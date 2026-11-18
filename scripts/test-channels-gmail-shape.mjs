@@ -2360,6 +2360,133 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
   } finally { presetsHolder.list = saved; }
 }
 
+// ── ㉗ B-166e part 2 (1) — THE FLEET'S PRESETS CANNOT BE REFUSED, SO A CLIENT SWAP IS SAID (主开发 2026-11-18 20:07Z): a company
+//    preset that now names ANOTHER OAuth client under the same key leaves the accounts signed in under it on the old client
+//    (they keep refreshing with their own minted client, ㉖, until the vendor deletes it). Over a stand-in store (four Gmail
+//    accounts under the company preset: three minted by its client, one minted before the B-166e rule) and the REAL For-you
+//    store, every event through the engine's OWN road (the presets' reload, enable / remove doors) and awaited by its chain
+//    (`clientSwapSettled`, never a clock): before the swap nothing; THE SWAP ⇒ ONE item naming the preset, «3 account(s)», its
+//    door the first account's Re-authorize; read again / the vault event / a restart ⇒ the same ONE item; a token the check
+//    cannot read ⇒ the preset left as it stands; a re-authorize ⇒ «2», the door moved on; a disable ⇒ «1»; the last removed ⇒
+//    resolved; the disabled one back ⇒ NOT said again (the same swap); a swap BACK ⇒ a new item; a dismissal stands.
+//    RED CONTROLS — an engine copy with ONE line gone each (the families inlined); each one's own step shows the plant took.
+console.log('\n㉗ B-166e part 2 (1): a company preset\'s client swapped under its key is said — once a swap, one item a preset, its door the next account, resolved at zero');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const SB = require(path.join(REPO, 'src/secret-box.js'));
+  const KEY = 'cluster:channels';
+  const OLDP = PRESETS.find((p) => p.key === 'channels');
+  const NEWP = { key: 'channels', label: 'Channels', clientId: 'chswap.apps.googleusercontent.com', clientSecret: ['channels-swap', 'value-00'].join('-') };   // built at run time
+  const saved = presetsHolder.list;
+  const J = JSON.stringify;
+  const swapWorld = async (M, tag) => {
+    const dir = path.join(ROOT, tag); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+    const box = SB.secretBox(path.join(dir, ENG.KEY_FILE));   // the engine's own key file, written first: the seeded seals open there
+    let minted = 0;
+    const tok = (clientId) => box.enc(JSON.stringify({ access_token: `at-${++minted}`, expiresAt: clock + 3600e3, refresh_token: `1//swap-${tag}-${minted}`, scopes: ['https://www.googleapis.com/auth/gmail.modify'], ...(clientId ? { client: { id: clientId, key: KEY } } : {}) }));
+    const ACCTS = [['g-bravo', 'Bravo mail', OLDP.clientId], ['g-alpha', 'Alpha mail', OLDP.clientId], ['g-charlie', 'Charlie mail', OLDP.clientId], ['g-pre', 'Pre-rule mail', null]];
+    fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ACCTS.map(([id, label, c]) => ({ id, kind: 'gmail', label, enabled: true, options: {}, state: {}, credentialKey: KEY, identity: { email: `${id}@example.test` }, auth: { tokenEnc: tok(c), expiresAt: clock + 3600e3, scopes: ['https://www.googleapis.com/auth/gmail.modify'], user: `${id}@example.test` }, lastPass: null, consecutiveFailures: 0 })) }));
+    const todos = new UserTodoManager({ dataDir: path.join(dir, 'todos'), onChange: () => {}, expirySweepMs: 0 });
+    const all = () => todos.idsWhere((i) => i.origin === 'channels' && /company preset «channels»/.test(i.text)).map((id) => todos.get(id));
+    const open = () => all().filter((i) => i.status === 'open');
+    const look = () => open().map((i) => ({ n: i.i18n && i.i18n.text && i.i18n.text.params ? i.i18n.text.params.n : null, door: i.action && i.action.adapterId, type: i.action && i.action.type }));
+    const st = {};
+    presetsHolder.list = [OLDP];
+    const mk = () => M.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet, userTodos: todos, ...FAST_PACE });
+    let E = mk();
+    const settle = () => E.clientSwapSettled();
+    const rec = (id) => E.adapterRecords().adapters.find((x) => x.id === id);
+    try {
+      await E.clientSwapCheck(); st.before = all().length;
+      presetsHolder.list = [NEWP]; integrations.presetsChanged('presets'); await settle();   // THE SWAP — the engine's listener ran the check
+      st.swap = look(); st.firstId = (open()[0] || {}).id || null;
+      integrations.presetsChanged('presets'); integrations.presetsChanged('vault'); await settle();   // the same presets again; the vault event
+      st.again = { all: all().length, same: (open()[0] || {}).id === st.firstId };
+      try { E.stop(); } catch { } try { E.store.close(); } catch { }
+      E = mk(); await E.clientSwapCheck(); st.restart = { all: all().length, open: look() };   // A RESTART: the preset's memo is on disk
+      const keep = rec('g-charlie').auth.tokenEnc;
+      await E.store.adapters.update(() => { rec('g-charlie').auth.tokenEnc = 'not-a-seal'; });   // a token this check cannot read
+      await E.clientSwapCheck(); st.blind = look();
+      await E.store.adapters.update(() => { rec('g-charlie').auth.tokenEnc = keep; });
+      await E.store.adapters.update(() => { rec('g-alpha').auth.tokenEnc = tok(NEWP.clientId); }); await E.clientSwapCheck(); st.one = look();   // a re-authorize under the new client
+      await E.setEnabled('g-bravo', false); await settle(); st.disabled = look();
+      await E.remove('g-charlie'); await settle(); st.zero = { open: open().length, all: all().length };
+      await E.setEnabled('g-bravo', true); await settle(); st.back = { open: open().length, all: all().length };   // on the old client again: the same swap
+      presetsHolder.list = [OLDP]; integrations.presetsChanged('presets'); await settle(); st.swapBack = { open: look(), all: all().length };   // A SWAP BACK
+      const b = open()[0]; if (b) todos.setStatus(b.id, 'done', 'user');   // a person dismisses it
+      integrations.presetsChanged('presets'); await settle(); st.dismissed = { open: open().length, all: all().length };
+    } finally { try { E.stop(); } catch { } try { E.store.close(); } catch { } presetsHolder.list = saved; }
+    return st;
+  };
+  const got = await swapWorld(ENG, 'swap');
+  ok(got.before === 0, '㉗ (1) the preset still names the client the tokens were minted by: nothing is said', got.before);
+  ok(J(got.swap) === J([{ n: 3, door: 'g-alpha', type: 'channel-reauth' }]), '㉗ (1) THE SWAP (the presets reloaded — the engine\'s own listener): ONE item «Gmail: the company preset «channels» signs in with another client now — 3 account(s) …» — the token minted before the rule not counted; its door the first account\'s Re-authorize (by label)', got.swap);
+  ok(got.again.all === 1 && got.again.same && got.restart.all === 1 && J(got.restart.open) === J(got.swap), '㉗ (1) said ONCE a swap: the same presets read again, the vault event and a restart — the same one item', { again: got.again, restart: got.restart });
+  ok(J(got.blind) === J(got.swap), '㉗ (1) a token the check cannot read: the preset left as it stands (never counted down)', got.blind);
+  ok(J(got.one) === J([{ n: 2, door: 'g-bravo', type: 'channel-reauth' }]), '㉗ (1) one account re-authorized: the same item redrawn «2», its door moved to the next account', got.one);
+  ok(J(got.disabled) === J([{ n: 1, door: 'g-charlie', type: 'channel-reauth' }]), '㉗ (1) an account disabled (the enable door): not counted — «1»', got.disabled);
+  ok(got.zero.open === 0 && got.zero.all === 1, '㉗ (1) the last account on the old client removed (the remove door): the item resolved', got.zero);
+  ok(got.back.open === 0 && got.back.all === 1, '㉗ (1) the disabled account enabled again — on the old client, the SAME swap: never said again', got.back);
+  // the For-you store merges an item by its words: the swap back says «1 account(s)» as the first swap's last count did, so it
+  // re-opens that item (said again, as a new swap must be — never a second item with the same words)
+  ok(J(got.swapBack.open) === J([{ n: 1, door: 'g-alpha', type: 'channel-reauth' }]), '㉗ (1) a swap BACK is a second swap: said again for the account now on the other client', got.swapBack);
+  ok(got.dismissed.open === 0, '㉗ (1) a person\'s dismissal stands: the same presets read again file nothing', got.dismissed);
+  // the RED CONTROLS — an engine copy with one line gone each (the families inlined); the verdict IS the copy's own step
+  const ESRC = engineSource(REPO);
+  const PLANTS = [
+    ['no-memo', "        if (m && m.to === k.to) {   // the same swap: its item redrawn while open (a dismissal stands)", "        if (false) {", (c) => c.dismissed.open === 1, 'without the same-swap branch the swap is filed again at the next reload — the item the person dismissed re-opens (the account back after a resolution is held twice over: the memo\'s `closed` and a closed item that no redraw reaches)'],
+    ['no-door', "userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n, action });", "userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n });", (c) => J(c.one) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the door\'s move the item says «2» and still opens the account already re-authorized'],
+    ['no-close', "          if (m && !m.closed) { close(m.itemId); next[mk] = { ...m, closed: true }; changed = true; }", "          if (m && !m.closed) { next[mk] = { ...m, closed: true }; changed = true; }", (c) => c.zero.open === 1, 'without the close the item stays open at zero'],
+    ['no-blind', "      if (!rd.token) { if (rd.why !== 'never-authenticated') k.blind = true; continue; }", "      if (!rd.token) continue;", (c) => J(c.blind) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the blind rule an unread token counts the preset down (a locked or broken read would resolve it)'],
+    ['no-listener', "      if (id === null && (why === 'presets' || why === 'vault') && !stopped) clientSwapCheck().catch((err) => log.warn(`[channels] client-swap check failed: ${(err && err.message) || err}`));", "", (c) => J(c.swap) === J([]), 'without the listener\'s call the reload says nothing'],
+  ];
+  const MW = mutantCopies('chan-gmail-swap', REPO);
+  for (const [tag, line, repl, red, words] of PLANTS) {
+    ok(ESRC.split(line).length === 2, `㉗ control setup (${tag}): the line is present once`);
+    const c = await swapWorld(MW.load('src/server/channels-engine.js', ESRC.replace(line, repl), tag), `swap-${tag}`);
+    ok(red(c), `㉗ RED CONTROL (${tag}): ${words} — red`, c);
+  }
+  for (const x of copiesCensus(MW.files, MW.dir, REPO, { minCopies: PLANTS.length, label: '㉗ (1) ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── ㉗ B-166e part 2 (主开发 2026-11-18 20:07Z «A (BOTH)», confirmed 20:11Z) — (2) THE OWNER'S OWN CLIENT: per account since
+//    B-166e (key «custom», the account's Edit dialog). A change of that client is a RE-AUTHORIZATION: the edit is refused by
+//    name (409 client-change-needs-reauth) and NOTHING is written — in memory and on disk the account keeps the client its
+//    token answers to. The law already held in 2.369.410 (src/server/channels-auth.js setCustomSecret); this is its pin.
+//    RED CONTROL: an engine copy without the refusal (scripts/channels-engine-src.mjs: the families inlined) writes the other
+//    client — the plant is proven by the copy's own write before the leg judges.
+console.log('\n㉗ B-166e part 2 (2): a change of an account\'s own client is refused by name, nothing written');
+{
+  const SEED = { id: 'gmail-own', kind: 'gmail', label: 'Own client mail', enabled: true, options: {}, state: {}, credentialKey: 'custom', credential: { appId: 'own.apps.googleusercontent.com', appSecretEnc: 'sealed-at-connect' }, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0 };
+  const OTHER = { appId: 'other.apps.googleusercontent.com', appSecret: ['other', 'client', 'value'].join('-') };   // built at run time
+  const ownWorld = async (M, tag) => {
+    const dir = path.join(ROOT, tag); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [SEED] }));
+    const E = M.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
+    let err = null, r = null;
+    try { r = await E.setCustomSecret(SEED.id, OTHER); } catch (x) { err = x; }
+    const mem = JSON.stringify((E.adapterRecords().adapters.find((x) => x.id === SEED.id) || {}).credential || null);
+    try { E.stop(); } catch { }
+    try { E.store.close(); } catch { }
+    const disk = JSON.stringify(((JSON.parse(fs.readFileSync(path.join(dir, 'channels', 'adapters.json'), 'utf8')).adapters || []).find((x) => x.id === SEED.id) || {}).credential || null);
+    return { code: (err && err.code) || null, status: (err && err.status) || null, said: String((err && err.message) || ''), ok: !!(r && r.ok), mem, disk };
+  };
+  const seeded = JSON.stringify(SEED.credential);
+  const got = await ownWorld(ENG, 'own-client');
+  ok(got.code === 'client-change-needs-reauth' && got.status === 409 && /re-authorization/.test(got.said) && /Re-authorize/.test(got.said),
+    '㉗ (2) the Edit of an account\'s own client with ANOTHER client id is refused by name — 409 client-change-needs-reauth, «… is a re-authorization — use Re-authorize with the new client»', got);
+  ok(got.mem === seeded && got.disk === seeded, '㉗ (2) nothing written: in memory and on disk the account keeps the client its token answers to', got);
+  const ESRC = engineSource(REPO);
+  const REFUSE = "    if (!sameClient(rec, choice)) throw httpErr(409, 'client-change-needs-reauth',";
+  ok(ESRC.split(REFUSE).length === 2, '㉗ control setup: the refusal is present once (the engine with its families inlined)');
+  const at = ESRC.indexOf(REFUSE), end = ESRC.indexOf('\n', at);
+  const MO = mutantCopies('chan-gmail-own', REPO);
+  const c = await ownWorld(MO.load('src/server/channels-engine.js', ESRC.slice(0, at) + ESRC.slice(end + 1), 'no-refusal'), 'own-client-ctl');
+  ok(c.ok && !c.code && c.mem.includes(OTHER.appId) && c.disk.includes(OTHER.appId) && c.disk !== seeded,
+    '㉗ RED CONTROL: without the refusal the same Edit writes the OTHER client, in memory and on disk (the copy wrote: its plant took) — red', c);
+  for (const x of copiesCensus(MO.files, MO.dir, REPO, { minCopies: 1, label: '㉗ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
 eng.stop();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

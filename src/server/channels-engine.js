@@ -890,8 +890,10 @@ function create(deps = {}) {
   }
   let offIntegrations = null;
   if (integrations && typeof integrations.onChange === 'function') {
-    offIntegrations = integrations.onChange(() => {
+    offIntegrations = integrations.onChange((id, why) => {
       Promise.all([...live.values()].map(refreshAuth)).then(() => { if (!stopped) notify([]); }).catch(() => {});
+      // B-166e part 2 (1): the presets reloaded (or the vault opened: the tokens readable again) — a swapped client is said
+      if (id === null && (why === 'presets' || why === 'vault') && !stopped) clientSwapCheck().catch((err) => log.warn(`[channels] client-swap check failed: ${(err && err.message) || err}`));
     });
   }
 
@@ -7265,6 +7267,78 @@ function create(deps = {}) {
       if (item && item.id) await store.adapters.update(() => { rec.namesItem = { id: item.id, text, signin, at: now() }; });
     } catch (e) { log.warn(`[channels] ${rec.id}: could not file the names item: ${(e && e.message) || e}`); }
   }
+  /** B-166e part 2 (1) — 主开发 2026-11-18 20:07Z: THE FLEET'S PRESETS CANNOT BE REFUSED, SO A CLIENT SWAP IS SAID. A company
+   *  preset (key `cluster:…`) that now names ANOTHER OAuth client leaves the accounts signed in under it with a token minted by
+   *  the old one — each keeps refreshing with its own minted client (B-166e) until the vendor deletes that client. Per preset
+   *  (integration row + key): ONE For-you item naming the preset, «N account(s) still signed in with the old one», its door
+   *  the Re-authorize of the next such account (by label), redrawn as N falls, resolved at zero. THE MEMO IS THE PRESET'S, on
+   *  the adapters store (`clientSwaps[row|key] = {to, itemId, closed}`), kept after the item resolves: the same swap is said
+   *  ONCE — read again, after a restart, after a dismissal, after an account comes back (re-enabled) — and a swap back is a new
+   *  one (another `to`). Counted: enabled accounts whose token names a client (one minted before the B-166e rule names none).
+   *  NOTHING is judged while the vault is locked, and a preset whose accounts' tokens this check cannot read, or whose preset is
+   *  withdrawn, is left as it stands. Run at a presets reload / the vault opening, at boot, and after an account's sign-in,
+   *  removal or enable changes — ONE AFTER ANOTHER (a reload then the vault opening never file twice). */
+  let swapChain = Promise.resolve();
+  function clientSwapCheck() {
+    const run = swapChain.then(() => clientSwapCheckNow());
+    swapChain = run.catch(() => {});
+    return run;
+  }
+  async function clientSwapCheckNow() {
+    if (!integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;
+    const memos = (() => { const m = store.adapters.live().clientSwaps; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; })();
+    const keys = new Map();   // `${row}|${key}` → { key, to, kind, preset, old: [rec], blind }
+    for (const rec of adapterRecords().adapters) {
+      const key = typeof rec.credentialKey === 'string' ? rec.credentialKey : '';
+      if (!key.startsWith(CLUSTER_PREFIX)) continue;
+      let mod = null; try { mod = registry.get(rec.kind); } catch { mod = null; }
+      if (!mod || !mod.integration) continue;
+      const mk = `${mod.integration}|${key}`;
+      let k = keys.get(mk);
+      if (!k) {
+        let v = null; try { const r = integrations.resolveIntegration(mod.integration, { credentialKey: key }); v = r && r.source === 'cluster' && r.values ? r.values : null; } catch { v = null; }
+        keys.set(mk, (k = { key, to: v && v.clientId ? String(v.clientId) : '', kind: mod.label || rec.kind, preset: key.slice(CLUSTER_PREFIX.length), old: [], blind: false }));
+      }
+      if (!k.to || rec.enabled === false) continue;
+      const rd = tokensFor(rec).read();
+      if (!rd.token) { if (rd.why !== 'never-authenticated') k.blind = true; continue; }
+      const minted = rd.token.client && typeof rd.token.client.id === 'string' ? rd.token.client.id : '';
+      if (minted && minted !== k.to) k.old.push(rec);
+    }
+    // a preset whose last account left it (removed, moved to another key): nothing is on its old client any more
+    for (const [mk, m] of Object.entries(memos)) if (!keys.has(mk) && m && m.to) keys.set(mk, { key: mk.slice(mk.indexOf('|') + 1), to: String(m.to), old: [], blind: false });
+    const close = (id) => { try { const it = userTodos && id ? userTodos.get(id) : null; if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(id, 'done', RESOLVED_BY); } catch { } };
+    const next = { ...memos };
+    let changed = false;
+    for (const [mk, k] of keys) {
+      if (k.blind || !k.to) continue;   // a token not read / the preset withdrawn: as it stands
+      const m = memos[mk] && typeof memos[mk] === 'object' ? memos[mk] : null;
+      try {
+        if (!k.old.length) {   // none left on the old client: the item resolved — the memo stays (the same swap is never said again)
+          if (m && !m.closed) { close(m.itemId); next[mk] = { ...m, closed: true }; changed = true; }
+          continue;
+        }
+        if (m && m.to === k.to && m.closed) continue;   // resolved, then an account back on the old client (re-enabled): said once
+        k.old.sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)) || (a.id < b.id ? -1 : 1));
+        const n = k.old.length;
+        const text = `${k.kind}: the company preset «${k.preset}» signs in with another client now — ${n} account(s) still signed in with the old one; re-authorize each`;
+        const i18n = { text: { key: i18nKey('{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each'), params: { kind: k.kind, preset: k.preset, n } }, source: INBOX_SOURCE };
+        const detail = `Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: ${k.old.map((r) => r.label || r.id).join(', ')}.\nRe-authorize opens the next one; this item resolves when none is left.`;
+        const action = { type: 'channel-reauth', adapterId: k.old[0].id };
+        if (m && m.to === k.to) {   // the same swap: its item redrawn while open (a dismissal stands)
+          if (m.itemId && userTodos && typeof userTodos.redrawItem === 'function') userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n, action });
+          continue;
+        }
+        if (m && !m.closed) close(m.itemId);   // an older swap of this preset (another `to`): superseded
+        if (!userTodos || typeof userTodos.add !== 'function') continue;
+        const item = userTodos.add(INBOX_KEY, { origin: 'channels', kind: 'action', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', action, i18n });
+        next[mk] = { to: k.to, itemId: item && item.id ? item.id : null };
+        changed = true;
+        log.log(`[channels] ${k.key}: the preset's client changed — ${n} account(s) still signed in with the old one, said once`);
+      } catch (e) { log.warn(`[channels] ${k.key}: the client-swap notice could not be kept: ${(e && e.message) || e}`); }
+    }
+    if (changed) await store.adapters.update(() => { store.adapters.live().clientSwaps = next; });
+  }
   async function retractNames(rec, why = 'a profile was read') {
     if (!rec.namesItem) return;
     const ni = rec.namesItem;
@@ -8621,6 +8695,7 @@ function create(deps = {}) {
     retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
     flushScope, flushPending,   // lane wake-approve-card r6: a held digest the owner releases is delivered through the same flush (channels-access decideHeld)
     speakSignin, retractSignin, landSignin,   // lane channel-reauth-visible: the dead sign-in's ONE item (an unfinished consent re-asserts it; a removal / a disconnect ends it); lane lark-refresh-stall r2: a landing VERIFIES
+    clientSwapCheck,   // B-166e part 2 (1): a re-authorize / a connect under a company preset recounts its key's client-swap item
     judgedRoadFor,   // lane judged-watch-state: the watch answers' judged-road line (channels-access)
     CG,              // lane grants-unify: the channel doors' rows (src/server/channels-grants.js)
     get stopped() { return stopped; },
@@ -8876,6 +8951,7 @@ function create(deps = {}) {
     // inc-muk9jj0j-rel3: a verdict judged before the account's LAST credential change (a re-authorization that landed
     // before this code) is re-judged once at boot — the read path re-judges on the way out anyway; this persists it
     for (const rec of adapterRecords().adapters) rejudgeConvCaps(rec, 'boot').catch(() => {});
+    clientSwapCheck().catch((err) => log.warn(`[channels] boot client-swap check failed: ${(err && err.message) || err}`));   // B-166e part 2 (1): a swap while the hub was down
     // lane lark-p2p: a change-feed row an older hit reader wrote starts over NOW (never waits out that reader's back-off
     // or park) — written at once so the card says "searching for the first time", not the old reader's state
     try {
@@ -9046,6 +9122,7 @@ function create(deps = {}) {
       const shape = (r) => ({ conversations: r.conversations, heads: r.heads, attention: r.attention, cands: r.cands.map((en) => en.key).sort() });
       return { kept: shape(kept), walk: shape(walk), stats: { ...firstKept.stats, facts: firstKept.facts.size } };
     }),
+    clientSwapCheck, clientSwapSettled: () => swapChain,   // B-166e part 2 (1): the gates run the check / await the one a reload, the boot or a door started
     schedulerExact: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerScan(rec, t) : null; },
     censusStats: () => Object.fromEntries(censusCount),
     // lane scheduler-census-index: the census index's work — O(rows) builds, rows re-judged, rows read in all

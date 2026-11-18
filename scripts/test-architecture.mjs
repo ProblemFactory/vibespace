@@ -3603,6 +3603,7 @@ await section(async () => {
     speakFailure: 'the owner\'s For-you item for a failing account',
     speakSlowed: 'the owner\'s For-you item when the vendor refused an account\'s quota twice in a day (lane gmail-quota-share)',
     speakNames: 'the owner\'s For-you item when an account\'s sign-in cannot read people\'s profiles, once per sign-in (lane channel-names-readable)',
+    clientSwapCheckNow: 'the owner\'s For-you item when a company preset names another OAuth client: how many accounts still hold a token of the old one, once per swap (B-166e part 2)',
     speakUnsaved: 'the owner\'s For-you item for an unsaved token',
     speakSignin: 'the owner\'s ONE urgent For-you item for a dead sign-in, standing until a pass of the account goes through (lane channel-reauth-visible)',
     askLanded: 'the owner\'s ONE For-you item for a sign-in that landed and nobody connected — «finish connecting», ended by Connect, a newer landing or the sign-in\'s own expiry (B-8edd)',

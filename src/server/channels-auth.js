@@ -35,6 +35,7 @@ function create(engineCtx) {
     refusedScopesOf, morePendingOf, pendingScopesOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
     customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, dropLive, retractUnsaved, retractFailure, wakeTimers, policyFor,
     speakSignin, retractSignin, landSignin,   // lane channel-reauth-visible: an unfinished consent re-asserts the dead sign-in's item; a removal / a disconnect ends it; lane lark-refresh-stall r2: a landing verifies
+    clientSwapCheck,   // B-166e part 2 (1): a sign-in that landed under a company preset recounts its key's client-swap item
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
     CG,   // lane grants-unify: the channel doors' rows in THE grants store (src/server/channels-grants.js)
     userTodos, INBOX_KEY, INBOX_SOURCE, RESOLVED_BY, i18nKey,   // B-8edd: a landed sign-in nobody connected is a For-you item
@@ -758,6 +759,7 @@ function create(engineCtx) {
     await retractFailure(rec);
     if (rec.signinDead || rec.signinVerifying) await landSignin(rec);   // lane lark-refresh-stall R5 r2: as at the record's own door (onAuthDone) — «signed in — verifying» (r3: a verifying record re-dated)
     await rejudgeConvCaps(rec, 're-authorized');   // inc-muk9jj0j-rel3: every conversation, BEFORE the one whole digest
+    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): one fewer on a preset's old client (never awaited: the landing does not wait on it)
     if (!engineCtx.stopped) notify([]);
     if (!engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
     if (!engineCtx.stopped && engineCtx.timer) syncPushLanes().catch(() => {});
@@ -1095,6 +1097,7 @@ function create(engineCtx) {
     // inc-muk9jj0j-rel3: A CONSENT CHANGES WHAT EVERY CONVERSATION MAY DO — re-judged HERE, at the write, for the whole
     // account (the pass below visits only what is due), then ONE whole digest carries the fresh verdicts
     if (r && r.ok) await rejudgeConvCaps(rec, 'connected');
+    if (r && r.ok) clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a fresh consent under a company preset recounts it (never awaited)
     if (!engineCtx.stopped) notify([]);
     if (r && r.ok && !engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after connect failed:', err && err.message));
     if (r && r.ok && !engineCtx.stopped && engineCtx.timer) syncPushLanes().catch(() => {});   // a fresh consent may be what the lane was waiting for
@@ -1186,6 +1189,7 @@ function create(engineCtx) {
     await retractSignin(rec, 'the account was removed');   // lane channel-reauth-visible
     await removeRecord(rec);
     log.log(`[channels] ${rec.id}: removed`);
+    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): the preset it was under has one account fewer
     notify([]);
     return { ok: true, removed: true, id: rec.id };
   }
@@ -1449,6 +1453,7 @@ function create(engineCtx) {
     // finish, paced, after the owner disabled it), the pass in flight ends at its next step, the lane is disarmed with it
     if (!enabled) dropLive(rec.id, 'disabled');
     else if (engineCtx.timer) syncPushLanes().catch(() => {});
+    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a disabled account is not counted on its preset's old client
     notify([]);
     return { ok: true, enabled: !!enabled };
   }

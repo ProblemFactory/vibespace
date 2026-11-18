@@ -592,11 +592,14 @@ class UserTodoManager {
    *  redrawRequest) — the ONE open item `pred` names, through THE bounds add() uses: the facts by normalizeCardFacts (the named
    *  cuts, the {dropped} stub), the detail by DETAIL_MAX, the i18n by normalizeI18n (a shape it refuses ⇒ nothing changes).
    *  ONE save + ONE broadcast. → { ok: true, facts } (the facts as stored) | { ok: false, code } */
-  redrawItem(pred, { detail, facts = null, i18n, text = null } = {}) {
+  redrawItem(pred, { detail, facts = null, i18n, text = null, action } = {}) {
     const it = this._state.items.find((x) => x.status === 'open' && pred(x));
     if (!it) return { ok: false, code: 'not_open' };
-    let words;
+    let words, act;
     try { words = i18n === undefined ? undefined : normalizeI18n(i18n); } catch (e) { return { ok: false, code: 'i18n_refused', error: e.message }; }
+    // B-166e part 2: an item's door may MOVE (the next account its words count) — the same kind of door, through add()'s bounds
+    try { act = action === undefined ? undefined : normalizeAction(action); } catch (e) { return { ok: false, code: 'action_refused', error: e.message }; }
+    if (act !== undefined && !(act && it.action && act.type === it.action.type)) return { ok: false, code: 'action_kind' };
     const fx = normalizeCardFacts(facts);
     const notObject = fx.fresh.includes('facts') && (typeof facts !== 'object' || Array.isArray(facts));   // the WHY of a drop, from the producer's own value (never the item's words in a log)
     if (fx.fresh.length) console.warn(`[user-todos] ${String(it.sessionKey).slice(0, 80)}: the card drawn again — ${fx.fresh.includes('facts') ? `its facts were ${notObject ? 'not an object' : 'larger than 24 KB'} — dropped, the card shows its text only` : `its facts were cut — named in its fold: ${fx.fresh.join(', ')}`}`);
@@ -606,6 +609,7 @@ class UserTodoManager {
     if (words !== undefined) { if (words) it.i18n = words; else delete it.i18n; }
     delete it.judged;   // the card's words moved: its place in the list is judged again
     if (typeof text === 'string' && text.trim()) it.text = clip(text.trim(), TEXT_MAX);   // a producer whose ONE item counts what it says (lane paced-wake-retry): this file's own surrogate-safe cut
+    if (act) it.action = act;
     this._save(); this._notify();
     return { ok: true, facts: fx.facts, detail: it.detail };
   }

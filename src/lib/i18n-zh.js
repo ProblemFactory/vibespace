@@ -8673,6 +8673,8 @@ export default {
   "People's names and pictures cannot be read on this account — re-authorize to add the contact permission": "此账户读不到联系人的名字和头像 — 重新授权以加上通讯录权限",
   "No match — people's names cannot be read on this account (re-authorize), so a search by a person's other name finds nothing": "没有匹配 — 此账户读不到联系人的名字（需重新授权），所以按一个人的其他名字搜索什么也找不到",
   "Channel {label}: people's names and pictures cannot be read — re-authorize to add the contact permission": "频道 {label}：读不到联系人的名字和头像 — 重新授权以加上通讯录权限",
+  // B-166e part 2: a company preset's client swapped — the accounts still on the old one
+  "{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each": "{kind}：公司预设「{preset}」现在用另一个客户端登录 — 仍有 {n} 个账号用旧客户端登录着；请逐个重新授权",
   "That account is gone": "该账户已不存在",
   "Memory is {pct}% full ({used} of {limit} GB) — the most is held by {who}": "内存已用 {pct}%（{used} / {limit} GB）——占用最多的是{who}",
   "Memory is {pct}% full ({used} of {limit} GB)": "内存已用 {pct}%（{used} / {limit} GB）",
