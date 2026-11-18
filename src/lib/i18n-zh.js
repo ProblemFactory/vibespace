@@ -1912,6 +1912,7 @@ export default {
   "Extracted to {name}": "已解压到 {name}",
   "Extracting…": "正在解压…",
   "Failed to load": "加载失败",
+  "The server is slow to answer — this is the list it gave last.": "服务器回应很慢——下面是它上次给出的列表。",
   "File": "文件",
   "File name": "文件名",
   "Filter…": "筛选…",

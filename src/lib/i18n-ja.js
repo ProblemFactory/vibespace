@@ -1912,6 +1912,7 @@ export default {
   "Extracted to {name}": "{name} に展開しました",
   "Extracting…": "展開中…",
   "Failed to load": "読み込みに失敗しました",
+  "The server is slow to answer — this is the list it gave last.": "サーバーの応答が遅れています — 下は前回受け取った一覧です。",
   "File": "ファイル",
   "File name": "ファイル名",
   "Filter…": "フィルター…",

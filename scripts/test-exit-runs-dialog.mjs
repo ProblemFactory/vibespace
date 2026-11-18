@@ -35,6 +35,17 @@
 //      the body's command cut to the head; the card without its command block; the command on the card again
 //      outside its fold (d); a row without the icon; the 2.369.207 duration words (f); the fold without the device's
 //      decoding handed in (g, the pre-lane line) — each goes red
+//   §6 (B-a31a, the Remote panel under a burst; src/lib/mounts-live.js + its wiring in sidebar-mounts.js) a recorded command
+//      reaches the open panel as ITS row's patch: the last-run line's words patched in place (the same node — a focus or a
+//      press survives; every other node of the row kept), inserted after the exit summary when the row had none, removed
+//      with no run; the rows found by their key; a pushed run written into the page's cache, and kept over an OLDER list a
+//      refresh brings back (the newer `at` wins, caught-up entries leave); 60 frames inside one window paint ONCE; ONE
+//      refresh in flight and ONE trailing (the callers' promise waits for the trailing one); the wiring: host-last-run → the
+//      row patch, a list frame → the coalesced refresh (never a direct whole redraw), a failed or 20-s-held refresh of a
+//      showing panel keeps it and says the server is slow (with Retry), a sidebar re-render never wipes a showing panel
+//      (src/lib/sidebar.js), the builder and the patch draw the same line; the slow note's CSS reads theme variables only.
+//      CONTROLS: (h) the release's listener, (i) a coalescer with no window, (j) the row rebuilt whole, (k) no single-flight
+//      guard, (l) the release's sidebar re-render (the wipe), (m) an overlay that takes the older list — each goes red
 // Run: node scripts/test-exit-runs-dialog.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -283,6 +294,120 @@ const rj = pj.applies ? rowOut(await zhPatched(pj), 'ok') : null;
 ok(pj.applies && rj === '· exit 0 · 0.2 s', 'CONTROL (j): the row with the hub\'s English words (the release), bundled in zh — the zh page says «· exit 0 · 0.2 s»: §5\'s one-word leg goes red', rj);
 ok(swapCase(PH).swapped && !swapCase(PH).open, 'CONTROL (h2): no keeper (the release) through the view\'s own swap — the swapped card\'s folds are CLOSED: §5\'s swap leg goes red');
 ok(marginCase(await bundle('src/lib/chat-renderers.js', pi), '      42\n').drawn !== '42', 'CONTROL (i): the release\'s drawing — «      42» drawn with its margin: §5\'s law 4 leg goes red');
+
+// ── §6 B-a31a the Remote panel under a burst ──
+console.log('§6 B-a31a: a recorded command patches its row in place; a burst paints once; one refresh in flight; a slow server keeps the panel');
+const mkRow = (withLast) => {
+  const row = document.createElement('div'); row.className = 'mounts-row';
+  const top = document.createElement('div'); top.className = 'mounts-row-top';
+  const sub = document.createElement('div'); sub.className = 'mounts-path';
+  const ex = document.createElement('div'); ex.className = 'mounts-path mounts-exit-line'; ex.textContent = 'Exit: network — nobody';
+  row.append(top, sub, ex);
+  if (withLast) { const lr = document.createElement('button'); lr.className = 'mounts-path mounts-exit-line mounts-exit-last'; lr.textContent = 'Last run: echo 1'; row.appendChild(lr); }
+  const stuck = document.createElement('div'); stuck.className = 'mounts-path mounts-exit-line mounts-agent-stuck'; row.appendChild(stuck);
+  return row;
+};
+const lineOf = (t) => { const b = document.createElement('button'); b.className = 'mounts-path mounts-exit-line mounts-exit-last'; b.textContent = t; return b; };
+const patchCase = (M) => {
+  const r1 = mkRow(true), before = [...r1.children], n2 = lineOf('Last run: echo 2');
+  const did1 = M.patchLastRunRow(r1, n2);
+  const kept = before.length === r1.children.length && before.every((k, i) => r1.children[i] === k);
+  const r2 = mkRow(false), did2 = M.patchLastRunRow(r2, lineOf('Last run: ls'));
+  const r3 = mkRow(true), did3 = M.patchLastRunRow(r3, null);
+  return {
+    did: [did1, did2, did3], kept,
+    replaced: kept && r1.children[3].textContent === 'Last run: echo 2' && r1.querySelectorAll(':scope > .mounts-exit-last').length === 1,
+    inserted: !!r2.children[3] && r2.children[3].textContent === 'Last run: ls' && r2.children[2].className === 'mounts-path mounts-exit-line' && r2.children[4]._cls.includes('mounts-agent-stuck'),
+    removed: r3.querySelectorAll(':scope > .mounts-exit-last').length === 0 && r3.children.length === 4,
+  };
+};
+const coalesceCase = (M) => {
+  const timers = []; let runs = 0;
+  const f = M.coalesce(() => { runs++; }, 250, { setTimer: (fn, w) => timers.push({ fn, win: w }) });
+  for (let i = 0; i < 60; i++) f();
+  const set1 = timers.length, win = timers[0] && timers[0].win;
+  timers.splice(0).forEach((t) => t.fn());
+  const after1 = runs;
+  f(); f();
+  const set2 = timers.length;
+  timers.splice(0).forEach((t) => t.fn());
+  return { set1, win, after1, set2, runs };
+};
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const flightCase = async (M) => {
+  let runs = 0, inFlight = 0, most = 0; const gates = [];
+  const f = M.singleFlight(() => { runs++; inFlight++; most = Math.max(most, inFlight); const n = runs; return new Promise((res) => gates.push(() => { inFlight--; res(n); })); });
+  const p0 = f(); const started = runs;
+  const ps = Array.from({ length: 5 }, () => f());
+  const same = ps.every((p) => p === ps[0]);
+  const duringFirst = runs;
+  gates.shift()(); await tick(); await tick();
+  const afterFirst = runs;
+  if (gates.length) gates.shift()();
+  for (const g of gates.splice(0)) g();
+  const got = await Promise.race([ps[0], tick().then(tick).then(() => 'never')]);
+  const first = await p0;
+  return { started, same, duringFirst, afterFirst, runs, most, got, first };
+};
+const ML = await bundle('src/lib/mounts-live.js');
+const pr = patchCase(ML);
+ok(pr.replaced && pr.did[0] === 'updated', 'a recorded command: the row\'s last-run line takes its new words IN PLACE — the same row, EVERY node the same node (the line too: a focus or a press survives), one last-run line', pr);
+const cacheCase = (M) => {
+  const L = document.createElement('div');
+  const a = document.createElement('div'); a.className = 'mounts-row'; a._hostId = 'host-a';
+  const b = document.createElement('div'); b.className = 'mounts-row'; b._hostId = 'host-b';
+  const loose = document.createElement('div'); loose.className = 'mounts-row'; // the local machine's row: no key
+  L.append(a, loose, b);
+  const rows = M.rowsByHost(L);
+  const hosts = [{ id: 'host-a', exit: { lastRun: { at: 10, cmd: 'old' } } }, { id: 'host-b' }];
+  const noted = M.noteLastRun(hosts, 'host-b', { at: 5, cmd: 'b1' }), none = M.noteLastRun(hosts, 'host-x', { at: 1 });
+  const seen = new Map([['host-a', { at: 20, cmd: 'pushed' }], ['host-b', { at: 3, cmd: 'older' }], ['host-x', { at: 9, cmd: 'gone' }]]);
+  const list = [{ id: 'host-a', exit: { lastRun: { at: 10, cmd: 'old' } } }, { id: 'host-b', exit: { lastRun: { at: 5, cmd: 'b1' } } }];
+  const keptIds = M.overlayLastRuns(list, seen);
+  return { byKey: rows.size === 2 && rows.get('host-a') === a && rows.get('host-b') === b, noted: noted === hosts[1] && hosts[1].exit.lastRun.cmd === 'b1' && none === null,
+    overlay: list[0].exit.lastRun.cmd === 'pushed' && list[1].exit.lastRun.cmd === 'b1' && keptIds.join() === 'host-a' && [...seen.keys()].join() === 'host-a', keptIds, left: [...seen.keys()] };
+};
+const cc = cacheCase(ML);
+ok(cc.byKey, 'the panel\'s rows are found by their key (`row._hostId`); a row with no key (this machine) is not one of them');
+ok(cc.noted, 'a pushed last run lands in the page\'s cached hosts list (the doors read it); a host the list lacks is left alone');
+ok(cc.overlay, 'a refresh that brings back an OLDER list keeps the pushed run (the newer `at` wins); a pushed run the list caught up with, or of a host gone, leaves', cc);
+ok(pr.inserted && pr.did[1] === 'inserted', 'a row with no last run yet: the line goes right after the exit summary (before the agent line)', pr.did);
+ok(pr.removed && pr.did[2] === 'removed', 'a row whose machine has no last run: its line is removed, nothing else', pr.did);
+const cr = coalesceCase(ML);
+ok(cr.set1 === 1 && cr.win === 250 && cr.after1 === 1 && cr.set2 === 1 && cr.runs === 2, '60 frames inside one 250 ms window paint ONCE; the next frame opens the next window', cr);
+const fr = await flightCase(ML);
+ok(fr.started === 1 && fr.same && fr.duringFirst === 1 && fr.afterFirst === 2 && fr.runs === 2 && fr.most === 1 && fr.got === 2 && fr.first === 1, 'ONE refresh in flight: five calls during it fold into ONE trailing refresh (never two at once), and their promise is the trailing one\'s', fr);
+const wiring = (src) => ({
+  patchFrame: /if \(msg\.type === 'host-last-run' && msg\.hostId\) this\._patchHostLastRun\(msg\.hostId, msg\.lastRun \|\| null\);/.test(src),
+  listSoon: /msg\.type === 'hosts-updated'\) && this\._activeTab === 'mounts'\) this\._renderMountsSoon\(\);/.test(src),
+  noDirect: !/msg\.type === 'hosts-updated'\)[^\n]*this\._renderMounts\(\)/.test(src),
+  flight: /this\._mountsFlight = singleFlight\(\(\) => this\._renderMountsOnce\(\)\)/.test(src),
+  soon: /this\._mountsSoon = coalesce\(/.test(src),
+  paint: /this\._lastRunPaint = coalesce\(/.test(src) && /patchLastRunRow\(row, this\._lastRunLine\(hh\)\)/.test(src),
+  keep: /if \(had\) \{ this\._mountsSlow\(\); return; \}/.test(src) && /setTimeout\(\(\) => this\._mountsSlow\(\), 4000\)/.test(src) && /await Promise\.race\(\[Promise\.all\(\[api\('\/api\/mounts'\)/.test(src) && /no\(new Error\('held'\)\), 20000\)/.test(src),
+  overlay: /overlayLastRuns\(hd && hd\.hosts, this\._lastRunSeen\);/.test(src) && /const rows = rowsByHost\(this\.listEl\);/.test(src),
+  same: /\{ const lr = this\._lastRunLine\(h\); if \(lr\) row\.appendChild\(lr\); \}/.test(src),
+});
+const SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
+const GUARD = "if (this._activeTab === 'mounts' && this.listEl.querySelector(':scope > .mounts-panel')) return;";
+const guarded = (src) => { const rail = src.indexOf("{ this._renderRailPanel?.(); return; }"), g = src.indexOf(GUARD), w = g < 0 ? -1 : src.indexOf("this.listEl.innerHTML = '';", g); return rail > 0 && g > rail && w > g && w - g < 600; };
+ok(guarded(SB), 'a sidebar re-render never wipes a Remote panel that shows (src/lib/sidebar.js: the guard sits before the list\'s wipe, after the rail panels\' own)');
+const wr = wiring(SM);
+ok(Object.values(wr).every(Boolean), 'the wiring: host-last-run → the row patch (coalesced); a list frame → ONE coalesced, single-flight refresh, never a direct whole redraw; a failed or held refresh keeps the panel and says so; the builder and the patch draw the same line', wr);
+const slowCss = rule(STY, '.mounts-slow');
+ok(/var\(--/.test(slowCss) && !/#[0-9a-fA-F]{3}/.test(slowCss) && /position: sticky; top: 0;/.test(slowCss) && /background: var\(--bg-sidebar\)/.test(slowCss), 'the slow note\'s CSS reads theme variables only, and it stays in view however far the list is scrolled (sticky, on the sidebar\'s own background — the pictures showed it scrolled out of sight)', slowCss);
+const a6PH = { src: SM.replace("if (msg.type === 'host-last-run' && msg.hostId) this._patchHostLastRun(msg.hostId, msg.lastRun || null);", '').replace("&& this._activeTab === 'mounts') this._renderMountsSoon();", "&& this._activeTab === 'mounts') this._renderMounts();") };
+ok(a6PH.src !== SM && !Object.values(wiring(a6PH.src)).every(Boolean), 'CONTROL (h): the release\'s listener (every frame a whole refetch and redraw) — the wiring census goes red');
+const a6PI = patched('src/lib/mounts-live.js', 'if (pending) return; pending = true; ', '');
+const a6PJ = patched('src/lib/mounts-live.js', "if (old && line) { if (old.textContent !== line.textContent) old.textContent = line.textContent; return 'updated'; }", "if (old && line) { for (const k of kids) k.remove(); for (const k of kids) row.appendChild(k === old ? line : Object.assign(document.createElement(k.tagName), { className: k.className })); return 'updated'; } // CONTROL: the row rebuilt whole");
+const a6PM = patched('src/lib/mounts-live.js', 'if (h && lr && atOf(lr) > atOf(listed))', 'if (false) // CONTROL: the older list wins\n    if (h && lr && atOf(lr) > atOf(listed))');
+const a6PK = patched('src/lib/mounts-live.js', 'if (cur) return next || (next = cur.then(again, again));', '');
+ok(a6PI.applies && a6PJ.applies && a6PK.applies && a6PM.applies, 'the §6 patches apply');
+ok(!guarded(SB.replace(GUARD, '')) && SB.includes(GUARD), 'CONTROL (l): the release\'s sidebar re-render (no guard: every digest change wipes the panel to «Loading…») — §6 goes red');
+ok(!cacheCase(await bundle('src/lib/mounts-live.js', a6PM)).overlay, 'CONTROL (m): an overlay that takes the older list (a run pushed during a refresh drawn away) — §6 goes red');
+ok((coalesceCase(await bundle('src/lib/mounts-live.js', a6PI))).set1 === 60, 'CONTROL (i): a coalescer with no window — 60 frames, 60 paints: §6 goes red');
+ok(!patchCase(await bundle('src/lib/mounts-live.js', a6PJ)).replaced, 'CONTROL (j): the row rebuilt whole (new nodes) — §6\'s in-place leg goes red');
+ok((await flightCase(await bundle('src/lib/mounts-live.js', a6PK))).most > 1, 'CONTROL (k): no single-flight guard — refreshes overlap: §6 goes red');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);

@@ -20,6 +20,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { FLAGS, SHOWN, IMPLIES, normalize, allowWord, allowArgOf } from './device-allow-words.js'; // lane device-allow-flags: the device's own allow list, ticked here
 import * as FFI from '../ffmpeg-install.js'; // lane machine-needs-at-pairing pick 3: step ②'s ffmpeg row (the pinned build's facts)
 import * as MDM from '../machine-desktop-model.js'; // lane machine-needs-at-pairing pick 3: step ②'s TightVNC row
+import { coalesce, singleFlight, patchLastRunRow, rowsByHost, noteLastRun, overlayLastRuns } from './mounts-live.js'; // B-a31a: the panel under a burst — a row patch, one refresh at a time
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -186,7 +187,10 @@ export function installSidebarMounts(Sidebar) {
       if (this._mountsSyncInit) return;
       this._mountsSyncInit = true;
       this.app.ws.onGlobal((msg) => {
-        if ((msg.type === 'mounts-updated' || msg.type === 'machine-mounts-updated' || msg.type === 'hosts-updated') && this._activeTab === 'mounts') this._renderMounts();
+        // B-a31a: a RECORDED command is its row's new fact, patched in place (coalesced); a record's own change refreshes ONCE
+        // (coalesced, single-flight) — never a whole refetch and redraw per pushed frame
+        if (msg.type === 'host-last-run' && msg.hostId) this._patchHostLastRun(msg.hostId, msg.lastRun || null);
+        if ((msg.type === 'mounts-updated' || msg.type === 'machine-mounts-updated' || msg.type === 'hosts-updated') && this._activeTab === 'mounts') this._renderMountsSoon();
         // vscode-style port discovery: a machine started listening on a new
         // port — offer it (the 🔌 dialog on its row forwards/publishes it)
         if (msg.type === 'machine-ports-new' && Array.isArray(msg.ports) && msg.ports.length) {
@@ -211,21 +215,106 @@ export function installSidebarMounts(Sidebar) {
     },
 
     async _renderMounts() {
+      // B-a31a: ONE render in flight and ONE trailing — a burst of pushes never stacks overlapping redraws
+      if (!this._mountsFlight) this._mountsFlight = singleFlight(() => this._renderMountsOnce());
+      return this._mountsFlight();
+    },
+    /** B-a31a: a pushed change refreshes the open panel ONCE per 250 ms, however many frames arrive */
+    _renderMountsSoon() {
+      if (!this._mountsSoon) this._mountsSoon = coalesce(() => { if (this._activeTab === 'mounts') this._renderMounts(); }, 250);
+      this._mountsSoon();
+    },
+    /** B-a31a THE ROW'S NEW FACT: a machine's last run patched IN PLACE — its one line in its keyed row; the panel is never
+     *  refetched, redrawn or scrolled for a recorded command, and a burst paints at most ~4 times a second */
+    _patchHostLastRun(hostId, lastRun) {
+      // the cache the doors read stays current; the pushed run is also kept for a refresh already in flight (its list may be
+      // older than this frame — overlayLastRuns keeps the newer `at` when that list lands)
+      noteLastRun(this._hostsData && this._hostsData.hosts, hostId, lastRun);
+      if (lastRun) (this._lastRunSeen || (this._lastRunSeen = new Map())).set(hostId, lastRun);
+      (this._lastRunDue || (this._lastRunDue = new Set())).add(hostId);
+      if (!this._lastRunPaint) {
+        this._lastRunPaint = coalesce(() => {
+          const due = [...this._lastRunDue]; this._lastRunDue.clear();
+          if (this._activeTab !== 'mounts' || !this.listEl) return;
+          const now = this._hostsData && Array.isArray(this._hostsData.hosts) ? this._hostsData.hosts : [];
+          const rows = rowsByHost(this.listEl);
+          for (const id of due) {
+            const row = rows.get(id), hh = now.find((x) => x && x.id === id);
+            if (row && hh) patchLastRunRow(row, this._lastRunLine(hh));
+          }
+        }, 250);
+      }
+      this._lastRunPaint();
+    },
+    /** the machine row's last-run line — a way into its command list — or null */
+    _lastRunLine(h) {
+      if (!h || !h.exit || !h.exit.lastRun) return null;
+      // lane exit-see-whole: the last-run line IS a way in — it opens the command list (the whole command there, no hover title)
+      const lr = document.createElement('button');
+      lr.type = 'button';
+      lr.className = 'mounts-path mounts-exit-line mounts-exit-last';
+      lr.textContent = lastRunText(h.exit.lastRun);
+      lr.onclick = (e) => { e.stopPropagation(); openExitRunsDialog(this.app, { hostId: h.id, name: h.name }); };
+      return lr;
+    },
+    /** B-a31a A SLOW ANSWER IS NOT A FAILURE: the panel keeps what it showed and says the hub is slow, with its Retry */
+    _mountsSlow() {
+      const panel = this.listEl && this.listEl.querySelector('.mounts-panel');
+      if (!panel) return;
+      const SLOW = tr('The server is slow to answer — this is the list it gave last.');
+      const had = panel.querySelector(':scope > .mounts-slow');
+      if (had) { const w = had.querySelector('.mounts-slow-words'), b = had.querySelector('.mounts-slow-retry'); if (w) w.textContent = SLOW; if (b) b.disabled = false; return; } // a Retry that met a slow server again
+      const box = document.createElement('div');
+      box.className = 'mounts-slow';
+      box.setAttribute('role', 'status');
+      const words = document.createElement('span');
+      words.className = 'mounts-slow-words';
+      words.textContent = SLOW;
+      const again = document.createElement('button');
+      again.type = 'button'; again.className = 'btn-cancel mounts-slow-retry'; again.textContent = tr('Retry');
+      // the note stays, saying it retries, until that refresh's answer: a new list replaces the panel (and the note), a slow one says so again
+      again.onclick = () => { words.textContent = tr('Retrying…'); again.disabled = true; this._renderMounts(); };
+      box.append(words, ' ', again);
+      panel.prepend(box);
+    },
+    async _renderMountsOnce() {
       this._initMountsSync();
       // Only blank to "Loading…" on the FIRST paint — on refreshes we keep the
       // existing panel up and swap in the new one when ready (no flicker).
-      if (!this.listEl.querySelector('.mounts-panel')) {
+      const had = !!this.listEl.querySelector('.mounts-panel');
+      if (!had) {
         this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
       }
       let d, hd;
       let mt, mm;
-      try { [d, hd, mt, mm] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/machine-mounts').catch(() => ({ mounts: [] }))]); }
-      catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
+      const slowT = had ? setTimeout(() => this._mountsSlow(), 4000) : null; // B-a31a: a held hub is said, the panel kept
+      // B-a31a: an answer that never comes ends this refresh at 20 s like a failed one — the next refresh (a Retry) is never
+      // stuck behind it (the late answer is dropped)
+      let heldT = null;
+      const held = new Promise((_, no) => { heldT = setTimeout(() => no(new Error('held')), 20000); });
+      try { [d, hd, mt, mm] = await Promise.race([Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/machine-mounts').catch(() => ({ mounts: [] }))]), held]); }
+      catch {
+        clearTimeout(slowT); clearTimeout(heldT);
+        if (this._activeTab !== 'mounts') return; // the person moved to another tab meanwhile — nothing is written there
+        if (had) { this._mountsSlow(); return; } // B-a31a: one failed fetch never blanks a panel that was showing
+        const box = document.createElement('div');
+        box.className = 'mounts-loading';
+        const again = document.createElement('button');
+        again.type = 'button'; again.className = 'btn-cancel mounts-slow-retry'; again.textContent = tr('Retry');
+        again.onclick = () => this._renderMounts();
+        box.append(tr('Failed to load'), ' ', again);
+        this.listEl.replaceChildren(box);
+        return;
+      }
+      clearTimeout(slowT); clearTimeout(heldT);
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
+      overlayLastRuns(hd && hd.hosts, this._lastRunSeen); // B-a31a: a run pushed while this list was on its way stays shown
       d.mountTokens = mt?.tokens || [];
       this._machineMountsData = mm?.mounts || []; // push AND pull mounts, keyed by hostId (B-f3e8)
       this._mountsData = d;
       this._hostsData = hd;
+      // B-a31a: a refresh keeps the place the person scrolled to — both scrollers, as Sidebar._render keeps them (2.228.3)
+      const scrollers = [this.listEl, this.listEl.closest && this.listEl.closest('.sidebar-section')].filter(Boolean), keepScroll = scrollers.map((el) => el.scrollTop);
       this.listEl.innerHTML = '';
       const root = document.createElement('div');
       root.className = 'mounts-panel';
@@ -415,6 +504,7 @@ export function installSidebarMounts(Sidebar) {
         : tr('Connected folders live under {base}. Shared links currently expire after 7 days; to create links that never expire, an admin can install the “mc” tool on the server.', { base: d.mountBase });
       root.appendChild(note);
       this.listEl.appendChild(root);
+      scrollers.forEach((el, i) => { if (keepScroll[i]) el.scrollTop = keepScroll[i]; });
     },
 
     _buildMountRow(m) {
@@ -1009,15 +1099,7 @@ export function installSidebarMounts(Sidebar) {
         ex.className = 'mounts-path mounts-exit-line';
         ex.textContent = exitSummaryText(h.exit);
         row.appendChild(ex);
-        if (h.exit && h.exit.lastRun) {
-          // lane exit-see-whole: the last-run line IS a way in — it opens the command list (the whole command there, no hover title)
-          const lr = document.createElement('button');
-          lr.type = 'button';
-          lr.className = 'mounts-path mounts-exit-line mounts-exit-last';
-          lr.textContent = lastRunText(h.exit.lastRun);
-          lr.onclick = (e) => { e.stopPropagation(); openExitRunsDialog(this.app, { hostId: h.id, name: h.name }); };
-          row.appendChild(lr);
-        }
+        { const lr = this._lastRunLine(h); if (lr) row.appendChild(lr); } // B-a31a: the same line the row patch replaces in place
         // lane device-upgrade-stuck: the agent's failed update stays on the row until the device reports the version
         const up = agentUpgradeText(h);
         if (up) { const ul = document.createElement('div'); ul.className = 'mounts-path mounts-exit-line mounts-agent-stuck'; ul.textContent = up; row.appendChild(ul); }

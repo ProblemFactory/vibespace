@@ -1426,6 +1426,10 @@ class Sidebar {
     // (owner 2026-09-21: "搜索框和filter似乎和这个界面无关")
     this.el.classList.toggle('sb-no-session-filter', PANEL_TABS.includes(this._activeTab) || this._activeTab === 'mounts');
     if (PANEL_TABS.includes(this._activeTab)) { this._renderRailPanel?.(); return; }
+    // B-a31a: the Remote panel renders once, like the rail panels above — a sidebar re-render (a digest change, a held hub's
+    // staleness row, its recovery) never wipes it to «Loading…» and refetches; it refreshes on its own frames and calls.
+    // Only a tab change (another tab's content in the list) paints it anew.
+    if (this._activeTab === 'mounts' && this.listEl.querySelector(':scope > .mounts-panel')) return;
 
     this.listEl.innerHTML = '';
 
