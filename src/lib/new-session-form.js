@@ -79,6 +79,7 @@ export function installNewSessionForm(App) {
       const sync = getStateSync(); if (sync) { try { sync.init('grants'); sync.on('grants', '*', reread); } catch { /* no mirror: the open and the interactions still paint */ } }
       // a channel signal re-reads only at an ACCOUNT-level change (it names no conversation: auth, enable, grains) — never at a message
       // pass (a hot account sends one per pass: 2 + N requests and a whole column redrawn each time, an open list closed under the hand)
+      // a GRANT (who may use what, a per-conversation grain included) arrives on the grants mirror above, never on this signal
       const accountLevel = (m) => !m.partial && !(Array.isArray(m.changedKeys) && m.changedKeys.length);
       this.ws?.onGlobal?.((msg) => { if (msg && ((msg.type === 'tasks-updated' && metaChanged(msg)) || (msg.type === 'channels-updated' && accountLevel(msg)))) reread(); });
       const right = $('ns-right');
