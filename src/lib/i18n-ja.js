@@ -12259,6 +12259,19 @@ export default {
   "The turn running when this asked was started by a delivered message, not typed here": "この依頼が出たときに実行中のターンは、届いたメッセージで始まりました（ここで入力されたものではありません）",
   "Who started this turn is not recorded": "このターンを誰が始めたかは記録されていません",
   "Who started this is not recorded: background work another turn started is still running": "誰が始めたかは記録されていません：別のターンが始めたバックグラウンドの作業がまだ実行中です",
+  // B-02a3: the strip's group press (hand the group messages to the running turn)
+  "Not handed over — VibeSpace does not see the agent in a turn right now; the group messages ride its next turn": "渡していません — いまエージェントがターン中だと VibeSpace には見えていません。グループメッセージは次のターンで届きます",
+  "Not handed over — this conversation cannot take a message into its running turn; the group messages ride its next turn": "渡していません — この会話は実行中のターンにメッセージを入れられません。グループメッセージは次のターンで届きます",
+  "Not handed over — the turn is being stopped; the group messages ride the next turn": "渡していません — ターンを停止しています。グループメッセージは次のターンで届きます",
+  "The agent did not confirm it took the group messages; they keep waiting for its next turn": "エージェントはグループメッセージを受け取ったと確認しませんでした。次のターンまで待ち続けます",
+  "Hand the group message over now": "このグループメッセージを今すぐ渡す",
+  "Hand the {n} group messages over now": "{n} 件のグループメッセージを今すぐ渡す",
+  "joins the running turn; if the turn is just ending, it runs right after it": "実行中のターンに加わります。ターンが終わる直前なら、その直後に実行されます",
+  "Gives the agent the group messages waiting for it inside the turn it is running, the way a message sent with Enter goes in; if that turn is just ending, they run right after it as a turn of its own": "待っているグループメッセージを、Enter で送ったメッセージと同じ道で、エージェントが実行中のターンに渡します。そのターンが終わる直前なら、直後に独立したターンとして実行されます",
+  "Handed 1 group message to the running turn": "1 件のグループメッセージを実行中のターンに渡しました",
+  "Handed {n} group messages to the running turn": "{n} 件のグループメッセージを実行中のターンに渡しました",
+  "the user handed the group messages waiting for a conversation to its running turn": "あなたが会話を待っているグループメッセージを実行中のターンに渡した",
+  "Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn": "渡していません — 待っているグループメッセージは一度に渡せる量を超えています。次のターンで届きます",
   "Allow for 1 hour": "1 時間許可", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "この会話を 1 時間許可しました — 使うたびに通知が出ます。保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "すべての宛先", // lane vault-standing-request r7 («Allow for 1 hour»)

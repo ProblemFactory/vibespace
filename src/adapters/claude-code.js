@@ -452,6 +452,9 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // agentd-attach bridge), NOT claude — SIGINT would kill the pipe and
     // read as a session drop while remote claude keeps running (audit
     // 2.192.0). The protocol interrupt still reaches claude via stdin.
+    // B-02a3: a Stop is SETTLING from here until the CLI says idle (the wrapper's own window: it holds every frame inside it)
+    // — claude-stream-json clears it at that word; the group press refuses while it stands (src/server/user-input.js)
+    if (session._turnLive === true || session._isStreaming === true) session._stopAskedAt = Date.now();   // a Stop at idle opens no window (the wrapper's own rule: only a live or owed turn)
     if (session.host) return;
     if (!session._childPid) return;
     if (session._interruptTimer) clearTimeout(session._interruptTimer);

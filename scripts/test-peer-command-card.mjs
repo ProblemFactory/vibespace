@@ -405,6 +405,36 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   }
 }
 
+console.log('— B-02a3: the consumer\'s facts for the group press — the live turn by the CLI\'s records, a Stop until idle, the wrapper\'s id-less word');
+{
+  const { s, p } = mkSession('w-gh');
+  const said = [];
+  p.data(J({ type: 'system', subtype: 'init', session_id: 'x', claude_code_version: '2.1.312' }));
+  const live = s._turnLive;
+  s._groupHandover = { said: (st) => said.push(st) };
+  p.data(J({ type: 'input_handover', state: 'handed', msg_ids: ['web-1'], via: 'enter' }));   // a person's frame — never the group hand-over's
+  p.data(J({ type: 'input_handover', state: 'handed', msg_ids: [], via: 'enter' }));
+  p.data(J(result('cccccccc-0000-4000-8000-0000000002a3')));
+  const ended = s._turnLive;
+  s._stopAskedAt = Date.now();
+  p.data(J({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: 'x' }));
+  const stillStopping = s._stopAskedAt > 0;
+  p.data(J({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: 'x' }));
+  // the third read: an INTERRUPTED result opens the Stop window whoever stopped it (a terminal's Stop never reaches the hub);
+  // the follow-up's init the wrapper interrupts is live by its records, but the Stop still stands until the CLI's idle
+  p.data(J({ type: 'system', subtype: 'init', session_id: 'x' }));
+  p.data(J({ type: 'result', subtype: 'error_during_execution', is_error: true, terminal_reason: 'aborted_tools', session_id: 'x' }));
+  const aborted = Number(s._stopAskedAt) > 0;
+  p.data(J({ type: 'system', subtype: 'init', session_id: 'x' }));
+  const followUp = { live: s._turnLive, stopping: Number(s._stopAskedAt) > 0 };
+  p.data(J({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: 'x' }));
+  const fresh = mkSession('w-gh-fresh');
+  ok(`B-02a3 (the third read): an interrupted result stamps the Stop (${aborted}); the follow-up's init is live yet the Stop stands (${JSON.stringify(followUp)}) until the idle (${s._stopAskedAt}); a fresh attach starts not live (${fresh.s._turnLive})`,
+    aborted === true && followUp.live === true && followUp.stopping === true && s._stopAskedAt === 0 && fresh.s._turnLive === false, JSON.stringify({ aborted, followUp, stop: s._stopAskedAt, fresh: fresh.s._turnLive }));
+  ok(`B-02a3: init ⇒ the turn is live (${live}), its result ends it (${ended}); the wrapper's word with NO message ids reaches the group hand-over, a person's frame's never (${JSON.stringify(said)}); a Stop settles at the CLI's idle, not before (${stillStopping} → ${s._stopAskedAt})`,
+    live === true && ended === false && JSON.stringify(said) === '["handed"]' && stillStopping === true && s._stopAskedAt === 0, JSON.stringify({ live, ended, said, stop: s._stopAskedAt }));
+}
+
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

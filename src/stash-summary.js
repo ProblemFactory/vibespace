@@ -175,7 +175,7 @@ function partWords(item, t) {
  *  next turn's injection (UserPromptSubmit — a turn of ANY origin since lane stash-any-turn, 2026-10-05) — a message
  *  typed into a running turn is folded into it with no such hook (and a long-running agent's turn can last hours):
  *  mid-turn the strip says the next turn AFTER this one ends. */
-function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false } = {}) {
+function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false, groupPress = false } = {}) {
   if (!summary || !summary.count) return null;
   const n = summary.count;
   // THE RETRYING ONES (lane notify-retry): on their way by themselves — the head says so when they are all there is,
@@ -194,7 +194,7 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
   // `reachable: false`), the sentence where it would be; some ⇒ the button stays and the count they are is said.
   const rides = (summary.items || []).filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0);
   const groupOnly = rides > 0 && rides >= n;
-  const ridesWords = rides && !groupOnly ? (midTurn
+  const ridesWords = rides && !groupOnly && !groupPress ? (midTurn   // B-02a3: beside the group press its own button says what happens to them
     ? (rides === 1 ? t('1 group message rides the next turn, after this one ends') : t('{n} group messages ride the next turn, after this one ends', { n: rides }))
     : (rides === 1 ? t('1 group message rides the next turn') : t('{n} group messages ride the next turn', { n: rides }))) : null;
   const costWords = billed ? t('starts a turn') : t('joins the running turn');
@@ -216,6 +216,20 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
   };
 }
 
+/** B-02a3: THE GROUP PRESS (the strip, while the agent is mid-turn on a conversation whose Enter hands a message to the
+ *  running turn): its button, its money word WITH the edge (主开发's ruling (1): «joins the running turn; if the turn is just
+ *  ending, it runs right after it»), its title — and the toast after it. `n` = the group messages waiting. */
+function groupHandOverWords(n, t, { inFlight = false } = {}) {
+  return {
+    button: inFlight ? t('Handing over…') : Number(n) === 1 ? t('Hand the group message over now') : t('Hand the {n} group messages over now', { n: Number(n) || 0 }),
+    cost: t('joins the running turn; if the turn is just ending, it runs right after it'),
+    title: t('Gives the agent the group messages waiting for it inside the turn it is running, the way a message sent with Enter goes in; if that turn is just ending, they run right after it as a turn of its own'),
+  };
+}
+function groupHandedWords(r, t) {
+  const n = Number(r && r.delivered) || 0;
+  return n === 1 ? t('Handed 1 group message to the running turn') : t('Handed {n} group messages to the running turn', { n });
+}
 /** After a hand-over: the toast — names what went AND what is still held (never a count that hides the rest). */
 function handedOverWords(r, t) {
   const n = Number(r && r.delivered) || 0;
@@ -295,6 +309,12 @@ function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, time
     if (reason) return { text: t('Not handed over — the spend check failed and refused this turn: “{reason}” (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [stash] and [deliver] lines record it.', { reason }), door: null };
     return { text: t('Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting.'), door: null };
   }
+  // B-02a3: the group press's own refusals — each says the messages keep waiting for the next turn (nothing was written)
+  if (code === 'not_mid_turn') return { text: t('Not handed over — VibeSpace does not see the agent in a turn right now; the group messages ride its next turn'), door: null };
+  if (code === 'not_steerable') return { text: t('Not handed over — this conversation cannot take a message into its running turn; the group messages ride its next turn'), door: null };
+  if (code === 'stopping') return { text: t('Not handed over — the turn is being stopped; the group messages ride the next turn'), door: null };
+  if (code === 'unconfirmed') return { text: t('The agent did not confirm it took the group messages; they keep waiting for its next turn'), door: null };
+  if (code === 'too_long') return { text: t('Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn'), door: null };
   if (code === 'unreachable') return { text: t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn'), door: null };
   if (code === 'in_flight') return { text: t('A hand-over for this agent is already in progress'), door: null };
   if (code === 'held_for_next_turn') return { text: t('Not handed over — this agent’s process predates mid-turn notifications; the notices ride its next prompt (restart the session to receive them mid-turn)'), door: null };
@@ -341,4 +361,4 @@ function handoverFacts(body) {
  *  hand-over sentence and its id). */
 function handoverCardText(n, text, { why = null } = {}) { return `${Number(n) || 0} waiting notice(s) handed over${why ? ` — ${why}` : ''}\n\n${String(text || '').trim()}`; }
 
-module.exports = { KIND_ORDER, REACTION_DIGEST_FROM, kindOf, summarize, summaryDigest, previewDigest, previewWords, previewHead, PREVIEW_MAX, PREVIEW_CHARS, partWords, stashSummaryWords, handedOverWords, handoverFacts, handoverCardText, HANDOVER_HEAD_RE, HELD_WHY, heldWhyOf, heldKeyOf, whenWords, clockAt, handOverRefusalWords };
+module.exports = { KIND_ORDER, REACTION_DIGEST_FROM, kindOf, summarize, summaryDigest, previewDigest, previewWords, previewHead, PREVIEW_MAX, PREVIEW_CHARS, partWords, stashSummaryWords, handedOverWords, groupHandOverWords, groupHandedWords, handoverFacts, handoverCardText, HANDOVER_HEAD_RE, HELD_WHY, heldWhyOf, heldKeyOf, whenWords, clockAt, handOverRefusalWords };

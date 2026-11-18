@@ -109,6 +109,11 @@ const SPEND_REASONS = Object.freeze({
   // what waits for the agent's next turn, and its "Hand over now" delivers the whole stash at once — ONE ladder call,
   // ONE turn. The producer is src/server/stash-handover.js (POST /api/sessions/:id/stash/hand-over, cookie only).
   'stash-handover': { turn: true, attended: true, what: 'the user handed a conversation its waiting notices now' },
+  // B-02a3 (主开发's ruling (1), 2026-11-18): the same strip's press for the GROUP messages waiting for a conversation that is
+  // mid-turn — handed to the RUNNING turn by the road an Enter takes (src/server/user-input.js origin 'group-handover'); a turn
+  // only in the one edge where that turn was already finishing (the CLI then runs it right after, as it runs an Enter). The
+  // producer is src/server/stash-handover.js handOverGroups (POST /api/sessions/:id/stash/hand-over-groups, a person's press)
+  'group-handover': { turn: true, attended: true, what: 'the user handed the group messages waiting for a conversation to its running turn' },
   // lane notify-retry (R3, 2026-10-01): the waiting notices that did not fit a prompt's inline context are posted as
   // their own message the moment that turn ends — the hand-over's own machinery, run by the turn end instead of a click;
   // declared beside its producer (src/server/stash-handover.js, the auto path)

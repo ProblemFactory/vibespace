@@ -83,7 +83,7 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     return;
   }
   if (msg.type === 'system' && msg.subtype === 'init') {
-    st.live = true;
+    st.live = true; session._turnLive = true;   // B-02a3: the turn the CLI is running, by its own records (either feed)
     const cmd = st.cmd;
     st.cmd = null; st.first = null; st.waitCmd = null;
     const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
@@ -102,7 +102,7 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     return;
   }
   if (msg.type === 'result') {
-    st.live = false; st.cmd = null; st.first = null; st.waitCmd = null;
+    st.live = false; session._turnLive = false; st.cmd = null; st.first = null; st.waitCmd = null;
     setTurnBy(session, { by: 'unrecorded', source: 'turn-ended' });
   }
 }

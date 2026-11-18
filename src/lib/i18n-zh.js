@@ -12260,6 +12260,19 @@ export default {
   "The turn running when this asked was started by a delivered message, not typed here": "提出这个请求时正在运行的这一轮由一条送达的消息发起（不是在这里输入的）",
   "Who started this turn is not recorded": "没有记录这一轮是谁发起的",
   "Who started this is not recorded: background work another turn started is still running": "由谁发起没有记录：另一轮启动的后台工作仍在运行",
+  // B-02a3: the strip's group press (hand the group messages to the running turn)
+  "Not handed over — VibeSpace does not see the agent in a turn right now; the group messages ride its next turn": "没有交出——VibeSpace 此刻没有看到这个 agent 在一轮中；这些群消息随它的下一轮送达",
+  "Not handed over — this conversation cannot take a message into its running turn; the group messages ride its next turn": "没有交出——这个对话无法把消息送进正在运行的一轮；这些群消息随它的下一轮送达",
+  "Not handed over — the turn is being stopped; the group messages ride the next turn": "没有交出——这一轮正在停止；这些群消息随下一轮送达",
+  "The agent did not confirm it took the group messages; they keep waiting for its next turn": "agent 没有确认收到这些群消息；它们继续等待它的下一轮",
+  "Hand the group message over now": "现在交出这条群消息",
+  "Hand the {n} group messages over now": "现在交出这 {n} 条群消息",
+  "joins the running turn; if the turn is just ending, it runs right after it": "并入正在运行的一轮；若这一轮正要结束，则紧接着运行",
+  "Gives the agent the group messages waiting for it inside the turn it is running, the way a message sent with Enter goes in; if that turn is just ending, they run right after it as a turn of its own": "把等待这个 agent 的群消息送进它正在运行的一轮，与用 Enter 发送的消息走同一条路；若这一轮正要结束，它们会紧接着作为单独的一轮运行",
+  "Handed 1 group message to the running turn": "已把 1 条群消息交给正在运行的一轮",
+  "Handed {n} group messages to the running turn": "已把 {n} 条群消息交给正在运行的一轮",
+  "the user handed the group messages waiting for a conversation to its running turn": "你把等待某个对话的群消息交给了它正在运行的一轮",
+  "Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn": "没有交出——等待中的群消息放不进一次交出；它们随下一轮送达",
   "Allow for 1 hour": "允许 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "已允许这个对话 1 小时 — 每次使用都会弹一条提示；可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "任何目的地", // lane vault-standing-request r7 («Allow for 1 hour»)

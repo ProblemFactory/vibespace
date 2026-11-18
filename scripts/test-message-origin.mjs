@@ -517,8 +517,8 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   }
   // the send doors (bound 2): only VibeSpace's own — the typed door, the auto-resume continue, the rpc-queue road's peer frame
   const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
-  ok('bound 2: the three send doors note their own sends (typed / dispatch at the typed door, auto-resume, peer) — and nothing else writes the record',
-    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
+  ok('bound 2: the three send doors note their own sends (typed / dispatch / a group hand-over\'s peer frame at the typed door — B-02a3 at the 2.369.411 restack, auto-resume, peer) — and nothing else writes the record',
+    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: handing \? 'peer' : human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
 }
 
 const ms = Number(process.hrtime.bigint() - T0) / 1e6;

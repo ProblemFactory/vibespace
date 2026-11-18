@@ -1618,13 +1618,14 @@ export class ChatInput {
    *  caps = backend-caps `inputModes` projected onto the client (agent-meta):
    *  `queueVerbs` is the table, `steer`/`queueOps` its derived view. */
   /** 2026-09-27: the session's `stash` fact ({count, items} | null) + its turn — the strip patches in place. */
-  setStash(summary, opts = {}) { this._stashStrip?.set(summary || null, opts); }
+  setStash(summary, opts = {}) { this._stashArgs = [summary, opts]; this._stashStrip?.set(summary || null, { ...opts, steers: this._sendModes().enterDoor === 'steer' }); }   // B-02a3: the group press follows this composer's own Enter door
   /** lane agent-window-no-pop: `{key, title, open}` — the card an agent's window leaves (src/lib/agent-card.js). */
   showAgentCard(card) { return this._agentCards?.show(card) || null; }
 
   setQueue(items, caps) {
     this._queue = Array.isArray(items) ? items : [];
     if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [], notifSteerMissing: !!caps.notifSteerMissing, ...(caps.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
+    if (caps && this._stashArgs) this.setStash(...this._stashArgs);   // B-02a3: the door changed — the strip's group press follows it
     // A row that left the queue cannot still be pending/refused/edited — the
     // republish IS the outcome (a spinner outliving its row is a lie).
     const live = new Set(this._queue.map((it) => String(it.id || '')));

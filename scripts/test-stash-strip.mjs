@@ -2001,8 +2001,8 @@ console.log('⑥ wiring pins');
   ok(/stash: \{ digest: null \},/.test(read('src/lib/sidebar.js')) && /patchStashHints\(this\.listEl, msg\.sessions\)/.test(read('src/lib/sidebar.js')) && /stashHintChip\(s\.stash\)/.test(read('src/lib/session-card.js')), 'LIVE_SESSION_FACTS carries `stash` (carried-only), the sidebar patches the hint in place, the card draws it at build');
   const ci = read('src/lib/chat-input.js'), cv = read('src/lib/chat-view.js');
   ok(/\.chat-stash-go\[hidden\], \.chat-stash-nobutton\[hidden\], \.chat-stash-held\[hidden\] \{ display: none; \}/.test(read('public/chat.css')), 'verify r2: the strip\'s no-button sentence, the hidden button and the held count have their own display rules (no global .hidden)');
-  ok(/inputArea\.append\(this\._stashStrip\.el, this\._queueStrip,/.test(ci) && /setStash\(summary, opts = \{\}\) \{ this\._stashStrip\?\.set\(summary \|\| null, opts\); \}/.test(ci) && /this\._chatInput\?\.setStash\?\.\(this\._stashFact\.stash, \{ turn: this\._stashFact\.turn \}\);/.test(cv),
-    'the strip sits ABOVE the queue strip; ChatView feeds it from its own row of every active-sessions payload');
+  ok(/inputArea\.append\(this\._stashStrip\.el, this\._queueStrip,/.test(ci) && /setStash\(summary, opts = \{\}\) \{ this\._stashArgs = \[summary, opts\]; this\._stashStrip\?\.set\(summary \|\| null, \{ \.\.\.opts, steers: this\._sendModes\(\)\.enterDoor === 'steer' \}\); \}/.test(ci) && /if \(caps && this\._stashArgs\) this\.setStash\(\.\.\.this\._stashArgs\);/.test(ci) && /this\._chatInput\?\.setStash\?\.\(this\._stashFact\.stash, \{ turn: this\._stashFact\.turn \}\);/.test(cv),
+    'the strip sits ABOVE the queue strip; ChatView feeds it from its own row of every active-sessions payload; B-02a3: the composer adds its own Enter door (`steers`) and re-sends it when the wrapper\'s door changes');
   ok(!/\.innerHTML\s*=(?!\s*UI_ICONS\.)/.test(read('src/lib/stash-strip.js')) && (read('src/lib/stash-strip.js').match(/\.innerHTML\s*=/g) || []).length === 2, 'stash-strip assigns innerHTML ONLY the library\'s own icons (every string is textContent)');
   const A = require(path.join(REPO, 'src/spend-authorizer.js'));
   ok(A.SPEND_REASONS['stash-handover'] && A.SPEND_REASONS['stash-handover'].turn === true && /file: 'src\/server\/stash-handover\.js', prim: 'deliver-ladder'/.test(read('scripts/test-spend-paths.mjs')) && require(path.join(REPO, 'src/notification-senders.js')).NOTIFICATION_SENDERS.includes('VibeSpace notices'),
@@ -2013,6 +2013,134 @@ console.log('⑥ wiring pins');
   for (const f of ['src/stash-summary.js', 'src/lib/stash-strip.js']) for (const m of read(f).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) keys.add(new Function(`return '${m[1]}'`)());
   const missing = [...keys].filter((k) => !zh.has(k) || !ja.has(k));
   ok(keys.size >= 28 && missing.length === 0, `zh + ja carry every word of the strip and the hint (${keys.size} keys)`, missing);
+}
+
+// ═══ B-02a3 THE GROUP PRESS (主开发's ruling (1), 2026-11-18): the group messages waiting for a MID-TURN agent, handed to its
+// running turn by the road an Enter takes; settled as received only on the wrapper's word; an idle agent keeps today's words ═══
+console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door settles on the wrapper\'s word, the typing path refuses idle');
+{
+  const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
+  const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
+  const dir = scratch('stash-strip-gh-' + Math.random().toString(36).slice(2, 7));
+  fs.mkdirSync(dir, { recursive: true });
+  const A = 'aaaaaaaa-02a3-4000-8000-0000000002a3', B = 'bbbbbbbb-02a3-4000-8000-0000000002a3';
+  const sB = { name: 'Agent One', backend: 'claude', backendSessionId: B, claudeSessionId: B, mode: 'chat', _isStreaming: true };
+  const sessions = new Map([['w1', sB], ['w2', { name: 'alpha', backend: 'claude', backendSessionId: A, claudeSessionId: A, mode: 'chat' }]]);
+  const roster = [{ cid: A, name: 'alpha', groups: ['tg'] }, { cid: B, name: 'Agent One', groups: ['tg'] }];
+  const store = createChannelStore({ dir: path.join(dir, 'channels') });
+  const cards = [];
+  let view = null;
+  const deliver = CD.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => undefined, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
+    onStashChange: () => { view && view.changed(); }, emitPeerCard: (c, card) => cards.push(card), log: () => {} });
+  const ge = GE.create({ store, deliver, roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} }, onPending: () => { view && view.changed(); } });
+  const typed = [], spent = [];
+  let answer = () => ({ ok: true, msgId: 'm' }), refuse = null;
+  const guardFake = { authorize: (req) => { spent.push('authorize:' + req.reason); return refuse ? { ok: false, why: refuse, identity: { key: 'acct', name: 'Work' } } : { ok: true, attended: true, identity: { key: 'acct', name: 'Work' } }; }, note: (rec) => spent.push('note:' + rec.reason) };
+  const mkView = (mod) => mod.create({ activeSessions: sessions, getDeliver: () => deliver, getJobs: () => null, getGroups: () => ge, broadcastSessions: () => {}, renderMsgStash, renderNotifStash, debounceMs: 20,
+    getSendUserInput: () => (wid, text, o) => { typed.push({ wid, text, o }); return answer(wid, text, o); }, getSpendGuard: () => guardFake, groupHandedWaitMs: 150,
+    schedule: (fn, ms) => setTimeout(fn, ms) });   // a press AWAITS its word: the suite's loop must stay alive for that timer (the hub's server keeps it alive; an unref'd one ended the module unsettled)
+  view = mkView(SH);
+  const made = await ge.create({ by: A, name: 'api lane', members: [B], quiet: true });
+  const groupsWaiting = () => { const f = view.summaryFor(sB); return f ? f.items.filter((i) => i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0) : 0; };
+  await ge.post({ group: made.group.id, from: A, text: 'the deploy is blocked — can you look?' });
+  await ge.post({ group: made.group.id, from: A, text: 'second note' });
+  await sleep(40);
+  // (1) THE STRIP: the press only mid-turn on a conversation whose Enter steers; its money word says the one edge
+  const strip = SS.createStashStrip({ sessionId: 'w1' });
+  const qa = (c) => strip.el.querySelectorAll('.' + c);
+  const press = () => qa('chat-stash-groups-go')[0];
+  const f0 = view.summaryFor(sB);
+  strip.set(f0, { turn: 'running', steers: true });
+  const shown = { hidden: press().hidden, label: press().querySelector('.chat-stash-go-label').textContent, cost: press().querySelector('.chat-stash-cost').textContent, noBtn: strip.el.querySelector('.chat-stash-nobutton').hidden };
+  strip.set(f0, { turn: 'running', steers: false }); const noSteer = { hidden: press().hidden, noBtn: strip.el.querySelector('.chat-stash-nobutton').hidden };
+  strip.set(f0, { turn: 'idle', steers: true }); const idle = { hidden: press().hidden, words: strip.el.querySelector('.chat-stash-nobutton').textContent };
+  ok(shown.hidden === false && shown.label === 'Hand the 2 group messages over now' && shown.cost === ' · joins the running turn; if the turn is just ending, it runs right after it' && shown.noBtn === true
+    && noSteer.hidden === true && noSteer.noBtn === false && idle.hidden === true && idle.words === 'they ride the next turn',
+    'RED-able (fe1d59c41: no press at all): mid-turn where Enter steers, the strip offers «Hand the 2 group messages over now · joins the running turn; if the turn is just ending, it runs right after it»; where Enter queues, or the agent is idle, today\'s words', { shown, noSteer, idle });
+  // the reader's should 6: a conversation on ANOTHER machine — its wrapper's door is not read here: no press, and the door refuses
+  sB.host = 'h1';
+  const fh = view.summaryFor(sB); strip.set(fh, { turn: 'running', steers: true }); const remoteHidden = press().hidden;
+  const rh = await view.handOverGroups('w1', { pressed: PRESS });
+  delete sB.host;
+  ok(fh && fh.groupHandover === false && remoteHidden === true && rh.code === 'not_steerable' && typed.length === 0, 'a remote conversation: the fact says no group press, the strip draws none, the door refuses «not_steerable» and writes nothing', { fh: fh && fh.groupHandover, remoteHidden, rh: rh.code });
+  // (2) THE DOOR — handed: the frame goes through THE typing path (origin group-handover), the attended reason is asked first,
+  // and the wrapper's word «handed» settles it (the marks move, the cards draw, the messages leave the strip)
+  const p1 = view.handOverGroups('w1', { pressed: PRESS });
+  await sleep(15);
+  const pend1 = sB._groupHandover;
+  if (pend1 && typeof pend1.said === 'function') pend1.said('handed');
+  const r1 = await p1; await sleep(40);
+  ok(r1.ok === true && r1.delivered === 2 && typed.length === 1 && typed[0].o.origin === 'group-handover' && /^The user handed over, into this turn, the group messages that were waiting for your next turn \(group hand-over gh-/.test(typed[0].text)
+    && /They are messages posted in your groups — not words the user typed to you here/.test(typed[0].text) && /the deploy is blocked/.test(typed[0].text) && spent.join() === 'authorize:group-handover' && groupsWaiting() === 0 && cards.filter((c) => c.kind === 'group').length === 2,
+    'the door: the report headed as handed-over group messages goes by the typing path\'s group-handover origin, the spend authorizer is asked under the ATTENDED reason first, and the wrapper\'s «handed» settles it (2 cards, nothing left waiting)', { r1, typed: typed.map((x) => x.o), spent, left: groupsWaiting() });
+  pend1 && pend1.said('own-turn');
+  ok(spent.join() === 'authorize:group-handover,note:group-handover' && sB._groupHandover === null, 'the one edge: the CLI ran it as a turn of its own ⇒ the ATTENDED tally (note under group-handover), and the hand-over is done', spent);
+  // (3) NO WORD from the wrapper ⇒ «unconfirmed», the marks unmoved (the messages still wait for the next turn); a late word still settles
+  await ge.post({ group: made.group.id, from: A, text: 'a third one' }); await sleep(30);
+  const r2 = await view.handOverGroups('w1', { pressed: PRESS });
+  const waitingAfterNoWord = groupsWaiting(), cardsAfterNoWord = cards.length, typedBefore = typed.length;
+  const r2b = await view.handOverGroups('w1', { pressed: PRESS });   // the reader's should 4: a second press while the first waits for its word
+  ok(r2b.ok === false && r2b.code === 'in_flight' && typed.length === typedBefore, 'a second press while the first hand-over waits for its word is refused «in_flight» and writes nothing (the same messages never go twice)', { r2b, typed: typed.length - typedBefore });
+  sB._groupHandover && sB._groupHandover.said('handed'); await sleep(40);
+  ok(r2.ok === false && r2.code === 'unconfirmed' && waitingAfterNoWord === 1 && cardsAfterNoWord === 2 && groupsWaiting() === 0 && cards.length === 3,
+    'no word within the wait ⇒ «unconfirmed» and NOTHING settled (the message still waits, no card); the late «handed» settles it then', { r2, waitingAfterNoWord, cardsAfterNoWord, after: groupsWaiting() });
+  // (4) the refusals write nothing and settle nothing
+  await ge.post({ group: made.group.id, from: A, text: 'a fourth one' }); await sleep(30);
+  const t0 = typed.length;
+  answer = () => ({ ok: false, code: 'not_mid_turn', error: 'the agent is not in a turn' });
+  const r3 = await view.handOverGroups('w1', { pressed: PRESS });
+  answer = () => ({ ok: true, msgId: 'm' });
+  refuse = 'hour-cap'; const s0 = spent.length;
+  const r4 = await view.handOverGroups('w1', { pressed: PRESS });
+  refuse = null;
+  const r5 = await view.handOverGroups('w1', {});
+  ok(r3.code === 'not_mid_turn' && sB._groupHandover === null && r4.code === 'spend_refused' && typed.length === t0 + 1 && spent.length === s0 + 1 && r5.code === 'not_a_person' && typed.length === t0 + 1 && groupsWaiting() === 1,
+    'the typing path\'s «not mid-turn» comes back by name and clears the hand-over; a spend refusal writes nothing; a call with no person\'s press is refused before anything; the message still waits', { r3: r3.code, r4: r4.code, r5: r5.code, typed: typed.length - t0, left: groupsWaiting() });
+  // (5) THE TYPING PATH — the REAL sender: written only mid-turn, no Stop settling, the Enter door steers; the frame carries no
+  // message id (the wrapper treats it as nobody's), webui_steer, and no live record is drawn for it
+  const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input.js'));
+  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const bufs = scratch('stash-strip-ui-' + Math.random().toString(36).slice(2, 7)); fs.mkdirSync(bufs, { recursive: true });
+  fs.writeFileSync(path.join(bufs, 'w9.json'), JSON.stringify({ pid: 1, caps: { inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'] } }));
+  const sess = { pty: {}, mode: 'chat', backend: 'claude', buffer: '', _isStreaming: true, _turnLive: true };
+  const lines = [], fed = [];
+  const uiOf = (mod) => mod.createUserInputSender({ activeSessions: new Map([['w9', sess]]), adapterRegistry: { get: () => new ClaudeCodeAdapter({ buffersDir: bufs }) }, BUFFERS_DIR: bufs, broadcastToSession() { }, feedLive: (s, m) => fed.push(m), autoResume: null, reattachLocalPty() { }, ptyQuietSince: () => false, writeSessionInput: (s, l) => lines.push(JSON.parse(l)) }).send;
+  const send = uiOf({ createUserInputSender });
+  const u1 = send('w9', 'group words', { origin: 'group-handover' });
+  sess._turnLive = false; const u2 = send('w9', 'group words', { origin: 'group-handover' }); sess._turnLive = true;   // after the result (the hub may still say «running» until idle)
+  sess._interruptTimer = 1; const u3 = send('w9', 'group words', { origin: 'group-handover' }); sess._interruptTimer = null;
+  sess._stopAskedAt = Date.now(); const u3b = send('w9', 'group words', { origin: 'group-handover' }); sess._stopAskedAt = 0;   // the reader's must 2: a Stop settling past the 2 s fallback
+  sess._turnState = 'requires_action'; sess._isStreaming = false; const u3c = send('w9', 'group words', { origin: 'group-handover' }); sess._turnState = 'running'; sess._isStreaming = true;   // should 3: a permission wait is inside the turn
+  fs.writeFileSync(path.join(bufs, 'w9.json'), JSON.stringify({ pid: 1, caps: { inputQueue: true, queueVerbs: ['remove', 'reorder', 'edit'] } }));
+  const u4 = send('w9', 'group words', { origin: 'group-handover' });
+  ok(u1.ok === true && lines[0].webui_steer === true && !('webui_msg_id' in lines[0]) && !('webui_origin' in lines[0]) && fed.length === 0 && sess.buffer === '' && !sess._userInputAt
+    && u2.code === 'not_mid_turn' && u3.code === 'stopping' && u3b.code === 'stopping' && u3c.ok === true && u4.code === 'not_steerable' && lines.length === 2,
+    'the REAL typing path: mid-turn on a steering wrapper ONE frame (webui_steer, NO message id, no origin — nobody\'s frame), no live record, never the person\'s typing stamp; the group check reads the CLI\'s own init / result (`_turnLive`), never the hub\'s turnState — so a permission wait inside the turn is not refused; after the turn\'s result ⇒ not_mid_turn, a Stop settling (the 2 s fallback, or any time until the CLI\'s idle) ⇒ stopping, a wrapper that holds ⇒ not_steerable — nothing written', { lines: lines.length, u2: u2.code, u3: u3.code, u3b: u3b.code, u3c: u3c.ok, u4: u4.code, fed: fed.length });
+  // the claude adapter stamps the Stop for EVERY session (a remote one too, before its SIGINT fallback's host return)
+  const adS = new ClaudeCodeAdapter({ buffersDir: bufs }), remoteS = { host: 'h1', _isStreaming: true }, idleS = { host: 'h1' };
+  adS.postInterrupt(remoteS, 'w8'); adS.postInterrupt(idleS, 'w7');
+  ok(Number(remoteS._stopAskedAt) > 0 && !idleS._stopAskedAt, 'the claude adapter\'s postInterrupt stamps `_stopAskedAt` for a running remote session too, and never for a Stop at idle (the wrapper opens no window there; the third read: a stuck refusal)', { remoteS, idleS });
+  // RED CONTROLS (each anchored; a missing anchor fails by name)
+  const MUTGH = mutantCopies('stash-strip-gh', REPO);
+  const uiSrc = read('src/server/user-input.js'), uiA = "      if (session._turnLive !== true) return { ok: false, code: 'not_mid_turn', error: 'VibeSpace does not see the agent in a turn right now — the group messages ride its next turn' };\n";
+  if (!uiSrc.includes(uiA)) throw new Error('the anchor of the control «an idle press is written» is not in the source');
+  const sendX = uiOf(MUTGH.load('src/server/user-input.js', uiSrc.replace(uiA, ''), 'idle-written'));
+  sess._turnLive = false; fs.writeFileSync(path.join(bufs, 'w9.json'), JSON.stringify({ pid: 1, caps: { inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'] } }));
+  const ux = sendX('w9', 'group words', { origin: 'group-handover' }); sess._turnLive = true;
+  ok(ux.ok === true && lines.length === 3, 'RED CONTROL the typing path without its mid-turn check WRITES the frame to an idle agent (a turn the press would start)', { ux, lines: lines.length });
+  const shSrc = read('src/server/stash-handover.js'), shA = "      const r = sendUserInput(String(webuiId), frame, { origin: 'group-handover', steer: true });   // its door: the running turn (the typing path writes it only there)\n";
+  if (!shSrc.includes(shA)) throw new Error('the anchor of the control «settled at the write» is not in the source');
+  view = mkView(MUTGH.load('src/server/stash-handover.js', shSrc.replace(shA, shA + "      pend.said('handed');\n"), 'settle-at-write'));
+  await ge.post({ group: made.group.id, from: A, text: 'a fifth one' }); await sleep(30);
+  const cx = cards.length, wx = groupsWaiting();
+  await view.handOverGroups('w1', { pressed: PRESS }); await sleep(40);
+  ok(cards.length > cx && wx > 0 && groupsWaiting() === 0, 'RED CONTROL a door that settles at the write (no wrapper word) draws the cards and moves the marks anyway — leg (3) goes red', { cards: cards.length - cx, waitingBefore: wx, after: groupsWaiting() });
+  for (const c of copiesCensus(MUTGH.files, MUTGH.dir, REPO, { minCopies: 1, label: 'B-02a3 ' })) ok(c.pass, c.name, c.detail);
+  // THE WIRING: the consumer hands the wrapper's id-less words to the hand-over; the route is a person's press; the attended reason
+  const CS = read('src/server/stdout/claude-stream-json.js'), SV = read('server.js');
+  ok(CS.includes("if (msg.type === 'input_handover' && Array.isArray(msg.msg_ids) && !msg.msg_ids.length && typeof msg.state === 'string' && session._groupHandover && typeof session._groupHandover.said === 'function') { try { session._groupHandover.said(msg.state); } catch { } }")
+    && /app\.post\('\/api\/sessions\/:id\/stash\/hand-over-groups', async \(req, res\) => \{\n\s+try \{\n\s+if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(shSrc) && SV.includes("getSendUserInput: () => sendUserInput") && (() => { const SA = require(path.join(REPO, 'src/spend-authorizer.js')).SPEND_REASONS; return !!(SA['group-handover'] && SA['group-handover'].attended === true && SA['group-handover'].turn === true); })(),
+    'the wiring: claude-stream-json tells the hand-over the wrapper\'s words on a frame with no message id; the route refuses every bearer before it mints the press; server.js hands the door THE typing path on its existing line; the reason is declared attended');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
