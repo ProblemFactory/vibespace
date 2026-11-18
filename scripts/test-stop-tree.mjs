@@ -411,11 +411,11 @@ const svcScene = async (Mod, tag) => {
   ok(C.up && cx.answer && cx.answer.pending === true && cx.flagAfter === true, 'B-cac2 CONTROL (the clear cut, in a copy): the remembered start SURVIVES the second stop — it would start when the run ends', cx);
   // 主开发 21:46Z (a): the asked start's MEMORY-PARK road and its two GUARDS (a job removed meanwhile, the engine's end) —
   // in-process, nothing spawned: the engine's own start / touch / owner message recorded on the instance
-  const guardScene = (Mod, tag) => {
+  const guardScene = (Mod, tag, kind = 'task') => {
     const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
     const J = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: () => { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
     J.init();
-    const job = { id: 'jb-c4c20001', kind: 'task', name: 'asked start', state: 'up', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: Date.now() - 1000 }], createdAt: 1, cmd: { argv: ['true'] } };
+    const job = { id: 'jb-c4c20001', kind, name: 'asked start', state: 'up', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: Date.now() - 1000 }], createdAt: 1, cmd: { argv: ['true'] } };
     J.jobs.set(job.id, job);
     const out = { starts: 0, said: [], told: [], parked: 0 };
     J.start = () => { out.starts++; return { ok: true }; };
@@ -443,6 +443,23 @@ const svcScene = async (Mod, tag) => {
     await flush();
     ok(Px.out.starts === 1, 'B-cac2 CONTROL (the park road without its refusal, in a copy): the asked start UNDOES the park', Px.out);
     Px.J.shutdown();
+    // its read (b8f S1): a SERVICE's park road — the likelier one (a restart whose run ends out of memory before the stop reaches
+    // it) — runs to the finalize's end, where the refusal rides the last call
+    const Ps = guardScene(require(path.join(ROOT, 'src/jobs.js')), 'cac2-park-svc', 'service');
+    Ps.job._startAfterStop = true; Ps.job.desiredUp = false;
+    let threwS = null; try { Ps.J._finalizeRun(Ps.job, Ps.job.runs[0], { code: 137, endedAt: Date.now() }, 'sweep'); } catch (e) { threwS = String(e && e.message); }
+    await flush();
+    ok(!threwS && Ps.out.parked === 1 && Ps.out.starts === 0 && Ps.out.said.some((w) => /the start asked during its stop was not done: it ended out of memory and is parked/.test(w)),
+      'B-cac2 (its read): a SERVICE whose run ends parked for memory while a start was asked — the park stands and is said (the finalize\'s last call carries the refusal)', { threwS, ...Ps.out });
+    Ps.J.shutdown();
+    const PARKS = '    this._startAskedAtStop(job, startAsked, memPark && memPark.park ? PARKED_NO_START : null);';
+    ok(JSRC.split(PARKS).length === 2, 'B-cac2 control setup: the anchor of the control «the service park road» is in jobs.js');
+    const Psx = guardScene(MJ9.load('src/jobs.js', JSRC.replace(PARKS, '    this._startAskedAtStop(job, startAsked, null);   /* MUTANT: the service park undone */'), 'park-undone-svc'), 'cac2-park-svc-mut', 'service');
+    Psx.job._startAfterStop = true; Psx.job.desiredUp = false;
+    try { Psx.J._finalizeRun(Psx.job, Psx.job.runs[0], { code: 137, endedAt: Date.now() }, 'sweep'); } catch { }
+    await flush();
+    ok(Psx.out.starts === 1, 'B-cac2 CONTROL (the service road without its refusal, in a copy): the asked start UNDOES the park', Psx.out);
+    Psx.J.shutdown();
     // the GUARDS: removed meanwhile, the engine's end
     const G = guardScene(require(path.join(ROOT, 'src/jobs.js')), 'cac2-guards');
     G.J._startAskedAtStop(G.job, true); G.J.jobs.delete(G.job.id); await flush();
@@ -461,7 +478,7 @@ const svcScene = async (Mod, tag) => {
     ok(xRemoved === 1 && Gx.out.starts === 2, 'B-cac2 CONTROL (no guard, in a copy): the asked start STARTS a removed job, and starts after the engine\'s end', { xRemoved, all: Gx.out.starts });
     Gx.J._unreadStopped = false; Gx.J.shutdown();
   }
-  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 4, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 5, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
   ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
 }

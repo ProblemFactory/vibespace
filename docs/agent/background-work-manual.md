@@ -252,7 +252,8 @@ URL — share the new one.
 - `stop <id> [--force]` · `start <id>` (revive parked) · `restart <id>` (stop, wait, start —
   one answer; it asks the user first like `start`) · `rm <id> [--stop]`. A `start`
   pressed while a stop's grace runs answers «still stopping (k s left) — it starts when
-  the stop ends» and does start then; a later `stop` cancels that start
+  the stop ends (a VibeSpace restart before then forgets it: start it again)» and does
+  start then; a later `stop` cancels that start
 - `access <id> --view session|group|all --control session|group|all` —
   owner-only; the user can lock access against agent edits
 
