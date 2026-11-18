@@ -20,6 +20,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { format as formatArgs } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
@@ -27,12 +30,126 @@ import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src
 import { BEFORE_REF as BEFORE82, beforeBlocks, beforeText, census as censusMoved, judge as judgeMoved, region as regionMoved, regionAt as regionAt82, rowOf as rowOfMoved } from './claude-md-retire.mjs';   // lane claude-md-retire: §82's census, shared with the retire verb   // lane dc-channels-seams: the engine + its three family files as one text
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// TWO THREADS (B-2c31, lane bl-ci 2026-11-18). This suite took 57 s of every build at two cores, all of it on ONE of them. Its
+// SECTIONS — each top-level `await section(async () => { … })` below — are independent: each is a block of its own names that
+// reads the tree and prints, and none writes what another reads (a census of what every block writes outside itself found
+// process.env alone, saved and restored inside the one section; a worker has its own copy). So a WORKER THREAD loads this same
+// file and the two share the sections: each runs on the thread that reaches it first (one atomic claim per section, in file
+// order) and the other skips it. Both run the prologue (the shared names, ~0.5 s); only this thread counts it and prints it.
+// THE OUTPUT IS THE SUITE'S OWN, IN ITS ORDER: what a section prints is held with it and printed once everything before it is
+// (the worker hands each section's lines and counts over as it ends); the summary counts both threads' checks. A section that
+// throws ends the run as before, after what came before it; a worker that fails is a red that names it, and so is a section it
+// claimed and never handed over. A worker section runs in its own async context: a check one of its callbacks makes after the
+// section ended, while the worker still works, is counted and printed as LATE (one still pending when the worker ends is
+// dropped, as this suite's own process.exit always dropped it); top-level code on the worker carries no context and counts
+// nothing (this thread counts it). A section that must run here says 'main' (§78 reads the child this thread started); one
+// whose environment swap a NATIVE reader would see says 'alone' and runs here LAST, after the worker ended (§104d's HOME:
+// os.homedir() reads the process's environment, which this thread's process.env is and a worker's copy is not; §42's GIT_*
+// reach only children, which take the copy of the thread that spawns them). VS_ARCH_ONE_THREAD=1 runs every
+// section on this thread, in order. CHECKS_PIN: a run that printed no degraded line (a `SKIP …` notice or a `… SKIPPED` check)
+// counts at least this many checks — a section that stops counting is a red, never a smaller green.
+const CHECKS_PIN = 952;
+const SEC_ONE_THREAD = isMainThread && process.env.VS_ARCH_ONE_THREAD === '1';
+const SEC_CLAIM = isMainThread ? new Int32Array(new SharedArrayBuffer(4 * 4096)) : new Int32Array(workerData.claim);
+let SEC_N = 0, SEC_SLOT = 0, SEC_OWN = isMainThread, SEC_PRINTED = 0, SEC_SKIPS = 0, SEC_W_PASS = 0, SEC_W_FAIL = 0, SEC_EXITING = false;
+const SEC_HELD = new Map(), SEC_OWNER = [], SEC_GOT = new Set(), SEC_DONE = new Set(), SEC_LATER = [], SEC_ALS = isMainThread ? null : new AsyncLocalStorage();   // SEC_HELD: slot → [[fd, text]] — 0 the prologue · 2k+1 section k · 2k+2 what follows it
+const writeLine = (fd, t) => { if (/^\s*SKIP\b/.test(t) || /^\s*[✓✗] .*\bSKIPPED\b/.test(t)) SEC_SKIPS++; (fd === 2 ? process.stderr : process.stdout).write(t + '\n'); };
+const holdLine = (fd) => (...a) => {
+  if (SEC_EXITING) return writeLine(fd, formatArgs(...a));   // an 'exit' listener after the last flush: straight out
+  if (!SEC_OWN) return;   // the worker's prologue and the headings between sections: this thread prints them
+  let h = SEC_HELD.get(SEC_SLOT); if (!h) SEC_HELD.set(SEC_SLOT, h = []); h.push([fd, formatArgs(...a)]);
+};
+console.log = console.info = console.debug = holdLine(1); console.error = console.warn = holdLine(2);
+const printSlot = (s) => { for (const [fd, t] of SEC_HELD.get(s) || []) writeLine(fd, t); SEC_HELD.delete(s); };
+const slotReady = (s) => SEC_SLOT > s && (s % 2 === 0 || SEC_DONE.has((s - 1) / 2) || SEC_GOT.has((s - 1) / 2));
+const flushHeld = (all = false) => { while (SEC_PRINTED <= SEC_SLOT && (all || slotReady(SEC_PRINTED))) printSlot(SEC_PRINTED++); };
+let SEC_WORKER = null, SEC_WORKER_DONE = null;
+if (isMainThread && !SEC_ONE_THREAD) {
+  try { SEC_WORKER = new Worker(new URL(import.meta.url), { workerData: { claim: SEC_CLAIM.buffer } }); } catch { SEC_WORKER = null; }   // none: every section is this thread's
+  if (SEC_WORKER) SEC_WORKER_DONE = new Promise((resolve) => {
+    let err = null;   // settled at 'exit' alone: Node hands over every message the worker posted before it emits it
+    SEC_WORKER.on('message', (m) => {
+      SEC_W_PASS += m.pass; SEC_W_FAIL += m.fail;
+      if (m.late) { let h = SEC_HELD.get(SEC_SLOT); if (!h) SEC_HELD.set(SEC_SLOT, h = []); h.push(...m.late); return; }
+      SEC_HELD.set(2 * m.k + 1, m.lines); SEC_GOT.add(m.k); flushHeld();
+    });
+    SEC_WORKER.on('error', (e) => { err = err || e; });
+    SEC_WORKER.once('exit', (code) => resolve(err || (code === 0 ? null : new Error(`the worker exited ${code}`))));
+  });
+}
+if (isMainThread) process.on('exit', () => { flushHeld(true); SEC_EXITING = true; });
+const section = async (fn, where) => {
+  const k = SEC_N++;
+  if (!isMainThread) {
+    if (where === 'main' || where === 'alone' || Atomics.compareExchange(SEC_CLAIM, k, 0, 2) !== 0) return;
+    SEC_OWN = true; SEC_SLOT = 2 * k + 1; const p0 = pass, f0 = fail;
+    try { await SEC_ALS.run(k, fn); } finally { parentPort.postMessage({ k, lines: SEC_HELD.get(SEC_SLOT) || [], pass: pass - p0, fail: fail - f0 }); SEC_HELD.delete(SEC_SLOT); SEC_OWN = false; }
+    return;
+  }
+  SEC_OWNER[k] = SEC_ONE_THREAD || !SEC_WORKER || where === 'main' || where === 'alone' || Atomics.compareExchange(SEC_CLAIM, k, 0, 1) === 0 ? 1 : 2;
+  if (where === 'alone' && SEC_WORKER) { SEC_LATER.push([k, fn]); SEC_SLOT = 2 * k + 2; flushHeld(); return; }   // run in sectionsEnd
+  SEC_SLOT = 2 * k + 1;
+  if (SEC_OWNER[k] === 1) { try { await fn(); } catch (e) { SEC_DONE.add(k); SEC_SLOT++; flushHeld(true); throw e; } SEC_DONE.add(k); }
+  SEC_SLOT = 2 * k + 2; flushHeld();
+};
+const sectionsEnd = async () => {
+  if (!isMainThread) process.exit(0);   // the worker: each section it ran was handed over as it ended
+  const e = SEC_WORKER ? await SEC_WORKER_DONE : null, lost = SEC_OWNER.flatMap((o, k) => (o === 2 && !SEC_GOT.has(k) ? [k] : []));
+  if (e || lost.length) {
+    flushHeld(true);
+    process.stderr.write(`  ✗ the worker thread failed — ${lost.length} section(s) it claimed never judged (${lost.map((k) => '#' + k).join(' ') || 'none'}): ${(e && e.stack) || e || 'no error'}\n`);
+    process.stdout.write(`\n${fail + SEC_W_FAIL + 1} FAILED (${pass + SEC_W_PASS} passed)\n`); process.exit(1);
+  }
+  const here = pass + fail;
+  pass += SEC_W_PASS; fail += SEC_W_FAIL;
+  for (const [k, fn] of SEC_LATER) {   // the 'alone' sections, the worker gone: in their own slots
+    const back = SEC_SLOT; SEC_SLOT = 2 * k + 1;
+    try { await fn(); } catch (x) { SEC_DONE.add(k); SEC_SLOT = back; flushHeld(true); throw x; }
+    SEC_DONE.add(k); SEC_SLOT = back;
+  }
+  flushHeld();
+  if (!SEC_SKIPS && pass + fail < CHECKS_PIN) { fail++; console.error(`  ✗ ${pass + fail - 1} checks ran (${here} before the 'alone' sections on this thread, ${SEC_W_PASS + SEC_W_FAIL} on the worker) — under the pinned ${CHECKS_PIN} (B-2c31): a section stopped counting`); }
+};
+// THE TREE IS READ ONCE (B-2c31, lane bl-ci 2026-11-18). The suite's sections read the same files of the tree again and again —
+// readFileSync was 9 s of the 57 s this suite took at two cores, and the garbage it made another 10. Every utf-8 read of a file
+// under the checkout (node_modules aside) and every directory listing there is answered from memory after its first read, for
+// every module this process loads (the censuses it imports read through the same fs). A write, a rename or a removal of a path
+// under the checkout drops what is remembered for it (the suite writes none today — §51 — but a planted copy never reads stale).
+// A listing is handed back as a COPY (a caller may sort it). Same asserts, same order: only the cost moves.
+{
+  const REPO_ = REPO + path.sep, NM = path.sep + 'node_modules' + path.sep;
+  const mine = (p) => { if (typeof p !== 'string' && !(p instanceof URL)) return null; const a = path.resolve(p instanceof URL ? p.pathname : p); return a.startsWith(REPO_) && !a.includes(NM) ? a : null; };
+  const texts = new Map(), lists = new Map();
+  const realRead = fs.readFileSync, realList = fs.readdirSync;
+  fs.readFileSync = function readFileSync(p, opts) {
+    const enc = typeof opts === 'string' ? opts : opts && typeof opts === 'object' && Object.keys(opts).length === 1 ? opts.encoding : undefined;
+    const a = (enc === 'utf8' || enc === 'utf-8') && mine(p);
+    if (!a) return realRead.apply(this, arguments);
+    let v = texts.get(a);
+    if (v === undefined) { v = realRead.call(this, a, 'utf8'); texts.set(a, v); }
+    return v;
+  };
+  fs.readdirSync = function readdirSync(p, opts) {
+    const a = mine(p), key = a && JSON.stringify(opts === undefined ? null : opts);
+    if (!a || (opts && typeof opts === 'object' && (opts.recursive || (opts.encoding && opts.encoding !== 'utf8')))) return realList.apply(this, arguments);
+    let byOpts = lists.get(a); if (!byOpts) lists.set(a, byOpts = new Map());
+    let v = byOpts.get(key);
+    if (v === undefined) { v = realList.call(this, a, opts); byOpts.set(key, v); }
+    return v.slice();
+  };
+  const forget = (p) => { const a = mine(p); if (!a) return; for (const k of [...texts.keys()]) if (k === a || k.startsWith(a + path.sep)) texts.delete(k); for (const k of [...lists.keys()]) if (k === a || k.startsWith(a + path.sep) || a.startsWith(k + path.sep)) lists.delete(k); };
+  for (const name of ['writeFileSync', 'appendFileSync', 'rmSync', 'unlinkSync', 'rmdirSync', 'mkdirSync', 'copyFileSync', 'cpSync', 'symlinkSync', 'linkSync', 'truncateSync']) {
+    const real = fs[name]; fs[name] = function () { forget(name === 'copyFileSync' || name === 'cpSync' || name === 'symlinkSync' || name === 'linkSync' ? arguments[1] : arguments[0]); return real.apply(this, arguments); };
+  }
+  { const real = fs.renameSync; fs.renameSync = function (a, b) { forget(a); forget(b); return real.apply(this, arguments); }; }
+  (await import('node:module')).syncBuiltinESMExports();   // a module that imported { readFileSync } by name reads through it too
+}
 let pass = 0, fail = 0;
 const ROOT_DIR_DCHS = new URL('..', import.meta.url).pathname;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; let x = ''; try { x = d === undefined ? '' : ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)); } catch { x = ' — ' + String(d); } console.error('  ✗ ' + n + x.slice(0, 4000)); } };   // a failure names its detail (lane job-secrets-retire r3, review N1: §96 named no offender)
+const ok = (c, n, d) => { if (!SEC_OWN) { if (!isMainThread && SEC_ALS.getStore() !== undefined) parentPort.postMessage({ late: [[c ? 1 : 2, `  ${c ? '✓' : '✗'} ${n} (LATE: after its section ended, on the worker)`]], pass: c ? 1 : 0, fail: c ? 0 : 1 }); return; } if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; let x = ''; try { x = d === undefined ? '' : ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)); } catch { x = ' — ' + String(d); } console.error('  ✗ ' + n + x.slice(0, 4000)); } };   // a failure names its detail (lane job-secrets-retire r3, review N1: §96 named no offender)
 // §78's dead-code censuses take ~4 s (a raw scan of ~20 MB per unused-key candidate + two esbuild metafiles): they run as
 // a CHILD from here, alongside every other section, and §78 awaits the file it writes (no pipe: a busy parent never stalls it)
-const DEAD78 = (() => {
+const DEAD78 = !isMainThread ? null : (() => {   // this thread's alone: §78 runs here ('main')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch78-')), out = path.join(dir, 'dead.json'), errFd = fs.openSync(path.join(dir, 'err'), 'w');
   return new Promise((resolve) => {
     const c = spawn(process.execPath, [path.join(REPO, 'scripts/dead-code-census.mjs'), '--json', out], { stdio: ['ignore', 'ignore', errFd] });
@@ -567,7 +684,7 @@ ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ s
 //    CLAUDE.md routing table), never back into server.js. If a legitimate
 //    wiring stanza pushes past the budget, raise it deliberately in the same
 //    commit that explains why.
-{
+await section(async () => {
   const serverLines = read('server.js').split('\n').length;
   ok(serverLines <= 1907, `server.js stays bootstrap-sized (${serverLines} ≤ 1907 lines, ${1907 - serverLines} of headroom — new mechanisms go in src/server/*; lowered from 2100 by lane dc-seams-server: the editor routes, the usage attribution log and the setup-token sweep moved out; 1905 on its base + the doc-engine and artifact-registry wiring lines of 2.369.215 at int217)`);
   // §48 (2.369.134): CODE APPENDED AFTER A MID-LINE // IS A COMMENT. The mounts-plugins wiring call in server.js
@@ -620,7 +737,7 @@ ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ s
   }
   const mods = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js'));
   ok(mods.length >= 14, `src/server/ holds the decomposed modules (${mods.length} ≥ 14)`);
-}
+});
 
 // 7) freeze the exceptions list: an exception nobody uses anymore must be
 //    removed (dead allowlist entries hide future violations behind them).
@@ -637,7 +754,7 @@ for (const [edge] of EXCEPTIONS) {
 //    resolves to nothing and throws only when a dial op RUNS. Free-variable
 //    checks, boot smokes and the route battery all miss a call-time require
 //    with a bad relative path; this static walk cannot.)
-{
+await section(async () => {
   const allFiles = ['server.js'];
   (function walk(dir) {
     for (const e of fs.readdirSync(path.join(REPO, dir))) {
@@ -657,7 +774,7 @@ for (const [edge] of EXCEPTIONS) {
     }
   }
   ok(!broken.length, `every relative require/import resolves (${broken.slice(0, 3).join('; ') || 'all resolve'})`);
-}
+});
 
 // 9) SERVER-side private methods that are CALLED must be DEFINED in-file
 //    (2.343.1, the _notify incident: a dead-code sweep deleted PluginManager's
@@ -665,7 +782,7 @@ for (const [edge] of EXCEPTIONS) {
 //    publish path threw for weeks; no battery saw a call-time method miss).
 //    Scoped to server tiers only — src/lib uses prototype mixins (methods
 //    defined across files) and would false-positive.
-{
+await section(async () => {
   const svFiles = allFilesFor9().filter((f) => !f.startsWith('src/lib/'));
   const broken = [];
   // lane ledger-dedup-law r11: ONE class across two files — UsageHistory's hold road (src/usage-hold-road.js) joins its
@@ -702,20 +819,20 @@ for (const [edge] of EXCEPTIONS) {
     })('src');
     return out;
   }
-}
+});
 
 // 41. Settings bounds/defaults have ONE home (inc-mt0mozsp): the Manage
 //     Agents instructions tab carried a hardcoded pre-2.210.0 copy of the
 //     stop-nudge bounds ([min 1/2] + `Number(v) || dflt`) that silently
 //     reverted an explicit 0 ("every stop" mode) back to 10/30. UI code must
 //     read SETTINGS_SCHEMA, never re-declare a schema row's numbers inline.
-{
+await section(async () => {
   const ma = read('src/lib/manage-agents.js');
   ok(!/stopNudge\w*Minutes'\s*:\s*\[/.test(ma) && ma.includes('SETTINGS_SCHEMA[key]'),
     'manage-agents reads stop-nudge bounds from SETTINGS_SCHEMA (no hardcoded twin)');
   ok(!/Number\(inp\.value\)\s*\|\|/.test(ma),
     'no falsy-default coalescing on number inputs (explicit 0 is a valid value)');
-}
+});
 
 // 42. NO CONTROL BYTES IN SOURCE (steer-all round 4). Two raw NUL bytes — one
 //     used as the separator inside a Map key, one echoed in the comment above
@@ -821,7 +938,7 @@ for (const [edge] of EXCEPTIONS) {
 //     what puts the 64 MB rclone out of scope), so the pathspec is gone: the
 //     census reads EVERY tracked file, and the scope pin now names server.js
 //     and install.sh alongside the three root witnesses.
-{
+await section(async () => {
   // A legitimately binary FIXTURE is not source; everything else in the index
   // is text by construction. Measured 2026-09-07 over all 556 tracked files:
   // 24 are skipped by extension (4 .png screenshots + 20 .woff2 fonts) and 0
@@ -1205,7 +1322,7 @@ for (const [edge] of EXCEPTIONS) {
     restoreAmbient();
     for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
   }
-}
+});
 
 // 43. THE GATE CENSUS (2026-09-07, B-4c5a — the fast/heavy split). A test
 //     suite that is in no runner is not a test: before the split, 99 of the
@@ -1225,7 +1342,7 @@ for (const [edge] of EXCEPTIONS) {
 //     tree (data/bin/rclone) — nothing writes scripts/test-*.mjs, and the case
 //     this census exists for is precisely a suite you just wrote and have not
 //     committed. Reading the index would let exactly that one fall through.
-{
+await section(async () => {
   const ci = await import('./ci.mjs');
   const disk = ci.listSuiteFiles(REPO);
   const f = ci.censusFindings(disk);
@@ -1256,7 +1373,7 @@ for (const [edge] of EXCEPTIONS) {
   // measured: the package.json pin turned test-window-menu into a 300 s
   // timeout and then a bare "Command failed: npm run build". A build-time
   // check may only read what a build reads; cross-file wiring is a suite's job.
-}
+});
 
 // 44. THE SETTINGS CATEGORY CENSUS (2026-09-09). `SETTINGS_CATEGORIES` is not
 //     a hint about ordering — it IS SettingsUI's render loop. `_renderContent`
@@ -1282,7 +1399,7 @@ for (const [edge] of EXCEPTIONS) {
 //     §43 scar). The assert is the CONSEQUENCE ("every row renders"), not just
 //     set inclusion, and the UI's own coupling is pinned so the replay cannot
 //     drift away from the loop it stands for.
-{
+await section(async () => {
   const schemaMod = await import('../src/lib/settings-schema.js');
   const { SETTINGS_SCHEMA, SETTINGS_CATEGORIES } = schemaMod;
   const ui = read('src/lib/settings-ui.js');
@@ -1436,7 +1553,7 @@ for (const [edge] of EXCEPTIONS) {
     'NEGATIVE CONTROL: a row in an unlisted category is silently dropped by the render loop (this census can go red)');
   ok(renderedPaths(ncSchema, [...SETTINGS_CATEGORIES, 'Nobody Listed This']).includes('zz.synthetic'),
     'POSITIVE CONTROL: listing that category is the whole fix (one array entry)');
-}
+});
 
 // 44d. THE SETTINGS REFERENCE IS GENERATED, AND A RETIRED KEY STAYS RETIRED (B-df40 part 1, lane settings-prune).
 //     (i) docs/settings.md's "All Settings Reference" tables have ONE writer, scripts/gen-settings-reference.mjs, from
@@ -1448,7 +1565,7 @@ for (const [edge] of EXCEPTIONS) {
 //     migration 2026-10-settings-rows-retired strips their stored values) may never come back: no schema row, and no
 //     quoted literal of one anywhere under src/ or in server.js — a `serverSetting('…')`, a `settings.get('…')`, a
 //     listener list — outside the list's own file.
-{
+await section(async () => {
   const schemaMod = await import('../src/lib/settings-schema.js');
   const { SETTINGS_SCHEMA, RETIRED_SETTING_KEYS } = schemaMod;
   const gen = await import('./gen-settings-reference.mjs');
@@ -1501,7 +1618,7 @@ for (const [edge] of EXCEPTIONS) {
     && quoted([['src/planted.js', "settings?.get(\"sessionCard.detailTruncation\") ?? 'left'"]]).length === 1
     && quoted([['src/server/migrations.js', "function other() { return settings['browser.cloak.executablePath']; }\n  function migrateCloakToPlugin() {\n  }\n"]]).length === 1,
     'NEGATIVE CONTROL: a re-added retired row, a planted serverSetting / settings.get read of a retired key, and a read of a CARRIED key outside the migration that carries it are what 44d reports');
-}
+});
 
 // 45. THE PER-ITEM SPAWN CENSUS (2026-09-09, userW's pod: 27 of 27 session
 //     creates and kills followed by an 11-17 s event-loop block). A spawn is
@@ -1550,7 +1667,7 @@ for (const [edge] of EXCEPTIONS) {
 //     census in scripts/test-discovery-spawn.mjs, which counts every
 //     child_process entry point the REAL sweep, the REAL refreshWebuiPids and
 //     the REAL kill-path socket lookup take, wherever the fork was written.
-{
+await section(async () => {
   const GIT_ENV45 = gitEnvFrom(process.env);
   const lsFiles = spawnSync('git', ['-C', REPO, 'ls-files', '-z'],
     { encoding: 'utf-8', env: GIT_ENV45, maxBuffer: 64 * 1024 * 1024 });
@@ -1606,6 +1723,9 @@ for (const [edge] of EXCEPTIONS) {
   // on the next one or two. Over-inclusion is the safe direction here — it can
   // only demand one more reason row.
   const spawnSites = (text, { pidOnly }) => {
+    // B-2c31: a pid site needs PID_TOOL in its window of lines, and PID_TOOL never spans a line — a text without it has none
+    // (the census split, rewrote and matched every line of 1099 files to find 18)
+    if (pidOnly && !PID_TOOL.test(String(text))) return [];
     const lines = String(text).split('\n');
     const out = [];
     lines.forEach((line, i) => {
@@ -1790,7 +1910,7 @@ for (const [edge] of EXCEPTIONS) {
   ok(!wsStray(wsText) && /pidsMatchingCmdline\(session\.socketPath\)/.test(wsText)
     && /require\('\.\/cli-identity'\)/.test(wsText),
     '(a) the kill path asks THE process reader (`pidsMatchingCmdline`) and ws-handler starts no process-table child of its own');
-}
+});
 
 // 46. THE LITERAL HARNESS-ID CENSUS (docs/design-harness-settings.zh.md §5,
 //     2026-09-20). A harness setting is read on the server through the
@@ -1804,7 +1924,7 @@ for (const [edge] of EXCEPTIONS) {
 //     offender for each so the census can go red. The one generic feature
 //     under a legacy `claude.` key (auto-resume's instance default) reads it
 //     through GENERIC_LEGACY_KEYS — a NAME, not a literal.
-{
+await section(async () => {
   const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(f)) walk(f, out); } else if (/\.js$/.test(e.name)) out.push(f); } return out; };
   const files = ['server.js', ...walk(path.join(REPO, 'src')).map(rel).filter((p) => !p.startsWith('src/lib/') && p !== 'src/client.js')];
   const KEY_LITERAL = /serverSetting\(\s*['"](?:claude|codex|opencode|antigravity)\./g;
@@ -1896,7 +2016,7 @@ for (const [edge] of EXCEPTIONS) {
       && branchLines("    switch (be) { case 'codex': return poolAuth(a); }").length === 1 && branchLines("          if (SP.statusline && sessionMode === 'terminal') {").length === 0,
       'NEGATIVE CONTROL: the pre-lane gate and a case label are both offenders; a row read is not (46d can go red)');
   }
-}
+});
 
 // 47. THE ONBOARDED-FLAG CENSUS (2.369.125 r7, the Actions mirror on cc89d748).
 //     The first-run Welcome wizard is skipped when localStorage 'vs-onboarded'
@@ -1917,7 +2037,7 @@ for (const [edge] of EXCEPTIONS) {
 //     parts → scripts/xpra-window-boot.mjs, lane xpra-window-split) is read
 //     with that module's text first — where its page opener lived when it was
 //     one file — so the module's import + addScript precede the part's navs.
-{
+await section(async () => {
   const scope = fs.readdirSync('scripts').filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => fs.readFileSync(f, 'utf8').includes("'Page.navigate'"));
   const judge = (s) => {
     if (s.includes('// onboarding-under-test') || s.includes('// cdp-protocol-under-test')) return null;
@@ -1937,7 +2057,7 @@ for (const [edge] of EXCEPTIONS) {
     '§47 the xpra window part navigates and passes ONLY through the module it boots in (alone it is red; a boot module that never adds the script is red)');
   ok(bad.length === 0, `every chrome suite pre-sets 'vs-onboarded' through ONBOARDED_SOURCE before every Page.navigate${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
   ok(judge("import { scratch } from './scratch.mjs';\nawait cdp('Page.navigate', { url: U });") !== null && judge("import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: U });") === null && judge("// onboarding-under-test\nawait cdp('Page.navigate', { url: U });") === null, 'NEGATIVE CONTROL: a bare navigate is caught, the shared idiom passes, the declared exemption passes');
-}
+});
 
 
 // 49. THE WAKE-DOOR CENSUS (r3 of agent groups, 2026-09-23). With auth OFF the
@@ -1948,7 +2068,7 @@ for (const [edge] of EXCEPTIONS) {
 //     consent echo and the pacer. r2 fenced the group routes and left three
 //     side doors beside them; this census reads every router.post/put in
 //     src/routes/channels.js and fails a wake-capable one that does not.
-{
+await section(async () => {
   const src = fs.readFileSync('src/routes/channels.js', 'utf8');
   const blocks = (text) => text.split(/\n(?=router\.(?:post|put|get|delete)\()/).filter((b) => /^router\.(post|put)\(/.test(b));
   const WAKES = /engine\(\)\.(propose|approve)\(|\bge\.(post|create|invite)\(/;
@@ -1968,7 +2088,7 @@ for (const [edge] of EXCEPTIONS) {
   ok(anyBearer && noBearer(src).length === 0, `§49 …and every one refuses EVERY bearer (refuseAgentBearer, which asks pressBearer) before it wakes — they are attended doors${noBearer(src).length ? ' — ' + noBearer(src).join('; ') : ''}`);
   ok(noBearer(src.replace("router.post('/api/channel-groups', async (req, res) => {\n  try {\n    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;\n", "router.post('/api/channel-groups', async (req, res) => {\n  try {\n")).length === 1, '§49 CONTROL: the group create route without its bearer refusal is flagged');
   ok(judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }));\n});") .length === 1 && judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }, wakeGuards(b)));\n});").length === 0, '§49 NEGATIVE CONTROL: a planted side door with no guards is caught; the guarded spelling passes');
-}
+});
 
 // 50. THE REAL-CLI KEY CENSUS (B-5f0b, 2026-09-23). The 2.369.69 red was a
 //     real `codex app-server` leg on a logged-out CODEX_HOME: the server's own
@@ -1980,7 +2100,7 @@ for (const [edge] of EXCEPTIONS) {
 //     codex / opencode by name spawns it through scratch.mjs's
 //     withoutVendorKeys(), or declares `// real-cli-env: <why>` — a leg whose
 //     child env is built from nothing, or that only reads the binary.
-{
+await section(async () => {
   const REAL_CLI = /command -v (claude|codex|opencode|agy)\b|(?:spawn|spawnSync|execFile|execFileSync)\(\s*'(?:codex|claude|opencode|agy)'|OPENCODE_CMD \|\| 'opencode'|ANTIGRAVITY_CMD \|\| 'agy'|execSync\(\s*'(?:codex|claude|opencode|agy) /;
   const judge = (s) => {
     if (!REAL_CLI.test(s)) return null;
@@ -2003,7 +2123,7 @@ for (const [edge] of EXCEPTIONS) {
   const planted = withoutVendorKeys({ PATH: '/bin', OPENAI_API_KEY: 'a', CODEX_API_KEY: 'b', ANTHROPIC_API_KEY: 'c', ANTHROPIC_AUTH_TOKEN: 'd' });
   ok(['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].every((k) => VENDOR_KEY_ENV.includes(k) && !(k in planted)) && planted.PATH === '/bin',
     '§50 withoutVendorKeys strips all four ambient credentials and keeps everything else');
-}
+});
 
 // §50b THE REAL-CODEX HOME CENSUS (lane hook-root-guard, B-c77a, 2026-10-02).
 //     The owner's ~/.codex/config.toml carried 676 `[projects."/tmp/vs-qs-real-…"]
@@ -2014,7 +2134,7 @@ for (const [edge] of EXCEPTIONS) {
 //     `app-server`) pins CODEX_HOME — inline, or through an env variable whose
 //     initializer names it — or declares `// real-cli-home: <why>` within the
 //     three lines above. A stub (`process.execPath, '-e', STUB`) is not a site.
-{
+await section(async () => {
   const CALL = /\b(?:spawn|spawnSync|execSync|execFile|execFileSync)\(/;
   // the call's own text: from the token to its matching close paren (strings and
   // templates skipped), so a multi-line options object is judged whole
@@ -2068,7 +2188,7 @@ for (const [edge] of EXCEPTIONS) {
     && String(ctl("const e = { ...process.env };\nconst srv = spawn('codex', ['app-server'], { env: e });")) === 'false'
     && ctl("const w = spawn(process.execPath, [W, b, m, process.execPath, '-e', STUB], { env: {} });").length === 0,
   '§50b NEGATIVE CONTROL: the pre-fix leg ⑥ shape is caught, a pinned env variable passes, a reasoned declaration passes, an unpinned variable is caught, a stub is no site');
-}
+});
 
 // §51 A SUITE NEVER WRITES A PATCHED COPY INTO THE TREE (B-0220 generalized,
 // 2.369.164 batch r1). A negative control used to load a copy of a product
@@ -2096,7 +2216,7 @@ for (const [edge] of EXCEPTIONS) {
 // no wildcard `.js` pattern that could apply under src/ — a stray copy must be
 // VISIBLE, never hidden.
 console.log('§51 no suite writes a patched copy into the tree');
-{
+await section(async () => {
   const judge = (src) => {
     const checkout = new Set();
     for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*import\.meta\.url[^;\n]*['"]\.\.['"][^;\n]*/g)) checkout.add(m[1]);
@@ -2169,7 +2289,7 @@ console.log('§51 no suite writes a patched copy into the tree');
   const eb = fs.readFileSync(esm, 'utf8');
   ok(esm.endsWith('.mjs') && !/from\s*['"]\.\.?\//.test(eb) && /from "file:\/\//.test(eb),
     '§51 mutant-copy: an ESM copy has every relative specifier rewritten to the real file\'s URL');
-}
+});
 
 // 52. THE BROWSER TAKEOVER CENSUS (docs/design-browser-takeover.zh.md §2 I1/I5,
 //     owner 2026-09-24: "vibespace 完全接管浏览器工具 … 从系统 path 隐藏
@@ -2190,7 +2310,7 @@ console.log('§51 no suite writes a patched copy into the tree');
 //         must name what it hides to point past it). A file name that merely
 //         CONTAINS the word (`~/.agent-browser/`, `agent-browser.json`) is a
 //         path, not the tool, and is not counted.
-{
+await section(async () => {
   const require = (await import('node:module')).createRequire(import.meta.url);
   const { HostManager } = require('../src/hosts.js');
   const EXEMPT = { 'vibespace-usage-scan': 'shipped on demand by the usage harvest (hosts.js usage-scan rung)', 'vibespace-opencode-op': 'shipped on demand by opencode-access (base64 over ssh)' };
@@ -2346,7 +2466,7 @@ console.log('§51 no suite writes a patched copy into the tree');
   ok(literalsOf(planted).filter((l) => count(l)).length === 1, '§52b NEGATIVE CONTROL: a patched CLI copy with the name in one string literal is caught');
   ok(count(teaching[0].replace('vibespace-browser <verb>', 'agent-browser <verb>')) === 1, '§52b NEGATIVE CONTROL: the word injected into a teaching line is caught');
   ok(count('~/.agent-browser/config.json and ./agent-browser.json and design-agent-browser-v2') === 0 && count('run `agent-browser open`.') === 1, '§52b the counter ignores path/file-name shapes and counts the command name (backticked, at a sentence end)');
-}
+});
 
 // §53 (2.369.168, design-browser-faces direction B): ONE GLYPH, ONE DEFINITION.
 // The agent browser's window-with-a-dot is the ⚙ row's, the status-bar chip's,
@@ -2355,7 +2475,7 @@ console.log('§51 no suite writes a patched copy into the tree');
 // exactly that: one path, three faces). Census over every src/lib module: the
 // 16-grid path string appears ONCE (icons.js); the 24-grid rail variant once
 // (sidebar-rail.js); the globe is no longer the agent's anywhere.
-{
+await section(async () => {
   const BL16 = '<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9" r="1.6"/>';
   const BL24 = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M6.5 7h.01M9.5 7h.01"/><circle cx="12" cy="14" r="2.2"/>';
   const libDir = path.join(REPO, 'src/lib');
@@ -2373,7 +2493,7 @@ console.log('§51 no suite writes a patched copy into the tree');
   // NEGATIVE CONTROL: a planted second copy in a scratch listing is counted
   const planted = occIn({ ...texts, 'browser-live-window.js': texts['browser-live-window.js'] + `\nconst COPY = svgIcon16('${BL16}');` }, BL16);
   ok(planted.length === 2 && planted.some(([f]) => f === 'browser-live-window.js'), `§53 NEGATIVE CONTROL: the pre-rename shape (a local svgIcon16 copy in browser-live-window.js) planted into a patched listing is caught (${JSON.stringify(planted)})`);
-}
+});
 
 // §54 (2026-09-25, the Chrome desktop-app incident + the owner's ruling "这个keeper到底是干啥的，没必要别乱加会影响
 // 使用的feature"): ONE RESOURCE VERDICT, TWO OUTCOMES. (a) the memory threshold is COMPARED only in
@@ -2382,7 +2502,7 @@ console.log('§51 no suite writes a patched copy into the tree');
 // desktop app / an agent browser a person or an agent is using is REPORTED. Grep-derived over every src/ file
 // (comments stripped), with a planted negative control for each rule.
 console.log('§54 one resource verdict; only the headless serve stops for a resource');
-{
+await section(async () => {
   const files = [];
   (function walk(dir) {
     for (const e of fs.readdirSync(path.join(REPO, dir))) {
@@ -2489,7 +2609,7 @@ console.log('§54 one resource verdict; only the headless serve stops for a reso
   const plantStop = { ...code, 'src/server/desktop-app-keeper.js': code['src/server/desktop-app-keeper.js'] + "\nstop(rec.id, { why: 'runaway' });" };
   const PARK = /\brunaway(?:Parked)?Until\b|\bparkRunaway\b|\bParkedUntil\b/;
   ok(Object.keys(offenders(plantStop)).includes('src/server/desktop-app-keeper.js') && !PARK.test(code['src/server/browser-keeper.js']) && !PARK.test(code['src/server/desktop-app-keeper.js']), '§54b NEGATIVE CONTROL: the pre-fix spelling (why: \'runaway\') is caught, and the old park names are spoken by neither report-only keeper');
-}
+});
 
 // §55 A SUITE THAT KILLS A WRAPPER WAITS FOR ITS EXIT BEFORE REMOVING ITS DIR
 // (2.369.172 r1 — the Actions mirror's red on test-codex-p2-client: `ENOTEMPTY:
@@ -2502,7 +2622,7 @@ console.log('§54 one resource verdict; only the headless serve stops for a reso
 // every scripts/test-*.mjs that spawns a data/bin/*wrapper*.js AND removes a
 // directory imports stopWrapper, or at least waits on an 'exit' event.
 console.log('§55 a suite that kills a wrapper waits for its exit before removing its dir');
-{
+await section(async () => {
   const judge = (src) => {
     const spawnsWrapper = /data\/bin\/(?:chat|pty|codex-chat)-wrapper\.js/.test(src);
     const removes = /\brmSync\s*\(/.test(src);
@@ -2532,7 +2652,7 @@ console.log('§55 a suite that kills a wrapper waits for its exit before removin
   const bareKill = "spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta]);\ntry { w.stdin.end(); w.kill(); } catch {}\nfs.rmSync(dir, { recursive: true, force: true });";
   ok(judge(blind) !== null && judge(bareKill) !== null && judge(idiom) === null && judge(waiter) === null && judge(noWrapper) === null && judge(sigkill) === null,
     '§55 NEGATIVE CONTROL: the kill-then-rm shape is caught (SIGTERM and the bare kill()); the stopWrapper import passes; an explicit exit wait passes; a suite that spawns no wrapper is out of scope; a SIGKILL (the record never runs) is out of scope');
-}
+});
 
 // §56 A CAPABILITY IS PINNED BY CONTENT, NEVER BY THE LIST'S TAIL (desktop lane C verify r2 F5, 2026-09-25).
 // The daemon's hello-ack capability list GROWS at its end: lane C1 appended desktop-serve after browser-serve and
@@ -2542,7 +2662,7 @@ console.log('§55 a suite that kills a wrapper waits for its exit before removin
 // scripts/test-*.mjs spells an `-serve` capability followed by the closing bracket — as a regex (`serve["']\]`,
 // `serve'\]`) or as esbuild's string (`serve"]'`); the list is found by its key (`capabilities: [ … ]`).
 console.log('§56 a capability is pinned by content, never by the capability list\'s tail');
-{
+await section(async () => {
   const TAIL = /-serve(?:(?:\["'\]|["'])\\\]|"\](?=['`]))/;
   const suites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').sort();
   const hits = [];
@@ -2565,7 +2685,7 @@ console.log('§56 a capability is pinned by content, never by the capability lis
     `argv: ['opencode', 'serve']`,
   ];
   ok(planted.every((l) => TAIL.test(l)) && !clean.some((l) => TAIL.test(l)), `§56 NEGATIVE CONTROL: the four tail spellings (regex both quotes, esbuild's string, a template) are caught; the by-content regex, a stub capability array and a plain argv are not (${JSON.stringify(planted.filter((l) => !TAIL.test(l)).concat(clean.filter((l) => TAIL.test(l))))})`);
-}
+});
 
 // §57 NO SCRATCH SERVER CLAIMS THE SINGLETON DESKTOP'S :7 / 5901 (2026-09-25 — the heavy RED on 69720f2b:
 // test-desktop-app-window's singleton leg read `null` twice). src/vnc.js's singleton Desktop takes the MACHINE-GLOBAL
@@ -2578,7 +2698,7 @@ console.log('§56 a capability is pinned by content, never by the capability lis
 // scripts/test-*.mjs spawn of `server.js` (argv `['server.js']`, `['-r', x, 'server.js']`, `[path.join(x, 'server.js')]`)
 // names an env that carries scratch.mjs `vncEnv()` — inline, or through the variable / spread it is built from.
 console.log('§57 every suite that spawns server.js hands it per-run singleton-Desktop names (scratch.mjs vncEnv)');
-{
+await section(async () => {
   // …and (2.369.181) a server.js spawned THROUGH a launcher — `spawn(DBUS, ['--', process.execPath, 'server.js'])`, the
   // shape lane D's test-desktop-app-snap used (dbus-run-session): node is an argv ELEMENT there, never the command, and the
   // first cut of this census read it as no spawn at all (the suite booted with the machine-global :7 / 5901)
@@ -2750,14 +2870,14 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
   const notBoots = { comment: "// spawn(process.execPath, ['server.js'])", string: "const ctl = \"spawn('node', ['server.js'])\";", copy: "for (const f of ['src', 'server.js']) cp(f);", git: "execFileSync('git', ['ls-files', 'server.js'])" };
   ok(Object.values(forms).every((v) => bootsOf(v) === 1) && Object.values(notBoots).every((v) => bootsOf(v) === 0) && judge(forms.patched).spawns === 0,
     `§57c the rule reads every boot form (${Object.keys(forms).join(', ')} — the patched copy §57's own rule does not count) and no comment, string, copy list or git argument`);
-}
+});
 
 // §58 EVERY ICON A MODULE NAMES EXISTS (lane I, 2026-09-25 — the owner's live-view screenshot printed the word
 // "undefined" in the bar: `openBtn.innerHTML = UI_ICONS.web` since 2.369.134, while `web` lives in FILE_ICONS and
 // UI_ICONS has `globe`; innerHTML = undefined writes the literal string). DERIVED: every `UI_ICONS.k` /
 // `FILE_ICONS.k` / `UI_ICONS['k']` spelled anywhere under src/ is a key of that object in src/lib/icons.js.
 console.log('§58 every UI_ICONS / FILE_ICONS name a module spells exists in icons.js');
-{
+await section(async () => {
   const icons = await import(new URL('../src/lib/icons.js', import.meta.url).href);
   const have = { UI_ICONS: new Set(Object.keys(icons.UI_ICONS || {})), FILE_ICONS: new Set(Object.keys(icons.FILE_ICONS || {})) };
   const walk = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : /\.(c|m)?js$/.test(d.name) ? [path.join(dir, d.name)] : []));
@@ -2779,7 +2899,7 @@ console.log('§58 every UI_ICONS / FILE_ICONS name a module spells exists in ico
   ok(bad.length === 0, `§58 every icon reference resolves${bad.length ? ' — ' + bad.join(' | ') : ''}`);
   const planted = misses({ ...texts, 'src/lib/browser-live-window.js': texts['src/lib/browser-live-window.js'] + "\nopenBtn.innerHTML = UI_ICONS.web;\nx.innerHTML = UI_ICONS['nope'];" });
   ok(planted.length === 2 && planted.every((p) => p.startsWith('src/lib/browser-live-window.js:')), `§58 NEGATIVE CONTROL: the shipped miss (UI_ICONS.web) and a bracket miss planted into a patched listing are both caught (${planted.join(' | ')})`);
-}
+});
 
 // §59 ONE OUTSIDE-PRESS CLOSER (lane M, inc-muhms5kt-0ejl — the owner: "vibespace中的悬浮菜单，不相应在app画面里的点击
 // 自动隐藏"). Every floating menu / popover / popup closed on a document `mousedown`, and an app's picture cancels its
@@ -2793,7 +2913,7 @@ console.log('§58 every UI_ICONS / FILE_ICONS name a module spells exists in ico
 //  (c) the helper's own body arms `pointerdown` capture+passive and never calls preventDefault / stopPropagation.
 // Planted negative controls for (a) and (b).
 console.log('§59 one outside-press closer: no document mousedown/click closer, every document pointerdown in the capture phase');
-{
+await section(async () => {
   const ALLOW = [
     // move mode (taskbar → Move): a full-screen overlay takes every press, the capture mousedown PLACES the window and
     // swallows the press (preventDefault + stopImmediatePropagation) — an interaction mode, not a closer
@@ -2853,7 +2973,7 @@ console.log('§59 one outside-press closer: no document mousedown/click closer, 
   const c6 = plant('src/lib/chat-view.js', "const o = {}; document.addEventListener('pointerdown', close, o);");
   ok(c1.press.length === 1 && c2.press.length === 1 && c4.press.length === 1 && c5.press.length === 1 && c3.bubble.length === 1 && c3.press.length === 0 && c6.bubble.length === 1,
     `§59 NEGATIVE CONTROL: a planted document mousedown closer (the pre-lane shape), a multi-line click closer, an onmousedown property, a second capture mousedown in an allow-listed file, a bubble-phase pointerdown closer and a named-options one outside the helper are each caught (${[c1, c2, c4, c5].map((c) => c.press.length).join('/')} press, ${c3.bubble.length}/${c6.bubble.length} bubble)`);
-}
+});
 
 // §60 THE BROWSER TOOL'S WRITE FENCE IS THE SESSION'S DIRECTORY, AND NO BROWSER DAEMON RUNS IN THE CHECKOUT
 // (lane L r5 — the round-3 adversarial verify on 33781ed1: F1 CRITICAL, a relative write target was judged in the
@@ -2870,7 +2990,7 @@ console.log('§59 one outside-press closer: no document mousedown/click closer, 
 //   c. the server tree launches the browser CLI only through browser-facts' runtime, whose execFile names the cwd
 //      `runDir()` chose — and `runDir` refuses the checkout even when a caller injects it.
 console.log('§60 the browser tool writes in the session\'s frame; no browser daemon runs in the checkout');
-{
+await section(async () => {
   const { createRequire } = await import('node:module');
   const req = createRequire(import.meta.url);
   const wc = read('src/ws-create.js');
@@ -2902,7 +3022,7 @@ console.log('§60 the browser tool writes in the session\'s frame; no browser da
   const refusedCheckout = F.runDir(() => ({ ok: true, dir: REPO }));
   const chosen = F.runDir();
   ok(refusedCheckout.ok === false && refusedCheckout.code === 'daemon_cwd_refused' && chosen.ok && chosen.dir !== REPO && !chosen.dir.startsWith(REPO + '/') && !REPO.startsWith(chosen.dir + '/'), `§60c runDir refuses the checkout even when injected, and chooses ${chosen.dir} (outside it)`);
-}
+});
 
 // §61 A RELEASE VERDICT NEEDS A KNOWN TURN (lane P verify r2 F1, 2026-09-26). The
 // keeper releases a conversation's ephemeral browser a few minutes after its
@@ -2914,7 +3034,7 @@ console.log('§60 the browser tool writes in the session\'s frame; no browser da
 // anywhere else it is null = unknown = never released. Pinned on the wiring
 // (the one place the keeper's facts are composed) and on the PURE predicate.
 console.log('§61 the release verdict reads a turn only where the mode publishes one (turnKnown)');
-{
+await section(async () => {
   const W = read('src/server/mounts-plugins-wiring.js');
   const lift = (src) => { const m = /\n( +)conversationFacts: (\(bk\) => \{[\s\S]*?\n\1\}),\n/.exec(src); return m ? m[2] : null; };
   // every `turnOf(` in the block is the consequent of a `turnKnown(s) ?` whose alternative is null
@@ -2939,7 +3059,7 @@ console.log('§61 the release verdict reads a turn only where the mode publishes
   const reverted = lift(W.replace(/TF\.turnKnown\(s\) \? TF\.turnOf\(s\) : null/, 'TF.turnOf(s)'));
   ok(judge(preFix) !== null && judge(half) !== null && judge(alwaysIdle) !== null && !!reverted && reverted !== blk && judge(reverted) !== null,
     '§61 NEGATIVE CONTROL: the pre-fix answer `{ turn: turnOf(s) }`, a second ungated read beside a gated one, a block that answers no turn, and the wiring with its gate reverted (lifted the same way) are all caught');
-}
+});
 
 // §62 A WINDOW THE USER NAMES IS REVEALED AS ITSELF (inc-muiq348r-jwb5, 2026-09-26).
 // The owner on a phone: "我在手机上怎么切换不到 vibespace 大开发这个 session？" — the
@@ -2956,7 +3076,7 @@ console.log('§61 the release verdict reads a turn only where the mode publishes
 // new path that names a window with a bare focusWindow is RED here until it is
 // routed through revealWindow (or argued into the raise-only list).
 console.log('§62 every path where the user names a window goes through wm.revealWindow');
-{
+await section(async () => {
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
   const cnt = (src, re) => (strip(src).match(re) || []).length;
   const FOCUS = /\.focusWindow\(/g, RESTORE = /(?:\bwm|this)\.restore\??\.?\(/g, DOOR = /\.revealWindow\(/g;
@@ -3035,7 +3155,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     `§62 NEGATIVE CONTROL: the pre-fix switcher row (${judge(preFix).length} findings), a bare focus planted in an unlisted file (${judge(planted).length}), a singleton door turned back into a raise (${judge(raised).length}) are caught; a commented-out call is not counted (${judge(commented).length})`);
   const fpBad = body(wj.replace('const target = pressTab(ch, paneWin ? paneWin.id : null);', 'const target = pressTab(ch, paneWin ? paneWin.id : null); this.revealWindow(win.id);'), '_focusFromPointer');
   ok(fpBad !== fp && !pointerPin(fpBad), '§62 NEGATIVE CONTROL: the pointer path patched to reveal (a press that would switch tabs) fails the pointer pin');
-}
+});
 
 // §62c EVERY SINGLETON'S RE-OPEN IS THE DOOR, AND THE DOOR GOES TO THE WINDOW'S DESKTOP (userW inc-muv3qfo7-96tm,
 // 2026-10-05: "点击 Outbox 没有任何反应" — the Outbox singleton lived on another desktop; its button revealed it where
@@ -3043,7 +3163,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
 // window through `.revealWindow(` (counted in §62's DOORS) and never a bare raise; revealWindow's body asks PURE
 // revealDesktop and switches through this client's one door (dm.switchTo) before the tab / restore / focus.
 console.log('§62c every singleton re-open is wm.revealWindow, and the door switches to the window\'s desktop first');
-{
+await section(async () => {
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
   const srcFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n);
   const singletonFiles = (srcs) => Object.keys(srcs).filter((f) => /\bsingleton:\s*true\b/.test(strip(srcs[f])) && /registerWindowType\(/.test(srcs[f]));
@@ -3062,7 +3182,7 @@ console.log('§62c every singleton re-open is wm.revealWindow, and the door swit
   const noSwitch = rw.replace(/\n    if \(go\.act === 'switch'\) \{[\s\S]*?\n    \}\n/, '\n');
   ok(raised['src/lib/channel-outbox.js'] !== srcs['src/lib/channel-outbox.js'] && JSON.stringify(judgeS(raised)) === '["src/lib/channel-outbox.js"]' && noSwitch !== rw && !doorPin(noSwitch),
     '§62c NEGATIVE CONTROL: the Outbox re-open turned into a bare raise (1 finding) and the door with its desktop switch removed (pin red)');
-}
+});
 
 // §63 THE CHANNEL WITNESS CENSUS (docs/design-communication-panel.zh.md §26, backlog B-099e — the owner: "那就按照这个
 // 做吧", plan A, passive). The chat's "which conversation is the agent working on" rows exist ONLY because every agent
@@ -3073,7 +3193,7 @@ console.log('§62c every singleton re-open is wm.revealWindow, and the door swit
 // is on the CLOSED exemption list WITH its reason (an exemption nothing matches is red too). And the owner's two reads
 // (src/routes/channels.js) refuse an agent's bearer. Controls are string copies (nothing written).
 console.log('§63 every agent channel route that touches a conversation records it (the channel witness)');
-{
+await section(async () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const EXEMPT = {
     'GET /api/agent/channels/list': 'enumerates the conversations the agent may see — it reads none of them',
@@ -3119,7 +3239,7 @@ console.log('§63 every agent channel route that touches a conversation records 
   const jr = judge(noRead), jp = judge(planted), jc = judge(commented);
   ok(noRead !== ar && jr.bad.length === 1 && /GET \/api\/agent\/channels\/read/.test(jr.bad[0]) && jp.bad.length === 1 && /peek/.test(jp.bad[0]) && jc.bad.length === 1,
     `§63 NEGATIVE CONTROL: the read handler without its record (${jr.bad.length}), a planted verb (${jp.bad.length}) and a verb whose only call is a comment (${jc.bad.length}) are each caught`);
-}
+});
 
 // §66 PAIRING THAT SAYS WHERE AND WHY · EXIT ACCESS WITH A WHO (lane-pairing, B-7007 — the owner's MacBook
 // 2026-09-27). Four censuses, each grep-derived with a string-copy control (nothing written):
@@ -3133,7 +3253,7 @@ console.log('§63 every agent channel route that touches a conversation records 
 //   (d) a dial machine's row words never read `online` alone: `_buildHostRow` (sidebar-mounts) and the Machines
 //       card (manage-agents) derive dot / badge / words from dialRowState
 console.log('§66 pairing + exit access: allowExit readers · the mint · the run bound · row words from dialRowState');
-{
+await section(async () => {
   const strip = (t) => t.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l.replace(/\s\/\/\s.*$/, ''))).join('\n');
   // (a)
   const fnSpan = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const e = src.indexOf('\n}', i); return src.slice(i, e < 0 ? src.length : e); };
@@ -3212,7 +3332,7 @@ console.log('§66 pairing + exit access: allowExit readers · the mint · the ru
   const hr = hostRow(sm), mc = card(read('src/lib/manage-agents.js'));
   ok(hr && mc && !/\bh\.online\b/.test(hr) && !/\bh\.online\b/.test(mc) && /dialRowState\(h\)/.test(hr) && /dialRowState\(h\)/.test(mc), '§66d the machine row and the Machines card read the dial words from dialRowState, never `online` alone');
   ok(/\bh\.online\b/.test(hostRow(sm.replace("const dot = isDial ? (rs.state === 'connected'", "const dot = isDial ? (h.online"))), '§66d NEGATIVE CONTROL: the pre-lane `h.online ?` words planted back into the row are caught');
-}
+});
 
 // §64 REACTIONS NEVER WAKE (lane channel-threads, spec §5.4 / §6.2 — the brief's recommendation adopted as a rule
 // WITH a census, not prose). A reaction is a SIDE record: it is folded at read time and it may reach an agent only as
@@ -3225,7 +3345,7 @@ console.log('§66 pairing + exit access: allowExit readers · the mint · the ru
 // adapters' `eventToSide(` callers must hand the result to the lane as a `kind: 'side'` event (never a record), and
 // nothing outside the engine / the store writes a side record. Controls are string copies (nothing written).
 console.log('§64 a reaction never opens a turn (the side-record census)');
-{
+await section(async () => {
   const ENGP = 'src/server/channels-engine.js';
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const WAKE_SITES = /\b(billedWake|onFresh|deliverToConversation|wake)\s*\(/;
@@ -3288,7 +3408,7 @@ console.log('§64 a reaction never opens a turn (the side-record census)');
   const ar = strip(read('src/agent-routes.js'));
   const reactH = ar.slice(ar.indexOf("app.post('/api/agent/channels/react'"), ar.indexOf('\n});', ar.indexOf("app.post('/api/agent/channels/react'")));
   ok(/touchChannel\(id, \[\{ op: 'react'/.test(reactH) && /eng\.proposeReaction\(/.test(reactH) && !/eng\.react\(|eng\.unreact\(/.test(reactH), '§63/§64 the agent\'s react handler PROPOSES (proposeReaction — never the direct act) and records its touch as op `react`');
-}
+});
 
 // §65 THE ACCESS GATE CENSUS (lane channel-threads verify r2, IDENTITY — the r1 digest and the r2 await / proposal holes
 // were each ONE producer that never asked reach; this is the census of the class). GREP-DERIVED, comments stripped:
@@ -3304,7 +3424,7 @@ console.log('§64 a reaction never opens a turn (the side-record census)');
 //   (D) THE CLI — every API path data/bin/vibespace-channels names is an agent route (never the owner's, which serves `by`).
 // Controls are string copies (nothing written): a gate removed from one producer is RED.
 console.log('§65 every producer that can carry a conversation\'s facts to an agent asks reach first — and again after an await');
-{
+await section(async () => {
   const ENGP = 'src/server/channels-engine.js';
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   // lane grants-read-is-a-lookup: `reachOf(rec, en)` is ONE walk's reader of the same reach (channels-access reachWalkOf(ctx)) — asked per conversation, as reachFor was
@@ -3412,7 +3532,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
   const results = controls.map(([name, src, re]) => { const r = src ? census(src, asrc, cli) : { bad: ['(setup) the control\'s anchor was not found once'] }; return { name, ok: !!src && r.bad.some((x) => re.test(x)), bad: r.bad }; });
   ok(results.every((r) => r.ok) && cp.bad.some((x) => /\(A1\) peekFor never asks reach/.test(x)) && cliBad.bad.some((x) => /\(D\) the CLI calls \/api\/channels\/list/.test(x)),
     `§65 NEGATIVE CONTROLS: ${results.map((r) => `${r.name} (${r.ok ? 'RED' : 'missed'})`).join(', ')}, a planted agent route over an ungated read (RED), the CLI pointed at an owner route (RED)`, JSON.stringify(results.filter((r) => !r.ok)));
-}
+});
 
 // §65c B-2198 THE RAW API ORCHESTRATOR'S ACCESS GATE (docs/design-channel-raw-api.md): every agent answer of
 // src/server/channel-api.js (the verbs the /api/agent/channels/api* handlers call) asks the TIER first (`tierNow(ctx`)
@@ -3421,7 +3541,7 @@ console.log('§65 every producer that can carry a conversation\'s facts to an ag
 // table's gate + `redirect: 'manual'`). Controls: the re-ask cut, a second fetch site planted, the host gate cut, a
 // planted agent verb with no tier.
 console.log('§65c the raw API orchestrator asks the tier first and after every await; ONE vendor fetch site');
-{
+await section(async () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const judge65c = (osrc, asrc) => {
     const code = strip(osrc);
@@ -3462,14 +3582,14 @@ console.log('§65c the raw API orchestrator asks the tier first and after every 
   const plantedO = osrc.replace('  function creds(ctx) {', '  function peekAll() { return { ok: true, all: allCreds() }; }\n  function creds(ctx) {');
   const pr = judge65c(plantedO, planted).bad.some((x) => /peekAll never asks the tier/.test(x));
   ok(res.every((r) => r.red) && pr, `§65c NEGATIVE CONTROLS: ${res.map((r) => `${r.name} (${r.red ? 'RED' : 'missed'})`).join(', ')}, a planted agent verb with no tier (${pr ? 'RED' : 'missed'})`);
-}
+});
 // §65b lane lark-threads (B3): THE OWNER'S NAME FOR AN AUTHOR is an OWNER surface — its one route (PATCH
 // /api/channels/:adapterId/authors/:id) refuses an agent bearer BY NAME before it reaches the engine, no agent route
 // (src/agent-routes.js) and no CLI path (data/bin/vibespace-channels) names `setAlias` / `/authors/`, and the engine's
 // setter answers through `notify` (the owner's `channels-updated`) — never a ladder / stash. A string copy without the
 // refusal is RED.
 console.log('§65b the owner\'s name for an author: owner-only, never an agent surface');
-{
+await section(async () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const judge = (rsrc, asrc, cli, esrc) => {
     const R = strip(rsrc), E = strip(esrc);
@@ -3489,12 +3609,12 @@ console.log('§65b the owner\'s name for an author: owner-only, never an agent s
   const noRefuse = rsrc.replace("    if (refuseAgentBearer(req, res, 'a name for an author is the owner\\'s — an agent token may not set one')) return;\n", '');
   const plantedAgent = asrc + "\napp.patch('/api/agent/channels/authors/:id', (req, res) => res.json(eng.setAlias('a', req.params.id, req.body.alias)));\n";
   ok(noRefuse !== rsrc && !judge(noRefuse, asrc, cli, esrc).route && !judge(rsrc, plantedAgent, cli, esrc).agentFree, '§65b NEGATIVE CONTROLS: the route without its agent refusal (RED), a planted agent route over the setter (RED)');
-}
+});
 
 // §64b lane channel-threads i18n: every t() / tr() literal the lane's client surfaces draw has a zh AND a ja entry
 // (i18n-check in the build proves the two dictionaries agree; this proves the new words are IN them)
 console.log('§64b the lane\'s new words are in both dictionaries');
-{
+await section(async () => {
   const dictOf = (f) => { const m = new Set(); for (const ln of read(f).split('\n')) { const x = /^  ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"): /.exec(ln); if (x) { try { m.add(new Function('return ' + x[1])()); } catch { } } } return m; };
   const zh = dictOf('src/lib/i18n-zh.js'), ja = dictOf('src/lib/i18n-ja.js');
   // 2026-09-28 (reply placements): + the PURE policy (the card's placement line, its refusal words) and the touch row's words
@@ -3507,7 +3627,7 @@ console.log('§64b the lane\'s new words are in both dictionaries');
   const missing = [...keys].filter((k) => !SAME_IN_EVERY_LANGUAGE.has(k) && (!zh.has(k) || !ja.has(k)));
   ok(LANE.every((k) => keys.has(k)) && keys.size >= 100, `§64b the census reads the lane's surfaces (${keys.size} literals, the ${LANE.length} spec §4.6 / §9 strings among them)`, LANE.filter((k) => !keys.has(k)).join(' | '));
   ok(missing.length === 0, `§64b every literal has zh + ja${missing.length ? ' — missing: ' + missing.slice(0, 8).join(' | ') : ''}`);
-}
+});
 
 // §67 THE HOT-SWITCH VERDICT IS A MEASUREMENT (lane-hot-switch, 2026-09-30). Every reader of
 // `capsOf(backend).hotSwitch === 'verified'` (the pool's hot re-point, ws-create's held stamp, the
@@ -3517,7 +3637,7 @@ console.log('§64b the lane\'s new words are in both dictionaries');
 // record file SHOWS the link followed on the pinned CLI, plus the heavy gate that re-measures the
 // installed CLI; nothing but the caps rows ever states the verdict, and no runtime prober flips it.
 console.log('§67 the hot-switch verdict is a measurement with its record');
-{
+await section(async () => {
   const caps = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/backend-caps.js'));
   const verdictProblems = (rows) => {
     const bad = [];
@@ -3559,7 +3679,7 @@ console.log('§67 the hot-switch verdict is a measurement with its record');
   try { ctl2 = verdictProblems({ y: { hotSwitch: 'verified', hotSwitchEvidence: { cli: '9.9.9', measuredAt: 'x', mechanism: 'x', record: path.relative(REPO, heldRec), gate: 'scripts/test-claude-hot-switch.mjs' } } }); } finally { try { fs.unlinkSync(heldRec); } catch { } }
   ok(ctl1.some((x) => /without a complete hotSwitchEvidence/.test(x)) && ctl2.some((x) => /does not show the link followed/.test(x)),
     '§67 NEGATIVE CONTROLS: a bare \'verified\' and a record showing the process held its first member are both caught', JSON.stringify({ ctl1, ctl2 }));
-}
+});
 
 // §68 A SUITE'S REACH INTO A HOME IS $HOME (lane profile-lock-roll verify r6; r5's F5 held, fixed here). A suite that must not touch
 // the owner's home is run under a pinned HOME; a read of `os.userInfo().homedir` (the passwd entry) or a literal `/home/<name>`
@@ -3572,7 +3692,7 @@ console.log('§67 the hot-switch verdict is a measurement with its record');
 // Dockerfile's `useradd … vibe` IS an account under /home — test-machine-migrate's '/home/vibe/…' fixture failed every image
 // build of 2.369.200…210 there while every dev box passed it.
 console.log('§68 a suite reaches a home through $HOME only');
-{
+await section(async () => {
   let locals = new Set(); try { locals = new Set(fs.readFileSync('/etc/passwd', 'utf8').split('\n').map((l) => l.split(':')).filter((p) => p[5] && p[5].startsWith('/home/')).map((p) => p[0])); } catch { locals = new Set(); }
   const imageAcct = (read('deploy/docker/Dockerfile').match(/\buseradd\b[^\n;]*?\s([a-z_][a-z0-9_-]*);/) || [])[1];
   ok(!!imageAcct, `§68 the fleet image's build account is read from deploy/docker/Dockerfile (${imageAcct || 'no useradd found'}) and judged as a real account`);
@@ -3605,7 +3725,7 @@ console.log('§68 a suite reaches a home through $HOME only');
   const binUnreasoned = binHits.filter(([f, , src]) => f in BIN_ALLOW && !BIN_ALLOW[f].test(src)).map(([f]) => f);
   const binMissing = Object.keys(BIN_ALLOW).filter((f) => !binHits.some(([g]) => g === f));
   ok(binUnlisted.length === 0 && binUnreasoned.length === 0 && binMissing.length === 0, `§68 data/bin reads the passwd home at exactly its two DELIBERATE sites, each carrying its reason (${binHits.map(([f]) => f).join(', ')})${binUnlisted.length ? ' — unlisted: ' + binUnlisted.join(' | ') : ''}${binUnreasoned.length ? ' — reason missing: ' + binUnreasoned.join(', ') : ''}${binMissing.length ? ' — allow-listed but gone (prune the list): ' + binMissing.join(', ') : ''}`);
-}
+});
 
 // §69 EVERY ROOT PACKAGE RUN GOES THROUGH THE MACHINE'S ONE PACKAGE SLOT (Layer 0 apps, docs/design-app-persistence.zh.md
 // §3.1 — "一台机器一个包槽": the xpra install, the LibreOffice installs and now the apps (install / remove / refresh / the
@@ -3620,7 +3740,7 @@ console.log('§68 a suite reaches a home through $HOME only');
 //       (src/app-serve.js — whose plans hand the argv to the slot);
 //   (d) every direct `execFile('sudo'` / `spawn('sudo'` names a command that is neither a package manager nor a shell.
 console.log('§69 every root package run goes through the machine\'s ONE package slot');
-{
+await section(async () => {
   const PKG = /\b(?:apt-get|apt|dpkg|yum|dnf|apk|zypper|pacman)\b/;
   // comment LINES only (a `/*` inside a shell script held in a template literal — `bin/*` — must not swallow the code after it)
   const strip68 = (t) => t.split('\n').map((l) => (/^\s*(?:\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
@@ -3667,13 +3787,13 @@ console.log('§69 every root package run goes through the machine\'s ONE package
   ok(p1.pkgLines.some((x) => x.startsWith('src/server/apps-engine.js:')) && p2.argvBuilders.includes('src/desktop-serve.js') && p3.consumers.launcher.includes('src/routes/apps.js') && p4.directSudo.some((x) => x.startsWith('src/server/jobs.js:')) && p5.directSudo.some((x) => x.startsWith('src/server/apps-engine.js:')),
     '§69 NEGATIVE CONTROLS: a `sudo -n apt-get` line outside the slot, a third root-script argv builder, a second launcher caller, a direct sudo of a package manager and of a shell are each caught');
   ok(strip68("  // sudo -n apt-get install y\n   * sudo -n apt-get install z\n").split('\n').every((l) => !/sudo -n/.test(l)), '§69 a comment line naming `sudo -n apt-get` is no site');
-}
+});
 
 // ═══ §70 THE WS KEEPALIVE CENSUS (lane stream-ping, browser-windows BL-r5-2) ═══════════════════════════════════════
 // every long-lived ws bridge (src/server/*-stream.js — grep-derived, a new bridge joins by its name) arms THE ONE keepalive
 // rule (src/ws-keepalive.js: 20 s ping, two silent rounds ⇒ terminated + named) and pings nowhere by hand. A bridge
 // without it kept a half-open viewer counted until the kernel's TCP timeout (the live view, until this lane).
-{
+await section(async () => {
   const bridges = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /-stream\.js$/.test(f));
   const kaBad = (name, src) => [
     ...(/require\(['"]\.\.\/ws-keepalive\.js['"]\)/.test(src) ? [] : [`${name}: no require('../ws-keepalive.js')`]),
@@ -3697,7 +3817,7 @@ console.log('§69 every root package run goes through the machine\'s ONE package
   const unclassified = (sites) => sites.filter((f) => !/^src\/server\/[^/]+-stream\.js$/.test(f) && !WSS_OUTSIDE[f]);
   ok(wssSites.length >= 4 && !unclassified(wssSites).length, `§70 THE SCOPE: every ws server is a *-stream.js bridge or named outside the rule with its reason (${wssSites.join(', ')})${unclassified(wssSites).length ? ' — UNCLASSIFIED: ' + unclassified(wssSites).join(', ') : ''}`);
   ok(unclassified([...wssSites, 'src/server/agent-mux.js']).join() === 'src/server/agent-mux.js', '§70 NEGATIVE CONTROL: a planted ws server outside *-stream.js and unnamed is red by name');
-}
+});
 
 // §71 A RAW SECRET IS COMPARED THROUGH ONE CONSTANT-TIME DOOR (B-8dda, lane agent-cli-fixes, 2026-10-02). A session's
 // `vsst_` token (`s.agentToken`) is the bearer secret every agent call presents, and the OTel exporter's per-boot header
@@ -3707,7 +3827,7 @@ console.log('§69 every root package run goes through the machine\'s ONE package
 // operator touches a token-shaped operand — `agentToken`, the `x-vibespace-otel` header; a presence check against
 // null / undefined and `typeof` stay legal. Planted lines prove the census sees each form.
 console.log('§71 a raw secret is compared only through sameToken');
-{
+await section(async () => {
   // line-preserving: a JSDoc / block-comment line and a `//` tail go; code is never swallowed (a whole-file `/\*…*\/`
   // strip eats from a '/api/*' string to the next comment end — server.js's site vanished that way)
   const strip68 = (t) => t.split('\n').map((ln) => (/^\s*(\/\*|\*)/.test(ln) ? '' : ln.replace(/\/\*.*?\*\//g, '').replace(/(^|\s)\/\/.*$/, '$1'))).join('\n');
@@ -3761,7 +3881,7 @@ console.log('§71 a raw secret is compared only through sameToken');
   const flagged = (l) => logical68(l).some((x) => bad68(x.t));
   const missed = caught.filter((l) => !flagged(l)), wrong = legal.filter((l) => flagged(l));
   ok(missed.length === 0 && wrong.length === 0, `§71 NEGATIVE CONTROLS: ${caught.length} planted compares caught, ${legal.length} legal lines pass${missed.length ? ' — missed: ' + missed.join(' | ') : ''}${wrong.length ? ' — wrongly caught: ' + wrong.join(' | ') : ''}`);
-}
+});
 
 // §72 EVERY WRITE OF A NAMED STORE IS TIMED (design 011 lane 1, store-timing, 2026-10-03). src/timed-sync.js STORES is
 // the CLOSED list of named stores; a write row's `sites` are the functions that write its file. Census (comments
@@ -3770,7 +3890,7 @@ console.log('§71 a raw secret is compared only through sameToken');
 // are printed. Every timedSync call in server.js + src names a row by a literal; every row is used in its own file.
 // Planted controls prove the census sees an unwrapped write, a wrong name and a computed name.
 console.log('§72 every write of a named store is timed (src/timed-sync.js STORES)');
-{
+await section(async () => {
   const { STORES } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/timed-sync.js'));
   const strip72 = (t) => t.split('\n').map((ln) => (/^\s*(\/\*|\*)/.test(ln) ? '' : ln.replace(/(^|\s)\/\/.*$/, '$1'))).join('\n');
   // the matching close of the bracket at `i` — strings, template literals and comments skipped
@@ -3848,7 +3968,7 @@ console.log('§72 every write of a named store is timed (src/timed-sync.js STORE
   const jobsBare = strip72(read('src/jobs.js')).replace("timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));", 'writeJsonAtomic(this.file, [...this.jobs.values()]);');
   const hit = unwrapped72(body72(jobsBare, '_save').text, ['jobs.write', 'jobs-notifs.write']);
   ok(hit.length === 1 && /writeJsonAtomic\(this\.file/.test(hit[0]), `§72 CONTROL: the real jobs.js _save with its jobs.json write unwrapped is printed (${hit.join(' | ')})`);
-}
+});
 
 // §73 THE USAGE INDEX IS A SHADOW, ON ITS OWN THREAD (design 011 lane 3, L1 — 2026-10-03). The ledger's SQLite index
 // feeds NOTHING in this release: its one reader is the comparer beside the Usage window's read. And the database is
@@ -3858,16 +3978,21 @@ console.log('§72 every write of a named store is timed (src/timed-sync.js STORE
 // inside the owner, and the owner is wired by account-usage-routes.js alone, which asks it only to start and compare.
 // DERIVED over server.js + src/** with comments stripped; NEGATIVE CONTROLS plant each forbidden line in a real file.
 console.log('§73 the usage index: node:sqlite in one file, never on the main thread, and no reader but the comparer');
-{
+await section(async () => {
   const strip72 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"\\])\/\/.*$/gm, '$1');
   const walk72 = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk72(d + '/' + e.name) : /\.(c|m)?js$/.test(e.name) ? [d + '/' + e.name] : []));
   const files72 = ['server.js', ...walk72('src')];
   const WORKER = 'src/usage-index-worker.js', OWNER = 'src/server/usage-index.js', WIRING = 'src/server/account-usage-routes.js';
   // lane global-search (.221): the SEARCH index is the second node:sqlite file — its worker spawned by its owner alone
   const SWORKER = 'src/search-index-worker.js', SOWNER = 'src/server/search-index.js';
-  const judge72 = (texts) => {
-    const bad = [];
-    for (const [f, raw] of Object.entries(texts)) {
+  // B-2c31: a file's findings are its name and text alone — judged once per text (the real census and its eleven plants each
+  // re-judged all of src), and a text that spells none of the words every rule needs has none (stripping never makes a word)
+  const JUDGED72 = new Map(), WORDS72 = /sqlite|DatabaseSync|index-worker|queryAggregate|workerStats|usage-index/;
+  const judgeFile72 = (f, raw) => {
+    let m = JUDGED72.get(f); if (!m) JUDGED72.set(f, m = new Map());
+    let bad = m.get(raw); if (bad) return bad;
+    bad = [];
+    if (WORDS72.test(raw)) {
       const t = strip72(raw);
       if (f !== WORKER && f !== SWORKER && /['"`]node:sqlite['"`]/.test(t)) bad.push(`${f} names node:sqlite`);
       if (f !== WORKER && f !== SWORKER && /\bDatabaseSync\b/.test(t)) bad.push(`${f} spells DatabaseSync`);
@@ -3878,6 +4003,12 @@ console.log('§73 the usage index: node:sqlite in one file, never on the main th
       if (f !== OWNER && /\b(?:queryAggregate|workerStats)\s*\(/.test(t)) bad.push(`${f} reads the index`);
       if (f !== WIRING && f !== OWNER && /require\(\s*['"`][^'"`]*server\/usage-index(?:\.js)?['"`]|require\(\s*['"`]\.\/usage-index(?:\.js)?['"`]/.test(t)) bad.push(`${f} wires the owner`);
     }
+    m.set(raw, bad);
+    return bad;
+  };
+  const judge72 = (texts) => {
+    const bad = [];
+    for (const [f, raw] of Object.entries(texts)) bad.push(...judgeFile72(f, raw));
     const w = strip72(texts[WIRING] || '');
     const asked = [...w.matchAll(/\busageIndex\.(\w+)/g)].map((m) => m[1]).filter((n) => n !== 'compare' && n !== 'start');
     if (asked.length) bad.push(`${WIRING} asks the owner for ${[...new Set(asked)].join(', ')}`);
@@ -3910,13 +4041,13 @@ console.log('§73 the usage index: node:sqlite in one file, never on the main th
   const missed72 = PLANTS.filter(([f, l]) => judge72(plant(f, l)).length === 0).map(([f, l]) => `${f}: ${l}`);
   const legal72 = judge72(plant('src/server/usage-pool-engine.js', '// the usage index (node:sqlite, DatabaseSync, queryAggregate) feeds nothing yet'));
   ok(missed72.length === 0 && legal72.length === 0, `§73 NEGATIVE CONTROLS: ${PLANTS.length} planted readers / openers caught, a comment naming them passes${missed72.length ? ' — missed: ' + missed72.join(' | ') : ''}${legal72.length ? ' — wrongly flagged: ' + legal72.join(' | ') : ''}`);
-}
+});
 
 // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP rides EXISTING doors — no new
 // device op (the agent's tcp-connect + run-cmd / run-stream), and the kind is NOT a keeper session (no idle verdict, no
 // resource sample, no record): the access layer holds it, the bridge relays it ──
 console.log('§D014 the vnc-native rung: no new device op, no keeper rows');
-{
+await section(async () => {
   const { createRequire } = await import('node:module');
   const wiringFolds = () => { const w = fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf8'); return /resolveTarget: \(id\) => src\(id\)\.target\(id\)/.test(w) && /onInput: \(id\) => \{ src\(id\)\.onInput\?\.\(id\); \}/.test(w) && !/DESKTOP_SINGLETON_ID \?|machineDesktopHost/.test(w); };
   const rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -3937,13 +4068,13 @@ console.log('§D014 the vnc-native rung: no new device op, no keeper rows');
   md.target('machine-desktop.h1'); md.onInput?.('machine-desktop.h1');
   ok(wiringFolds() && md.name === 'machine-desktop' && md.personal && JSON.stringify(srcCalls) === '["access machine-desktop.h1"]' && SS.sourceOf(srcs2, 'da-1').name === 'keeper', '§D014 the bridge resolves a machine desktop through the access layer, never the keeper, and its input never reaches the keeper\'s idle clock (STREAM_SOURCES, by behaviour)');
   ok(census({ ...srcs, 'src/agentd/agentd.js': srcs['src/agentd/agentd.js'] + "\nif (msg.op === 'machine-desktop') { }" }).length === 1 && census({ ...srcs, 'src/server/desktop-app-keeper.js': srcs['src/server/desktop-app-keeper.js'] + '\n// a vnc-native idle row' }).length === 1, '§D014 CONTROL: a planted daemon op / keeper row naming the rung is caught');
-}
+});
 
 // lane exit-transfer (design 013 B): a NEW device op is THREE touches + a capability gate — the daemon's handler, the
 // hub client's method that asks the capability BEFORE it sends the op (an unknown op hangs an old agent until its
 // timeout), and the capability string in the hello-ack list. Derived for `write-stream` (an agent's push).
 console.log('§74 a new device op is three touches + its capability gate (write-stream)');
-{
+await section(async () => {
   const ad70 = read('src/agentd/agentd.js'), cl70 = read('src/agentd/client.js');
   const three = (adSrc, clSrc) => {
     const caps = (adSrc.match(/capabilities: \[([^\]]*)\]/) || [])[1] || '';
@@ -3959,7 +4090,7 @@ console.log('§74 a new device op is three touches + its capability gate (write-
   const noGate = three(ad70, cl70.replace("capabilities?.includes?.('fs-write-stream')", 'capabilities'));
   const late = three(ad70, cl70.replace("    if (!conn.info?.capabilities?.includes?.('fs-write-stream'))", "    await this._request({ op: 'fs-op', action: 'write-stream', step: 'probe' });\n    if (!conn.info?.capabilities?.includes?.('fs-write-stream'))"));
   ok(noCap.capability === false && noGate.client === false && late.gateFirst === false, `§74 NEGATIVE CONTROLS: the capability dropped from the hello-ack, the gate removed, an op sent before the gate — each caught (${JSON.stringify([noCap.capability, noGate.client, late.gateFirst])})`);
-}
+});
 
 // ── design 016 S2 (lane app-satellite-windows, 2026-10-03): ONE xpra CONNECTION PER APP SESSION — an app's second top-level
 // opens its own VibeSpace window (a SATELLITE), whose pane is a viewport of the main window's session: the x5 rule (one
@@ -3967,7 +4098,7 @@ console.log('§74 a new device op is three touches + its capability gate (write-
 // body (desktop-app-window.js openSatelliteWindow) and the view's satellite pane (xpra-view.js attachSatellite) name no
 // stream url, no view, no client, no worker; xpra-view.js builds ONE client per view; CONTROLS plant each opener. ──
 console.log('§S2 a satellite window opens no connection of its own');
-{
+await section(async () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"\\])\/\/.*$/gm, '$1');
   const OPENERS = /streamUrl\(|\/stream\b|createXpraView\(|createVncView\(|createXpraClient\(|new\s+(?:WorkerCtor|Worker|WebSocket)\(|\bworkerUrl\b/;
   const bodyOf = (src, start, end) => { const a = src.indexOf(start), b = src.indexOf(end, a + 1); return a >= 0 && b > a ? src.slice(a, b) : ''; };
@@ -3996,7 +4127,7 @@ console.log('§S2 a satellite window opens no connection of its own');
   const missed = PLANTS.filter(([f, l]) => judge(f === 'daw' ? plantIn(daw, 'function openSatelliteWindow(', l) : daw, f === 'xv' ? plantIn(xv, 'function attachSatellite(', l) : xv).length === 0).map(([f, l]) => `${f}: ${l}`);
   const legal = judge(plantIn(daw, 'function openSatelliteWindow(', '// a satellite never calls createXpraView( or streamUrl( — the main window does'), xv);
   ok(missed.length === 0 && legal.length === 0, `§S2 NEGATIVE CONTROLS: ${PLANTS.length} planted openers caught, a comment naming them passes${missed.length ? ' — missed: ' + missed.join(' | ') : ''}${legal.length ? ' — wrongly flagged: ' + legal.join(' | ') : ''}`);
-}
+});
 
 // §75 A SUITE THAT READS AN OLD GIT OBJECT SURVIVES A DEPTH-1 CHECKOUT (lane mirror-green-207 — 2026-10-04). The Actions
 // checkout is depth 1 (ci.yml sets no fetch-depth): HEAD's commit is the only one there. test-windows-device-fs read its
@@ -4008,7 +4139,7 @@ console.log('§S2 a satellite window opens no connection of its own');
 // rev-parse --verify). A suite with such a call must also print a SKIP line by name when it degrades. The per-file SKIP word
 // is a proxy; whether a skipped control counts as a pass is each suite's business (the 2.369.164 r2 rule).
 console.log('§75 every old-object git read in a suite is guarded and degrades to a named SKIP (depth-1 checkouts)');
-{
+await section(async () => {
   const GIT_CALL = /(?:execFileSync|execFile|spawnSync|spawn)\(\s*'git'|\bgit\(|\bgitIn\(|\bspawnSyncGit\(/;
   const OBJ_READ = new RegExp("'show',\\s*(?=\\S)(?![`'\"]-)(?![`'\"]HEAD:)|'cat-file'|'rev-parse',\\s*(?=\\S)(?!'--(?:show-toplevel|git-dir|git-common-dir|is-shallow-repository|path-format)\\b)(?!'HEAD')");
   const PROBE = /'cat-file',\s*'-e'|'rev-parse',\s*'--verify'/;
@@ -4103,13 +4234,13 @@ console.log('§75 every old-object git read in a suite is guarded and degrades t
   const OLD_VF = "try { baseSrc = execFileSync('git', ['-C', REPO, " + SH + ", `${BASE_SHA}:src/lib/voice-input.js`], { encoding: 'utf8' }); } catch { }";
   ok(!judged.some((j) => j.f === 'test-voice-follow-chrome.mjs') && !GIT_CALL.test(vfc) && vfc.includes("'voice-input.base-shape.js'") && judgeSrc(vfc + '\n' + OLD_VF).sites.length === 1,
     '§75 test-voice-follow-chrome\'s RED CONTROL is a patched copy of today\'s voice-input.js — no git read at all (its .335 base read is seen when planted back)');
-}
+});
 
 // ── THE CLOCK-JUDGE CENSUS (lane work-meter-judges, .209 — ci.mjs clockJudgeLines / CLOCK_JUDGES): a complexity claim
 // is judged by WORK (scripts/work-meter.mjs). A NEW suite that judges linear / quadratic by a clock is red here until it
 // is converted or listed with the reason it stays on the clock; a listed suite no longer found is red too ──
 console.log('\nclock-judge census: every clock read beside a complexity claim is a listed CLOCK_JUDGES suite');
-{
+await section(async () => {
   const { clockJudgeLines, CLOCK_JUDGES } = await import('./ci.mjs');
   const dir = path.join(REPO, 'scripts');
   const found = fs.readdirSync(dir).filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => ({ name: f.slice(0, -4), lines: clockJudgeLines(fs.readFileSync(path.join(dir, f), 'utf-8')) })).filter((x) => x.lines.length);
@@ -4136,7 +4267,7 @@ console.log('\nclock-judge census: every clock read beside a complexity claim is
   const inWord = `const t0 = ${CLK};\nconst m = M.MIGRATIONS.find((x) => x.id);\nok(m, 'the row exists (INTEGRATIONS too)');\n`;
   const ownWord = `const t0 = ${CLK};\nok(b < a * SHAPE_RATIO, 'b grows like a');\n`, ownWord2 = `const t0 = ${CLK};\nok(RATIO > 2, 'x');\n`;
   ok(clockJudgeLines(inWord).length === 0 && clockJudgeLines(ownWord).length === 1 && clockJudgeLines(ownWord2).length === 1, `CONTROL: a word containing RATIO (MIGRATIONS, INTEGRATIONS) beside a clock read is no ratio judge (${clockJudgeLines(inWord).length} found); SHAPE_RATIO / RATIO on their own still are (${clockJudgeLines(ownWord).length}, ${clockJudgeLines(ownWord2).length})`);
-}
+});
 
 // §76 A PRIVATE BUS NEVER SHARES THE OWNER'S RUNTIME DIR (lane xpra-control-judge, 2026-10-04). Apps on a private
 // dbus-run-session activate their own org.a11y.Bus launcher, and it binds `$XDG_RUNTIME_DIR/at-spi/bus`: with the owner's
@@ -4156,7 +4287,7 @@ console.log('\nclock-judge census: every clock read beside a complexity claim is
 // lane dc-seams) and the singleton SOURCE owning its fixed stream id (src/server/stream-sources.js). Lines comparing an
 // install `what` are the install slot (rv-desktop F-I1, wave-2 lane dc-apps-rows), not a rung. Baseline 0 (was 37 lines in 8 files at 8d934bb1).
 console.log('§DB1 a display backend is one row: no rung-id / stream-kind branch outside its owners');
-{
+await section(async () => {
   const { createRequire } = await import('node:module');
   const DA = createRequire(import.meta.url)(path.join(REPO, 'src/desktop-apps.js'));
   const IDS = [...new Set([...DA.BACKEND_IDS, ...DA.DISPLAY_BACKENDS.map((b) => b.stream)])];
@@ -4173,10 +4304,10 @@ console.log('§DB1 a display backend is one row: no rung-id / stream-kind branch
   const planted = scan([['src/lib/desktop-app-window.js', daw.replaceAll("if (!cap(rec, 'scales')) return '';", "if (!rec || rec.stream !== 'xpra') return '';")], ['src/desktop-serve.js', "const own = rec.backend !== M.DESKTOP_SINGLETON_ID;"]]);
   ok(planted.length === 3, `§DB1 CONTROL: the restored \`rec.stream !== 'xpra'\` (scaleChipText, scaleChipTitle) and a planted singleton-id branch are caught (${planted.length})`);
   ok(DA.DISPLAY_BACKENDS.every((b) => DA.CAP_KEYS.every((k) => typeof b[k] === 'boolean')) && !DA.DISPLAY_BACKENDS.some((b) => 'adaptive' in b), `§DB1 every rung declares every cell (${DA.CAP_KEYS.join(', ')}) as a boolean; the unread \`adaptive\` column is gone`);
-}
+});
 
 console.log('§76 every private-bus / GTK-fixture script gives its children a private XDG_RUNTIME_DIR');
-{
+await section(async () => {
   const DBUS = /(?:bin|binOnPath)\(\s*['"]dbus-run-session['"]|(?:spawn|spawnSync|execFile|execFileSync|execSync)\(\s*[`'"]dbus-run-session/;
   const GTK = /(?:bin|binOnPath)\(\s*['"](?:gnome-calculator|gnome-text-editor|gedit|zenity)['"]|Gtk\.(?:Window|ApplicationWindow|Dialog)\(/;
   const PRIV = /XDG_RUNTIME_DIR\s*:\s*(?!process\.env|undefined\b|null\b|''|"")[\w$`'"(]/;
@@ -4192,7 +4323,7 @@ console.log('§76 every private-bus / GTK-fixture script gives its children a pr
   const part = read('scripts/test-desktop-xpra-window-close.mjs');
   ok(fixture(part) && !PRIV.test(part) && imported(part).some((m) => PRIV.test(m)), `§76 the xpra window part test-desktop-xpra-window-close resolves a GTK app and passes through the module it boots in (scripts/xpra-window-boot.mjs), not by an entry of its own`);
   ok(ctl.every((c) => !c.asWritten && c.patched), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
-}
+});
 
 // §76b THE CONSENT MACHINE NAMES NO VENDOR (lane dc-channels-consent; the 2026-10-04 decoupling plan rows rv-channels-core
 // C1 / C8 / C10, rv-channel-adapters F1 / F3): a vendor's consent — the landing's state shape and page, the relay setting,
@@ -4203,7 +4334,7 @@ console.log('§76 every private-bus / GTK-fixture script gives its children a pr
 // vendor joining through REAL_ADAPTERS alone and completing a round trip over the real route, with the pre-lane judge /
 // page restored as red controls — is scripts/test-channels-engine.mjs ("consent:"). Controls here: each pre-lane line is red.
 console.log('§76b the consent machine names no vendor: the engine, the channels routes, oauth-loopback, the account dialog');
-{
+await section(async () => {
   const QUOTED_ID = /['"`](?:lark|slack|gmail|fake)['"`]/;
   const CONSENT_NAMES = /\b(?:SlackManifest|SlackWords|slackConsent|slackRelayUrl|SLACK_RELAY_DEFAULT|LARK_CALLBACK_URL)\b/;
   const PASTE_FACTS = /xox[pe]|api\.slack\.com|\/\^A\[A-Z0-9\]/;
@@ -4237,7 +4368,7 @@ console.log('§76b the consent machine names no vendor: the engine, the channels
   ];
   const r = ctl.map(([n, files]) => ({ n, red: census76b(files).length > 0 }));
   ok(r.every((x) => x.red), `§76b CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
-}
+});
 
 // §77 THE RAW API'S CORE NAMES NO VENDOR (B-2198, lane channel-api-declared; the owner 2026-10-04 "我需要当前系统低耦合"):
 // the vendor facts live in the file that owns them — an adapter's `api` row beside its `apiBearer` (the ONE schema:
@@ -4246,7 +4377,7 @@ console.log('§76b the consent machine names no vendor: the engine, the channels
 // `KIND_VENDOR`) stay deleted anywhere in src/, and the two core files name no vendor at all. readdir, not ls-files: a
 // new untracked file is judged too. Controls: each planted shape is red.
 console.log('§77 the raw API core names no vendor: no VENDORS / KIND_VENDOR table, no vendor name in the fence or the orchestrator');
-{
+await section(async () => {
   const CORE = ['src/channel-api.js', 'src/server/channel-api.js'];
   const VENDOR_NAME = /lark|feishu|slack|google|gmail/i;
   const census77 = (files) => {
@@ -4272,7 +4403,7 @@ console.log('§77 the raw API core names no vendor: no VENDORS / KIND_VENDOR tab
   ];
   const r = ctl.map(([n, files]) => ({ n, red: census77(files).length > 0 }));
   ok(r.every((x) => x.red), `§77 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
-}
+});
 
 // §78 THE RATCHET: LITERAL-ID BRANCHES AND DEAD CODE ONLY SHRINK (lane dc-ratchet, 2026-10-04; the decoupling review's
 // rv-harnesses T18 + rv-client-chrome F3 / F10 + rv-server-core's export census). The owner's standard is a member = ONE
@@ -4289,7 +4420,7 @@ console.log('§77 the raw API core names no vendor: no VENDORS / KIND_VENDOR tab
 // NEGATIVE CONTROLS: planted texts per regex shape (counted), an owner folder / owner table / comment / lone property key /
 // ALLOW row (not counted); a planted dead export ESM + CJS among live ones; planted dictionary keys judged by the raw fallback.
 console.log('§78 literal-id branches per family + unused i18n keys + unreferenced exports + unreached src/lib only shrink (ratchet)');
-{
+await section(async () => {
   const IB = await import('./id-branch-census.mjs');
   const DC = await import('./dead-code-census.mjs');
   const baseIB = JSON.parse(read('scripts/fixtures/id-branch-baseline.json') || '{}');
@@ -4374,17 +4505,17 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
   const corpus = "t('In t()'); const row = { label: 'Used via a row' }; x('It\\'s quoted'); tc('ctx'); 'Both parts' <b>a &amp; b</b>";
   const verdicts = ['In t()', 'Used via a row', "It's quoted", 'ctx::Both parts', 'a & b', 'Never anywhere', 'ctx::Nowhere'].map((k) => DC.keyUnused(k, new Set(['In t()']), corpus));
   ok(JSON.stringify(verdicts) === JSON.stringify([false, false, false, false, false, true, true]), `§78 NEGATIVE CONTROL: unused-key judge — an extracted key, a data-row literal, an escaped quote, both tc parts, an HTML-escaped key are used; a key nowhere and a tc key with a missing part are not (${JSON.stringify(verdicts)})`);
-}
+}, 'main');
 
 // dc-harness-store (2.369.213): the resume hooks are the descriptor's — the
 // generic sweep/fork readers carry no harness id (the lane proof is
 // test-harness-contract `store:`: a derived reader census + a fake harness
 // with a patched-copy control).
-{
+await section(async () => {
   const rd = (f) => { try { return fs.readFileSync(path.join(ROOT_DIR_DCHS, f), 'utf8'); } catch { return ''; } };
   ok(!/=== '(claude|codex|opencode|antigravity|shell)'/.test(rd('src/writer-sweep.js')) && !/=== '(claude|codex|opencode|antigravity|shell)'/.test(rd('src/resume-store.js')) && /store\.writerSweep|\.writerSweep\b/.test(rd('src/resume-store.js')),
     'dc-harness-store: writer-sweep.js + resume-store.js read store.writerSweep / forkChain with no harness id branch (proof: test-harness-contract store:)');
-}
+});
 
 // §76c A CHANNEL VENDOR = ITS FOLDER + ONE LIST LINE (lane dc-channels-manifest; rv-channels-core C3/C4, rv-channel-adapters
 // F2/F8/F10): src/channel-settings.js, src/integration-registry.js and src/lib/settings-schema.js only DERIVE the vendors'
@@ -4392,7 +4523,7 @@ console.log('§78 literal-id branches per family + unused i18n keys + unreferenc
 // a `V.<vendor>…` validator, a vendor's callback constant). The list line is the one place a vendor's name is written
 // outside its folder (allowlisted: it IS the registration). CONTROLS: a vendor row left in any of the three is RED.
 console.log('§76c a channel vendor is its folder + one list line: the three derived files name no vendor');
-{
+await section(async () => {
   const KINDS = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind);
   const alt = KINDS.join('|');
   const RULES = [new RegExp(`['"\`](${alt})['"\`]`), new RegExp(`['"\`]channels\\.(${alt})[A-Z]`), new RegExp(`\\bV\\.(${alt}|google)[A-Z]`), /\b[A-Z]+_CALLBACK_URL\b/];
@@ -4410,7 +4541,7 @@ console.log('§76c a channel vendor is its folder + one list line: the three der
   ];
   const r = ctl.map(([n, f, add]) => ({ n, red: census76c([[f, read(f) + add]]).length > 0 }));
   ok(r.every((x) => x.red), `§76c CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
-}
+});
 
 // §79 THE CHANNELS ENGINE'S FAMILIES MEET ONLY IN ITS ONE CONTEXT OBJECT (lane dc-channels-seams, rv-channels-core C11):
 // src/server/channels-engine.js's create() composes channels-access.js, channels-outbound.js and channels-auth.js (each
@@ -4421,7 +4552,7 @@ console.log('§76c a channel vendor is its folder + one list line: the three der
 // from a family is in that family's answer. Controls: a planted cross-family require, an unanswered late door and a
 // field dropped from the root are each red.
 console.log('§79 the channels engine\'s families meet only through its one context object');
-{
+await section(async () => {
   const FAM_REQ = {
     'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-record.js', '../channel-search.js', '../channel-watch-spec.js', '../channels/index.js', '../foryou-actions.js', '../peer-text.js', './owner-facts.js', 'crypto'],   // ../foryou-actions.js: lane chat-needs-you-card — THE For-you action registry: the agent's ONE line after a watch / access request (PURE, not a family); ./owner-facts.js: lane agent-context-owner-facts — a refusal's time in the owner's zone (not a family); ../channel-record.js: lane gmail-draft-not-a-message — the agent's read sets a draft apart (`draftsOf`, PURE)
     'src/server/channels-outbound.js': ['../channel-acl.js', '../channel-caps.js', '../channel-drain.js', '../channel-filter.js', '../channel-groups.js', '../channel-outbox-files.js', '../channel-policy.js', '../channel-ref.js', '../channel-revisions.js', '../channel-thread.js', '../channel-upload-plan.js', '../channels/index.js', '../channels/vendor-hold.js', '../peer-text.js', '../write-origin.js'],   // lane lark-send-hold: the vendor hold's ceiling; lane channels-proposals-recall: a message the store already shows recalled; lane owner-press-attended r2: isPress (an attended receipt / send rides the door's press)
@@ -4459,7 +4590,7 @@ console.log('§79 the channels engine\'s families meet only through its one cont
   const c2 = judge79(eng, { ...fams, [O]: fams[O].replace('  function outboxView(', '  const leak = () => engineCtx.tokensOf();\n  function outboxView(') }).bad.length > 0;
   const c3 = judge79(eng.replace(/(\n  const engineCtx = \{\n[^}]*?)\bbilledWake,/, '$1'), fams).bad.length > 0;
   ok(c1 && c2 && c3, `§79 CONTROLS: a family requiring another (${c1 ? 'RED' : 'missed'}), a late door nobody answers (${c2 ? 'RED' : 'missed'}), a field dropped from the root (${c3 ? 'RED' : 'missed'})`);
-}
+});
 
 // §80 ONE BUILT-IN PLUGIN REGISTRY, NO ID DISPATCH (lane dc-plugins, 2026-10-04 — rv-server H3 + rv-client F9). A
 // built-in plugin is ONE file src/plugins/<id>.js declaring { id, label, description, provides, create(h) } + ONE line
@@ -4468,7 +4599,7 @@ console.log('§79 the channels engine\'s families meet only through its one cont
 // surfaces). The member ids are DERIVED from the list, never hand-listed. The runtime proof (a fake plugin registered
 // through the one list drives every verb with zero plugins.js edits) is scripts/test-builtin-plugins.mjs.
 console.log('§80 built-in plugins: one list, one file each, no id branch in the core or the client');
-{
+await section(async () => {
   const rd = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   const listSrc = rd('src/plugins/index.js');
   const memberFiles = [...listSrc.matchAll(/require\('\.\/([\w-]+\.js)'\)/g)].map((m) => `src/plugins/${m[1]}`);
@@ -4503,12 +4634,12 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
   ];
   const r = ctl.map(([n, files]) => ({ n, applied: files.every(([rel, t]) => t !== get(rel)), red: census79(files).length > 0 }));
   ok(r.every((x) => x.applied && x.red), `§80 CONTROLS: ${r.map((x) => `${x.n} (${x.applied ? (x.red ? 'RED' : 'missed') : 'patch did not apply'})`).join(', ')}`);
-}
+});
 
 // lane dc-client-billing (2026-10-04): the client billing surfaces read the declared ui row — no billing-word / backend-label ternary on a harness id left in src/lib (test-billing-row carries the fake-harness proof)
-{ const lib = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n-/.test(f)).map((f) => [f, fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')]);
+await section(async () => { const lib = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n-/.test(f)).map((f) => [f, fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')]);
   const bad = lib.filter(([, t]) => /[!=]==?\s*'(?:claude|codex)'\s*\?\s*(?:t|tr)\(\s*'(?:ChatGPT login|CLI login|Subscription)|[!=]==?\s*'(?:claude|codex)'\s*\?\s*'(?:Claude|Codex)'/.test(t)).map(([f]) => f);
-  ok(bad.length === 0, `client billing words / backend labels come from the declared ui row (no id ternary; offenders: ${bad.join(', ') || 'none'})`); }
+  ok(bad.length === 0, `client billing words / backend labels come from the declared ui row (no id ternary; offenders: ${bad.join(', ') || 'none'})`); });
 
 // lane names-scrub (B-2dcc, 2026-10-05; CLAUDE.md "Public repo hygiene": ZERO personal identifiers): a colleague's real
 // names never return to the tracked tree. The list holds the sha256 of each forbidden word (lower-cased), NEVER the word,
@@ -4517,16 +4648,21 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
 // person and `Ada (Marketing)` for a nickname. NAME_EXEMPT: a same-letters word that is NOT a name, pinned by its exact
 // count so a real name added to that file still goes red. The push-time guard is the private repo-guard denylist
 // (REPO_GUARD_COMPANY, outside this repo); this is the CI one. To add a name: printf <name> | tr A-Z a-z | sha256sum.
-{ const NAME_DIGESTS = new Set([
+await section(async () => { const NAME_DIGESTS = new Set([
     '43f52410ceeba65a8e92d84b6d29f6a82aa3b46959bdd3b056f4c616734e8299',
     'b78469618fb15871b9508defd1ff70014747c1f918e4185425c5f2bbea2a4e5d',
     'fb25a668cf5b61bbbdd2539d41a32706059e68b8d3547916a87c8beb627cff08',   // int360 hygiene (B-c412): a pool member's nickname — the docs and suites say userP
   ]);
   const NAME_EXEMPT = {};   // none since .382 (int382 hygiene): the one same-letters local was renamed (src/design-viewer-entry.js) — the map stays for the next such word, pinned by its count
+  const MEMO_BY_DIGESTS = new WeakMap();   // B-2c31: one memo per digest set — the five controls share theirs
   const nameCensus = (tree, digests, exempt) => {
-    const memo = new Map(), bad = [];
-    const hit = (w) => { const k = w.toLowerCase(); if (!memo.has(k)) memo.set(k, digests.has(crypto.createHash('sha256').update(k).digest('hex'))); return memo.get(k); };
-    for (const [rel, t] of tree) { let n = 0; for (const w of t.match(/[A-Za-z]+/g) || []) if (hit(w)) n++; if (n !== (exempt[rel] || 0)) bad.push(`${rel} (${n})`); }
+    if (!MEMO_BY_DIGESTS.has(digests)) MEMO_BY_DIGESTS.set(digests, { memo: new Map(), raw: new Map() });
+    const { memo, raw } = MEMO_BY_DIGESTS.get(digests), bad = [];
+    // B-2c31: memoised by the word AS WRITTEN (a repeat costs one lookup, no lower-casing) over its lower-cased digest; the runs are
+    // walked with one regex's exec, not an array of every word of a file (the tree is ~50 MB of text)
+    const RUN = /[A-Za-z]+/g;
+    const hit = (w) => { let v = raw.get(w); if (v === undefined) { const k = w.toLowerCase(); v = memo.get(k); if (v === undefined) { v = digests.has(crypto.createHash('sha256').update(k).digest('hex')); memo.set(k, v); } raw.set(w, v); } return v; };
+    for (const [rel, t] of tree) { let n = 0, m; RUN.lastIndex = 0; while ((m = RUN.exec(t))) if (hit(m[0])) n++; if (n !== (exempt[rel] || 0)) bad.push(`${rel} (${n})`); }
     return bad;
   };
   const ls = spawnSync('git', ['-C', REPO, 'ls-files', '-z', '-co', '--exclude-standard'], { encoding: 'utf-8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 });
@@ -4551,7 +4687,7 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
   ];
   const r = ctl.map(([n, files, ex, wantRed]) => ({ n, ok: doc.length > 0 && (nameCensus(files, D, ex).length > 0) === wantRed, wantRed }));
   ok(r.every((x) => x.ok), `public repo hygiene CONTROLS: ${r.map((x) => `${x.n} (${x.ok ? (x.wantRed ? 'RED' : 'green') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §81 A FIXTURE NEVER NAMES A FIXED LOOPBACK ENDPOINT (lane fixture-ports, B-b6cd, 2026-10-06 — mirror-green-220). The
 // fake agent-browser of test-browser-ephemeral answered `get cdp-url` with the FIXED ws://127.0.0.1:19888 as its "dead"
 // browser; on the dev box another project's workbench listened there and answered 404, the product read "answered", and
@@ -4563,7 +4699,7 @@ console.log('§80 built-in plugins: one list, one file each, no id branch in the
 // census follows the variable; a NAME from deadPort / freePort / listen(0) is no hit). Each hit is EXEMPT by a row below
 // (data a pure function reads, or a port the product pins by contract) or RED. A row that covers no hit is red too.
 console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort / listen(0)) — the census table:');
-{
+await section(async () => {
   const req81 = (await import('node:module')).createRequire(import.meta.url);
   // a hit = a loopback endpoint whose port is a LITERAL: in a string / template token (acorn — a comment is never one), or
   // a `host:${NAME}` / `'host:' + NAME` whose NAME this file binds to a number literal (the census follows the variable)
@@ -4571,19 +4707,31 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
   const LIT = new RegExp(`${HOST}:(\\d{2,5})(?!\\d)`, 'g'), TAIL = new RegExp(`${HOST}:$`);
   const endpointHits = (src) => {
     const acorn = req81('acorn'), T = acorn.tokTypes, hits = [];
-    let toks; try { toks = [...acorn.tokenizer(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType: 'module', allowAwaitOutsideFunction: true, locations: true })]; } catch (e) { return [{ port: 0, line: 0, via: 'UNPARSED ' + e.message }]; }
     const numOf = (name) => { const m = new RegExp(`\\b(?:const|let|var)\\s+${name.replace(/\$/g, '\\$')}\\s*=\\s*(\\d{2,5})\\b`).exec(src); return m ? Number(m[1]) : null; };
-    toks.forEach((t, i) => {
+    const judge = (t, a, b) => {
       if (t.type !== T.string && t.type !== T.template && t.type !== T.regexp) return;
       // a regex token's pattern reads with its escapes dropped (`127\\.0\\.0\\.1:19777` — test-browser-human's missed shape)
       const v = t.type === T.regexp ? t.value.pattern.replace(/\\(.)/g, '$1') : String(t.value);
-      for (const m of v.matchAll(LIT)) hits.push({ port: Number(m[1]), line: t.loc.start.line, via: 'literal' });
+      const line = () => acorn.getLineInfo(src, t.start).line;   // the line `locations: true` gave the token
+      for (const m of v.matchAll(LIT)) hits.push({ port: Number(m[1]), line: line(), via: 'literal' });
       if (!TAIL.test(v)) return;
-      const a = toks[i + 1], b = toks[i + 2];
       const viaName = a && b && b.type === T.name && (a.type === T.dollarBraceL || (a.type === T.plusMin && a.value === '+')) ? b.value : null;
       const n = viaName && numOf(viaName);
-      if (n) hits.push({ port: n, line: t.loc.start.line, via: 'name ' + viaName });
-    });
+      if (n) hits.push({ port: n, line: line(), via: 'name ' + viaName });
+    };
+    // B-2c31: the same tokens read AS THEY COME — each judged with the two after it — and without positions (a hit's line is
+    // acorn's getLineInfo of its start); every suite's tokens used to be kept, each with two positions (60 MB of suites). A text
+    // that does not tokenize is still UNPARSED alone (the hits judged before its error are dropped, as none were judged before).
+    const it = acorn.tokenizer(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType: 'module', allowAwaitOutsideFunction: true })[Symbol.iterator]();
+    let p = null, q = null;
+    for (;;) {
+      let r; try { r = it.next(); } catch (e) { return [{ port: 0, line: 0, via: 'UNPARSED ' + e.message }]; }
+      if (r.done) break;
+      if (p) judge(p, q, r.value);
+      p = q; q = r.value;
+    }
+    if (p) judge(p, q, undefined);
+    if (q) judge(q, undefined, undefined);
     return hits;
   };
   const PURE = 'text a pure function reads or builds — nothing dials it';
@@ -4651,7 +4799,7 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
     ['a dead EXEMPT row', judge81([['test-x.mjs', "const u = 'http://127.0.0.1" + ":3000/';\n"]], { 'test-x.mjs': [[3000, 4000], 'x'] }).dead.join() === 'test-x.mjs:4000', true],
   ];
   ok(r81.every(([, got, want]) => got === want), `§81 CONTROLS: ${r81.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §82 CLAUDE.md IS AN INDEX OF ≤ 100 000 BYTES (lane claude-md-diet, B-23e7, 2.369.235). Every agent session pays the
 // auto-loaded CLAUDE.md at its start AND again after each compaction: ≈ 115K tokens a copy with ~30 lane workers a day
 // was several million tokens a day before any work. The per-file lines ("## File Structure", ~574) and the per-incident
@@ -4673,7 +4821,7 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
 // stored: the verbatim rows left must hash like the same rows of the before-text (git show f835b0e58:CLAUDE.md, read only
 // then; a depth-1 checkout SKIPs that leg by name). The census itself lives in scripts/claude-md-retire.mjs.
 console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file / per-incident lines live in the kb INDEX heads:');
-{
+await section(async () => {
   const CLAUDE_MD_MAX_BYTES = 40024;   // ratchet — FALLEN (lane make-room, 主开发 2026-11-18 00:11Z: the ratchet falls when the file shrinks, «room a later unit can silently eat is not room»): five routing rows became heads, MEASURED 43 330 → 39 992 bytes; + 11 (the next train's one CLAUDE.md change, usage-predict's) + the 21-byte margin carried forward unchanged = 40 024. Before: 43 360 = 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 % = 41 240; + 420 (lane grants-unify: ONE routing-table row «A GRANT — who may use a resource», the size law's allowed kind); + 300 (lane engine-plugin: ONE routing-table row «A browser ENGINE plugin», the same allowed kind); + 280 (lane vault-totp-add: ONE routing-table row «A VAULT ENTRY KIND», the same allowed kind — 273 bytes) + 320 (lane human-cli via int361: ONE routing-table row «The PERSON'S CLI», the size law's allowed kind — the lane brief kept CLAUDE.md for the integrator) + 114 (lane agy-wall-signal r2: the §ban-safety LAW line names the owner's ruling «A» 2026-11-02 — the Antigravity wall one-shot, the second owner-approved usage read; MEASURED 42 539 → 42 653 bytes = +114, and the cap steps by exactly that — the named margin is the 21 bytes the base already had under 42 560, carried forward unchanged) + 253 (lane cli-shell-truth: the brief's ONE cross-cutting LAW line «THE CLI LOCATION LAW» — the person's login shell is the truth for where an agent CLI is; MEASURED 42 653 → 42 906 bytes = +253, and the cap steps by exactly that — the 21-byte margin carried forward unchanged) + 433 (lane cli-self-measure, acceptance r1 J: ONE routing-table row «A NEW CLAUDE CODE BUILD — may its long-lived tokens be spent», the size law's allowed kind, + the §ban-safety digest's one clause «the hub's check of a new Claude Code runs the vendor's binary against a loopback mock with fake tokens — never a vendor call»; MEASURED 42 906 → 43 339 bytes = +433, and the cap steps by exactly that — the 21-byte margin carried forward unchanged) — the cap fell to 40 024 at «make room» (above)
   const h82 = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10);
   const fx82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-md-moved.json'), 'utf8'));
@@ -4809,7 +4957,7 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ['a NON-identical essay bullet below the region is spared by strandedDup (no false positive)', strandedDup(homes.get('bugfix-index').text + '\n- a brand new essay bullet that matches no index line at all\n', '## INDEX').length > strandedDup(homes.get('bugfix-index').text, '## INDEX').length, false],
   ];
   ok(mid > 0 && r82.every(([, got, want]) => got === want), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §83 A CHANNEL VENDOR IS ITS FOLDER + ONE LINE: NO SHARED CHANNEL FILE SPELLS A VENDOR ID (lane channel-vendor-one-file,
 // B-e3f1; the owner 2026-10-04: "保持通用内部接口格式，拓展 vendor 只需要 vendor-specific 的文件 + 一行注册"). A vendor declares
 // its settings table + integration row (+ its paste words) in src/channels/<kind>/manifest.js, joined by ONE line of
@@ -4824,7 +4972,7 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
 // row's why, the send-scope sentence, Slack's paste-back hint) — now declared facts (view.rawApi, the push view's
 // transport, paste.notes.landed) or words that name no vendor.
 console.log('§83 no shared channel file spells a channel vendor id (a vendor = its folder + one registry-list line):');
-{
+await section(async () => {
   const req83 = (await import('node:module')).createRequire(import.meta.url);
   const acorn83 = req83('acorn');
   const IDS83 = [...req83(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind), 'feishu'];
@@ -4867,7 +5015,7 @@ console.log('§83 no shared channel file spells a channel vendor id (a vendor = 
     ['a fake vendor joining the list', red('src/channel-x.js', "if (k === 'acme') go();\n", [...IDS83, 'acme']) && !red('src/channel-x.js', "if (k === 'acme') go();\n"), true],
   ];
   ok(r83.every(([, got, want]) => got === want), `§83 CONTROLS: ${r83.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // ── §84 A SUITE ENDS WHAT IT MADE (B-60d2, 2026-10-07) ─────────────────────
 // /tmp (tmpfs) held 30 of 62 GB of `vs-*` dirs older than a day. A suite's mint through scripts/scratch.mjs (scratch /
 // scratchDir / scratchHome) is registered and removed at its exit (the behaviour: test-ci-gate §9d); a suite that hands
@@ -4878,7 +5026,7 @@ console.log('§83 no shared channel file spells a channel vendor id (a vendor = 
 // gate's directory sweep reaps them a day after their last write; the fix is endScratchAtExit(<name>) at the mint, and a
 // fixed row must go (a row outliving its leak is RED).
 console.log('\n§84 a suite ends what it made (B-60d2)');
-{
+await section(async () => {
   const MINT_RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:fs\.)?mkdtempSync\(([^;\n]{0,160})|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*`\/tmp\/vs-[^`]*\$\{process\.pid\}[^`]*`/g;
   const rx = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // the raw scratch dirs a suite source mints (mkdtempSync of a vs- name, a /tmp/vs-…${process.pid} literal) that it never ends
@@ -4946,13 +5094,13 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   ok(unended("const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctl-'));\nrun(dir);\n").join() === 'dir', 'CONTROL: a suite minting a raw scratch dir without its finally is RED');
   ok(!unended("const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctl-'));\ntry { run(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }\n").length, '…and green with the finally');
   ok(!unended("const a = fs.mkdtempSync('/tmp/vs-a-'), b = 1;\nconst c = `/tmp/vs-c-${process.pid}`;\nfor (const d of [a, c]) fs.rmSync(d, { recursive: true });\n").length && unended("const a = fs.mkdtempSync('/tmp/vs-a-');\nconst c = `/tmp/vs-c-${process.pid}`;\nfor (const d of [a]) fs.rmSync(d, { recursive: true });\n").join() === 'c', '…the for-of cleanup idiom credits exactly the names it lists');
-}
+});
 
 // §85 A PID IS NEVER AN IDENTITY (B-1cc6, lane pid-identity-census, 2026-10-08). This box's pids wrapped ≥ 3 times since
 // the 09-17 boot; a pid recorded hours ago can name a stranger. Every process.kill / kill - / pkill / killall / tail --pid
 // in the server, the daemon, data/bin, the gate and the image entrypoint is a ROW of scripts/pid-identity-census.mjs:
 // what it signals → what proves the pid (src/proc-identity.js, a starttime, a fresh scan, the spawn handle) or EXEMPT why.
-{
+await section(async () => {
   const C = await import('./pid-identity-census.mjs');
   const files85 = C.censusFiles(REPO);
   const j85 = C.judgeCensus(files85);
@@ -4995,13 +5143,13 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ok(!tracked85.includes('data/bin/rclone') && tracked85.includes('data/bin/vibespace-x') && C.judgeCensus(ignored85).red.length === 0 && C.judgeCensus(C.censusFiles(s85)).red.length > 0,
       `§85 CONTROL: the scope is the TRACKED data/bin — an ignored data/bin/rclone holding a kill line is never read (quiet), a tracked data/bin kill line is RED (scope ${JSON.stringify(tracked85)})`);
   } finally { fs.rmSync(s85, { recursive: true, force: true }); }
-}
+});
 // §86 A BLOCKED MOUNT PATH IS ANSWERED, NEVER READ (B-afc4, lane mount-readers-blocked, 2026-10-09). rel242's two-strike
 // liveness rule blocked a silent cloud mount's root from strike 1, but only src/routes/files.js asked — every other
 // reader could hang inside a dead FUSE for two sweeps (a hung reader is not killable either). Every file that reads a
 // path is a ROW of scripts/mount-reader-census.mjs: user-path (asks src/mount-door.js / pathBlocked BEFORE the read) /
 // own-tree / exempt; SafeFs.call refuses a blocked path before it picks a worker.
-{
+await section(async () => {
   const C = await import('./mount-reader-census.mjs');
   const files86 = C.censusFiles(REPO);
   const j86 = C.judgeCensus(files86);
@@ -5039,12 +5187,12 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ["the workbook's SafeFs road taken out of files.js", red86([[ff86, ft86.replace("sfs(req).call('xlsxSheets'", "sfs(req).call('stat'")]]), true],
   ];
   ok(l86.every(([, got, want]) => got === want), `§86 LIB_BY_PATH CONTROLS: ${l86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §87 A VFS CACHE IS NEVER REMOVED OR COPIED ON THE LOOP OR THE THREADPOOL (B-4997, lane vfs-cache-local, 2026-10-09).
 // The owner's OneDrive cache held 164 788 files on fuse.bindfs over NFS; remove() ran fs.rm over it on the libuv threadpool
 // (the FUSE-threadpool outage class) and nothing chose the cache's filesystem. A move is a SWITCH (the next daemon gets the
 // new dir), never a copy; the old dir is removed by a CHILD rm with a timeout, after the new daemon mounted.
-{
+await section(async () => {
   const BAD87 = /\bfs\.(?:promises\.)?(?:rm|rmSync|rmdir|rmdirSync|cp|cpSync|copyFile|copyFileSync)\s*\(([^;\n]*)/g;
   const hits87 = (src) => [...src.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n').matchAll(BAD87)]
     .filter((mm) => /cache|p\.from|p\.dir/i.test(mm[1])).map((mm) => mm[0].slice(0, 90));
@@ -5061,14 +5209,14 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['a comment naming fs.rm(cacheDir)', hits87('  // never fs.rm(cacheDir) here\n').length > 0, false],
   ];
   ok(c87.every(([, got, want]) => got === want), `§87 CONTROLS: ${c87.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §88 NO `builtin` BRANCH OUTSIDE THE AGENTS MODULE (lane webhook-l1-server, docs/design-webhook.zh.md §1 rows 3 / 19). The
 // engine used to branch on `builtin` in eleven places (seeding, reach, listing, remove / duplicate, the account's auth
 // line); a second built-in adapter (webhook) is NOT agents-shaped, so each branch now reads a DECLARED module fact —
 // `reach` (msg-acl | grants), `listed`, `seed`, `removable`, `consent`. The census: in src/server/ and src/channels/ (the
 // agents module itself excepted), a `.builtin` read appears ONLY as the record's projection to the client
 // (`builtin: !!rec.builtin`) — never in a condition. Control: the pre-lane branch shape is RED.
-{
+await section(async () => {
   const walk88 = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const f = `${d}/${e.name}`; if (e.isDirectory()) walk88(f, out); else if (f.endsWith('.js')) out.push(f); } return out; };
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const files88 = [...walk88('src/server'), ...walk88('src/channels')].filter((f) => f !== 'src/channels/agents.js');
@@ -5084,7 +5232,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['the projection to the client', hits88("      id: rec.id, builtin: !!rec.builtin,\n").length > 0, false],
   ];
   ok(c88.every(([, got, want]) => got === want), `§88 CONTROLS: ${c88.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §89 EVERY HUB LISTENER REACHES BOTH SERVERS (lane https-tailscale, 2026-10-12). The hub answers http AND https on ONE
 // port (src/server/tls.js: a first-byte demux in front of two servers); a listener attached to the http server alone
 // would silently die for every https visitor (the WebSockets: the app, the desktop bridge, the device dial). The
@@ -5092,7 +5240,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
 // is either (a) in server.js INSIDE the one `hub.attachToServers('upgrade', …)` dispatcher, or (b) a counted row of a
 // file that owns its OWN listener or a dispatcher target (a new site there is RED until its row moves), or (c) the
 // helper itself (tls.js). Controls: a `server.on('upgrade'` added to server.js and a new upgrade site in a module are RED.
-{
+await section(async () => {
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const SITE = /\.on\(\s*['"]upgrade['"]|\b\w*[sS]erver\.on\(|\bhandleUpgrade\(/;
   const OWN89 = {
@@ -5133,7 +5281,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['the tree as it is', red89.length > 0, false],
   ];
   ok(c89.every(([, got, want]) => got === want), `§89 CONTROLS: ${c89.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §90 EVERY NET HOP OF A PERSON'S PICTURE OR INPUT IS noDelay (lane picture-path-nodelay, owner "延迟更低"). Node keeps
 // Nagle ON for a `net` socket: a small write behind an un-ACKed one waits for the peer's delayed ACK (~40 ms) — a key's
 // release behind its press measured 42 ms through the paired-machine path (test-picture-path-nagle), the demux front's
@@ -5141,7 +5289,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
 // picture path's files (the desktop / device / stream-relay / browser-access server files and the whole daemon) is
 // followed within two lines by `.setNoDelay(true)` or carries `// nagle: ok — <reason>` on its line. Controls: a planted
 // bare connect, a bare accept and a reason-less ok are RED; the fixed shape and a commented-out connect are quiet.
-{
+await section(async () => {
   const files90 = [
     ...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /^(desktop-|device-|stream-relay-)[\w-]*\.js$|^browser-access\.js$/.test(f)).map((f) => `src/server/${f}`),
     'src/agentd/agentd.js',
@@ -5171,14 +5319,14 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['a commented-out connect', red("  // const s = net.connect(port);\n"), false],
   ];
   ok(c90.every(([, got, want]) => got === want), `§90 CONTROLS: ${c90.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
-}
+});
 // §91 A HUB ACT ON A DEVICE IS NEVER ANONYMOUS (lane device-act-audit, design q-042 §3 D4, 2026-10-19). After `hello` a device
 // trusts its hub for every op; the hub's own acts there (a command, a file, a secret, keys, a LAN socket, new code) were
 // called from 14 files with no "who asked" and recorded nowhere. The ONE send point (src/agentd/client.js `_request`)
 // refuses an act / code op without `by` (`act_without_by`, never sent); THIS census finds the call before it runs: every
 // call of a client method that can send an act (src/device-acts.js CLIENT_ACT_METHODS) in the hub's sources passes a `by`
 // AT THE CALL (scripts/device-acts-census.mjs, acorn). And every `new DeviceManager(` hands its lines to the audit (`onAct:`).
-{
+await section(async () => {
   console.log('\n§91 every hub act on a device names who asked (`by` at the call) and every client is audited');
   const C91 = await import(path.join(REPO, 'scripts', 'device-acts-census.mjs'));
   const r91 = C91.censusActCalls({ root: REPO });
@@ -5201,7 +5349,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     return { f, ok: i >= 0 && /\bonAct:\s*\(line\)\s*=>/.test(t.slice(i, i + 3000)) };
   });
   ok(mk91.every((x) => x.ok), `§91 every DeviceManager construction passes onAct (${mk91.map((x) => x.f + (x.ok ? '' : ' — MISSING')).join(', ')})`);
-}
+});
 // §92 A DEVICE RE-EXECS NOTHING UNSIGNED (lane device-bundle-signing, design q-042 D2). Before, a hub whose bundle
 // version differed streamed its own data/bin bundle and the device landed it, repointed `current` and re-exec'd — a
 // compromised hub replaced every paired machine's code. The ONE writer of a device's `current` (and of the landed bundle)
@@ -5210,7 +5358,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
 // `--land-upgrade` (the host's own agent judges what installAgentd ships); no other module the agent bundles repoints it
 // (client.js installLocal is the HUB's own machine).
 // Controls: the verdict moved after the repoint / a second repoint call / a road that skips landBundle ⇒ red.
-{
+await section(async () => {
   const judge92 = (src) => {
     const calls = (src.match(/repointCurrent\(/g) || []).length;
     const at = src.indexOf('function landBundle('), body = at >= 0 ? src.slice(at, src.indexOf('\n}\n', at)) : '';
@@ -5229,13 +5377,14 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['a road that skips landBundle', judge92(AD92.replace('const v = landBundle(tmp, dir, version, { sig }, { dialed: true });', 'const v = { ok: true };'))],
   ];
   ok(c92.every(([, v]) => v === false), `§92 CONTROLS: ${c92.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
-}
+});
 // §93's DATA-FLOW NAME CENSUS (lane job-notify-user r6, accept-r5 confirmed 0 + unverified 1): r5's census read a job
 // record's name off fixed SPELLINGS and stayed green for a record copied into a PURE renderer (the injected digest) and for
 // jm.jobs.forEach / a Map-entry loop / archivedList(). This follows the RECORD over each file's AST: from its ORIGINS
 // through every binding, copy, list, Map and callee it reaches, to every read of its name. Files are parsed on demand (a
 // file a record can start in, or a callee one reaches); `from` + `changed` re-run a control from the converged base.
 function makeFlow93(acorn) {
+  const BUILT93 = new Map(), keep93 = (file, src, kept) => { let m = BUILT93.get(file); if (!m) BUILT93.set(file, m = new Map()); m.set(src, kept); };   // B-2c31: file → text → { record, its requires }
   // a record's ORIGINS: the engine's jobs Map (`this.jobs` in the engine, `jm.jobs` / `getJobs().jobs` / `….jm.jobs` elsewhere —
   // read, iterated, spread, walked), its archive, and the calls that answer records (a token's job, the visible set, the
   // archive list, a holder's own list accessor, a record found in a list)
@@ -5272,9 +5421,16 @@ function makeFlow93(acorn) {
     const parse = (file) => {
       let P = parsed.get(file); if (P) return P;
       const src = read(file) || '';
+      // B-2c31: a record is its file's name, its text and the requires its pre-walk resolved against THIS run's files — the
+      // pre-walk below writes every field and node mark, the flow only reads them. A FRESH run (no `from`: its summaries keyed by
+      // node start empty) takes one this instance built for the same file and text when every require resolves as it did then
+      // (the FULL control re-parsed every file); a run from the base keeps its own reuse alone, as before.
+      const kept = !from && BUILT93.get(file), was = kept && kept.get(src);
+      if (was && was.reqs.every(([spec, to]) => reqFile(file, spec) === to)) { if (!was.P.ast) unparsed.add(file); parsed.set(file, was.P); return was.P; }
+      const reqs93 = [];
       let ast = null;
       for (const sourceType of ['script', 'module']) { try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType, locations: true, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { } }
-      if (!ast) { unparsed.add(file); P = { file, ast: null, lines: [], fns: new Map(), props: new Map(), alias: new Map(), imported: new Map(), scopes: new Map() }; parsed.set(file, P); return P; }
+      if (!ast) { unparsed.add(file); P = { file, ast: null, lines: [], fns: new Map(), props: new Map(), alias: new Map(), imported: new Map(), scopes: new Map() }; parsed.set(file, P); keep93(file, src, { P, reqs: reqs93 }); return P; }
       P = { file, ast, lines: src.split('\n'), fns: new Map(), props: new Map(), alias: new Map(), imported: new Map(), scopes: new Map() };
       // one pre-walk: parents, scopes (a function or the program) + what each declares, the named functions, the requires
       const decl = (scope, pat) => { if (!pat) return; if (pat.type === 'Identifier') scope.declared.add(pat.name); else if (pat.type === 'AssignmentPattern') decl(scope, pat.left); else if (pat.type === 'RestElement') decl(scope, pat.argument); else if (pat.type === 'ArrayPattern') pat.elements.forEach((e) => decl(scope, e)); else if (pat.type === 'ObjectPattern') pat.properties.forEach((p) => decl(scope, p.type === 'RestElement' ? p.argument : p.value)); };
@@ -5304,7 +5460,7 @@ function makeFlow93(acorn) {
         if (n.type === 'VariableDeclarator' && n.init) {
           const rq = unwrap(n.init);
           if (rq && rq.type === 'CallExpression' && rq.callee.type === 'Identifier' && rq.callee.name === 'require' && rq.arguments[0] && rq.arguments[0].type === 'Literal') {
-            const t = reqFile(file, rq.arguments[0].value);
+            const t = reqFile(file, rq.arguments[0].value); reqs93.push([rq.arguments[0].value, t]);
             if (t && n.id.type === 'Identifier') P.alias.set(n.id.name, t);
             if (t && n.id.type === 'ObjectPattern') for (const p of n.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') P.imported.set(p.value.name, [t, p.key.name || p.key.value]);
           }
@@ -5315,7 +5471,7 @@ function makeFlow93(acorn) {
         for (const x of kids) pre(x, n, scope);
       };
       pre(ast, null, null);
-      parsed.set(file, P); return P;
+      parsed.set(file, P); keep93(file, src, { P, reqs: reqs93 }); return P;
     };
     const fnIn = (file, name) => { if (!known.has(file)) return null; const P = parse(file); return P.fns.get(name) || P.props.get(name) || null; };
     const resolve = (file, P, callee) => {
@@ -5504,7 +5660,7 @@ function makeFlow93(acorn) {
     return { hits: [...hits.values()], paramTaint, parsed, unparsed: [...unparsed], hitsMap: hits, summaries };
   };
 }
-{
+await section(async () => {
   // §93 THE AGENT-OUTPUT SINK BELT CENSUS (lane agent-output-sinks; design q-043 D3 ②③ + §5 P0-b). A store that keeps an
   // agent's OWN text — a task PROGRESS note/detail, a vibespace-ask FOR-YOU text/detail, a session-status NOTICE, a
   // MESSAGE to a group / its held stash, a JOB's log — passes it through THE ONE BELT (src/agent-output-belt.js) before it
@@ -5802,7 +5958,7 @@ function makeFlow93(acorn) {
     ['a data/bin plant through `d.notifyUser`', !door93(read('data/bin/vibespace-job') + "\nd.notifyUser({ text: 'raw' });\n", 'data/bin/vibespace-job').some((p) => /^data\/bin\/vibespace-job:\d+ \S+ reaches the For-you dep/.test(p))],
   ];
   ok(c93.every(([, v]) => v === false), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
-}
+});
 
 // §94 A CHILD GETS THE ENV IT NEEDS, NEVER THE HUB'S BY DEFAULT (lane spawn-env-census, 2026-10-20 — the sweep of lane
 // frp-spawn-env-allowlist). Every async child_process / node-pty call in the server, the daemon and data/bin is a SITE of
@@ -5816,7 +5972,7 @@ function makeFlow93(acorn) {
 // mount), tailscaled and xclip on serviceEnv, the remote chat re-adopt on agentEnv. Lane antigravity-spawn-argv (2026-10-21):
 // THE ARGV PASS — a secret-shaped NAME=value word on any site's argv is RED (no row: /proc/<pid>/cmdline is world-readable),
 // every other NAME= word is counted; ws-create's session spawn (`pty` from the ws ctx) is a site now.
-{
+await section(async () => {
   const C = await import('./spawn-env-census.mjs');
   const s93 = C.scan(REPO);
   const j93 = C.judge(s93);
@@ -5880,13 +6036,13 @@ function makeFlow93(acorn) {
   ];
   const q93 = one93('src/zz-quiet.js', quiet93, { rows: [], copyRows: [], fixed: [] });
   ok(c93.every(([, v]) => v) && q93.length === 0, `§94 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'RED' : 'WRONG'})`).join(', ')}, a comment + a *Sync child + a literal env (${q93.length ? 'WRONG: ' + q93.join(' | ') : 'quiet'})`);
-}
+});
 // §95 A STORAGE SECRET NEVER RIDES `rclone obscure <plain>` ON ARGV (lane mount-password-off-argv, B-d752 —
 // credential class). rclone's obscure is a PUBLIC algorithm, computed in-process (src/rclone-obscure.js, AES-256-CTR
 // under rclone's fixed key); NO child_process call anywhere hands a PASS-type credential to `rclone obscure` on its
 // argv — readable in /proc/<pid>/cmdline by any local user, on a SYNC exec that blocks the loop. A grep over tracked
 // src + server.js + data/bin: zero sites; the pre-fix spelling is caught as a planted control.
-{
+await section(async () => {
   const OBSCURE_EXEC = /\b(?:execFileSync|execFile|spawnSync|spawn|execSync)\s*\([^;]*['"]obscure['"]/;
   const files94 = String(spawnSync('git', ['-C', REPO, 'ls-files', 'server.js', 'src', 'data/bin'], { encoding: 'utf-8', env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }).stdout || '').split('\n').filter((f) => /\.(c?js|mjs)$/.test(f));
   const hits94 = [];
@@ -5896,7 +6052,7 @@ function makeFlow93(acorn) {
     && !OBSCURE_EXEC.test("  // we obscure the password before handing it to rclone")
     && !OBSCURE_EXEC.test("const { obscure: rcloneObscure } = require('./rclone-obscure.js');"),
     '§95 NEGATIVE CONTROL: the pre-fix `execFileSync(rclone, [\'obscure\', plain])` is caught; a comment and the pure-module require are not');
-}
+});
 // §96 A CENSUS LISTS TRACKED FILES, NEVER THE WORKING TREE (lane fence-hygiene, B-abd8 — the .197 / §42-round-5 law
 // as a census-of-censuses). A census must learn "what source files exist" from git, never a directory walk over the
 // one root the PRODUCT populates with UNTRACKED files at boot/install: data/bin. installRclone drops a ~64 MB rclone
@@ -5915,7 +6071,7 @@ function makeFlow93(acorn) {
 // CENSUS_WALK_EXCEPTIONS row with a reason. (Mover note for 主开发: lane takeover-census-fast's new
 // scripts/test-takeover-census.mjs reads src/lib + index.html, not data/bin, and already lists via git ls-files — it
 // is green under this rule either way.)
-{
+await section(async () => {
   console.log('\n§96 a census lists data/bin via git ls-files, never a working-tree readdir (the .197 / §42-round-5 law)');
   // a data/bin directory listing: path.join(<repo>, 'data/bin') | 'data', 'bin' | a bare 'data/bin' literal. The
   // data segment must be the readdir's OWN argument (not merely a 'data/bin/...' string elsewhere on the line).
@@ -5994,7 +6150,7 @@ function makeFlow93(acorn) {
   // and the helper itself exists and is git-derived (not a readdir)
   const tf = read('scripts/tracked-files.mjs');
   ok(/export function trackedFiles\(/.test(tf) && /git'[^)]*'ls-files'/.test(tf) && /gitEnvFrom/.test(tf) && !DBIN.test(tf), '§96 the shared trackedFiles() helper lists via `git ls-files` through the sanitized gitEnvFrom (no readdir of a root)');
-}
+});
 // §99 AN AGENT CLI'S WAIT IS BOUNDED AND NAMED (lane cli-call-timeouts, hub feedback 2026-10-23: «vibespace-task progress
 // hung for 30+ min … the same line re-issued 3 min later landed in 2 s»). Every agent CLI (data/bin/vibespace-*, and the
 // generated vibespace-status) reaches its hub through THE ONE CALL, src/cli-call.js `CC.call` — a budget by verb class
@@ -6003,7 +6159,7 @@ function makeFlow93(acorn) {
 // http.request: for ever) — RED unless the file is an EXEMPT99 row with its reason. Each CLI that calls through the one
 // call carries the loader (src/cli-call.js in a checkout, ./cli-call.js beside it on a host) and CC.cliStart (the flag).
 // The list is git ls-files (§96), the CONTROL a bare fetch / the pre-lane http.request postLong shape — both RED.
-{
+await section(async () => {
   console.log('\n§99 every agent CLI calls its hub through THE ONE CALL (src/cli-call.js) — a bare fetch / http.request is red');
   // a bare hub call: global fetch( (CC.call is a member call), http.request / https.get, require('http').request / the ternary form
   const BARE99 = [/(?<![\w$.])fetch\s*\(/, /(?<![\w$.])https?\s*\.\s*(?:request|get)\s*\(/, /require\(\s*[^)]*['"](?:node:)?https?['"]\s*\)\s*\.\s*(?:request|get)\s*\(/];
@@ -6043,7 +6199,7 @@ function makeFlow93(acorn) {
   const preLane = "const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST' }, (res) => {});";
   ok(mutFetch !== read('data/bin/vibespace-task') && bare99(mutFetch).length === 1 && bare99(preLane).length === 1 && bare99('const r = await CC.call(api + p, {});\n// a comment that says fetch( is prose').length === 0,
     '§99 CONTROL: a bare fetch( in vibespace-task and the pre-lane unbounded http.request postLong are RED; CC.call and a comment are not');
-}
+});
 // §100 NO NATIVE DIALOG IN THE CLIENT (lane controls-that-lie, 2026-10-23 — the UI law «NO native prompt/alert/confirm»,
 // CLAUDE.md + kb-design-lessons §17, had NO census: naive study round 4 reported «Fetch quota from Anthropic?» on refresh-all
 // as a native confirm; it was showConfirmDialog (the screenshot shows the house modal), and the grep found zero native calls —
@@ -6051,7 +6207,7 @@ function makeFlow93(acorn) {
 // comments stripped: no bare / window. / globalThis. / self. call of confirm( alert( prompt( — a method of another object
 // (`x.confirm(`) and a declaration (`function confirm(`, `async confirm(`) are not calls of the native dialog. The pre-law
 // spelling is caught as a planted control.
-{
+await section(async () => {
   const NATIVE100 = /(^|[^\w$.])(?:(?:window|globalThis|self)\.)?(confirm|alert|prompt)\(/;
   const DECL100 = /(?:function\s+|async\s+|^\s*)(?:confirm|alert|prompt)\([^)]*\)\s*\{/;
   const strip100 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
@@ -6064,7 +6220,7 @@ function makeFlow93(acorn) {
     && !hit100("    const ok = await showConfirmDialog({ title: t('Check every account’s usage limits now?') });") && !hit100("  async function confirm(password, { ip = null } = {}) {")
     && !hit100("  const r = await engine.confirm(id, terms);") && !hit100("  t('the notices ride its next prompt (restart the session)')"),
     '§100 NEGATIVE CONTROL: a bare / window. confirm, an alert, a prompt are caught; showConfirmDialog, a declaration, a method of another object and the word in a sentence are not');
-}
+});
 // §97 ONE GRANT MODEL (lane grants-unify, 2026-10-23 — the owner: 「权限系统要 unify 一下，不想引入太多复杂度」; the only
 // concepts are 给谁 and 除了). Every "who may use this" — a browser profile, an automation key's use and reach, a channel's
 // reach / notification / raw-API tier, a machine's exit, a desktop window's share, a Task Group's outside visibility —
@@ -6081,7 +6237,7 @@ function makeFlow93(acorn) {
 //   (c) EVERY WRITER CALLS THE ONE WRITER — each door's write function (WRITERS97) holds a call into the store, and
 //       nothing but the store writes data/grants.json.
 console.log('\n§97 one grant model: admission only in grant-model · no reader of the old fields · every writer calls the ONE writer');
-{
+await section(async () => {
   const strip97 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l.replace(/\s\/\/\s.*$/, ''))).join('\n');
   // a function's body: from its head to the closing brace at the head's own indentation (top level or inside create())
   const bodyOf = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const ls = src.lastIndexOf('\n', i) + 1; const indent = /^\s*/.exec(src.slice(ls, i + 1))[0]; const e = src.indexOf(`\n${indent}}`, i); return src.slice(i, e < 0 ? src.length : e); };
@@ -6245,7 +6401,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const TG97 = read('src/task-groups.js');
   const plantC = TG97.replace("const w = g.set('group-visibility', String(id),", "const w = ({ ok: true }); void ('group-visibility', String(id),");
   ok(plantC !== TG97 && judgeC((f) => (f === 'src/task-groups.js' ? plantC : read(f))).length === 1, '§97 (c) CONTROL: a Task Group visibility write that skips the store is RED');
-}
+});
 // §98 ONE PATH FIELD AT EVERY DOOR (lane path-field — L1 of the New Session train, the owner accepted POC v2.2 on
 // 2026-10-23 「没啥问题」). Every place a person types a folder is THE path field (src/lib/path-field.js over PURE
 // src/path-candidates.js): the candidates come from the person's own Task Groups, folders and history, computed for the
@@ -6258,7 +6414,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 //      with its reason; a raw path input is RED;
 //  (d) negative controls: a planted raw path input, a planted setupDirAutocomplete( and a door whose call is gone are
 //      each caught.
-{
+await section(async () => {
   console.log('\n§98 one path field at every door (lane path-field): no raw path input, setupDirAutocomplete deleted');
   const DOORS = [
     { file: 'src/lib/app.js', re: /this\._cwdField = pathField\(input, \{/, covers: ['input-cwd', 'src/lib/app.js:cwdInput'], why: 'New Session — the folder (its machine, its Task Group, its name)' },
@@ -6320,7 +6476,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const plantedLegacy = census97({ ...tx97, 'src/lib/planted.js': 'setupDirAutocomplete(a, b);' });
   const gone = census97({ ...tx97, 'src/lib/setup-flows.js': tx97['src/lib/setup-flows.js'].replace('const cwdPf = pathField(cwdInput, {', 'const cwdPf = null; ({') });
   ok(planted.raw.length === 2 && plantedLegacy.legacy.includes('src/lib/planted.js') && gone.dead.length === 1 && gone.raw.some((r) => r.includes('ob-cwd')), `§98d NEGATIVE CONTROLS: a planted raw path input (markup + a placeholder) is RED (${planted.raw.length}), a planted setupDirAutocomplete( is RED, a door whose call is gone is a dead row AND its input turns raw`);
-}
+});
 
 // §101 NO CHILD'S STDIN IS EVER UNLISTENED ON A MACHINE ROAD (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH:
 // picking a paired ssh machine that cannot be reached stopped the whole hub). A child's stdin is a stream; a stream
@@ -6336,7 +6492,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 //      (lower the pin);
 //  (c) CONTROLS: a bare `child.stdin.end(tar)` planted in hosts.js, the helper with its listener after the write, and an
 //      unlistened write in a new file are each red; a listened one is not.
-{
+await section(async () => {
   console.log('\n§101 no child\'s stdin is ever unlistened on a machine road (lane hub-dies-dead-ssh-host): ONE feed, hosts.js feedStdin');
   const strip101 = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const ROADS101 = { 'src/hosts.js': 5, 'src/remote-fs.js': 1, 'src/machine-mounts.js': 1, 'src/server/dial-pairing.js': 0, 'src/remote-shell.js': 0 };
@@ -6354,6 +6510,9 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     'src/server/cli-usage-door.js': [1, 'the local CLI usage child (not a machine road)'],
   };
   const sites101 = (t) => {
+    // B-2c31: a site is `….stdin.write(` / `….stdin.end(` in the comment-stripped text, and stripping never makes a word — a
+    // text without «stdin» has none (the real run and its four controls each stripped and split all of src: 5 × 38.7 MB)
+    if (!String(t).includes('stdin')) return [];
     const lines = strip101(t).split('\n'); const out = [];
     lines.forEach((l, i) => {
       for (const m of l.matchAll(/([\w$.]+?)\.stdin\??\.(write|end)\(/g)) {
@@ -6397,7 +6556,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const okF = census101({ ...tx101, 'src/planted-101.js': "const c = spawn('x');\nc.stdin.on('error', () => {});\nc.stdin.end(buf);\n" });
   ok(bare101.roadBad.length >= 1 && late101.helper === false && hostsT !== hostsT.replace('const fed = feedStdin(child, tar);', '') && newF.newBad.some((x) => x.startsWith('src/planted-101.js')) && !okF.newBad.length,
     `§101c CONTROLS: a bare child.stdin.end(tar) in hosts.js (${bare101.roadBad.length} red), the helper's listener after its write (${late101.helper ? 'WRONG' : 'red'}) and an unlistened write in a new file (${newF.newBad.length ? 'red' : 'WRONG'}) are caught; a listened one is not (${okF.newBad.length ? 'WRONG' : 'green'})`);
-}
+});
 
 
 // ── §102 (2.369.359, the owner installing the custom browser plugin): A JSON BODY SAYS IT IS JSON ──
@@ -6405,7 +6564,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // an EMPTY body and refused the Install plugin dialog's git install by name («source must be path | git | zip |
 // github-release») while the dialog had sent source:'git'. Every direct fetch / fetchJson call in the client whose body
 // is JSON.stringify(…) names a content type (headers: …); a wrapper that builds such calls is itself one of them.
-{
+await section(async () => {
   const bareJsonCalls = (src) => {
     const out = [];
     for (const m of src.matchAll(/\b(fetch|fetchJson)\(/g)) {
@@ -6422,7 +6581,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(bare.length === 0, `§102 every client fetch / fetchJson with a JSON.stringify body names its content type (headers) — a bare one is text/plain to express.json() and the route reads an empty body${bare.length ? ': ' + bare.join(' ') : ''}`);
   const control = bareJsonCalls("const r = await fetchJson('/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }) });\nawait fetch('/api/y', { method: 'POST', headers: H, body: JSON.stringify({}) });");
   ok(control.length === 1 && control[0] === 1, `§102 CONTROL: the census sees a bare JSON POST (line 1) and spares the one with headers (${JSON.stringify(control)})`);
-}
+});
 
 // ── §103 (lane dialog-yield, 2.369.360 — the owner on his hub, 2026-10-26: «尽可能减少 blocking popup 的使用；带填空的对话框不阻塞
 // 聊天；打开别的窗口要让位»): ONE SHELL, TWO KINDS, DECLARED AT EVERY CALL. createModalShell (src/lib/utils.js) draws a
@@ -6482,7 +6641,19 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // `this.m(p)`), an iteration callback's own parameter (`ps.forEach((v) => { i.value = v; })` ⇒ `ps`), a helper ANY depth
 // (memoized, a cycle read once), a bag by its `= {}` default or its name (spec). WHAT IT STILL CANNOT FOLLOW IS SAID BY NAME —
 // BLIND_SPOTS, printed with the census, each shape planted and proven unfollowed (a road that becomes followed leaves the list).
-{
+await section(async () => {
+  // ONE PARSE PER FILE (B-2c31): census103, readers103 and systemOpens103 each parsed the same src texts with the same options —
+  // the whole of src twice over. One cache for this section (freed with it); a text that does not parse throws again, as before.
+  const AST103 = new Map(), OPTS103 = { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true };
+  const parse103 = (src) => { let v = AST103.get(src); if (v === undefined) { try { v = acorn.parse(src, OPTS103); } catch (e) { v = { error: e }; } AST103.set(src, v); } if (v.error) throw v.error; return v; };
+  // A NAME A FILE SPELLS (B-2c31): in its text with its \u escapes read (an identifier may be written `\u0061…`). A census that
+  // looks for a call of a NAME finds none in a file that spells none of its names, so such a file is not parsed for it
+  // (systemOpens103 parsed every src file and held every tree: 38.7 MB of text). Exact: only fewer parses, the same rows.
+  const UNESC103 = new Map();
+  const unescaped103 = (src) => { if (!src.includes('\\u')) return src; let t = UNESC103.get(src); if (t === undefined) { t = src.replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (m, a, b) => { try { return String.fromCodePoint(parseInt(a || b, 16)); } catch { return m; } }); UNESC103.set(src, t); } return t; };
+  // a whole word: an identifier never touches another ASCII word character (a non-ASCII one still lets the name match — more parses, never fewer rows)
+  const spellsRe103 = (names) => new RegExp(`(?<![\\w$])(?:${[...names].map((n) => n.replace(/[$]/g, '\\$&')).join('|')})(?![\\w$])`);
+  const spells103 = (src, re) => re.test(unescaped103(src));
   const lit = (x) => x && x.type === 'Literal' && (x.value === 'form' || x.value === 'decision');
   const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every(lit);
   const FIELD_RE = /\b\w+\(\s*['"](input|textarea|select)['"]|<(input|textarea|select)[\s>]|type\s*=\s*['"]password['"]|\bpwInput\(/; // a field built in the call's own function (createElement / a local el() helper / markup / a password box)
@@ -6672,7 +6843,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     const pend = [];   // r4: the queueable checks need every row's id first
     for (const [f, src] of files) {
       let ast;
-      try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch (e) { bad.push(`${f}: unparsable (${e.message})`); continue; }
+      try { ast = parse103(src); } catch (e) { bad.push(`${f}: unparsable (${e.message})`); continue; }
       const lines = src.split('\n');
       const saidAbove = (line) => { let i = line - 2; while (i >= 0 && /^\s*\/\//.test(lines[i])) i--; return lines.slice(i + 1, line - 1).join('\n'); };   // r7: the comment block right above a call (each «not the subject» its own line)
       const consts = new Map();   // module / function `const NAME = '<literal>'` — a fixed id by name (DIALOG_ID)
@@ -6878,7 +7049,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       if (f === 'src/lib/form-yield.js') continue;
       if (!/dialog-(overlay|form)|owner-form|ownerForm/.test(src)) continue;
       let ast;
-      try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch { continue; }
+      try { ast = parse103(src); } catch { continue; }
       const walk = (n, parent) => {
         if (!n || typeof n.type !== 'string') return;
         const texts = n.type === 'Literal' && typeof n.value === 'string' ? [n.value] : n.type === 'TemplateLiteral' ? n.quasis.map((q) => q.value.cooked || '') : [];
@@ -6905,10 +7076,10 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
    *  runs — with its opener. (A frame's 'message' is not one: the design frame posts the person's own clicks.) */
   const systemOpens103 = (files) => {
     const openers = new Set(['mountsDialog', '_mountsDialog', 'showInputDialog']);
-    const parsed = [];
+    const SHELL_RE = spellsRe103(['createModalShell']);
     for (const [f, src] of files) {
-      let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch { continue; }
-      parsed.push([f, src, ast]);
+      if (!spells103(src, SHELL_RE)) continue;   // an opener's own body calls createModalShell (the Identifier)
+      let ast; try { ast = parse103(src); } catch { continue; }
       walkAll(ast, (n, parent) => {
         if (!/Function/.test(n.type)) return;
         let has = false;
@@ -6936,7 +7107,10 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     const SYS_NEST = new Set(['then', 'catch', 'finally', 'setTimeout', 'queueMicrotask', 'requestAnimationFrame', 'forEach', 'map', 'filter', 'some', 'every', 'reduce', 'Promise']);
     const stillSystem = (fnNode, parent) => !!parent && (parent.type === 'CallExpression' || parent.type === 'NewExpression') && parent.arguments.includes(fnNode) && SYS_NEST.has(calleeName(parent));
     const out = [];
-    for (const [f, src, ast] of parsed) {
+    const ROW_RE = spellsRe103(['createModalShell', ...openers]);   // a row is a call of createModalShell or of an opener, by its name
+    for (const [f, src] of files) {
+      if (!spells103(src, ROW_RE)) continue;
+      let ast; try { ast = parse103(src); } catch { continue; }
       // the local functions a system callback calls (one level deep — never an opener itself: its call is the row): their bodies count
       const sysBodies = [];
       const localFns = new Map();
@@ -6993,7 +7167,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(queueable.length >= 20 && real.readyRed.length === 0, `§103 r4 every queueable form's caller that works after its open (a load it awaits, a focus) reads \`ready\` — it may wait behind the open one's ask; its content lands when it opens (${queueable.length} queueable · ${queueable.filter((r) => r.readsReady).length} read ready · ${queueable.filter((r) => !r.after && !r.readsReady).length} pure draws)${real.readyRed.length ? ' — RED: ' + real.readyRed.join(' | ') : ''}`);
   ok(real.liveRed.length === 0, `§103 r4 no queueable form judges its liveness by its own overlay / body / dialog's isConnected — the shell's live() is THE predicate (a queued body is detached)${real.liveRed.length ? ' — RED: ' + real.liveRed.join(' | ') : ''}`);
   // every mounts helper caller names its id too (the shared default is retired)
-  const mountsCalls = allSrc103.flatMap(([f, src]) => { let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); } catch { return []; } const o = []; walkAll(ast, (n) => { if (n.type !== 'CallExpression') return; const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' ? n.callee.property.name : null; if (nm !== 'mountsDialog' && nm !== '_mountsDialog') return; if (f === 'src/lib/sidebar-mounts.js' && n.arguments.length === 5 && n.arguments[4].type === 'Identifier') return; const a5 = n.arguments[4]; const has = a5 && a5.type === 'ObjectExpression' && a5.properties.some((p) => p.type === 'Property' && p.key.name === 'id'); o.push({ at: `${f}:${n.loc.start.line}`, has }); }); return o; });
+  const MOUNTS_RE = spellsRe103(['mountsDialog', '_mountsDialog']);
+  const mountsCalls = allSrc103.flatMap(([f, src]) => { if (!spells103(src, MOUNTS_RE)) return []; let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); } catch { return []; } const o = []; walkAll(ast, (n) => { if (n.type !== 'CallExpression') return; const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' ? n.callee.property.name : null; if (nm !== 'mountsDialog' && nm !== '_mountsDialog') return; if (f === 'src/lib/sidebar-mounts.js' && n.arguments.length === 5 && n.arguments[4].type === 'Identifier') return; const a5 = n.arguments[4]; const has = a5 && a5.type === 'ObjectExpression' && a5.properties.some((p) => p.type === 'Property' && p.key.name === 'id'); o.push({ at: `${f}:${n.loc.start.line}`, has }); }); return o; });
   ok(mountsCalls.length >= 15 && mountsCalls.every((c) => c.has), `§103 r3 every mountsDialog / _mountsDialog call names its own id (${mountsCalls.length} calls)${mountsCalls.some((c) => !c.has) ? ' — RED: ' + mountsCalls.filter((c) => !c.has).map((c) => c.at).join(' | ') : ''}`);
   const sysOpens = systemOpens103(allSrc103);
   console.log(`  THE SYSTEM'S OPENS (r3 — derived: a form-opening call inside a setInterval / onGlobal / ws.on / onBroadcast callback, one local function deep; r4: a person's own download re-opening its form is theirs): ${sysOpens.map((r) => `${r.at.replace(/^src\/lib\//, '')} ${r.call}() · ${r.system ? 'system' : 'PERSON'}`).join(' | ') || 'none'}`);
@@ -7115,7 +7290,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     ['src/lib/zz-s1.js', "function openZ() { createModalShell({ id: 'z', kind: 'form' }); }\nexport function watch(app) { setInterval(() => openZ(), 1000); app.ws.onGlobal((m) => openZ({ opener: 'system' })); const done = () => openZ(); setInterval(() => done(), 5); setInterval(() => { b.onclick = () => openZ(); }, 9); }"],
   ]);
   ok(sctl.length === 3 && sctl.filter((r) => !r.system).length === 2 && sctl.filter((r) => r.system).length === 1, `§103 NEGATIVE CONTROL (the system's opens): an open from a setInterval — directly and one local function deep — without opener 'system' is RED; the broadcast's that says it is not (${JSON.stringify(sctl)})`);
-}
+});
 
 // ── §104 (lane human-cli, 2026-10-28 — the 89-minute hub freeze of 2026-10-27): THE PERSON'S SESSION INDEX HAS ONE WRITER
 // AND EVERY SESSION STATE CHANGE REACHES IT. The index (<home>/.vibespace/local/sessions.<rootDigest>.json — what `vibespace ls /
@@ -7128,7 +7303,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 //       shutdown stops it — and nothing else requires the writer
 //   (c) the index's file name and folder are spelled in the PURE module only; the CLI never writes, renames or deletes
 //   (d) round 2: the writer's fs CALLEES through any module (driven, not read) — procfs, its own place, its own two install files
-{
+await section(async () => {
   const acorn = (await import('node:module')).createRequire(import.meta.url)('acorn');
   const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
   const visit = (node, fn, anc = []) => { if (!node || typeof node.type !== 'string') return; const a = [...anc, node]; fn(node, a); for (const k of Object.keys(node)) { const v = node[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') visit(x, fn, a); } else if (v && typeof v.type === 'string') visit(v, fn, a); } };
@@ -7245,7 +7420,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     ok(ctlBad.length > 0 && ctlBad.every((c) => /^src\/server\/local-index\.js:\d+$/.test(c.at)), `§104d CONTROL: a planted harness path rule that lists <checkout>/data is named, with the writer's line that reached it (${ctlBad.map(show).slice(0, 2).join(' | ') || 'not seen'})`);
     try { fsm.rmSync(D, { recursive: true, force: true }); } catch { }
   }
-}
+}, 'alone');
 
 // ── §105 (lane engine-spi-egress, design-desk cloak-plugin §1 (g) — 2026-11-02): NO BROWSER ENGINE'S ID IS NAMED IN src/ ──
 // An engine is whatever the engine table holds: the default engine's options, its policy and its kernel's place are DERIVED
@@ -7253,7 +7428,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // /api/browser/engines), so a second engine plugin (CloakBrowser's) needs no line of the core. The ids watched: every fixture
 // manifest declaring contributes.browserEngine + the engines this project ships plugins for; plus any 'plugin:<id>' literal.
 // A src file that must name one (a migration naming the plugin a record moves to) is a ROW here, with its reason.
-{
+await section(async () => {
   const ENGINE_ID_ROWS = Object.freeze({ // 'src/<file>': '<why it names an engine id>'
     'src/server/migrations.js': 'lane engine-spi-egress L3: the one-shot 2026-11-cloak-to-plugin names the plugin the CloakBrowser records move to (its profiles\' build, its rows, its seeds.json)',
   });
@@ -7267,13 +7442,13 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(stale105.length === 0, `§105 every ENGINE_ID_ROWS row still names an engine id (a row whose file names none is stale) — ${stale105.join(', ') || 'none'}`, stale105);
   const planted105 = scan105("const CLOAK = 'plugin:vibespace.cloak-browser'; // planted");
   ok(planted105.length === 2 && scan105('const ok = engineRowPath(id); // \'plugin:other.id:x\' is a command id').length === 0, `§105 CONTROL: a planted id is named (${planted105.join(', ')}); a derived one is not`);
-}
+});
 
 // ── §106 (lane engine-spi-egress L3, 主开发's ruling 2026-11-03 — the owner: 「cloakbrowser直接去掉吧」): THE CORE KEEPS NO ANTI-BOT
 // BACKEND OF ITS OWN — no line of src/ names it, but the rows below, each with its reason. A bare «grep = 0» cannot be the census:
 // Windows' DWM window attribute is spelled the same way. The dictionaries are a row ONLY for the keys the migration's notice
 // uses (its exported WORDS table): any other entry naming it is red, and so is a comment.
-{
+await section(async () => {
   const RE106 = /cloak/i;
   const req106 = (await import('node:module')).createRequire(import.meta.url);
   const W106 = (() => { try { return new Set(Object.values(req106('../src/server/migrations.js').CLOAK_PLUGIN_WORDS || {})); } catch { return new Set(); } })();
@@ -7294,7 +7469,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(dead106.length === 0, `§106 every row still names it (a row whose file no longer does is stale) — ${dead106.join(', ') || 'none'}`, dead106);
   const planted106 = [...scan106('src/server/browser-keeper.js', "  if (p.provider === 'cloak') return x; // planted"), ...scan106('src/lib/i18n-zh.js', '  "Switch to CloakBrowser": "切换到 CloakBrowser",'), ...scan106('src/lib/i18n-zh.js', '  // a comment naming CloakBrowser')];
   ok(planted106.length === 3 && scan106('src/lib/i18n-zh.js', `  ${JSON.stringify([...W106][0] || '')}: "x",`).length === 0, `§106 CONTROL: a planted provider id, a planted dictionary entry and a planted dictionary comment are each named (${planted106.length}); a notice key is not`, planted106);
-}
+});
 
 
 // ── §107 lane file-preview-mount (主开发 09:05Z, the merged .399 read: the SafeFs worker's xlsxSheets op said require('xlsx'),
@@ -7305,7 +7480,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // release's list, with why the device carries it; a new one is red until it is rowed with its reason. The output stays within
 // DEVICE_BUNDLE_MARGIN of the release's size. And the refusal a storage mount gets says no version (a «being fixed (x.y.z)»
 // was false on the hub that already ran x.y.z).
-{
+await section(async () => {
   const req107 = (await import('node:module')).createRequire(import.meta.url);
   const esbuild107 = req107('esbuild');
   const script107 = (JSON.parse(read('package.json')).scripts || {})['build:agentd'] || '';
@@ -7376,7 +7551,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const files107 = read('src/routes/files.js'), sent107 = code107((files107.match(/function syncRefusedBody[\s\S]*?\n\}/) || [''])[0]);
   const fe107 = read('src/lib/file-explorer-ops.js'), said107 = code107((fe107.match(/storage_sync_refused'\) return [^\n]*/) || [''])[0]);
   ok(!!sent107 && !/RELEASE|version|\{release\}|being fixed|\d+\.\d+\.\d+/.test(sent107) && !!said107 && !/\{release\}|being fixed|\d+\.\d+\.\d+/.test(said107), '§107 the storage-mount refusal says no version and no «being fixed» — the server\'s sentence and the client\'s words', { sent: sent107.slice(0, 200), said: said107.slice(0, 200) });
-}
+});
 
 // ── §108 (B-4f03, lane bl-tests-e, 2026-11-17 — int358's registry law: a helper family with 14 copies is a kind with no row): ONE REAL-CLICK DOOR ──
 // realClick was COPIED across the chrome suites — 14 copies in 10 variants (int358), each measuring its element and then
@@ -7386,7 +7561,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // mouse events is a COPY and is red — except the three named below, each with what the door lacks (folding them grows the
 // door in scratch.mjs, which every chrome suite imports). A named exception whose copy is gone is red too (drop its row).
 console.log('\n§108 one real-click door (B-4f03): a realClick that presses by itself is a copy — red outside the named exceptions');
-{
+await section(async () => {
   const COPIES_KEPT = Object.freeze({
     'pairing-ui-harness.mjs': 'an EXPRESSION target (a selector that starts with «(»), a wait for the element to appear (≤ ms) and the rect settled on THREE readings a frame or 50 ms apart (lane chrome-157: a background tab paints no frames) — the door reads a CSS selector and two looks 40 ms apart',
     'test-wake-approve-card-chrome.mjs': 'it scrolls ONLY when the target is not wholly in view — measured there: a second centre scroll moved a centred Approve by 40 px under the pointer and the press arm rightly refused it; the door always scrolls to the centre',
@@ -7427,7 +7602,8 @@ console.log('\n§108 one real-click door (B-4f03): a realClick that presses by i
   ok(copiesIn("P.realClick = async (sel) => { await P.cdp('Input.dispatchMouseEvent', { type: 'mousePressed' }); };\n").join() === '1' && copiesIn("const page = {\n  realClick: async (sel) => { await cdp('Input.dispatchMouseEvent', { type: 'mousePressed' }); },\n};\n").join() === '2'
     && copiesIn("class Page {\n  async realClick(sel) {\n    await this.cdp('Input.dispatchMouseEvent', { type: 'mousePressed' });\n  }\n}\n").join() === '2', '§108 NEG: …and under another spelling — a property assigned, an object key, a class method');
   ok(copiesIn(WRAP).length === 0, '§108 a wrapper over the door is not a copy — even with a press of its own on the NEXT line (the body ends where the definition does)');
-}
+});
 
+await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

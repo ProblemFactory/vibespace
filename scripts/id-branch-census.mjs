@@ -87,6 +87,9 @@ export const PATTERNS = Object.fromEntries(Object.entries(FAMILIES).map(([k, f])
 const KEY = (ids) => new RegExp(`(?:^|[{,])\\s*(['"]?)(${ids.map((s) => s.replace(/[-]/g, '\\-')).join('|')})\\1\\s*:(?!:)`, 'g');
 export const KEYS = Object.fromEntries(Object.entries(FAMILIES).map(([k, f]) => [k, KEY(f.ids)]));
 const keyIds = (fam, ln) => new Set([...ln.matchAll(KEYS[fam])].map((m) => m[2]));
+// B-2c31: a line counts only through a PATTERN (a member id quoted whole) or a key (`id:` / `'id':`) — a text with neither
+// shape of any of a family's ids has no line of that family, and its lines are not read for it (8 families × every line of src)
+const CANDIDATE = Object.fromEntries(Object.entries(FAMILIES).map(([k, f]) => { const I = f.ids.map((s) => s.replace(/[-]/g, '\\-')).join('|'); return [k, new RegExp(`(['"\`])(?:${I})\\1|(?:${I})['"]?\\s*:`)]; }));
 const indentOf = (ln) => ln.match(/^\s*/)[0].length;
 // a key line is a dispatch-map entry when its object holds a second member id as a key
 function dispatchKey(fam, L, i) {
@@ -149,7 +152,7 @@ export function census(repo, { read = (f) => fs.readFileSync(path.join(repo, f),
         owners[fam].push(span ? `${f}:${span[0]}-${span[1]}` : `${f} (table NOT FOUND)`);
       }
       const ex = EXEMPT.filter((e) => e.family === fam && e.file === f).map((e) => ({ e, span: e.table ? tableSpan(text, e.table, { skipComments: true }) : [1, L.length], n: 0 }));
-      L.forEach((ln, i) => {
+      if (CANDIDATE[fam].test(text)) L.forEach((ln, i) => {
         if (span && i + 1 >= span[0] && i + 1 <= span[1]) return;
         const t = ln.trim();
         if (!t || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;

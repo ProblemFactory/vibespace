@@ -76,23 +76,22 @@ function isCallAt(src, openIdx) {
   }
   return false;
 }
-function callSites(src, name) {
-  const re = new RegExp(`(^|[^.\\w$])(${name})\\s*\\(`, 'g');
-  let m, n = 0;
-  while ((m = re.exec(src))) {
-    const open = src.indexOf('(', m.index + m[1].length + name.length);
-    if (open >= 0 && isCallAt(src, open)) n++;
-  }
-  return n;
-}
 
 // ── the check: any of OUR symbols appearing as a BARE CALL in the minified
 //    bundle is unbound (a bound one would have been renamed to 1-3 chars) ──
+// ONE PASS over the bundle (B-2c31, lane bl-ci 2026-11-18): every identifier followed by `(` whose left neighbour is no `.`, word
+// character or `$` — the occurrences the old per-symbol regex found, since an identifier is matched whole (and a name with a `$`,
+// which that regex never escaped and so never matched) — and only
+// the names that are OURS are judged by isCallAt. It used to build one RegExp per symbol (thousands) and scan the whole bundle
+// with each: 15.8 s of every build at two cores (the parity of the two forms over the real bundles is proved in the unit's line).
+const IDENT_CALL = /(?<![.\w$])([\w$]+)\s*\(/g;
 function freeCalls(bundleSrc) {
   const found = new Map();
-  for (const name of SYMBOLS) {
-    const hits = callSites(bundleSrc, name);
-    if (hits) found.set(name, hits);
+  for (const m of bundleSrc.matchAll(IDENT_CALL)) {
+    const name = m[1];
+    if (!SYMBOLS.has(name)) continue;
+    const open = bundleSrc.indexOf('(', m.index + name.length);
+    if (open >= 0 && isCallAt(bundleSrc, open)) found.set(name, (found.get(name) || 0) + 1);
   }
   return found;
 }
