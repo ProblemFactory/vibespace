@@ -2,7 +2,7 @@ import { pillMode, billingPillForms, billingPillHtml, phoneBarFold } from './tit
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
-import { apiFateLookup } from './channel-api-card-view.js'; // B-d3d3: a raw API row's words say its proposal's fate
+import { apiFateLookup, onApiCards } from './channel-api-card-view.js'; // B-d3d3: a raw API row's words say its proposal's fate (and follow the records while the menu is open)
 import { UI_ICONS } from './icons.js';
 import { panelPlace } from './menu-place.js'; // PURE (lane ui-controls-and-bugs): a panel keeps its natural width and slides — the width sweep's rule 4
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
@@ -267,7 +267,7 @@ export class ChatStatusBar {
   /** lane outbox-chip-door: a row's state words, patched in place — the feed's change reaches an open menu too. */
   _paintChannelRowStates() {
     const menu = this._channelMenu;
-    if (!menu || !menu.isConnected) { this._channelMenu = null; return; }
+    if (!menu || !menu.isConnected) { this._channelMenu = null; if (this._apiMenuOff) { this._apiMenuOff(); this._apiMenuOff = null; } return; }
     const apiFateOf = apiFateLookup();   // B-d3d3: an API row's fate moves with the records (a decision writes no touch)
     for (const it of menu.querySelectorAll('.chat-status-channel-row')) {
       const r = it._row, said = it.querySelector('.chat-status-channel-words');
@@ -279,6 +279,11 @@ export class ChatStatusBar {
       box.dataset.said = key;
       box.replaceChildren(...words.map((w) => { const s = document.createElement('span'); s.className = w.cls; s.textContent = w.text; return s; }));
     }
+  }
+  /** B-d3d3 (the readers' should, 00:05Z): the open Channels menu follows the API records THEMSELVES — a decision's outbox
+   *  push can land before the records' read, and the menu said «awaiting you» until reopened; let go once the menu is gone. */
+  _followApiRecords() {
+    if (!this._apiMenuOff) this._apiMenuOff = onApiCards(this._app || null, () => this._paintChannelRowStates());
   }
   setOutbox(v) {
     this._paintChannelRowStates();
@@ -1768,6 +1773,7 @@ export class ChatStatusBar {
       }
       this._channelMenu = dropdown;
       this._paintChannelRowStates();
+      this._followApiRecords();
       return;
     }
     // Session-health chip -> the same rows the init card lists. Touch has no

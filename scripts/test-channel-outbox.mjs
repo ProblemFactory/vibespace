@@ -3184,6 +3184,19 @@ async function chatReadLegs(ENGmod, name) {
             const got = menu.querySelector('.chat-status-channel-words').textContent;
             return [got === REJ, got];
           }],
+          ['D3 the open Channels menu FOLLOWS the API records themselves (the readers\' should, 00:05Z): a records read re-words it with no outbox push; a closed menu lets go', async () => {
+            await readWith(F, { cards: [{ id: 'pa', status: 'pending', at: Date.now() }] });
+            const menu = menuOf(ROW, WAIT);
+            const P = F.ChatStatusBar.prototype;
+            const bar = { _channelMenu: menu, _channelRowStateWords: () => [], _app: null, _apiMenuOff: null, _paintChannelRowStates: P._paintChannelRowStates };
+            P._followApiRecords.call(bar);
+            await tick();
+            await readWith(F, { cards: [{ id: 'pa', status: 'rejected', decidedBy: 'user', at: Date.now() }] });
+            const got = menu.querySelector('.chat-status-channel-words').textContent, held = !!bar._apiMenuOff;
+            menu.isConnected = false;
+            await readWith(F, { cards: [] });
+            return [got === REJ && held && bar._apiMenuOff === null, { got, held, after: bar._apiMenuOff }];
+          }],
         ];
         let FATEMOD = null, fateModErr = null;
         try { FATEMOD = await fateBundle('real'); } catch (e) { fateModErr = e; }
@@ -3199,6 +3212,13 @@ async function chatReadLegs(ENGmod, name) {
         await recMutant('the good read never kept', ' if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; }', '', /^D3 the person rejects/);
         await recMutant('a failed read taken as the records', 'if (r && Array.isArray(r.cards)) { good = r.cards;', '{ good = (r && r.cards) || [];', /^D3 a FAILED read/);
         await recMutant('an id on its way read as gone', "      return firstSeen.get(k) >= at ? { fate: 'pending', status: null } : null;", '      return null;', /^D3 an id the good read does not hold/);
+        await legOSC('MUTANT B-d3d3 the open menu never following the records (chat-status-bar.js) ⇒ RED by name on the follow leg', async () => {
+          const sbSrc = srcOf('chat-status-bar.js');
+          const FROM = '    if (!this._apiMenuOff) this._apiMenuOff = onApiCards(';
+          if (sbSrc.split(FROM).length !== 2) return [false, 'the follow line is not spelled once'];
+          const red = await redOfLegs(viewLegs(await fateBundle('menu-unfollowed', { 'lib/chat-status-bar.js': sbSrc.replace(FROM, '    if (false) this._apiMenuOff = onApiCards(') })));
+          return [red.some((n) => /^D3 the open Channels menu FOLLOWS/.test(n)), red];
+        });
         await legOSC('MUTANT B-d3d3 the chip\'s menu painter never re-wording an API row (chat-status-bar.js) ⇒ RED by name on the chip leg', async () => {
           const sbSrc = srcOf('chat-status-bar.js');
           const FROM = "      if (said && r && r.ops && r.ops.api && r.proposalId) { const text = channelRowWords(r, t, { apiFateOf }); if (said.textContent !== text) said.textContent = text; }\n";
@@ -3214,6 +3234,7 @@ async function chatReadLegs(ENGmod, name) {
             dispose: /function dispose\(\) \{[\s\S]*?if \(apiOff\) \{ apiOff\(\); apiOff = null; \}\n    apiBoxes\.clear\(\);\n  \}/.test(tv),
             chipOpen: sb.includes('const apiFateOf = apiFateLookup();   // B-d3d3: one lookup for the menu') && sb.includes('words.textContent = channelRowWords(r, t, { apiFateOf });'),
             chipFollow: /_paintChannelRowStates\(\) \{[\s\S]*?const apiFateOf = apiFateLookup\(\);[\s\S]*?channelRowWords\(r, t, \{ apiFateOf \}\)/.test(sb),
+            menuFollows: sb.includes('      this._channelMenu = dropdown;\n      this._paintChannelRowStates();\n      this._followApiRecords();'),
           };
           return [Object.values(pins).every(Boolean), pins];
         });
