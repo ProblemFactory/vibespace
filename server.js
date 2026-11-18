@@ -322,7 +322,7 @@ const {
 });
 // noteTurnEnd ALSO wakes the delivery ladder's retry park (lane notify-retry, 2026-10-01): a parked notification is posted the
 // moment the conversation's turn ends (claude `result` / codex `task_complete` / ACP) — the stdout consumers keep the ONE name
-const noteTurnEnd = (s, m) => { noteTurnEndEngine(s, m); try { deliver.noteTurnEnd(s); } catch (e) { console.warn('[deliver] turn-end hook failed:', e && e.message); } };
+const noteTurnEnd = (s, m) => { noteTurnEndEngine(s, m); try { deliver.noteTurnEnd(s); } catch (e) { console.warn('[deliver] turn-end hook failed:', e && e.message); } try { consumeKeptOf(s, m).catch((x) => console.warn('[kept] turn-end consume failed:', x && x.message)); } catch (e) { console.warn('[kept] turn-end consume failed:', e && e.message); } }; // B-a5a4 (2): a resume that RAN consumes its kept copy
 // ── Effective-size computation (min cols/rows across clients + PTY resize + broadcast) ──
 // Only clients that have sent a REAL `resize` (terminal fit) drive the PTY
 // size. Two classes of entries must NOT shrink it:
@@ -408,7 +408,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patch
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta)
+  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, consumeKeptOf, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta); consumeKeptOf: at a turn end (B-a5a4 (2))
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,

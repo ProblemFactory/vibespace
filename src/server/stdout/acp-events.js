@@ -125,6 +125,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             session._isStreaming = false; newLabel = '';
             delete session._turnOpenSaidAt;   // the cut (D): the opening said is the turn running NOW — cleared at its end record
             try { if (session.backendSessionId) deliverRef?.noteTurnEnded?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-end note failed: ${e.message}`); }
+            session._promptStopReason = msg.stopReason || null;   // B-a5a4 (2): how the turn ENDED — an 'error' / 'cancelled' end proves no resume (boot-restore turnRan)
             try { noteTurnEnd?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts }); } catch {}   // its OWN stamp (U1 cure 2's read): a replayed backlog's turn end settles nothing — it never clears a restored mark
             // ONE usage read after a stretch of work (lane usage-predict, the owner's A): THE arming site — the account's 5-minute
             // quiet wait starts here and nowhere else (src/server/after-turn-read.js)

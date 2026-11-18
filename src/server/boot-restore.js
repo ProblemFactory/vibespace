@@ -78,6 +78,18 @@ function resumeIdOf(meta) {
 /** Why a kept meta is stopped — the one producer (a dead socket found by a boot or its re-probe); the client words it
  *  «its process ended while the server was down». A `.json.stopped` written by 2.369.365 carries no reason: the same one. */
 const STOP_DEAD_SOCKET = 'dead-socket-at-boot';
+/** B-a5a4 (2) — PURE: did a turn end WELL, so that it proves the resume loaded its conversation? Not a claude `result` that is an
+ *  error — a resume the CLI cannot load answers `{type:'result', subtype:'error_during_execution', is_error:true, errors:['No
+ *  conversation found with session ID: …']}` on stdout and exits 1 (scripts/test-resume-breaker.mjs's stub, the record the exit
+ *  classifier scans); an interrupted or capped turn is not counted either — not an ACP prompt that ended in 'error' or
+ *  'cancelled' (acp-events stamps `session._promptStopReason`; a wrapper whose agent died mid-prompt ends it 'error', and agy can
+ *  end one 'cancelled' before its agent answered anything). codex's one turn-end call is `task_complete` (codex-events), no record.
+ *  Anything not proven keeps the copy for the sweep's road. */
+function turnRan(rec, session) {
+  if (rec && typeof rec === 'object' && (rec.is_error === true || (typeof rec.subtype === 'string' && rec.subtype !== 'success'))) return false;
+  const stop = session && session._promptStopReason;
+  return stop !== 'error' && stop !== 'cancelled';
+}
 /** tmp + rename (the atomic-persistence law): a crash mid-write leaves the old file or none, never a torn one. */
 function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -387,6 +399,24 @@ async function stoppedSessions() {
       ...(k.startsWith('sock:') ? { forkPending: true } : {}) }); // a pending fork's copy: kept and listed here, but `id` is its PARENT's — no sidebar row (routes/sessions)
   }
   return rows;
+}
+/** B-a5a4 (2) — A RESUME THAT RAN CONSUMES ITS COPY AT ONCE: a live session that addresses a kept copy's conversation ended a turn
+ *  WELL (server.js's ONE turn-end entry — claude `result`, codex `task_complete`, ACP `prompt_end` — every chat harness's stdout
+ *  consumer) ⇒ the live session is the record, and its copy goes now, not at the next /api/sessions sweep. A resume that ran and
+ *  ended with no page asking in between left the copy: a «its process ended while the server was down» row with the old time, and
+ *  the old account its next resume went to. Never at registration, never on a turn that FAILED (`turnRan`): r1 of B-a5a4 consumed at
+ *  registration and lost a failed resume's copy. A pending fork addresses nothing (addressableId), so it consumes nothing.
+ *  `rec` = the turn-end record the entry was handed (claude's `result`; none for codex / ACP). → the consumed sockFile | null */
+async function consumeKeptOf(session, rec = null) {
+  if (!turnRan(rec, session)) return null;
+  const id = session ? addressableId(session) : null;
+  if (!id) return null;
+  await loadKept();
+  const k = `${session.backend || 'claude'}:${id}`, e = keptStopped.get(k);
+  if (!e) return null;
+  keptStopped.delete(k);
+  await new Promise((r) => fs.unlink(keptFile(e.sockFile), () => r()));
+  return e.sockFile;
 }
 // THE FACTS LINE (the boot trace's notes, ⚙ Diagnostics): what the dead sockets of a restore / a re-probe pass became —
 // said once the pass's kept copies were looked for (r2: a copy its harness then answered «no transcript» for is said
@@ -1044,6 +1074,7 @@ async function readoptOrphanKeeperSessions() {
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
     stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
-    stoppedSessions }; // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
+    stoppedSessions, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
+    consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
