@@ -42,6 +42,10 @@ const portFree = (port) => new Promise((resolve) => {
   s.once('error', () => resolve(false));
   s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
 });
+// B-cabe: a RELEASED port is free once its listener's close has landed — a fresh listen at once after close() can lose that
+// race on a loaded runner (the .367 mirror: «stopAll() releases everything» 112/1). «released» is judged on that state: the
+// probe is asked again, a bounded COUNT of times (100 × 20 ms), never a fixed sleep; «held» stays ONE probe (a listener is up)
+const portFreed = async (port, { onTry = () => { } } = {}) => { for (let k = 0; k < 100; k++) { if (await portFree(port)) return true; onTry(k); await sleep(20); } return false; };
 const hold = (port) => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(port, '127.0.0.1', () => resolve(s)); });
 
 const [P_FIXED, P_BUSY, P_CANCEL, P_TIMEOUT] = await freePorts(4);
@@ -68,7 +72,7 @@ const quiet = { warn() {}, log() {}, error() {} };
   await sleep(30);
   const s1 = ol.status(f.flowId);
   ok(s1.done === true && s1.ok === true && exchanges.length === 1 && exchanges[0].code === 'abc123' && exchanges[0].redirectUri === f.redirectUri, `ephemeral: the code was exchanged ONCE with the same redirect_uri (${JSON.stringify(exchanges)})`);
-  ok(s1.listening === false && (await portFree(f.port)), 'ephemeral: the port is RELEASED on completion');
+  ok(s1.listening === false && (await portFreed(f.port)), 'ephemeral: the port is RELEASED on completion');
   const replay = await get(`${f.redirectUri}/?state=${state}&code=abc123`);
   ok(replay.status === 0, 'ephemeral: a replayed callback finds nobody listening (the port was held for ONE flow)');
   const taken = ol.take(f.flowId);
@@ -94,7 +98,7 @@ const quiet = { warn() {}, log() {}, error() {} };
   const good = await get(`http://127.0.0.1:${P_FIXED}/lark/cb?state=${state}&code=lark-code-1`);
   await sleep(30);
   ok(good.status === 200 && exchanges.length === 1 && exchanges[0] === 'lark-code-1' && ol.status(f.flowId).ok === true, 'fixed: the right state on the registered path exchanges the code');
-  ok((await portFree(P_FIXED)), 'fixed: the port is RELEASED on completion');
+  ok((await portFreed(P_FIXED)), 'fixed: the port is RELEASED on completion');
   // lane dc-channels-consent: the machine holds NO default fixed target — the caller's consent row names its callback
   let noDefault = null; try { OL.fixedTarget(); } catch (e) { noDefault = e.message; }
   const t = OL.fixedTarget(require(path.join(REPO, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL);
@@ -148,20 +152,28 @@ const quiet = { warn() {}, log() {}, error() {} };
   const c = await mk(P_CANCEL, 60000);
   ok(c.listening === true && !(await portFree(P_CANCEL)), 'cancel leg: the port is held while the flow runs');
   ok(ol.cancel(c.flowId) === true && ol.status(c.flowId).cancelled === 'cancelled' && ol.status(c.flowId).running === false, 'cancel() is terminal and says so');
-  ok(await portFree(P_CANCEL), 'cancel releases the port');
+  ok(await portFreed(P_CANCEL), 'cancel releases the port');
   ok(ol.cancel(c.flowId) === false, 'cancelling twice is a no-op');
 
   const tmo = await mk(P_TIMEOUT, 120);
   ok(!(await portFree(P_TIMEOUT)), 'timeout leg: the port is held while the flow runs');
   await sleep(250);
-  ok(ol.status(tmo.flowId).cancelled === 'timeout' && (await portFree(P_TIMEOUT)), 'the flow\'s own timeout releases the port and names the reason');
+  ok(ol.status(tmo.flowId).cancelled === 'timeout' && (await portFreed(P_TIMEOUT)), 'the flow\'s own timeout releases the port and names the reason');
 
   // one flow per id: a second begin() for the same id supersedes the first
   const a = await mk(P_CANCEL, 60000);
   const b = await mk(P_CANCEL, 60000);
   ok(ol.status(a.flowId).cancelled === 'superseded' && ol.status(b.flowId).running === true && ol.runningFor('lark').flowId === b.flowId, 'a second begin() for the same id SUPERSEDES the first (one running flow per id, gmail-sync\'s rule) — and the port moved with it');
   ol.stopAll();
-  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFree(P_CANCEL)), 'stopAll() releases everything (the shutdown path)');
+  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_CANCEL)), 'stopAll() releases everything (the shutdown path)');
+  // B-cabe PLACED: a listener that closes only once the FIRST probe has answered «held» (the probe's onTry) — a close landing after
+  // the leg's probe. ONE probe reads «held» (the old leg's shape, red); the bounded re-ask reads free. NOTE (the adversarial read):
+  // release() closes its server synchronously, so the .367 mirror's 112/1 is NOT proven to be this race — the cause stays unnamed
+  {
+    const late = await hold(P_CANCEL), one = await portFree(P_CANCEL);
+    let tries = 0; const freed = await portFreed(P_CANCEL, { onTry: (k) => { tries = k + 1; if (k === 0) late.close(); } });
+    ok(one === false && freed === true && tries >= 1, `B-cabe: a port whose listener closes after the first probe answered «held» is FREE by the bounded re-ask (${tries} re-ask(s)); a single probe reads it held`);
+  }
 
   // bad inputs are typed refusals, not stack traces
   let e1 = null; try { await ol.begin({ id: 'x', mode: 'osmosis', buildConsentUrl: () => '', exchange: async () => ({}) }); } catch (e) { e1 = e; }
