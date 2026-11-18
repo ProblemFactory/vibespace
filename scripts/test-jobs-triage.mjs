@@ -1108,7 +1108,7 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
     const w = J.withdrawAsk(job);
     const woke = await Promise.race([waiting, new Promise((r) => setImmediate(() => r('still waiting')))]);
     const again = J.withdrawAsk(job);
-    let tail = ''; try { tail = fs.readFileSync(path.join(ctl, 'answers.jsonl'), 'utf8'); } catch { }
+    let tail = ''; for (let k = 0; k < 50 && !tail; k++) { try { tail = fs.readFileSync(path.join(ctl, 'answers.jsonl'), 'utf8'); } catch { } if (!tail) await new Promise((r) => setTimeout(r, 10)); }   // the mirror appends OFF the loop
     const out = { posted: posted.version, asked, w, state: job.state, pending: job.interaction && job.interaction.pending, resolved, woke, again, recorded: ((job.interaction && job.interaction.answers) || []).filter((x) => x && x.withdrawn === true).map((x) => x.version), stdin: tail.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.withdrawn === true).length };
     J.shutdown(); return out;
   };
@@ -1121,13 +1121,13 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
   const MJ8 = mutantCopies('jobs-withdraw-8bd5', ROOT);
   const rx = await scene(MJ8.load('src/jobs.js', JSRC.replace(RES, "    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });   /* MUTANT: no resolve — the item stays */\n"), 'no-resolve'), 'jobs-triage-withdraw-mut');
   ok(rx.resolved.length === 0, 'B-8bd5 CONTROL (the withdraw without its resolve, in a copy): the For-you item STAYS open — what the row reported', rx.resolved);
-  const MIR = "      if (run) { try { fs.appendFileSync(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\\n'); } catch { } }\n";
+  const MIR = "      if (run) { try { fs.promises.appendFile(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\\n').catch(() => { }); } catch { } }";
   ok(JSRC.split(MIR).length === 2, 'B-8bd5 control setup: the anchor of the control «the stdin mirror of a withdraw» is in jobs.js');
-  const rm = await scene(MJ8.load('src/jobs.js', JSRC.replace(MIR, '      /* MUTANT: no stdin mirror */\n'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
+  const rm = await scene(MJ8.load('src/jobs.js', JSRC.replace(MIR, '      /* MUTANT: no stdin mirror */'), 'no-mirror'), 'jobs-triage-withdraw-mut2');
   ok(rm.stdin === 0, 'B-8bd5 CONTROL (no mirror, in a copy): the stdin-open job never sees the withdraw', rm.stdin);
   for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
-  ok(/const selfActs = \['progress', 'ask', 'withdraw', 'announce'\];/.test(ar) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return jobModel\.canView\(job, a\.caller\) \? res\.status\(403\)/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
+  ok(/const selfActs = \['progress', 'ask', 'withdraw', 'announce'\];/.test(ar) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return jobModel\.canView\(job, a\.caller\) \? res\.status\(403\)/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job, \{ self: !!a\.selfJob \}\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

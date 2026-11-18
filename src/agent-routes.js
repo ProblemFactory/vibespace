@@ -2858,7 +2858,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     else if (act === 'rm') r = a.jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
     else if (act === 'progress') r = a.jm.progress(job, req.body?.text || '');
     else if (act === 'ask') r = a.jm.ask(job, req.body?.panel);
-    else if (act === 'withdraw') r = a.jm.withdrawAsk(job);   // B-8bd5: the filer closes its own ask once its cause is gone
+    else if (act === 'withdraw') r = a.jm.withdrawAsk(job, { self: !!a.selfJob });   // B-8bd5: the filer closes its own ask once its cause is gone (a job's own: no stdin echo)
     else if (act === 'access') {
       for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
       a.jm._touch(job); a.jm._save(); r = { ok: true };

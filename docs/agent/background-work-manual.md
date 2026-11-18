@@ -186,7 +186,10 @@ Its cause gone (the alarm cleared, the mirror fresh again)? `vibespace-job withd
 closes it and resolves its For-you item; `answers` then holds `{"withdrawn": true}`
 for that panel, as an unanswered one holds `{"expired": true}`. The job
 withdraws its own question from inside, or its owner conversation does — never another
-conversation (one that holds control included).
+conversation (one that holds control included: it is refused, 403 `not-the-filer`). A
+`--stdin-open` job reads a withdraw BY ITS OWNER on its stdin as
+`{"withdrawn": true, "version": N}` (match the version to the panel you asked); its own
+withdraw is not echoed there.
 
 Example panel.json:
 ```json

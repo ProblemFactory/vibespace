@@ -3379,7 +3379,7 @@ class JobManager {
   }
   /** B-8bd5: the job that FILED a panel may WITHDRAW it once its cause is gone (a monitor's alarm that cleared) — the panel closed,
    *  its For-you item resolved, a waiting `answers --wait` woken, said in its events; no panel open: answered, nothing changed */
-  withdrawAsk(job) {
+  withdrawAsk(job, { self = false } = {}) {   // `self`: the job withdrew its own question (its jbt_) — it knows; nothing echoes on its stdin
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const p = job.interaction && job.interaction.pending;
     if (!p) return { ok: true, already: 'no panel of this job is open' };
@@ -3389,9 +3389,9 @@ class JobManager {
     const wrec = { withdrawn: true, version: p.version, ts: now() };
     job.interaction.answers.push(wrec);
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);   // its read r2: the same cap as an answer's
-    if (job.stdinOpen) { // 主开发 21:46Z: a stdin-open job reads the withdraw on its stdin, as it reads an answer (the wrapper's answers tail file)
+    if (job.stdinOpen && !self) { // 主开发 21:46Z: a stdin-open job reads a withdraw BY ITS OWNER on its stdin, as it reads an answer (the wrapper's answers tail file) — never an echo of its own
       const run = job.runs && job.runs[job.runs.length - 1];
-      if (run) { try { fs.appendFileSync(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\n'); } catch { } }
+      if (run) { try { fs.promises.appendFile(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\n').catch(() => { }); } catch { } }   // OFF the loop (test-store-write-census: no new synchronous store write)
     }
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
