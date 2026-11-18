@@ -234,7 +234,10 @@ const winsBefore = await evalJs(`app.wm.windows.size`);
 await evalJs(`(() => { app._addSubscription(); return 1; })()`);
 await sleep(500);
 const dlgOk = await evalJs(`(() => {
-  const ovs = [...document.querySelectorAll('.dialog-overlay')];
+  // the EXCLUDED package (2026-11-17, its run alone on the test machine): a FORM dialog is hosted by the form host since it was
+  // built — a sheet or a window's root, never the old bare .dialog-overlay — so it is found by its own id (input-dialog-<n>,
+  // src/lib/utils.js _modalShell), whichever host holds it
+  const ovs = [...document.querySelectorAll('[id^="input-dialog-"]')];
   const ov = ovs[ovs.length - 1];
   const inp = ov?.querySelector('input, textarea');
   if (!inp) return false;
@@ -258,6 +261,8 @@ const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resourc
 check('no JS errors', realErrors.length === 0);
 if (realErrors.length) console.error('   errors:', realErrors.slice(0, 5));
 const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 460, height: 1000, scale: 1.5 } });
-fs.writeFileSync('/tmp/agents-overview.png', Buffer.from(shot.data, 'base64'));
+// a picture only when one is asked for (AO_SHOT=<path>) — a fixed /tmp name was left behind by every run (the test machine's
+// LEFTOVERS named it)
+if (process.env.AO_SHOT) fs.writeFileSync(path.resolve(process.env.AO_SHOT), Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);
