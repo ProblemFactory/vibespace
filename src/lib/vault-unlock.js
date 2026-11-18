@@ -271,9 +271,10 @@ export function showUnlock({ then = null, opener = 'person' } = {}) {
     err.textContent = '';
     if (!pw.value) { pw.focus(); return; }
     const done = sayVaultWait(go, err, t('Unlocking…'), t('Checking the second password…'));
-    const r = await post('/api/vault/unlock', { password: pw.value });
+    unlockAsked++;   // this page's own unlock is in flight: the hub's broadcast of it may land BEFORE this answer (unlockThen `here`)
+    let r; try { r = await post('/api/vault/unlock', { password: pw.value }); } finally { unlockAsked--; }
     done();
-    if (r && r.ok) { pw.value = ''; applyVaultFacts(r); close(); showToast(t('Vault unlocked')); return; }
+    if (r && r.ok) { pw.value = ''; applyUnlockHere(r); close(); showToast(t('Vault unlocked')); return; }
     pw.value = ''; pw.focus();
     err.textContent = vaultWords(r);
     if (r && r.state) applyVaultFacts(r);
@@ -287,7 +288,7 @@ export function showUnlock({ then = null, opener = 'person' } = {}) {
 /** The ⚙ button's press (app.js, mobile-nav.js — lane vault-locked-loud): while LOCKED the unlock dialog first, then `open` (the
  *  menu, as today) once it closes; otherwise `open` at once. */
 export function unlockFirst(open) {
-  if (vaultLoudState({ facts }).mark) { unlockThen(open); return; }   // B-864f cure (the cure's own read): an unlock in this dialog removes it — `then` alone never opened the menu
+  if (vaultLoudState({ facts }).mark) { unlockThen(open, { here: true }); return; }   // B-864f cure: an unlock in this dialog removes it (`then` alone never opened the menu) — and only THIS page's unlock opens it (cure 2)
   open();
 }
 
@@ -350,14 +351,27 @@ export function showChange() {
   setTimeout(() => o.focus(), 0);
 }
 
+/** THIS page's own unlock answer (the dialog's submit) — applied with `unlockedHere` raised, so a wait that asked for THIS
+ *  page's unlock (unlockThen `here`) tells it from another tab's or device's (the broadcast applies the same facts). */
+let unlockedHere = false, unlockAsked = 0;
+function applyUnlockHere(r) { unlockedHere = true; try { applyVaultFacts(r); } finally { unlockedHere = false; } }
+
 /** RUN `go` ONCE AFTER THE UNLOCK ASK (B-864f cure — the reader round's must): when the person closes the unlock dialog (an
  *  unlock, 「稍后」, Esc, ✕) OR the vault turns unlocked (this dialog, another tab, another device), whichever comes first.
  *  applyVaultFacts REMOVES the unlock dialog when the facts say unlocked, and a removed form runs none of its closers — so a
  *  `then` alone never ran after a successful unlock. The boot offer's «Unlock and resume all n» (src/lib/layout.js). */
-export function unlockThen(go) {
+export function unlockThen(go, { here = false } = {}) {
   let ran = false, off = null;
-  const once = () => { if (ran) return; ran = true; if (off) off(); go(); };
-  off = onVaultFacts((f) => { if (f && f.state === 'unlocked') once(); });
+  const once = () => { if (ran) return; ran = true; if (off) off(); setTimeout(go, 0); };   // after the closing press / outside the facts loop — a zero timer, as a close always ran it
+  // `here`: only an unlock made in THIS page counts (the ⚙ press asked for this page's menu — another device's unlock minutes
+  // later must not pop it open); the close here still runs it
+  // cure 2b (the read): another page's unlock ENDS a `here` wait unrun — left armed, a later unlock here for another reason
+  // would pop the menu hours after the press; one that lands while THIS page's own unlock is in flight waits for its answer
+  off = onVaultFacts((f) => {
+    if (!f || f.state !== 'unlocked') return;
+    if (!here || unlockedHere) { once(); return; }
+    if (!unlockAsked) { ran = true; off(); }
+  });
   if (facts && facts.state === 'unlocked') { once(); return; }
   showUnlock({ then: once });
 }

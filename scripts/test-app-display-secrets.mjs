@@ -305,9 +305,9 @@ try {
   let src2 = src;
   for (const [a, z] of [
     ["                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)\n                emit(conn, 'ItemChanged', item_path(n))", "                S.items[n] = val; S.save(); emit(conn, 'ItemChanged', item_path(n))"],
-    ["                n = S.next; val['created'] = now\n                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)\n                S.next += 1; register_item(conn, n)", "                n = S.next; S.next += 1; val['created'] = now; S.items[n] = val; S.save(); register_item(conn, n)"],
-    ["            if not S.save({k: v for k, v in S.items.items() if k != n}): return err(FAILED, NOT_WRITTEN)\n            drop_item(conn, n); emit(conn, 'ItemDeleted', path)", "            drop_item(conn, n); S.save(); emit(conn, 'ItemDeleted', path)"],
-    ["            if not S.save({}): return err(FAILED, NOT_WRITTEN)\n            for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))\n            say(", "            for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))\n            S.save(); say("],
+    ["                n = S.next; val['created'] = now\n                if not S.save({**S.items, n: val}): return err(FAILED, NOT_WRITTEN)\n                S.next += 1; register_item(conn, n)", "                n = S.next; S.next += 1; val['created'] = now; S.items[n] = val; S.save(); register_item(conn, n)"],   // stale-pins: kept — a RED control: the pre-fix writer line restored on purpose (B-694d)
+    ["            if not S.save({k: v for k, v in S.items.items() if k != n}): return err(FAILED, NOT_WRITTEN)\n            drop_item(conn, n); emit(conn, 'ItemDeleted', path)", "            drop_item(conn, n); S.save(); emit(conn, 'ItemDeleted', path)"],   // stale-pins: kept — a RED control: the pre-fix writer line restored on purpose (B-694d)
+    ["            if not S.save({}): return err(FAILED, NOT_WRITTEN)\n            for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))\n            say(", "            for n in ns: drop_item(conn, n); emit(conn, 'ItemDeleted', item_path(n))\n            S.save(); say("],   // stale-pins: kept — a RED control: the pre-fix writer line restored on purpose (B-694d)
   ]) { if (!src2.includes(a)) throw new Error('the .407-shape mutant anchor moved: ' + a.slice(0, 60)); src2 = src2.replace(a, z); }
   fs.writeFileSync(mut2, src2);
   b = await startBus('on', mut2);

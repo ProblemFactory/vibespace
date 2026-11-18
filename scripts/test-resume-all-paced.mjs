@@ -223,21 +223,23 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   const locked = (i, m) => ({ type: 'error', reqId: m.reqId, code: 'vault_locked', cwd: m.cwd, waitsFor: 'Studio Mac', message: `the vault is locked — the folder ${m.cwd} is on Studio Mac, which opens after the owner unlocks the vault with the second password` });
   const created = (i, m) => ({ type: 'created', sessionId: 'new-' + i, cwd: m.cwd, mode: 'chat', reqId: m.reqId });
   const pick = (m) => J({ cwd: m.cwd, resumeId: m.resumeId, mode: m.mode, backend: m.backend, sessionName: m.sessionName, model: m.model, permissionMode: m.permissionMode, effort: m.effort });
-  const waitsLeg = async (inst, { unlockMidPace = false, already = false } = {}) => {
+  const waitsLeg = async (inst, { unlockMidPace = false, already = false, archive = null, archivedAtAsk = null } = {}) => {
     vf.clear(); globalThis.__rapFacts = already ? { state: 'unlocked' } : { state: 'locked' };
     const t0 = made.length, n = unlockMidPace ? 4 : 3;
     const refused = new Set(), waits = (m) => (unlockMidPace ? m.resumeId === CID(1) : true);   // each waiting conversation is refused ONCE
     const P = page(inst, { delay: 10, answer: (i, m) => (waits(m) && !refused.has(m.resumeId) ? (refused.add(m.resumeId), locked(i, m)) : created(i, m)) });
+    if (archivedAtAsk) P.app.sidebar.isArchived = (s) => !!(s && s.sessionKey === `claude:${archivedAtAsk}`);   // archived BEFORE its resume was asked
     const run = P.lm._resumeAll(stoppedOf(n));
     if (unlockMidPace) { for (let k = 0; k < 40 && P.creates.length < 2; k++) await tick(5); facts({ state: 'unlocked' }); }
     await run; await tick(5);
     const first = { creates: P.creates.length, said: saidOf(t0), waiting: vf.size };
+    if (archive) P.app.sidebar.isArchived = (s) => !!(s && s.sessionKey === `claude:${archive}`);   // the person archives it WHILE IT WAITS (after the refusals)
     if (!unlockMidPace && !already) { facts({ state: 'locked' }); await tick(10); first.whileLocked = P.creates.length; facts({ state: 'unlocked' }); }
-    const want = unlockMidPace ? 5 : 6;
+    const want = unlockMidPace ? 5 : archive ? 5 : 6;
     for (let k = 0; k < 120 && P.answered < want; k++) await tick(10);
     await tick(10); facts({ state: 'unlocked' }); await tick(30);
     const same = refused.size > 0 && [...refused].every((rid) => { const ms = P.creates.filter((m) => m.resumeId === rid); return ms.length === 2 && pick(ms[0]) === pick(ms[1]); });
-    return { first, after: P.creates.length, max: Math.max(0, ...P.inFlightAtSend), same, left: vf.size, inFlightAtSend: P.inFlightAtSend };
+    return { first, after: P.creates.length, max: Math.max(0, ...P.inFlightAtSend), same, left: vf.size, inFlightAtSend: P.inFlightAtSend, of2: P.creates.filter((m) => m.resumeId === CID(2)).length };
   };
   const w = await waitsLeg(await lifeOf());
   ok(w.first.creates === 3 && w.first.waiting === 3 && w.first.whileLocked === 3, 'three conversations whose folders wait for the vault: three refusals, each window waits (no gone dialog, nothing recreated); a tick still LOCKED starts nothing', w.first);
@@ -248,6 +250,14 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   ok(mid.after === 5 && mid.max === 1 && mid.same, 'unlocked WHILE the pace still has a create in flight: the waiting window takes its turn in the pace\'s lane — never two in flight', mid);
   const now = await waitsLeg(await lifeOf(), { already: true });
   ok(now.after === 6 && now.max === 1 && now.left === 0 && now.same, 'a vault already unlocked when the refusal lands (it was unlocked meanwhile): the window resumes at once, in the lane', now);
+  const ar = await waitsLeg(await lifeOf(), { archive: CID(2) });
+  ok(ar.after === 5 && ar.of2 === 1 && ar.max === 1, 'a conversation the person ARCHIVED while it waited (cure 2 — archiving leaves its window open, the create door reads no archive) is NOT resumed at the unlock (its one create was the refused one); the other two are', ar);
+  const aa = await waitsLeg(await lifeOf(), { archivedAtAsk: CID(2) });
+  ok(aa.after === 6 && aa.of2 === 2, 'one ALREADY archived when its resume was asked (Send my message again, a boot resume-all) is the person\'s own resume — it goes on at the unlock (cure 2b)', aa);
+  const arRed = await waitsLeg(await lifeOf((x) => x.replace(/\n            if \(!archivedAtAsk && this\.sidebar\?\.isArchived\?\.\(convOf\)\)[^\n]*\n/, '\n')), { archive: CID(2) });
+  ok(arRed.after === 6, 'RED control: the replay without the archive check (cure 1\'s shape) ⇒ the archived conversation is resumed', arRed);
+  const aaRed = await waitsLeg(await lifeOf((x) => x.replace('if (!archivedAtAsk && this.sidebar?.isArchived?.(convOf))', 'if (this.sidebar?.isArchived?.(convOf))')), { archivedAtAsk: CID(2) });
+  ok(aaRed.after === 5, 'RED control: «archived NOW» (cure 2\'s shape) ⇒ a resume the person asked of an archived conversation is dropped at the unlock, its message with it', aaRed);
   const r1 = await waitsLeg(await lifeOf((x) => x.replace('        if (msg.resumesAtUnlock) {\n', '        if (false) {\n')));
   ok(r1.after === 3, 'RED control: the window that waits taken out (the .407 shape) ⇒ nothing resumes after the unlock', r1);
   const flood = (x) => x.replace('const turnOf = (fn) => inTurn(fn);', 'const turnOf = (fn) => fn();');

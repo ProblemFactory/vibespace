@@ -9996,6 +9996,7 @@ export default {
   "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "このセッションは保管庫を待っています — 第二パスワードでロックを解除すると（ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています）自動で再接続し、何も失われません。", // lane vault-e2e-password-fix-r2
   "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "この会話のフォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — このページを開いている間は、解除すれば自動で再開し、何も失われません。",
   "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.": "この会話のフォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — このページを開いている間は、解除すれば自動で再開し、書いておいたメッセージを送ります。何も失われません。",
+  "Not resumed — this conversation was archived while it waited for the vault.": "再開しませんでした — この会話は保管庫を待つ間にアーカイブされました。",
   "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "この会話のフォルダーは {name} 上にありますが、今はマウントされていません — 何も開始していません。マウントが戻ってから再開してください。",
   "The folder is on {name}, which is not mounted right now — start again once it is back.": "フォルダーは {name} 上にありますが、今はマウントされていません — 戻ってからもう一度始めてください。",
   "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "フォルダーは {name} 上にあり、保管庫のロックを解除すると開きます — 解除してから、もう一度始めてください。",

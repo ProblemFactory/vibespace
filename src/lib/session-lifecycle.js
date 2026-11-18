@@ -365,8 +365,14 @@ export function installSessionLifecycle(App, ctx = {}) {
         // resume-all-paced law — never every window at the unlock's tick); the hub then waits for the mount to come back
         if (msg.resumesAtUnlock) {
           rescueViewOnly();
+          // B-864f cure 2 (主开发's ask): a conversation the person ARCHIVED WHILE IT WAITED was put away — never resumed by the
+          // unlock (archiving leaves its read-only window open; the create door reads no archive). «While it waited»: one already
+          // archived when its resume was asked (Send my message again, a boot resume-all) is the person's own resume — it goes on
+          const convOf = { sessionKey: `${backend}:${createArgs.backendSessionId || resumeId}`, backend, backendSessionId: createArgs.backendSessionId || resumeId, cwd, host: hostId || undefined };
+          const archivedAtAsk = !!this.sidebar?.isArchived?.(convOf);
           const again = () => turnOf(() => new Promise((done) => {
             if (!this._winIs(winInfo)) { done(); return; } // closed or re-made while it waited
+            if (!archivedAtAsk && this.sidebar?.isArchived?.(convOf)) { this.sessions.get(winInfo.id)?._renderers?.appendSystem(t('Not resumed \u2014 this conversation was archived while it waited for the vault.')); done(); return; }
             const re = this._reopenWin(winInfo.id); // the row, re-opened (r2 N1)
             const { onCreateResult: _r, onCreateEnd: _e, syncId: _s, winBounds: _w, recreateCwd: _c, ...asked } = createArgs;
             this.createSession({ ...asked, winBounds: winBounds || re?.place, syncId: re?.id, onCreateEnd: () => done() });

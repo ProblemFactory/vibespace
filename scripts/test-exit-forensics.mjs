@@ -1268,7 +1268,7 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
     ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '')),
       `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above; claude-steer-inject 2.369.362: the kept copies, src/kept-copies.js, above)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
-    ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),
+    ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),   // stale-pins: kept — an absence check on ITS own body (fs.writeFileSync left only in src/app-secrets-seal.js by B-694d)
       `${f}: the signal handler is synchronous (no await/timer/stream write)`);
     ok(!/writeFileSync|persistMeta\(/.test(body) && /overwriteIfPresent\(metaFile, /.test(body) && /overwriteIfPresent\(bufferFile, buffer\) && fs\.existsSync\(metaFile\)\) persistBuffer\(\)/.test(body),
       `${f}: the handler writes the meta only through overwriteIfPresent ('r+'), the buffer only into an existing .buf or while the meta exists`);
