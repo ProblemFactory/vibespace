@@ -57,13 +57,15 @@ jobs:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smoke needs)
         run: bash scripts/ci-apt.sh dtach
-        timeout-minutes: 3
+        # 6 (B-4a3b, B-3f60): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), the install and its one more try (80 s each)
+        timeout-minutes: 6
       # zsh (int378 seam 7): test-cli-env measures REAL zsh + REAL bash because the owner's shell is zsh (lane cli-shell-truth:
       # the person's login shell is the truth for where an agent CLI is); the runner image ships bash only. Its OWN step, so the
       # dtach step stays byte-identical (test-ci-gate pins it). No heavy job runs a real zsh (checked at .378).
       - name: Install zsh (test-cli-env's real login shells)
         run: bash scripts/ci-apt.sh --no-update zsh
-        timeout-minutes: 3
+        # 5 (B-3f60: hosted run 44202852228 died here, the install's fetch past its 80 s bound): the install, the second mirror's update and the install once more fit
+        timeout-minutes: 5
       # THE GATE PINS THE TOOL IT REVIEWS (int365 seam, 2.369.365): test-vault-run-model ⑤c re-parses the LIVE gh against
       # the gh grammar reviewed at gh 2.102.0 (src/vault-run.js's gh row: grammarVersion, the 32 help hashes, toolSha256) and
       # is REQUIRED here. On 2026-10-30 the runner image rolled its gh to 2.103.2 and the .364 mirror's fast job went red on
@@ -183,7 +185,8 @@ jobs:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smokes need)
         run: bash scripts/ci-apt.sh dtach
-        timeout-minutes: 3
+        # 6 (B-4a3b, B-3f60): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), the install and its one more try (80 s each)
+        timeout-minutes: 6
       # CJK fonts (lane-mirror-197, 2.369.198): the runner image ships DejaVu +
       # Liberation and NO CJK family, so every zh / ja glyph the chrome suites
       # measure was DejaVu's fallback box — narrower than the glyph a Chinese or

@@ -522,29 +522,82 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
   ok(!bare.length && door.length >= 2, `every apt step in ci.yml goes through scripts/ci-apt.sh (${door.length} steps${bare.length ? '; BARE: ' + bare.map((l) => l.trim()).join(' | ') : ''})`);
   const sh = fs.readFileSync(path.join(REPO, 'scripts', 'ci-apt.sh'), 'utf-8');
   ok(/Acquire::ForceIPv4=true/.test(sh) && /--no-install-recommends/.test(sh), 'the door speaks IPv4 and installs only the packages named');
-  ok(/-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30/.test(sh) && /timeout -k \d+ "\$BOUND" \$SUDO/.test(sh) && /^BOUND=\$\{CI_APT_BOUND:-80\}$/m.test(sh),
+  ok(/-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30/.test(sh) && /timeout -k \d+ "\$b" \$SUDO/.test(sh) && /^BOUND=\$\{CI_APT_BOUND:-80\}$/m.test(sh) && /^FIRST=\$\{CI_APT_UPDATE_BOUND:-\$\{CI_APT_BOUND:-40\}\}$/m.test(sh),
     'the door is BOUNDED (lane ci-cjk-fonts): a stalled connection gives up after 30 s, every apt call runs under `timeout` (80 s, sized for dtach)');
   // the selection over a fixture sources.list.d: the runner's microsoft lists moved aside (printed), ubuntu.sources kept
   const dir = path.join(mktmp('apt'), 'sources.list.d');
   fs.mkdirSync(dir, { recursive: true });
+  // B-4a3b: every run here keeps the second mirror's list in a scratch file (never the runner's /tmp default) and reads a fixture release
+  const aptState = path.join(path.dirname(dir), 'second-mirror.list'), osRel = path.join(path.dirname(dir), 'os-release');
+  fs.writeFileSync(osRel, 'NAME="Ubuntu"\nVERSION_CODENAME=noble\n');
+  const AENV = { CI_APT_STATE: aptState, CI_APT_OS_RELEASE: osRel };
   fs.writeFileSync(path.join(dir, 'ubuntu.sources'), 'Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\nSuites: noble noble-updates\nComponents: main universe\n');
   fs.writeFileSync(path.join(dir, 'microsoft-prod.list'), 'deb [arch=amd64,armhf,arm64] https://packages.microsoft.com/ubuntu/24.04/prod noble main\n');
   fs.writeFileSync(path.join(dir, 'azure-cli.sources'), 'Types: deb\nURIs: https://packages.microsoft.com/repos/azure-cli/\nSuites: noble\n');
-  const r = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1' } });
+  const r = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1' , ...AENV } });
   const left = fs.readdirSync(dir).sort().join(), aside = fs.existsSync(dir + '.off') ? fs.readdirSync(dir + '.off').sort().join() : '';
   ok(r.status === 0 && left === 'ubuntu.sources' && aside === 'azure-cli.sources,microsoft-prod.list' && /moved aside microsoft-prod\.list — https:\/\/packages\.microsoft\.com/.test(r.stdout) && /kept ubuntu\.sources/.test(r.stdout),
     `the runner's packages.microsoft.com lists are moved aside BY NAME, the Ubuntu archive kept (left: ${left}; aside: ${aside})`);
   const OPTS = '-o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30';
-  okd(r.stdout.includes(`\ntimeout 80 apt-get ${OPTS} update\n`) && r.stdout.endsWith(`timeout 80 apt-get ${OPTS} install -y --no-install-recommends dtach\n`), 'then update + install of exactly the named package, IPv4 forced, each call bounded', r.stdout);
-  const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1', CI_APT_BOUND: '200' } });
+  okd(r.stdout.includes(`\ntimeout 40 apt-get ${OPTS} --error-on=any update\nci-apt: the index is the runner's mirror's\n`) && r.stdout.endsWith(`timeout 80 apt-get ${OPTS} install -y --no-install-recommends dtach\n`), 'then update + install of exactly the named package, IPv4 forced, each call bounded', r.stdout);
+  const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1', CI_APT_BOUND: '200' , ...AENV } });
   ok(noUpd.status === 0 && !/ update\n/.test(noUpd.stdout) && /^timeout 200 apt-get .* install -y --no-install-recommends dtach$/m.test(noUpd.stdout), '--no-update installs on the index the first step fetched; CI_APT_BOUND sizes the bound for a larger package');
   // the bound itself, over a stub apt-get that never answers (a stalled mirror): the call is killed, the step red BY NAME
   const stub = path.join(mktmp('aptstub'), 'bin');
   fs.mkdirSync(stub);
   fs.writeFileSync(path.join(stub, 'apt-get'), '#!/bin/bash\nexec sleep 30\n', { mode: 0o755 });
-  const hung = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { PATH: `${stub}:${process.env.PATH}`, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_BOUND: '0.3' } });
-  okd(hung.status === 124 && /^::error::ci-apt: apt-get … update passed its 0\.3 s bound \(a stalled mirror\)$/m.test(hung.stderr) && !/install -y/.test(hung.stdout + hung.stderr),
-    `an apt call past its bound is killed and the step goes red naming it — the install never starts (exit ${hung.status})`, hung.stdout + hung.stderr);
+  const hung = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { PATH: `${stub}:${process.env.PATH}`, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_BOUND: '0.3' , ...AENV } });
+  okd(hung.status === 124 && /^::warning::ci-apt: apt-get … update passed its 0\.3 s bound \(a stalled mirror\)$/m.test(hung.stderr) && /^::error::ci-apt: apt-get … update passed its 0\.3 s bound \(a stalled mirror\)$/m.test(hung.stderr)
+    && /ONCE more against http:\/\/archive\.ubuntu\.com\/ubuntu/.test(hung.stdout) && !/install -y/.test(hung.stdout + hung.stderr),
+    `an apt call past its bound is killed; a stalled update is tried ONCE more on the second mirror (a warning), and when that stalls too the step goes red naming it — the install never starts (exit ${hung.status})`, hung.stdout + hung.stderr);
+  // B-4a3b THE SECOND MIRROR: the runner's mirror stalls on the FIRST call only (10-31: three jobs red at SETUP, exit 124)
+  { const once = path.join(mktmp('aptonce'), 'bin'), log = path.join(path.dirname(once), 'argv.log');
+    fs.mkdirSync(once);
+    fs.writeFileSync(path.join(once, 'apt-get'), '#!/bin/bash\necho "$*" >> "$APT_STUB_LOG"\n[ "$(wc -l < "$APT_STUB_LOG")" -eq 1 ] && exec sleep 30\nexit 0\n', { mode: 0o755 });
+    const env = { PATH: `${once}:${process.env.PATH}`, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_BOUND: '0.5', APT_STUB_LOG: log, ...AENV };
+    const rr = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env });
+    const calls = fs.readFileSync(log, 'utf-8').trim().split('\n'), alt = `-o Dir::Etc::sourcelist=${aptState} -o Dir::Etc::sourceparts=-`;
+    okd(rr.status === 0 && calls.length === 3 && / --error-on=any update$/.test(calls[0]) && !calls[0].includes('sourcelist') && calls[1].endsWith(`${alt} --error-on=any update`) && calls[2].includes(alt) && / install -y --no-install-recommends dtach$/.test(calls[2])
+      && /^::warning::ci-apt: apt-get … update passed its 0\.5 s bound/m.test(rr.stderr) && !/::error::/.test(rr.stderr) && /ONCE more against http:\/\/archive\.ubuntu\.com\/ubuntu \(noble main universe\)/.test(rr.stdout),
+      `a stalled first update is a WARNING, the second mirror's update serves, and the install reads THAT index (exit ${rr.status}, ${calls.length} calls)`, rr.stdout + rr.stderr + calls.join('\n'));
+    const K = '[signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg]';
+    ok(fs.readFileSync(aptState, 'utf-8') === `deb ${K} http://archive.ubuntu.com/ubuntu noble main universe\ndeb ${K} http://archive.ubuntu.com/ubuntu noble-updates main universe\n`,
+      'the second mirror\'s list: the runner\'s release (main + universe, the release and its -updates), signed by the archive keyring, every source part off');
+    // a mirror that FAILS FAST (exit 100, no stall) is a failed update too — warned with its exit code, then the second mirror
+    const fastFail = path.join(mktmp('aptfail'), 'bin'), logF = path.join(path.dirname(fastFail), 'argv.log');
+    fs.mkdirSync(fastFail);
+    fs.writeFileSync(path.join(fastFail, 'apt-get'), '#!/bin/bash\necho "$*" >> "$APT_STUB_LOG"\n[ "$(wc -l < "$APT_STUB_LOG")" -eq 1 ] && exit 100\nexit 0\n', { mode: 0o755 });
+    const ff = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { ...env, PATH: `${fastFail}:${process.env.PATH}`, APT_STUB_LOG: logF } });
+    ok(ff.status === 0 && /^::warning::ci-apt: apt-get … update failed \(exit 100\)$/m.test(ff.stderr) && /ONCE more against/.test(ff.stdout) && fs.readFileSync(logF, 'utf-8').trim().split('\n').length === 3,
+      'a mirror that FAILS FAST (exit 100) is warned with its exit code and the second mirror serves — not only a stall');
+    // THE INSTALL'S ONE MORE TRY (B-3f60: hosted run 44202852228's «Install zsh» — the install's fetch past its bound after a green
+    // update): a stub apt-get that answers each call by a plan (ok / stall / fail), one call per line of its log
+    const plan = path.join(mktmp('aptplan'), 'bin'); fs.mkdirSync(plan);
+    fs.writeFileSync(path.join(plan, 'apt-get'), '#!/bin/bash\necho "$*" >> "$APT_STUB_LOG"\nn=$(wc -l < "$APT_STUB_LOG"); a=$(echo "$APT_PLAN" | cut -d, -f"$n")\n[ "$a" = stall ] && exec sleep 30\n[ "$a" = fail ] && exit 100\nexit 0\n', { mode: 0o755 });
+    const planned = (args, p, extra = {}) => { const lg = path.join(mktmp('aptplanlog'), 'argv.log'); fs.writeFileSync(lg, '');
+      const st = path.join(path.dirname(lg), 'second.list'); if (extra.second) fs.writeFileSync(st, 'deb [signed-by=/k] http://second.example/ubuntu noble main\n');
+      const r = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), ...args], { encoding: 'utf-8', env: { PATH: `${plan}:${process.env.PATH}`, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_BOUND: '0.5', APT_STUB_LOG: lg, APT_PLAN: p, CI_APT_STATE: st, CI_APT_OS_RELEASE: osRel } });
+      return { r, calls: fs.readFileSync(lg, 'utf-8').trim().split('\n'), st }; };
+    const i1 = planned(['zsh'], 'ok,stall,ok,ok');
+    ok(i1.r.status === 0 && i1.calls.length === 4 && /install -y --no-install-recommends zsh$/.test(i1.calls[1]) && !i1.calls[1].includes('sourcelist') && /sourceparts=- --error-on=any update$/.test(i1.calls[2]) && /sourcelist=.* install -y --no-install-recommends zsh$/.test(i1.calls[3])
+      && /^::warning::ci-apt: apt-get … zsh passed its 0\.5 s bound/m.test(i1.r.stderr) && !/::error::/.test(i1.r.stderr),
+      `an install that STALLS after a green update goes ONCE more on the second mirror — its own update, then the install (B-3f60; ${i1.calls.length} calls)`, i1.r.stdout + i1.r.stderr + i1.calls.join('\n'));
+    const i2 = planned(['--no-update', 'zsh'], 'fail,ok', { second: true });
+    ok(i2.r.status === 0 && i2.calls.length === 2 && i2.calls.every((c) => c.includes('sourcelist=') && / install -y --no-install-recommends zsh$/.test(c)) && /ONCE more on the same index/.test(i2.r.stdout),
+      'an install on an index that IS the second mirror\'s already goes ONCE more on that same index');
+    const i3 = planned(['--no-update', 'zsh'], 'fail,ok,fail');   // the install fails, the second mirror's update answers, its install fails too
+    ok(i3.r.status !== 0 && i3.calls.length === 3 && /^::error::ci-apt: apt-get … zsh failed \(exit 100\)$/m.test(i3.r.stderr),
+      `an install that fails on BOTH mirrors is a red that names it — no third install (exit ${i3.r.status}, ${i3.calls.length} calls)`);
+    const later = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'zsh'], { encoding: 'utf-8', env });
+    const c2 = fs.readFileSync(log, 'utf-8').trim().split('\n');
+    ok(later.status === 0 && c2.length === 4 && c2[3].includes(alt) && / install -y --no-install-recommends zsh$/.test(c2[3]) && /the index is the second mirror's/.test(later.stdout),
+      'a later --no-update step installs from the SAME index (the second mirror\'s list kept for the job)');
+    const log2 = path.join(path.dirname(once), 'argv2.log');
+    fs.writeFileSync(log2, 'an earlier call\n'); // the stub stalls only on its log's first line: this time the runner's mirror answers
+    const fresh = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { ...env, APT_STUB_LOG: log2 } });
+    const c3 = fs.readFileSync(log2, 'utf-8').trim().split('\n').slice(1);
+    ok(fresh.status === 0 && c3.length === 2 && !fs.existsSync(aptState) && !c3.some((l) => l.includes('sourcelist')) && !/second mirror/.test(fresh.stdout),
+      'an update that the runner\'s mirror answers clears an earlier job\'s second-mirror list (the index is decided anew)'); }
 }
 
 // ── §2g AN INSTALL MAY BE RETRIED, A SUITE NEVER (lane ci-npm-retry, B-fa5e: .330's heavy 6/6 — run 39462417012 — died in
@@ -711,7 +764,7 @@ console.log('\n§2h every setup step is bounded; the fonts have one road (script
     ['a cache restore that may stall to its bound', 'yml', (t) => t.replace(new RegExp(STEP('Cache the pinned CJK fonts')), (m) => m.replace('          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2\n', '')), /a stalled fonts-cache restore is no miss .*unset/],   // the FONTS cache's line (int365 seam: the fast job's gh cache, earlier in the file, carries the same line)
     ['the fonts step unbounded', 'yml', (t) => t.replace(FONTS_RUN + '        timeout-minutes: 6\n', FONTS_RUN), /job heavy-shards: «Install CJK fonts [^»]*» has no timeout-minutes/],
     ['the fonts step bounded at 30', 'yml', (t) => t.replace(FONTS_RUN + '        timeout-minutes: 6\n', FONTS_RUN + '        timeout-minutes: 30\n'), /the fonts step's bound is 30 \(≤ 6 min\)/],
-    ['dtach unbounded', 'yml', (t) => t.replace('        run: bash scripts/ci-apt.sh dtach\n        timeout-minutes: 3\n', '        run: bash scripts/ci-apt.sh dtach\n'), /job fast: «Install dtach [^»]*» has no timeout-minutes/],
+    ['dtach unbounded', 'yml', (t) => t.replace(/        run: bash scripts\/ci-apt\.sh dtach\n( {8}#[^\n]*\n)?        timeout-minutes: 6\n/, '        run: bash scripts/ci-apt.sh dtach\n'), /job fast: «Install dtach [^»]*» has no timeout-minutes/],
     ['checkout unbounded', 'yml', (t) => t.replace('      - uses: actions/checkout@v4\n        timeout-minutes: 3\n', '      - uses: actions/checkout@v4\n'), /job fast: «actions\/checkout@v4» has no timeout-minutes/],
     // (2.369.408's heavy-shards seam: the job's limit 45 → 60 — this mutant sets npm ci's bound to THE JOB'S, so it follows the job's number)
     ['npm ci bounded at the job\'s 60', 'yml', (t) => t.replace(/(run: bash scripts\/ci-npm\.sh ci\n {8}timeout-minutes: )6\n([\s\S]*run: bash scripts\/ci-npm\.sh ci\n {8}timeout-minutes: )6\n/, '$16\n$260\n'), /job heavy-shards: «npm ci \(3 attempts on a registry blip\)» is bounded at 60, not under its job's 60/],
