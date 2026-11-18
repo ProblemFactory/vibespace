@@ -12272,6 +12272,7 @@ export default {
   "Handed {n} group messages to the running turn": "{n} 件のグループメッセージを実行中のターンに渡しました",
   "the user handed the group messages waiting for a conversation to its running turn": "あなたが会話を待っているグループメッセージを実行中のターンに渡した",
   "Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn": "渡していません — 待っているグループメッセージは一度に渡せる量を超えています。次のターンで届きます",
+  "Not handed over — the last hand-over still waits for the agent to say it took the group messages (up to a minute); they keep waiting": "渡していません — 前回の受け渡しは、エージェントがグループメッセージを受け取ったと言うのをまだ待っています（最大 1 分）。待ち続けます",
   "Allow for 1 hour": "1 時間許可", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "この会話を 1 時間許可しました — 使うたびに通知が出ます。保管庫ウィンドウで取り消せます", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "すべての宛先", // lane vault-standing-request r7 («Allow for 1 hour»)

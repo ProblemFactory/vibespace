@@ -315,6 +315,7 @@ function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, time
   if (code === 'stopping') return { text: t('Not handed over — the turn is being stopped; the group messages ride the next turn'), door: null };
   if (code === 'unconfirmed') return { text: t('The agent did not confirm it took the group messages; they keep waiting for its next turn'), door: null };
   if (code === 'too_long') return { text: t('Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn'), door: null };
+  if (code === 'awaiting_word') return { text: t('Not handed over — the last hand-over still waits for the agent to say it took the group messages (up to a minute); they keep waiting'), door: null };
   if (code === 'unreachable') return { text: t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn'), door: null };
   if (code === 'in_flight') return { text: t('A hand-over for this agent is already in progress'), door: null };
   if (code === 'held_for_next_turn') return { text: t('Not handed over — this agent’s process predates mid-turn notifications; the notices ride its next prompt (restart the session to receive them mid-turn)'), door: null };

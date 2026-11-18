@@ -1222,6 +1222,16 @@ and restored at boot.
   delivery and the wrapper's echo restores the originals too; the echo's own
   `kind` is judged (a `peer` frame never restores); `delivered` on the result
   counts every claimed entry (the cap no longer evicts a claimed one).
+- `POST /api/sessions/:id/stash/hand-over-groups` (B-02a3 — a PERSON's press only: every bearer → **403 `agent_forbidden`**, no page's
+  press → **403 `not_a_person`**) → `{ok, id, delivered, lane: 'steer'}` — the GROUP messages waiting for this conversation (the
+  groups engine's own next-turn report, aside), handed to its RUNNING turn through THE typing path (origin `group-handover`: no
+  message id, the Enter door's steer); the spend ceiling is asked FIRST under the attended reason **`group-handover`** (the hub
+  passes the door its guard, `getSpendGuard`); settled as received (the engine's marks, the cards) only on the wrapper's own
+  `input_handover handed`. Refusals: 404 `no_session`, 409 `no_conversation` / `nothing_waiting` / `too_long` / `in_flight` /
+  `awaiting_word` (the last hand-over still waits for its word, ≤ 1 min; `Retry-After`) / `not_mid_turn` (no turn live by the
+  CLI's records) / `stopping` (a Stop settles until the CLI's idle) / `not_steerable` (this conversation's Enter does not hand a
+  message to a running turn; a remote conversation) / `unconfirmed` (no word within 3 s — nothing settled; a word ≤ 1 min later
+  still settles) / `unreachable`, 429 `spend_refused`, 503 `restarting` / `unavailable`. No refusal settles anything (no mark moves, no card), and every refusal but `unconfirmed` types nothing: an `unconfirmed` press HAS typed its frame into the turn — only the word is missing. The waiting hand-over is remembered ≤ 1 min: a press after that minute may hand the same messages again (the wrapper's word carries no id).
 
 ### Slack (design 012, lane S1)
 

@@ -554,6 +554,115 @@ const DEFERRED_ATTENDED = [
   { reason: 'held-deliver', door: 'POST /api/channels/reach-requests/:id/:verdict (decideRequest → decideHeld → flushScope / flushPending → wakeNow; a person door under personVerdict there)', wiredIn: 'wake-approve-card r10' },
 ];
 const WO = require(path.join(REPO, 'src/write-origin.js'));
+// §2c THE GUARD IS WIRED WHERE THE HUB BUILDS IT (B-02a3 cure, 主开发 12:19Z). §2 judges a site by the SHAPE of its gate call
+// (`spendGuard.authorize(` in scope) — never by whether the guard that call reaches was ever handed in. The B-02a3 door at
+// 869399b5c read its guard through a default getter that found nothing (`require('./usage-pool-engine.js').spendGuard`: the
+// module exports only `create`), so in production every press was refused «not wired» while §2 called its site GATED. DERIVED:
+// every function that TAKES the guard as a destructured parameter named authorizeSpend / getSpendGuard / spendGuard (a
+// constructor: `function create({…})`, `function mountRoutes({…})`, `function setupAgentRoutes({…})`, any name) is handed it at
+// EVERY site that builds it — a `require(…/<module>).<fn>(` call, or a call of the name a `const { <fn> } = require(…/<module>)`
+// binds, anywhere in server.js or src/: the parameter is a key (or a shorthand) of that call's own argument, and a key whose value
+// is the literal null / undefined / `() => null` hands NOTHING. THE READER'S MUST (the cure's read): the census read only the code
+// its comment stripper left, and that stripper took a `/*` INSIDE a line comment (`// … /api/file/serve/* etc.`) for a block
+// comment — server.js lines 143–579 were invisible to it (14 construction sites). stripJsComments below knows strings, template
+// literals and regex literals: run over every tracked .js of src/, server.js, data/bin and scripts/, esbuild's whitespace-minified
+// output was byte-identical before and after it (2359 files) — it removes comments and nothing else. Only files whose RAW text
+// names a guard parameter (a taker) or a taker's module (a site) are stripped: stripping only removes text.
+const GUARD_PARAMS = ['authorizeSpend', 'getSpendGuard', 'spendGuard'];
+const GUARD_HINT = /authorizeSpend|getSpendGuard|spendGuard/;
+function matchClose(t, open, a, b) { let d = 0; for (let j = open; j < t.length; j++) { if (t[j] === a) d++; else if (t[j] === b) { d--; if (d === 0) return j; } } return -1; }
+/** A JavaScript text with its comments blanked (each comment byte a space, every line break kept): strings, template
+ *  literals (with their `${…}` parts) and regex literals pass through untouched, so a `//` or `/*` inside one is never a comment. */
+function stripJsComments(src) {
+  let out = '', i = 0, prevSig = '';
+  const n = src.length, tpl = [];   // tpl: the brace depth of each open template `${…}`
+  const blank = (x) => x.replace(/[^\n]/g, ' ');
+  const regexMayStart = () => {
+    if (!prevSig || /[(,=:[!&|?{};+\-*%<>~^]/.test(prevSig)) return true;
+    const m = out.slice(-24).match(/([A-Za-z_$][\w$]*)\s*$/);   // the word before the slash, from the tail only
+    return !!(m && /^(return|typeof|case|in|of|delete|void|throw|new|instanceof|yield|await|else|do)$/.test(m[1]));
+  };
+  const templateFrom = (j) => {   // j: the first char inside a template; to its end or its next `${`
+    while (j < n && src[j] !== '`') { if (src[j] === '\\') { j += 2; continue; } if (src[j] === '$' && src[j + 1] === '{') return { end: j + 2, open: true }; j++; }
+    return { end: j + 1, open: false };
+  };
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === '/' && d === '/') { const e = src.indexOf('\n', i), end = e < 0 ? n : e; out += blank(src.slice(i, end)); i = end; continue; }
+    if (c === '/' && d === '*') { const e = src.indexOf('*/', i + 2), end = e < 0 ? n : e + 2; out += blank(src.slice(i, end)); i = end; continue; }
+    if (c === '"' || c === "'") { let j = i + 1; while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1; out += src.slice(i, j + 1); i = j + 1; prevSig = c; continue; }
+    if (c === '`' || (c === '}' && tpl.length && tpl[tpl.length - 1] === 0)) {
+      if (c === '}') tpl.pop();
+      const r = templateFrom(i + 1); out += src.slice(i, r.end); i = r.end;
+      if (r.open) { tpl.push(0); prevSig = '{'; } else prevSig = '`';
+      continue;
+    }
+    if (tpl.length && c === '{') tpl[tpl.length - 1]++; else if (tpl.length && c === '}') tpl[tpl.length - 1]--;
+    if (c === '/' && regexMayStart()) {   // a regex literal ends on its own line, its classes respected
+      let j = i + 1, cls = false;
+      while (j < n && src[j] !== '\n') { if (src[j] === '\\') { j += 2; continue; } if (src[j] === '[') cls = true; else if (src[j] === ']') cls = false; else if (src[j] === '/' && !cls) break; j++; }
+      if (j < n && src[j] === '/') { out += src.slice(i, j + 1); i = j + 1; prevSig = 'x'; continue; }
+    }
+    out += c; if (!/\s/.test(c)) prevSig = c; i++;
+  }
+  return out;
+}
+const STRIPPED = new Map();
+const stripCached = (raw) => { let x = STRIPPED.get(raw); if (x === undefined) { x = stripJsComments(raw); STRIPPED.set(raw, x); } return x; };
+const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SCANNED = new Map();   // a raw text → what one cheap pass over it found (every control hands the same strings back)
+function scanOf(raw, stemRe) {
+  let x = SCANNED.get(raw);
+  if (!x) { x = { takes: GUARD_HINT.test(raw), stems: new Map() }; SCANNED.set(raw, x); }
+  if (stemRe && !x.stems.has(stemRe.source)) x.stems.set(stemRe.source, new Set([...raw.matchAll(stemRe)].map((m) => m[1])));
+  return x;
+}
+function guardWiring(texts) {
+  const takers = [], sites = [], unwired = [];
+  for (const f of Object.keys(texts).filter((x) => scanOf(texts[x]).takes)) {
+    const t = stripCached(texts[f]);
+    for (const m of t.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(\s*\{/g)) {
+      const open = m.index + m[0].length - 1, close = matchClose(t, open, '{', '}');
+      if (close < 0) continue;
+      const params = t.slice(open + 1, close);
+      for (const p of GUARD_PARAMS) if (new RegExp(`(^|[\\s,])${p}\\s*(=|,|:|$)`).test(params)) takers.push({ f, fn: m[1], p });
+    }
+  }
+  const stemOf = (f) => f.split('/').pop().replace(/\.js$/, '');
+  const stemRe = takers.length ? new RegExp(`/(${[...new Set(takers.map((tk) => reEsc(stemOf(tk.f))))].join('|')})(?:\\.js)?['"]`, 'g') : null;
+  for (const tk of takers) {
+    const stem = stemOf(tk.f);
+    const req = `require\\(\\s*['"][^'"]*/${reEsc(stem)}(?:\\.js)?['"]\\s*\\)`;
+    let n = 0;
+    for (const f of Object.keys(texts).filter((x) => scanOf(texts[x], stemRe).stems.get(stemRe.source).has(stem))) {
+      const t = stripCached(texts[f]), calls = [];
+      for (const m of t.matchAll(new RegExp(`${req}\\.${reEsc(tk.fn)}\\(`, 'g'))) calls.push(m.index + m[0].length - 1);
+      for (const m of t.matchAll(new RegExp(`(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${req}\\s*[;,\\n]`, 'g'))) {   // const SH = require(…); SH.<fn>(
+        for (const c of t.matchAll(new RegExp(`(^|[^.\\w$])${reEsc(m[1])}\\.${reEsc(tk.fn)}\\(`, 'g'))) calls.push(c.index + c[0].length - 1);
+      }
+      for (const m of t.matchAll(new RegExp(`(?:const|let|var)\\s*\\{([^}]*)\\}\\s*=\\s*${req}`, 'g'))) {
+        const b = m[1].split(',').map((x) => x.trim()).find((x) => x === tk.fn || new RegExp(`^${reEsc(tk.fn)}\\s*:`).test(x));
+        if (!b) continue;
+        const alias = b.includes(':') ? b.split(':')[1].trim() : tk.fn;
+        for (const c of t.matchAll(new RegExp(`(^|[^.\\w$])${reEsc(alias)}\\(`, 'g'))) {
+          if (/function\s*$/.test(t.slice(Math.max(0, c.index - 12), c.index + c[1].length))) continue;   // its own definition
+          calls.push(c.index + c[0].length - 1);
+        }
+      }
+      for (const open of calls) {
+        const close = matchClose(t, open, '(', ')');
+        const args = close > open ? t.slice(open + 1, close) : '';
+        const keyed = new RegExp(`(^|[{,\\s])${tk.p}\\s*(:|,|\\})`).test(args);
+        const empty = new RegExp(`(^|[{,\\s])${tk.p}\\s*:\\s*(null|undefined|\\(\\s*\\)\\s*=>\\s*(null|undefined))\\s*[,}]`).test(args)
+          || new RegExp(`(^|[{,\\s])${tk.p}\\s*:\\s*(\\(\\s*\\)\\s*=>\\s*)?require\\([^)]*\\)\\s*\\.\\s*(${GUARD_PARAMS.join('|')})\\b`).test(args);   // the 869399b5c getter, moved to a site
+        sites.push({ ...tk, at: f, wired: keyed && !empty }); n++;
+        if (!keyed || empty) unwired.push(`${tk.f} ${tk.fn}({${tk.p}}) built at ${f} ${empty ? 'handed nothing' : 'without it'}`);
+      }
+    }
+    if (!n) unwired.push(`${tk.f} ${tk.fn}({${tk.p}}) is built nowhere a census can read`);
+  }
+  return { takers, sites, unwired };
+}
 function trackedServerSource() {
   const out = execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js', 'data/bin'], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString();
   return out.split('\0').filter(Boolean)
@@ -617,6 +726,36 @@ function trackedServerSource() {
     ok('§2 the attended column is PER SITE: the hand-over file\'s gated stash-retry site prints no attended reason, its press site prints stash-handover; the groups site reads its `const paid` line', !!stash334 && !!stash335 && attendedAt(stash334).length === 0 && attendedAt(stash335).join() === 'stash-handover'
       && hits.some((h) => h.file === 'src/server/groups-engine.js' && attendedAt(h).join() === 'owner-group-wake'), JSON.stringify({ s334: stash334 && attendedAt(stash334), s335: stash335 && attendedAt(stash335) }));
 
+    { // §2c the guard is wired where the hub builds it — and its RED control is the B-02a3 door as 869399b5c built it
+      const texts = Object.fromEntries(files.map((f) => [f, read(f)]));
+      const W = guardWiring(texts);
+      const names = [...new Set(W.takers.map((x) => x.f.split('/').pop()))].sort();
+      ok(`§2c every function that TAKES the spend guard is handed it at every site that builds it (${W.sites.length} sites: ${names.join(', ')})`,
+        W.unwired.length === 0 && ['stash-handover.js', 'conversation-deliver.js', 'worker-dispatch.js', 'agent-routes.js'].every((x) => names.includes(x)) && W.sites.length >= 6, W.unwired);
+      const sj = texts['server.js'], key = "getSpendGuard: () => spendGuard";
+      const kept = stripJsComments(sj || '');
+      ok('§2c the census reads server.js WHOLE: its stripper keeps every line, and the constructions a `/*` inside a line comment once hid from it (the usage engine, the boot restore) are read',
+        !!sj && kept.split('\n').length === sj.split('\n').length && kept.includes("require('./src/server/usage-pool-engine.js').create(") && kept.includes("require('./src/server/boot-restore.js').create("), { lines: sj && sj.split('\n').length, kept: kept.split('\n').length });
+      const probe = "// a route like /api/file/serve/* etc.\nconst d = require('./stash-handover.js').create({ activeSessions });\n// the end */\n";
+      const Wp = guardWiring({ ...texts, 'src/server/zz-census-probe.js': probe });
+      ok('§2c RED CONTROL (the blind span): an unwired build after a line comment that holds «/*» is named', Wp.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wp.unwired);
+      const W3 = guardWiring({ ...texts, 'server.js': sj.replace(key, 'getSpendGuard: () => null') });
+      ok('§2c RED CONTROL: a key that hands NOTHING (`getSpendGuard: () => null`) is named', W3.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u)), W3.unwired);
+      const W5 = guardWiring({ ...texts, 'server.js': sj.replace(key, "getSpendGuard: () => require('./src/server/usage-pool-engine.js').spendGuard") });
+      ok('§2c RED CONTROL: the 869399b5c getter moved to the site (`() => require(…usage-pool-engine.js).spendGuard` — a module export, never the instance) hands nothing', W5.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js handed nothing/.test(u)), W5.unwired);
+      const probeVar = "const SH = require('./stash-handover.js');\nconst d = SH.create({ activeSessions });\n";
+      const Wv = guardWiring({ ...texts, 'src/server/zz-census-probe.js': probeVar });
+      ok('§2c RED CONTROL: a module bound to a name (`const SH = require(…); SH.create(…)`) is read — built there without the guard, it is named', Wv.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wv.unwired);
+      const Wn = guardWiring({ ...texts, 'src/server/zz-census-taker.js': 'function create({ activeSessions, spendGuard = null }) { return { activeSessions, spendGuard }; }\nmodule.exports = { create };\n' });
+      ok('§2c RED CONTROL: a function that takes the guard and is built nowhere the census can read is named', Wn.unwired.some((u) => /zz-census-taker\.js create\(\{spendGuard\}\) is built nowhere a census can read/.test(u)), Wn.unwired);
+      const keyAR = 'serverSetting, spendGuard, scheduleCtxSync';
+      if (sj.split(keyAR).length !== 2) throw new Error('the anchor of the control «the agent routes unwired» is not in server.js once');
+      const W4 = guardWiring({ ...texts, 'server.js': sj.replace(keyAR, 'serverSetting, scheduleCtxSync') });
+      ok('§2c RED CONTROL: a DESTRUCTURED constructor is read too — server.js calling setupAgentRoutes (bound by `const { setupAgentRoutes } = require(…)`) without the guard is named', W4.unwired.some((u) => /agent-routes\.js setupAgentRoutes\(\{spendGuard\}\) built at server\.js without it/.test(u)), W4.unwired);
+      if (!sj || !sj.includes(key)) throw new Error('the anchor of the control «the B-02a3 door unwired» is not in server.js');
+      const W2 = guardWiring({ ...texts, 'server.js': sj.replace(key, 'getSpendGuardX: () => spendGuard') });
+      ok('§2c RED CONTROL: server.js building the stash door without its guard (869399b5c) is named unwired', W2.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at server\.js without it/.test(u)), W2.unwired);
+    }
     ok('§2 the four wired consumers are all in the GATED set', ['src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => gatedFiles.includes(f)), gatedFiles.join(', '));
     // THE OWNER'S RULING (2026-09-27 — "告知agent发生了打断，交还时提醒它重新运行"): the takeover now TELLS the agent and the
     // handback reminds it to re-run — and neither grows a producer: browser-handback.js keeps its ONE ladder site (the

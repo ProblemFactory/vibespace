@@ -307,7 +307,7 @@ const TABLE = {
   'src/server/groups-engine.js :: emitPeerCard(': { rules: ['declared:a CARD to the user\'s chat of a shown message (textContent) — the agent\'s copy is the report row'], pin: null, why: 'the card door' },
   'src/server/stash-handover.js :: renderMsgStash(': { rules: ['declared:src/agent-routes.js renders (its row)'], pin: null, why: 'the hand-over\'s message part' },
   'src/server/stash-handover.js :: renderNotifStash(': { rules: ['declared:src/job-model.js renders (its row)'], pin: null, why: 'the hand-over\'s jobs part' },
-  'src/server/stash-handover.js :: reportsForTurn(': { rules: ['declared:the preview above the composer (src/channel-groups.js row) — for the user\'s strip'], pin: null, why: 'the strip\'s preview' },
+  'src/server/stash-handover.js :: reportsForTurn(': { rules: ['declared:the preview above the composer (src/channel-groups.js row) — for the user\'s strip; and the group press (B-02a3): the same report handed to the AGENT, its whole frame through the belt (agentText, kind block)'], pin: /const frame = agentText\(`The user handed over, into this turn, the group messages that were waiting for your next turn/, why: 'the strip\'s preview + the group press' },
   'src/server/stash-handover.js :: deliverToConversation(': { rules: ['declared:the hand-over frame = the two renders above under VibeSpace\'s own head'], pin: null, why: 'Hand over now' },
   'src/server/stash-handover.js :: vibespaceNoticeText(': { rules: ['declared:VibeSpace\'s own head remembered for the echo check — adds no peer text'], pin: null, why: 'the delivered frame\'s memory' },
   // ── transports: they carry what a producer row judged; the text is never re-composed ──

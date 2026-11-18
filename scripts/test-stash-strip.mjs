@@ -2080,7 +2080,7 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   const r2 = await view.handOverGroups('w1', { pressed: PRESS });
   const waitingAfterNoWord = groupsWaiting(), cardsAfterNoWord = cards.length, typedBefore = typed.length;
   const r2b = await view.handOverGroups('w1', { pressed: PRESS });   // the reader's should 4: a second press while the first waits for its word
-  ok(r2b.ok === false && r2b.code === 'in_flight' && typed.length === typedBefore, 'a second press while the first hand-over waits for its word is refused «in_flight» and writes nothing (the same messages never go twice)', { r2b, typed: typed.length - typedBefore });
+  ok(r2b.ok === false && r2b.code === 'awaiting_word' && r2b.retryAfter > 0 && typed.length === typedBefore, 'a second press while the first hand-over waits for its word is refused «awaiting_word» (its own words, a Retry-After) and writes nothing (the same messages never go twice while the first waits for its word, ≤ 1 min)', { r2b, typed: typed.length - typedBefore });
   sB._groupHandover && sB._groupHandover.said('handed'); await sleep(40);
   ok(r2.ok === false && r2.code === 'unconfirmed' && waitingAfterNoWord === 1 && cardsAfterNoWord === 2 && groupsWaiting() === 0 && cards.length === 3,
     'no word within the wait ⇒ «unconfirmed» and NOTHING settled (the message still waits, no card); the late «handed» settles it then', { r2, waitingAfterNoWord, cardsAfterNoWord, after: groupsWaiting() });
@@ -2096,6 +2096,41 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   const r5 = await view.handOverGroups('w1', {});
   ok(r3.code === 'not_mid_turn' && sB._groupHandover === null && r4.code === 'spend_refused' && typed.length === t0 + 1 && spent.length === s0 + 1 && r5.code === 'not_a_person' && typed.length === t0 + 1 && groupsWaiting() === 1,
     'the typing path\'s «not mid-turn» comes back by name and clears the hand-over; a spend refusal writes nothing; a call with no person\'s press is refused before anything; the message still waits', { r3: r3.code, r4: r4.code, r5: r5.code, typed: typed.length - t0, left: groupsWaiting() });
+  // (4b) THE DOOR AS THE HUB BUILDS IT (the cure — 主开发 12:19Z: «in production the press can never work»): server.js's OWN
+  // argument text for the stash door, evaluated over the hub's names, with the REAL spend guard (src/server/spend-guard.js over a
+  // scratch data dir; its account reader is the hub's seam) — no hand-made authorizer — and pressed
+  const hubDoor = (serverSrc) => {
+    const head = "const stashView = require('./src/server/stash-handover.js').create(";
+    const i = serverSrc.indexOf(head);
+    if (i < 0) throw new Error("the anchor of the hub's stash-door construction is not in server.js");
+    let d = 0, j = i + head.length - 1;
+    for (; j < serverSrc.length; j++) { const c = serverSrc[j]; if (c === '(') d++; else if (c === ')') { d--; if (d === 0) break; } }
+    const args = serverSrc.slice(i + head.length, j);
+    const hubDir = scratch('stash-strip-hub-' + Math.random().toString(36).slice(2, 7)); fs.mkdirSync(path.join(hubDir, 'data'), { recursive: true });
+    const realGuard = require(path.join(REPO, 'src/server/spend-guard.js')).create({ dataDir: path.join(hubDir, 'data'), identityOf: () => ({ key: 'acct-hub', name: 'Hub account' }) });
+    const typedHub = [];
+    const build = new Function('require', 'path', '__dirname', 'activeSessions', 'sendUserInput', 'deliver', 'jobsWiring', 'channelsWiring', 'broadcastActiveSessions', 'spendGuard', "return require('./src/server/stash-handover.js').create(" + args + ');');
+    const v = build(createRequire(path.join(REPO, 'server.js')), path, hubDir, sessions, (wid, text, o) => { typedHub.push(o); return { ok: true, msgId: 'm' }; }, deliver, { getJobs: () => null }, { groups: ge, channels: null }, () => {}, realGuard);
+    return { v, typedHub };
+  };
+  const SVsrc = read('server.js');
+  await ge.post({ group: made.group.id, from: A, text: 'one for the hub-built door' }); await sleep(30);
+  const H = hubDoor(SVsrc);
+  const ph = H.v.handOverGroups('w1', { pressed: PRESS });
+  await sleep(15);
+  if (sB._groupHandover && typeof sB._groupHandover.said === 'function') sB._groupHandover.said('handed');
+  const rh2 = await ph; await sleep(40);
+  ok(rh2.ok === true && H.typedHub.length === 1 && H.typedHub[0].origin === 'group-handover',
+    'RED-able (869399b5c: refused «not wired» at every press): the door AS server.js BUILDS IT, with the REAL spend guard, hands the group messages over (the attended reason passes)', { rh2, typed: H.typedHub });
+  // RED CONTROL: server.js's line as 869399b5c had it — no `getSpendGuard` — every press refused, nothing written
+  const unwiredKey = "getSpendGuard: () => spendGuard /* B-02a3 cure: THE spend ceiling (the usage engine's, above) — the press asks it first */, ";
+  if (!SVsrc.includes(unwiredKey)) throw new Error('the anchor of the control «the hub builds the door without its guard» is not in server.js');
+  await ge.post({ group: made.group.id, from: A, text: 'one for the unwired door' }); await sleep(30);
+  const H0 = hubDoor(SVsrc.replace(unwiredKey, ''));
+  const r0 = await H0.v.handOverGroups('w1', { pressed: PRESS });
+  ok(r0.ok === false && r0.code === 'spend_refused' && /not wired/.test(r0.error) && H0.typedHub.length === 0,
+    'RED CONTROL the hub building the door WITHOUT its guard (869399b5c\'s line): every press refused «not wired», nothing written', r0);
+  sB._groupHandover = null;
   // (5) THE TYPING PATH — the REAL sender: written only mid-turn, no Stop settling, the Enter door steers; the frame carries no
   // message id (the wrapper treats it as nobody's), webui_steer, and no live record is drawn for it
   const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input.js'));
@@ -2139,7 +2174,7 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   // THE WIRING: the consumer hands the wrapper's id-less words to the hand-over; the route is a person's press; the attended reason
   const CS = read('src/server/stdout/claude-stream-json.js'), SV = read('server.js');
   ok(CS.includes("if (msg.type === 'input_handover' && Array.isArray(msg.msg_ids) && !msg.msg_ids.length && typeof msg.state === 'string' && session._groupHandover && typeof session._groupHandover.said === 'function') { try { session._groupHandover.said(msg.state); } catch { } }")
-    && /app\.post\('\/api\/sessions\/:id\/stash\/hand-over-groups', async \(req, res\) => \{\n\s+try \{\n\s+if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(shSrc) && SV.includes("getSendUserInput: () => sendUserInput") && (() => { const SA = require(path.join(REPO, 'src/spend-authorizer.js')).SPEND_REASONS; return !!(SA['group-handover'] && SA['group-handover'].attended === true && SA['group-handover'].turn === true); })(),
+    && /app\.post\('\/api\/sessions\/:id\/stash\/hand-over-groups', async \(req, res\) => \{\n\s+try \{\n\s+if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(shSrc) && SV.includes("getSendUserInput: () => sendUserInput") && SV.includes("getSpendGuard: () => spendGuard") && (() => { const SA = require(path.join(REPO, 'src/spend-authorizer.js')).SPEND_REASONS; return !!(SA['group-handover'] && SA['group-handover'].attended === true && SA['group-handover'].turn === true); })(),
     'the wiring: claude-stream-json tells the hand-over the wrapper\'s words on a frame with no message id; the route refuses every bearer before it mints the press; server.js hands the door THE typing path on its existing line; the reason is declared attended');
 }
 

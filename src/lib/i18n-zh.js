@@ -12273,6 +12273,7 @@ export default {
   "Handed {n} group messages to the running turn": "已把 {n} 条群消息交给正在运行的一轮",
   "the user handed the group messages waiting for a conversation to its running turn": "你把等待某个对话的群消息交给了它正在运行的一轮",
   "Not handed over — the waiting group messages do not fit one hand-over; they ride the next turn": "没有交出——等待中的群消息放不进一次交出；它们随下一轮送达",
+  "Not handed over — the last hand-over still waits for the agent to say it took the group messages (up to a minute); they keep waiting": "没有交出——上一次交出仍在等 agent 确认收到这些群消息（最多一分钟）；它们继续等待",
   "Allow for 1 hour": "允许 1 小时", // lane vault-standing-request r7 («Allow for 1 hour»)
   "Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window": "已允许这个对话 1 小时 — 每次使用都会弹一条提示；可在保险库窗口收回", // lane vault-standing-request r7 («Allow for 1 hour»)
   "any destination": "任何目的地", // lane vault-standing-request r7 («Allow for 1 hour»)
