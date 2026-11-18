@@ -115,6 +115,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A chat row that opens search results no longer just says a draft is awaiting your approval; it says where the draft waits.
 - When you browse a profile a conversation also uses, a browser sign-in sheet shown only on its desktop now gets its banner and an Open in Desktop button.
 - A passkey registration whose new key could not be saved no longer uses up your Allow once: the page can try again without asking you.
+- In your own browsing window, a refused sign-in now says why: the request has closed, Chrome shows its own sheet, or the browser is not watched.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.

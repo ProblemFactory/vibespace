@@ -989,7 +989,24 @@ function helperNames(state) {
   return out;
 }
 
+/** B-37a1 cure (主开发 09:07Z, as if a must): A REFUSED ANSWER IN THE SIGN-IN FORM IS SAID. The person's own window can
+ *  answer an HTTP sign-in (the form under its prompt banner); the bridge answers `prompt-ack` (src/server/browser-stream.js
+ *  answerPromptFor ← src/server/browser-dialogs.js answerPrompt). PURE: the ack → null (it went through) | the sentence by
+ *  its code. `t` = the page's translator (its {name} fill included). */
+const fillWords = (s, v) => String(s).replace(/\{(\w+)\}/g, (m, k) => (v && v[k] != null ? String(v[k]) : m));
+function promptAckWords(m, t = fillWords) {
+  if (!m || m.ok !== false) return null;
+  const code = String(m.code || '');
+  if (code === 'no_prompt') return t('The sign-in request is no longer open in this browser — nothing was sent');
+  if (code === 'native_sheet') return t('Chrome shows its own sign-in sheet for this page — open it in Desktop and answer it there');
+  if (code === 'not_watched') return t('VibeSpace is not watching this browser now, so the sign-in was not sent — try again in a moment');
+  if (code === 'bad_request') return t('Enter a username to sign in');
+  return t('The sign-in was not sent: {why}', { why: String(m.error || code || 'refused').slice(0, 200) });
+}
+const PROMPT_ACK_CODES = Object.freeze(['no_prompt', 'native_sheet', 'not_watched', 'bad_request']);   // the codes with their own words (any other: the server's sentence)
+
 module.exports = {
+  promptAckWords, PROMPT_ACK_CODES, // B-37a1 cure: the sign-in form's refused answer, said
   STREAM_PATH, BACKPRESSURE, MAX_FPS_DEFAULT, MAX_FPS_CAP, UPSTREAM_TYPES, REPLAYED_TYPES, MODES, VIEWER_INPUT_TYPES, VIEWER_CONTROL_TYPES, VIEWER_VIEW_TYPES, KEY_MODIFIERS,
   frameGateWait, // lane S4: the trailing edge of the per-viewer frame gate
   EPHEMERAL_REF, sessionNameFor, classifyUpstream, parseStreamStatus, streamPlan, originHeaderFor, streamTargetFor, pairsToEnv,

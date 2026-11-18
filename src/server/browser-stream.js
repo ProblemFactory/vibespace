@@ -285,11 +285,13 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     let f = null; try { f = dialogs.stuckForKey(relay.browserKey); } catch { f = null; }
     return { type: 'prompt-fact', fact: f && f.state === 'prompt' && f.prompt ? f : null, profileId: relayProfileId(relay) };
   }
+  /** The prompt fact's digest: the WHOLE prompt block (a prompt that keeps its id while its words change is told again). */
+  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');
   function pushPrompt(relay) {
     if (relays.get(relay.key) !== relay) return false;
     const rec = promptRecordOf(relay);
     if (!rec) return false;
-    const digest = rec.fact ? JSON.stringify({ id: rec.fact.prompt.id, type: rec.fact.prompt.type, native: rec.fact.prompt.native }) : '';
+    const digest = promptDigestOf(rec);
     if (digest === (relay.prDigest || '')) return false;
     relay.prDigest = digest;
     broadcast(relay, rec);
@@ -457,7 +459,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.lastFit) send(ws, relay.lastFit);
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: his window's tab row
     if (relay.lastBg) send(ws, relay.lastBg); // lane browser-windows (U0b)
-    { const pr = promptNow(relay); if (pr) { relay.prDigest = pr.fact ? JSON.stringify({ id: pr.fact.prompt.id, type: pr.fact.prompt.type, native: pr.fact.prompt.native }) : ''; send(ws, pr); } } // B-37a1: the person's window's prompt fact, the CURRENT one after every hello (null included)
+    { const pr = promptNow(relay); if (pr) { relay.prDigest = promptDigestOf(pr); send(ws, pr); } } // B-37a1: the person's window's prompt fact, the CURRENT one after every hello (null included)
     if (!pushPasskey(relay)) send(ws, passkeyNow(relay)); // lane passkey-browse-yourself: his page waits for a passkey — acceptance r1: the CURRENT fact, null included
     if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
     broadcastViewers(relay);

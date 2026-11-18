@@ -1128,6 +1128,33 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const baseDoor = sn && pc ? win({ key: HK }, 'deskDoorStuck({ passkey: pkFactNow(), stuck: st.fact && st.fact.stuck })') : null;   // stale-pins: kept — the base's line, written back by this RED control
     if (baseDoor) baseDoor.on({ type: 'prompt-fact', fact: SHEET, profileId: PID });
     ok(baseDoor && baseDoor.door() === null, 'CONTROL (B-37a1): the base\'s door (the row\'s stuck only) draws nothing in the person\'s window for the same sheet (RED for the leg above)');
+    // B-37a1 cure (主开发 09:07Z, as if a must): A REFUSED ANSWER IN THE SIGN-IN FORM IS SAID — the bridge's prompt-ack by its
+    // code, a toast in the person's window; every code the two answerers give has its own words (any other: the server's sentence)
+    const dsA = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const bodyOf = (src, head) => { const i = src.indexOf(head); return i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); };
+    const codesIn = (body) => [...new Set([...body.matchAll(/code: '([a-z_]+)'/g)].map((m) => m[1]))];
+    const answered = [...codesIn(bodyOf(dsA, '  async function answerPrompt(')), ...codesIn(bodyOf(bs, '  function answerPromptFor('))];
+    const ownCodes = answered.filter((c) => c !== 'internal' && c !== 'refused');
+    const zhP = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaP = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    const sayW = Object.fromEntries([...ownCodes, 'internal'].map((c) => [c, BHS.promptAckWords({ ok: false, code: c, error: 'the answer was not delivered' })]));
+    const keyed = Object.values(sayW).map((w) => w.replace('the answer was not delivered', '{why}'));
+    ok(ownCodes.length >= 4 && ownCodes.every((c) => BHS.PROMPT_ACK_CODES.includes(c)) && BHS.promptAckWords({ ok: true }) === null && /nothing was sent/.test(sayW.no_prompt) && /open it in Desktop/.test(sayW.native_sheet)
+      && sayW.internal === 'The sign-in was not sent: the answer was not delivered' && keyed.every((k) => zhP.includes(JSON.stringify(k) + ':') && jaP.includes(JSON.stringify(k) + ':')),
+      'B-37a1 cure: every code the sign-in answer can be refused with (answerPrompt + the bridge) has its own words, zh and ja; an answer that went through says nothing', { ownCodes, sayW });
+    const ackLine = line("      case 'prompt-ack':");
+    const winAck = (caseLine) => { const toasts = []; const on = new Function('promptAckWords', 't', 'showToast', `return (m) => { switch (m.type) { ${caseLine || ''}\n } };`)(BHS.promptAckWords, (x, v) => (v && v.why ? x.replace('{why}', v.why) : x), (w, o) => toasts.push({ w, type: o && o.type })); return { on, toasts }; };
+    const wa = winAck(ackLine); wa.on({ type: 'prompt-ack', ok: false, code: 'no_prompt' }); wa.on({ type: 'prompt-ack', ok: true });
+    ok(ackLine && wa.toasts.length === 1 && wa.toasts[0].type === 'error' && wa.toasts[0].w === sayW.no_prompt, 'B-37a1 cure (the window\'s own line): a refused answer is a toast in its words; one that went through is not', wa.toasts);
+    const wb = winAck(''); wb.on({ type: 'prompt-ack', ok: false, code: 'no_prompt' });
+    ok(wb.toasts.length === 0, 'CONTROL (B-37a1 cure): the base\'s window (no prompt-ack case) says nothing of a refused answer (RED for the leg above)');
+    // the digest: ONE helper over the whole prompt block (a prompt that keeps its id while its words change is told again)
+    const dg = (bs.match(/  const promptDigestOf = \(rec\) => [^\n]*/) || [''])[0];
+    const digestOf = dg ? new Function(`${dg.trim()} return promptDigestOf;`)() : null;
+    const recA = { fact: { prompt: { id: 'p1', type: 'auth', native: true, realm: 'Team' } } }, recB = { fact: { prompt: { id: 'p1', type: 'auth', native: true, realm: 'Other' } } };
+    ok(digestOf && digestOf(recA) !== digestOf(recB) && digestOf({ fact: null }) === '' && (bs.match(/promptDigestOf\(/g) || []).length === 2 && !/JSON\.stringify\(\{ id: [a-z]+\.fact\.prompt\.id/.test(bs),   // stale-pins: kept — a deliberate check that no copy of the base's digest is left
+      'B-37a1 cure: ONE digest helper for both sends (the hello and every watch event), over the whole prompt block — the same id with other words is told again', { dg });
+    const baseDigest = (rec) => (rec.fact ? JSON.stringify({ id: rec.fact.prompt.id, type: rec.fact.prompt.type, native: rec.fact.prompt.native }) : '');   // stale-pins: kept — the base's digest, the control below
+    ok(baseDigest(recA) === baseDigest(recB), 'CONTROL (B-37a1 cure): the base\'s digest (id, type, native) cannot tell the two apart (RED for the leg above)');
   }
   // MAJOR 2 + MINOR: the window's own code (sliced from src/lib/browser-live-window.js, run over a stub scope)
   {
