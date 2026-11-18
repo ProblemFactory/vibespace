@@ -332,6 +332,7 @@ if (process.argv.includes('--discovery-snapshot-child')) {
 const net = require('net');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const AR = require('./attach-roads.js'); // B-beaf: the pipe pump and the terminal road stop when the link holds them back
+const { ptyInput } = require('./pty-input.js');   // B-5019: one UTF-8 decoder per pty session (a character split across frames)
 // PURE (bundled): the ONE spawn-env sanitizer the orchestrator's agentEnv()
 // also is — every daemon child and every daemon re-exec is born from
 // `daemonEnv(process.env)`, never from `process.env` (see spawnEnv below).
@@ -2818,7 +2819,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // B-beaf: the terminal road under credit — a held link PAUSES the pty (the child blocks on its own output), the
           // channel's writable resumes it; never a queue without bound in this daemon
           const out = AR.heldSender({ send: (b) => mux.data(chan, b), pause: () => proc.pause(), resume: () => proc.resume() });
-          sessions.set(chan, { proc, out });
+          sessions.set(chan, { proc, out, input: ptyInput((s) => proc.write(s)) });   // B-5019: the session's input, decoded as ONE stream
           proc.onData((d) => { out.send(Buffer.from(d, 'utf-8')); });
           proc.onExit(({ exitCode }) => {
             sessions.delete(chan);
@@ -2846,7 +2847,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (!authed) return;
       if (chan === 1 && upgrade) { upgrade.data(buf); return; }
       const sx = sessions.get(chan);
-      if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); return; }
+      if (sx) { try { sx.input(buf); } catch { } mux.credit(chan, buf.length); return; }
       if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); return; }
       if (wsData(chan, buf)) return; // lane exit-transfer: a push's bytes (credited as the disk takes them)
       const t = tcpChans.get(chan);
