@@ -153,6 +153,29 @@ console.log('\n§8c hosts — the self-hosted desktop batch + the 7 hosted shard
   ok(sp(C.shardPlan([...hosted].reverse(), 7, { sourceOf: srcOf, timings: tm || {} })) === sp(lp), 'the SAME table and times give the SAME split (every matrix job agrees) — not a function of the table order');
   const grown = C.shardPlan([...hosted, { name: 'test-zz-added-suite', tier: 'heavy' }], 7, { sourceOf: srcOf, timings: tm || {} });
   ok(grown.shards.every((x, k) => lp.shards[k].every((y) => x.some((z) => z.name === y.name))), 'an UNMEASURED new suite takes its name-hash slot and moves no measured one');
+  // B-9ab7 THE IN-SHARD ORDER ON A FRESH RUNNER: no markers there, so the order is the checked-in times (markers win per suite), else
+  // the time the row states — never the table position for a suite that has a time anywhere
+  { const has = typeof C.orderTimings === 'function' && typeof C.statedMsOf === 'function';
+    ok(has, 'the heavy gate\'s order has its times door (orderTimings + statedMsOf)');
+    const OT = has ? C.orderTimings : (m) => ({ ...(m || {}) });
+    const fx = ['a', 'b', 'c', 'd'].map((name) => ({ name, tier: 'heavy', why: name === 'd' ? 'slow — 1200 s alone' : 'slow — 1 s' })), times = { a: 900e3, b: 10e3, c: 500e3 };
+    const statedFx = Object.fromEntries(fx.map((s) => [s.name, has ? C.statedMsOf(s) : null]).filter(([, ms]) => ms !== null));
+    const ordOf = (timings) => C.scheduleLanes(fx, { timings }).parallel.map((s) => s.name).join();
+    ok(ordOf(OT({}, times, statedFx)) === 'd,a,c,b', `a fresh runner (no marker) starts the LONGEST first: the checked-in times, and a suite with none by the time its row states (d, 1200 s) — ${ordOf(OT({}, times, statedFx))}`);
+    ok(ordOf(times) !== ordOf({}) && ordOf({}) === 'd,c,b,a', `CONTROL — markers only, the base: the table read backwards (${ordOf({})}), the 900 s suite LAST`);
+    ok(ordOf(OT({ b: 2000e3 }, times, statedFx)) === 'b,d,a,c' && has && C.statedMsOf({ why: 'chrome — ~503 s measured' }) === 503000 && C.statedMsOf({ why: 'in-process · 250 ms' }) === 250 && C.statedMsOf({ why: 'a census over 2.369.403\'s rows' }) === null,
+      'a suite\'s own marker time wins; statedMsOf reads the first «N ms | s | min» of a why (a version number is no time)');
+    const lead = lp.shards.map((sh) => {
+      const statedSh = Object.fromEntries(sh.map((s) => [s.name, has ? C.statedMsOf(s) : null]).filter(([, ms]) => ms !== null));
+      const par = C.scheduleLanes(sh, { timings: OT({}, tm || {}, statedSh), sourceOf: srcOf }).parallel;
+      const t = (s) => ((tm || {})[s.name] ?? statedSh[s.name] ?? 0);
+      const want = [...par].sort((x, y) => t(y) - t(x)).slice(0, 2).map((s) => s.name).sort().join(), got = par.slice(0, 2).map((s) => s.name).sort().join();
+      return { want, got };
+    });
+    ok(lead.every((l) => l.want === l.got), `on a fresh runner every hosted shard STARTS its TWO longest (checked-in times, else the row's): ${lead.map((l) => l.got.replace(/test-/g, '')).join(' | ')}`);
+    const ci = readR('scripts/ci.mjs');
+    ok(/const plan = scheduleLanes\(heavy, \{ timings: orderTimings\(previousTimings\(dir\), shardTimings\(runRoot\), stated\),/.test(ci) && /const stated = Object\.fromEntries\(heavy\.map\(\(s\) => \[s\.name, statedMsOf\(s\)\]\)/.test(ci),
+      'WIRING: the heavy gate orders its lanes by the markers, else the tree\'s checked-in runner times, else the rows\' stated times'); }
   // the two runners together: the hosted shards + the self-hosted batch = the tier, each suite once
   const together = [...lp.shards.flat().map((s) => s.name), ...names(plan.self)];
   ok(together.length === heavy.length && new Set(together).size === heavy.length, `the 7 hosted shards + the desktop batch run ${together.length} = the ${heavy.length} heavy suites, each exactly once`);

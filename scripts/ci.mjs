@@ -2629,6 +2629,15 @@ export function shardPlan(suites, n, { serial = SERIAL, fixtures = machineGlobal
 export function shardTimings(root = repo) {
   try { const j = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'fixtures', 'ci-shard-timings.json'), 'utf-8')); return j && typeof j.ms === 'object' ? j.ms : null; } catch { return null; }
 }
+// THE IN-LANE ORDER'S TIMES (B-9ab7): a suite's own marker time, else its checked-in runner time. A fresh hosted runner has
+// no markers, so longestFirst fell back to the table position and a shard's LONGEST suite could start LAST (ci/prep391b
+// heavy 4/6 and .397's 4/6: test-phone-desktop-sync; master 2.369.401 heavy 3/7: test-exit-slow-chrome, 714 s, red once at
+// 722 s with no room left for its retry) — each cancelled at the 45-min limit. Markers win per suite: the box keeps its own. A suite
+// with neither (13 hosted heavies had no checked-in time on 11-12) is ordered by the time its ROW states — every heavy row carries
+// one — so an untimed long suite does not start after its shard's one-second ones.
+export const orderTimings = (marked, checkedIn, stated = {}) => ({ ...(stated || {}), ...(checkedIn || {}), ...(marked || {}) });
+/** PURE: the time a row's why states — its first «N ms | s | min» — in ms, or null. */
+export const statedMsOf = (row) => { const m = /(\d+(?:\.\d+)?)\s*(ms|s|min)\b/.exec((row && row.why) || ''); return m ? Math.round(Number(m[1]) * (m[2] === 'ms' ? 1 : m[2] === 's' ? 1000 : 60000)) : null; };
 // The same file's `desktop` block (lane xpra-window-split): self-hosted suites' walls measured ALONE on the hub under a
 // private display — the order ci-remote --batch falls back to for a suite the box has no marker time for; null when none.
 export function batchTimings(root = repo) {
@@ -4172,7 +4181,8 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     else if (!abandonedWhy) {
       laneN = laneCount();
       const sourceOf = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
-      const plan = scheduleLanes(heavy, { timings: previousTimings(dir), sourceOf, keepOrder: !!only });
+      const stated = Object.fromEntries(heavy.map((s) => [s.name, statedMsOf(s)]).filter(([, ms]) => ms !== null));
+      const plan = scheduleLanes(heavy, { timings: orderTimings(previousTimings(dir), shardTimings(runRoot), stated), sourceOf, keepOrder: !!only }); // B-9ab7: a fresh runner orders by the checked-in times, else the row's
       serialNames = plan.serial.map((s) => s.name);
       console.log(`[ci:heavy] ${laneN} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}${plan.serial.length ? ': ' + plan.serial.map((s) => `${s.name} (${s.serialWhy.split(/[—;]/)[0].trim()})`).join(', ') : ''}`);
       const parallelQ = [...plan.parallel];
