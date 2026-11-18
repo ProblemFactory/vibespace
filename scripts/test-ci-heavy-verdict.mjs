@@ -480,7 +480,9 @@ console.log('§4f the guard follow-ups (on r4): the writer, identity by file nam
   ok(st.status === 1 && /marker directory .* cannot be read \(ENOTDIR\)/.test(st.stderr) && !/\n\s+at /.test(st.stderr), `--status on a marker path that is a FILE: a named line and exit 1, no stack trace (exit ${st.status}: ${st.stderr.trim().slice(0, 100)})`); }
 
 console.log('§4g THE TABLE A FULL GREEN WAS RUN BY (B-479e) — it covers a failed suite only if that table knew it');
-{ const T = makeRepo('table'); const a = commit(T, 'scripts/test-new.mjs', '// a suite\n', 'A adds test-new'), b = commit(T, 'b.txt', 'b\n', 'B'), h = commit(T, 'h.txt', 'h\n', 'HEAD');
+{ // the green's commit carries a table (B-479e's must: «is X still to be run» asks that commit's OWN scripts/ci.mjs row)
+  const TABLE = (moved = 'heavy') => `export const SUITES = [\n  { name: 'test-new', tier: 'heavy', why: 'x · 1 s' },\n  { name: 'test-old', tier: 'heavy', why: 'x · 1 s' },\n  { name: 'test-moved', tier: '${moved}', why: 'x · 1 s' },\n];\n`;
+  const T = makeRepo('table'); commit(T, 'scripts/ci.mjs', TABLE(), 'the table'); const a = commit(T, 'scripts/test-new.mjs', '// a suite\n', 'A adds test-new'), b = commit(T, 'b.txt', 'b\n', 'B'), h = commit(T, 'h.txt', 'h\n', 'HEAD');
   const dirOf = (green, failed = ['test-new'], extra = null) => { const d = scratch('tbl'); fs.writeFileSync(path.join(d, `${a}.red`), JSON.stringify(goodRec(a, 'red', { failed })));
     fs.writeFileSync(path.join(d, `${b}.green`), JSON.stringify(goodRec(b, 'green', green))); if (extra) fs.writeFileSync(path.join(d, `${h}.green`), JSON.stringify(goodRec(h, 'green', extra))); return d; };
   const knows = { table: { digest: 'x', heavy: ['test-new', 'test-old'] } }, older = { table: { digest: 'y', heavy: ['test-old'] } };
@@ -489,7 +491,23 @@ console.log('§4g THE TABLE A FULL GREEN WAS RUN BY (B-479e) — it covers a fai
   ok(blockedBy(dirOf({ table: { heavy: 'test-new' } }), h, T) === a && blockedBy(dirOf({ table: null }), h, T) === a, '…a table that is not a list of names covers no failed name (fail closed)');
   ok(blockedBy(dirOf(older, ['test-new', 'test-old'], { scope: 'affected', selected: ['test-new'] }), h, T) === null, '…and the UNION still holds: the older FULL green covers test-old, an affected green listing test-new covers the rest');
   ok(blockedBy(dirOf(older, ['test-gone']), h, T) === null && blockedBy(dirOf(older, ['npm run build']), h, T) === null,
-    '…but a failed name that is NO suite at the green\'s commit (renamed or deleted since, or «npm run build») has nothing left to run: the FULL green covers it — else no run of the current tree could ever clear it');
+    '…but a failed name that is NO heavy suite at the green\'s commit (renamed or deleted since, or «npm run build») has nothing left to run: the FULL green covers it — else no run of the current tree could ever clear it');
+  // THE MUST (B-479e, 主开发 08:53Z): a suite MOVED to the fast tier keeps its file — the file never says it is still to be run, the
+  // commit's own row does. Moved: the FULL green at the commit that rows it fast clears its red (no list run can name a fast suite,
+  // so nothing else ever could); CONTROL, the same history with the row still heavy at that commit: the older table's green does not.
+  for (const tier of ['fast', 'heavy']) {
+    const R = makeRepo(`moved-${tier}`); commit(R, 'scripts/ci.mjs', TABLE(), 'the table'); commit(R, 'scripts/test-moved.mjs', '// a suite\n', 'the suite');
+    const rc = commit(R, 'r.txt', 'r\n', 'C: red on test-moved'), dc = commit(R, 'scripts/ci.mjs', TABLE(tier) + `// D: test-moved is ${tier}\n`, `D: test-moved is ${tier}`), hc = commit(R, 'h.txt', 'h\n', 'HEAD');
+    const d = scratch(`moved-${tier}`); fs.writeFileSync(path.join(d, `${rc}.red`), JSON.stringify(goodRec(rc, 'red', { failed: ['test-moved'] })));
+    fs.writeFileSync(path.join(d, `${dc}.green`), JSON.stringify(goodRec(dc, 'green', older)));
+    let fileStays = false; try { fileStays = String(git(R, ['cat-file', '-t', `${dc}:scripts/test-moved.mjs`])).trim() === 'blob'; } catch { }
+    ok(fileStays && blockedBy(d, hc, R) === (tier === 'fast' ? null : rc), tier === 'fast'
+      ? '…a red on a suite MOVED to the fast tier since (its file stays) is cleared by the FULL green at the commit whose OWN table rows it fast — the door the block names opens it'
+      : 'CONTROL: the same history with test-moved still a HEAVY row at the green\'s commit — the older table\'s FULL green does not clear its red');
+  }
+  { const N = makeRepo('no-table'); const nr = commit(N, 'r.txt', 'r\n', 'R'), nd = commit(N, 'd.txt', 'd\n', 'D'), nh = commit(N, 'h.txt', 'h\n', 'HEAD');
+    const d = scratch('no-table'); fs.writeFileSync(path.join(d, `${nr}.red`), JSON.stringify(goodRec(nr, 'red', { failed: ['test-gone'] }))); fs.writeFileSync(path.join(d, `${nd}.green`), JSON.stringify(goodRec(nd, 'green', older)));
+    ok(blockedBy(d, nh, N) === nr, '…and a green\'s commit whose table cannot be read keeps every failed name heavy (fail closed): its older table covers nothing it did not list'); }
   ok(blockedBy(dirOf({ ...knows, skipped: ['test-new'] }), h, T) === a && blockedBy(dirOf(older, ['test-new'], { scope: 'affected', selected: ['test-new'], skipped: ['test-new'] }), h, T) === a,
     '…and a green in which the suite SKIPPED ITSELF does not vouch for it (B-479e (1) on the box\'s own markers): neither a FULL green nor a list');
   const du = scratch('tbl-u'); fs.writeFileSync(path.join(du, `${a}.red`), 'null'); fs.writeFileSync(path.join(du, `${b}.green`), JSON.stringify(goodRec(b, 'green', older)));
@@ -499,7 +517,9 @@ console.log('§4g THE TABLE A FULL GREEN WAS RUN BY (B-479e) — it covers a fai
     'PURE heavyTableOf: the heavy names sorted (fast rows left out) and one digest per table, whatever the table order');
   const CIT = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   ok(/table: scope !== 'affected' && !only && !shard && !host \? heavyTableOf\(SUITES\) : undefined,/.test(CIT) && /const covers = \(g, f\) => ranIn\(g, f\) && \(\(fullOf\(g\) && tableKnows\(g, f\)\) \|\| listOf\(g\)\.includes\(f\)\);/.test(CIT),
-    'WIRING: a FULL box run writes the table it ran by into its marker; the gate asks it before a FULL green covers a failed suite'); }
+    'WIRING: a FULL box run writes the table it ran by into its marker; the gate asks it before a FULL green covers a failed suite');
+  ok(/spawnSync\('git', \['-C', repoRoot, 'show', `\$\{c\}:scripts\/ci\.mjs`\]/.test(CIT) && /\(g\.table\.heavy\.includes\(f\) \|\| !heavyAt\(g\.commit, f\)\)/.test(CIT) && !/isSuiteAt/.test(CIT),
+    'WIRING: «nothing left to run» is asked of the green commit\'s OWN table (git show <commit>:scripts/ci.mjs), never of whether the suite\'s file exists'); }
 
 console.log('§5 NEGATIVE CONTROLS — the per-job check, and r1\'s FULL marker');
 const M = mutantCopies('ci-heavy-verdict', REPO);

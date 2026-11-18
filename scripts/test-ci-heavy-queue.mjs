@@ -25,6 +25,7 @@ import { acquireMachineLock, machineQueue, ticketDirOf, lockWaitLine, runBuild, 
 import { spawnSync } from 'node:child_process';
 import { REPO, ok, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { gitEnvFrom } from './git-env.mjs';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), `vs-ciqueue-${process.pid}-`));   // EVERY scratch path of this run lives here (§8)
 let seq = 0;
@@ -261,7 +262,10 @@ const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '§7 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log('§8 THE BUILD STAMP');
-const NCC = path.join(os.tmpdir(), 'node-compile-cache'), nccBefore = fs.existsSync(NCC);   // npm (run by runBuild) leaves its compile cache here
+// A GATE SUITE CLAIMS NO MACHINE-GLOBAL NAME (主开发 08:53Z, batch 42's point): npm, run by §8's builds, keeps a compile cache — the
+// builds get their OWN under this run's root (it goes with the root), never the machine's TMPDIR/node-compile-cache, which another
+// node or npm on the machine may be using while this suite runs.
+const BUILD_ENV = { ...gitEnvFrom(process.env), NODE_COMPILE_CACHE: path.join(ROOT, 'node-compile-cache') };
 { const R = scratch('stamp'), g = (...a) => spawnSync('git', ['-C', R, ...a], { encoding: 'utf-8' });
   g('init', '-q', '-b', 'main'); g('config', 'user.email', 'q@test.local'); g('config', 'user.name', 'queue test');
   fs.writeFileSync(path.join(R, 'build.cjs'), `const fs=require('fs'),path=require('path');if(fs.existsSync(${JSON.stringify(path.join(R, '..', 'fail-' + TAG))}))process.exit(1);   // (ci.mjs runs the build with its own fixed env)
@@ -275,7 +279,7 @@ fs.appendFileSync(${JSON.stringify(path.join(R, '..', 'builds-' + TAG))},'1\\n')
   fs.mkdirSync(path.join(R, 'node_modules')); fs.writeFileSync(path.join(R, 'node_modules', '.package-lock.json'), '{"lockfileVersion":3}\n');
   g('add', '-A'); g('commit', '-q', '-m', 'one');
   const builds = () => { try { return fs.readFileSync(path.join(R, '..', 'builds-' + TAG), 'utf-8').trim().split('\n').length; } catch { return 0; } };
-  const quiet = { log: () => { } }, readJsonQ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } };
+  const quiet = { log: () => { }, env: BUILD_ENV }, readJsonQ = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } };
   const b1 = runBuild({ cwd: R, reuse: true, ...quiet });
   ok(b1.ok && builds() === 1 && fs.existsSync(buildStampPathOf(R)) && g('status', '--porcelain').stdout === '', `a first claim builds and leaves a stamp in the tree's own git dir — the work tree stays clean (${buildStampPathOf(R).replace(R, '<repo>')})`);
   const b2 = runBuild({ cwd: R, reuse: true, ...quiet });
@@ -352,11 +356,10 @@ fs.appendFileSync(${JSON.stringify(path.join(R, '..', 'builds-' + TAG))},'1\\n')
   ok(/settleHeavyMarker\(\{ dir, sha, rec, abandonedWhy, buildOk: build\.ok, dirtyAtStart,/.test(SRC8), 'WIRING: the heavy gate hands its build result to that step'); }
 
 console.log('§9 nothing left behind');
-if (!nccBefore) fs.rmSync(NCC, { recursive: true, force: true });   // the cache npm made for §8's builds, never one that was there
 for (const k of kids) { try { k.kill('SIGKILL'); } catch { } }
 await until(() => kids.every(exited), 3000);
 fs.rmSync(ROOT, { recursive: true, force: true });
 const leftovers = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(`vs-ciqueue-${process.pid}-`));
 const children = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p)).filter((p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf-8').includes(TAG); } catch { return false; } });
-ok(leftovers.length === 0 && children.length === 0 && (nccBefore || !fs.existsSync(NCC)), `0 scratch dirs, 0 children and no npm compile cache of ours left under TMPDIR (${leftovers.length} dirs, ${children.length} processes)`);
+ok(leftovers.length === 0 && children.length === 0, `0 scratch dirs and 0 children left under TMPDIR (${leftovers.length} dirs, ${children.length} processes)`);
 report();

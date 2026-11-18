@@ -70,7 +70,7 @@ const MUTANTS = [
   { name: 'aborted run calls itself GREEN again', file: CI, suite: 'test-ci-heavy-launch',
     from: '    const verdict = abandonedWhy', to: '    const verdict = false' },
   { name: 'abandoned run stamps a verdict again', file: CI, suite: 'test-ci-heavy-launch',
-    from: "    if (abandonedWhy || (abandonedWhy = abandoned())) noVerdict = abandonedWhy;", to: '    if (false) { }' },
+    from: '  if (abandonedWhy) noVerdict = abandonedWhy;\n', to: '  if (false) { }\n' },   // settleHeavyMarker (B-88e5 moved it there)
   { name: 'killed-from-outside evidence removed', file: CI, suite: 'test-ci-heavy-launch',
     from: "export const killedFromOutside = (r) => !!(r && r.signal && OUTSIDE_SIGNALS.includes(r.signal) && !(r.error && r.error.code === 'ETIMEDOUT'));",
     to: 'export const killedFromOutside = (r) => false;' },
@@ -126,7 +126,7 @@ const MUTANTS = [
   { name: 'a fast run where NOTHING ran says ALL GREEN again (round 6)', file: CI, suite: 'test-ci-heavy-launch',
     from: '    if (absent.length === fast.length) {', to: '    if (false) {' },
   { name: 'a heavy run where NOTHING ran stamps a green marker again (round 6)', file: CI, suite: 'test-ci-heavy-launch',
-    from: '    else if (absent.length && absent.length === heavy.length) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;\n', to: '' },
+    from: '  else if (allAbsent) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;\n', to: '' },   // settleHeavyMarker
   { name: 'the fast tier runs once per pushed sha again (round 6)', file: HOOK, suite: 'test-ci-gate',
     from: '  fast_subjects="$subject"', to: '  fast_subjects="$distinct"' },
   // …and the other half of round 5: the "not code" set was a statement about

@@ -2553,7 +2553,7 @@ export function writeBuildStamp(cwd, { before = null } = {}) {
   const outputs = {}; for (const f of BUILD_OUTPUTS) outputs[f] = fileDigest(path.join(cwd, f));
   try { fs.writeFileSync(p, JSON.stringify({ ...inp, outputs, builtAt: Date.now() }) + '\n'); } catch { }
 }
-export function runBuild({ cwd = repo, log = console.log, reuse = false } = {}) {
+export function runBuild({ cwd = repo, log = console.log, reuse = false, env = GIT_ENV } = {}) {   // env: a suite's scratch build hands its own (its compile cache under its own root)
   if (reuse) {
     const why = buildStampWhy(cwd);
     if (!why) { log(`  ✓ npm run build — SKIPPED: this tree is built at ${shortSha(gitIn(cwd, ['rev-parse', 'HEAD']))} (its build stamp matches the commit, tree, node, dependencies and every output)`); return { ok: true, ms: 0, reused: true }; }
@@ -2561,7 +2561,7 @@ export function runBuild({ cwd = repo, log = console.log, reuse = false } = {}) 
   }
   const before = reuse ? buildTreeOf(cwd) : null;   // a stamp names the tree the build STARTED from — only if it did not move
   const t = Date.now();
-  const r = spawnSync('npm', ['run', 'build'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, encoding: 'utf-8', env: GIT_ENV });
+  const r = spawnSync('npm', ['run', 'build'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, encoding: 'utf-8', env });
   const ms = Date.now() - t;
   if (r.status === 0) { if (reuse) writeBuildStamp(cwd, { before }); log(`  ✓ npm run build (${ms}ms)`); return { ok: true, ms }; }   // a stamp only where one will be asked
   try { const p = buildStampPathOf(cwd); if (p) fs.unlinkSync(p); } catch { }
@@ -3518,11 +3518,21 @@ export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFul
     const absent = new Set(g.absent || []);
     return [].concat(strList(g.selected) ? g.selected : [], strList(g.partial) ? g.partial : []).filter((f) => !absent.has(f));
   };
-  // …and a name that is NO suite at the green's commit (renamed, split or deleted since — or no suite at all, «npm run build») has
-  // nothing left to run: a FULL green covers it (B-479e's adversarial read: else such a red could never clear). One `git cat-file -e`
-  // per name asked, memoised.
-  const suiteAt = new Map(), isSuiteAt = (c, f) => { const k = `${c}:${f}`; if (!suiteAt.has(k)) suiteAt.set(k, /^test-[\w.-]+$/.test(f) && gitIn(repoRoot, ['cat-file', '-e', `${c}:scripts/${f}.mjs`]) !== null); return suiteAt.get(k); };
-  const tableKnows = (g, f) => g.table === undefined || (!!g.table && strList(g.table.heavy) && g.table.heavy.includes(f)) || (!!g.table && strList(g.table.heavy) && !isSuiteAt(g.commit, f));
+  // …and a name that is NO HEAVY SUITE at the green's commit has nothing left to run in the heavy tier: a FULL green covers it —
+  // moved to the fast tier since (its file stays), renamed, split or deleted, or no suite at all («npm run build»). Asked of THAT
+  // commit's own table — its scripts/ci.mjs row `{ name: 'X', tier: 'heavy'` (every row is one line, the tier right after the name)
+  // — never of whether scripts/X.mjs exists (B-479e's must, 主开发 08:53Z: a red on a suite moved to the fast tier could never clear,
+  // since no list run can name a fast suite, and the doors the block names could not open it). One `git show` per commit asked,
+  // memoised; a commit whose table cannot be read keeps every name heavy (fail closed).
+  const tableAt = new Map(), heavyAt = (c, f) => {
+    if (!tableAt.has(c)) { const r = spawnSync('git', ['-C', repoRoot, 'show', `${c}:scripts/ci.mjs`], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 << 20 }); tableAt.set(c, r.status === 0 ? r.stdout : null); }
+    const t = tableAt.get(c);
+    if (t == null) return true;
+    if (!/^[\w.-]+$/.test(f)) return false;
+    const row = new RegExp(`\\{\\s*name:\\s*'${f.replace(/\./g, '\\.')}',\\s*tier:\\s*'(\\w+)'`).exec(t);
+    return !!row && row[1] === 'heavy';
+  };
+  const tableKnows = (g, f) => g.table === undefined || (!!g.table && strList(g.table.heavy) && (g.table.heavy.includes(f) || !heavyAt(g.commit, f)));
   // a suite that SKIPPED ITSELF in a green (B-479e (1), the box's own markers) ran nothing: the green does not vouch for it
   const ranIn = (g, f) => !(strList(g.skipped) && g.skipped.includes(f));
   const covers = (g, f) => ranIn(g, f) && ((fullOf(g) && tableKnows(g, f)) || listOf(g).includes(f));
@@ -4785,7 +4795,7 @@ export function checkHeavy({ dir, head } = {}) {
   console.error('       npm run ci:heavy        (the whole tier in an isolated worktree at HEAD, ~17 min; writes the marker that clears this)');
   // …and by day the hub refuses that whole tier (hubFullRefusal): the AFFECTED tier clears the block too when it reruns
   // every suite that failed (coversRed) — said here, so the door this message names is one that opens now
-  if (hubFullRefusal({ full: true })) console.error(`       by day the hub runs no FULL tier — instead: node scripts/ci.mjs --heavy --isolate --affected --range=${shortSha(blocker.commit || blocker.sha)}..HEAD\n         (clears it when it reruns ${(blocker.failed || []).join(', ') || 'the failed suites'}), or npm run ci:heavy -- --allow-hub-full`);
+  if (hubFullRefusal({ full: true })) console.error(`       by day the hub runs no FULL tier — instead: node scripts/ci.mjs --heavy --isolate --affected --range=${shortSha(blocker.commit || blocker.sha)}..HEAD\n         (clears it when it reruns ${(blocker.failed || []).join(', ') || 'the failed suites'} — from a commit AFTER the red one: an affected run at the red commit keeps its red), or npm run ci:heavy -- --allow-hub-full`);
   console.error('     Emergency bypass: VIBESPACE_SKIP_CI=1 git push\n');
   return 1;
 }
