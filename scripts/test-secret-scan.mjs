@@ -267,7 +267,22 @@ const fastGate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('as
 ok(ci.includes("const script = path.join(cwd, 'scripts', 'secret-scan.mjs');") && ci.includes("[script, '--tree', '--quiet']"), 'caller 2, scripts/ci.mjs: runSecretScan spawns scripts/secret-scan.mjs --tree');
 ok(fastGate.includes('runSecretScan({ cwd: runRoot, sha })') && fastGate.indexOf('await runFastLanes(plan, {') > 0 && fastGate.indexOf('runSecretScan(') < fastGate.indexOf('await runFastLanes(plan, {'), '…in the FAST tier, after the build and before the first suite (the Actions fast job runs `node scripts/ci.mjs` too)');
 ok(/^\s*if ! node scripts\/secret-scan\.mjs --tree; then$/m.test(wf) && !wf.includes('git ls-files'), 'caller 3, the Actions secret-scan workflow: `node scripts/secret-scan.mjs --tree` (no per-file loop of its own)');
-ok(/node scripts\/ci\.mjs\s*$/m.test(ciYml), '…and ci.yml\'s fast job runs scripts/ci.mjs (caller 2 on the runner)');
+// THE HOSTED FAST JOB RUNS THE SECRET SCAN — the law, never the line's spelling (主开发 11:48Z, after B-7353 split the job in two):
+// the job's line runs scripts/ci.mjs, whole or as one part; EVERY part reaches the scan (fastGate calls it unconditionally, after the
+// build and before any lane, whatever part it runs); and the scan's own suite is a fast row the split puts in exactly one part
+const FAST_RUN = /^\s*- run: node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?\s*$/m;
+ok(FAST_RUN.test(ciYml), '…and ci.yml\'s fast job runs scripts/ci.mjs — the whole tier or one part of it (--fast-part=${{ matrix.part }}/n) — caller 2 on the runner');
+const runLine = (ciYml.match(FAST_RUN) || [''])[0];
+ok(!!runLine && !FAST_RUN.test(ciYml.replace(runLine, runLine.replace('scripts/ci.mjs', 'scripts/other.mjs'))) && !FAST_RUN.test(ciYml.replace(runLine, runLine.replace('scripts/ci.mjs', 'scripts/ci.mjs --only=test-a'))),
+  'CONTROL: a fast job line that runs another script — or the tier cut to a named list — is red');
+ok(/\n {4}if \(!runSecretScan\(\{ cwd: runRoot, sha \}\)\.ok\)/.test(fastGate) && fastGate.indexOf('if (part) fast = fastPartPlan(') > 0 && fastGate.indexOf('if (part) fast = fastPartPlan(') < fastGate.indexOf('runSecretScan('),
+  '…and EVERY part runs the scan: fastGate calls it unconditionally, after the part\'s cut is made and before its lanes');
+{ const C = await import(pathToFileURL(path.join(REPO, 'scripts', 'ci.mjs')).href), fp = C.workflowFastPartsAt(ciYml);
+  const sourceOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf8'); } catch { return ''; } };
+  const parts = fp ? C.fastPartPlan(C.SUITES.filter((x) => x.tier === 'fast'), fp.n, { sourceOf }).parts : [];
+  const holding = parts.filter((p) => p.some((x) => x.name === 'test-secret-scan')).length;
+  ok(C.SUITES.some((x) => x.name === 'test-secret-scan' && x.tier === 'fast') && !!fp && holding === 1,
+    `…and the scan's own suite is a FAST row the split puts in exactly ONE of the workflow's ${fp ? fp.n : '?'} parts (test-ci-gate §2 holds every row in exactly one)`); }
 const OWN_PATTERN = /xox\[|gh\[pousr\]|github_pat_|sk-ant-|AKIA|AIza|GOCSPX|glpat-|PRIVATE KEY|T3Blbk|npm_\[|hf_\[|SG\\\./;
 for (const [name, text] of [['scripts/git-hooks/pre-push', hook], ['scripts/ci.mjs', ci], ['.github/workflows/secret-scan.yml', wf], ['.github/workflows/ci.yml', ciYml]]) ok(!OWN_PATTERN.test(text), `${name} carries no secret pattern of its own`, (OWN_PATTERN.exec(text) || [])[0]);
 const PARTNER = ['slack-token', 'slack-config-token', 'slack-app-token', 'slack-webhook', 'github-token', 'github-pat', 'gitlab-token', 'anthropic-key', 'openai-key', 'google-api-key', 'google-oauth-secret', 'google-oauth-token', 'aws-akid', 'aws-secret', 'stripe-key', 'twilio-api-key', 'sendgrid-key', 'npm-token', 'pypi-token', 'huggingface-token', 'private-key-block'];
