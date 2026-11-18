@@ -362,7 +362,7 @@ await (async () => {
   // (e) THE REAL STOP, end to end: a child process answers an HTTP request from the writer's answer and, in the same run,
   // exits as server.js does — the client READS the answer; RED (the microtask copy): the connection ends with no answer
   const CHILD = path.join(T9, 'exit-answer.cjs');
-  fs.writeFileSync(CHILD, `'use strict';
+  fs.writeFileSync(CHILD, `'use strict';   // stale-pins: kept — the child program this leg writes (its own writer calls), no pin on a product file
 const Module = require('module'), path = require('path'), fs = require('fs'), http = require('http');
 const [SWF, mode, dir] = process.argv.slice(2);
 let src = fs.readFileSync(SWF, 'utf8');

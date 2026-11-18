@@ -766,7 +766,7 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   ok(mvOk.mv && mvOk.mv.ok && mvOk.mv.moved && !mvOk.owed && mvOk.onDiskNew && !mvOk.onDiskOld, 'U5b «written before the move», behaviourally: moveDirLineage returns with the lineage ON DISK under the new key (nothing owed for the registry)', mvOk);
   const aMv = 'if (!saveNow()) { reg.dirHosts = before;';
   ok(kSrc.split(aMv).length === 2, 'U5b ANCHOR: the move waits on saveNow()');
-  const NoWaitK = mutantCopies('browser-pin-u5b-mv', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', kSrc.replace(aMv, 'if (!save()) { reg.dirHosts = before;'), 'move-no-wait');
+  const NoWaitK = mutantCopies('browser-pin-u5b-mv', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', kSrc.replace(aMv, 'if (!save()) { reg.dirHosts = before;'), 'move-no-wait');   // stale-pins: kept — the mutant's PLANTED text (save() for saveNow()), absent from the product on purpose
   const mvRed = await moveLeg(NoWaitK, 'red');
   ok(mvRed.mv && mvRed.mv.moved && mvRed.owed && !mvRed.onDiskNew, 'U5b CONTROL: the move\'s saveNow() back to save() ⇒ the lineage is owed, NOT on disk when the move returns — the check above would be red', mvRed);
   SWb.storeWriter().flushSync();

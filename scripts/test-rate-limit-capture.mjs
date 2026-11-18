@@ -602,8 +602,11 @@ await (async () => {
     // three rounds' defects planted back (at cap 1), each must be found. THE DRAIN is a law too: after each input's microtask
     // drain a re-merge is READING only while the walk holds its start or its read — a promise chain still running is red.
     const WALK_DEPTH = Number(process.env.VS_U65_WALK_DEPTH) || 5;
-    const WALK_CAPS = [[1, WALK_DEPTH], [2, Number(process.env.VS_U65_WALK_DEPTH2) || 4]];   // [cap, depth]
-    const walk = async (M, { stopAtFirst = false, cap = 1, depth = WALK_DEPTH } = {}) => {
+    // [cap, depth, older]: the cap-2 walk adds L5 (主开发 15:15Z at the restack): an event on the 5h lane OLDER than the newest 5h
+    // reading (the re-merge's newer/keep() filter — a call older than what the file holds for its lane — and the chain decides
+    // what an older reading does); at cap 2 so the fast row stays bounded, where a replay of several calls runs that filter
+    const WALK_CAPS = [[1, WALK_DEPTH, false], [2, Number(process.env.VS_U65_WALK_DEPTH2) || 4, true]];
+    const walk = async (M, { stopAtFirst = false, cap = 1, depth = WALK_DEPTH, older = false } = {}) => {
       const WALK_CAP = cap;
       const dW = path.join(d11, 'walk'); fs.mkdirSync(dW, { recursive: true });   // the walk's own folder: the folder law reads a short listing
       const key = 'sub-W', f = UW.cacheFileFor(dW, key);
@@ -621,21 +624,24 @@ await (async () => {
         M.useStoreWriter(store, { dropRun: () => { }, readFile: () => new Promise((res, rej) => reads.push({ res, rej })), schedule: (fn) => begins.push(fn), replayCap: WALK_CAP });
         let n = 0, otherUsed = false, bad = null;
         const last = { fiveHour: null, sevenDay: null }, producers = [];
+        let lastAt5 = null;   // the newest 5h event's instant (L5 is older than it)
         let chain = null, chainMark = null;   // the synchronous chain: every event merged over the last, nothing else (its mark read once per event)
         const markOf = (o) => { const e = QM.lanesOfReading(o).find((x) => x.lane === 'plan:7d'); return e ? !!e.mark : null; };
         const lostOf = (o) => producers.filter((x) => !(o && o.fiveHourAbsentWitnesses && o.fiveHourAbsentWitnesses[x]));
         const apply = async (inp) => {
           replays = 0;
-          if (inp === 'E5' || inp === 'E7' || inp === 'R7') {
-            // an event through THE write entry every producer calls, carrying the stream capture's PASSIVE ANSWER (its producer,
-            // a fresh session each event): its witness entry is a field the merge takes from the BASE, not from the call — so a
-            // re-merge over an OLDER file without a call loses it (what round 3's defect loses: the limits ride each call as merged)
-            n++; const five = inp === 'E5', dead = inp === 'R7', u = dead ? 100 : 10 + n, at = 1000 + n * 10, lane = five ? 'fiveHour' : 'sevenDay', lk = five ? 'plan:5h' : 'plan:7d';
+          if (inp === 'E5' || inp === 'E7' || inp === 'R7' || inp === 'L5') {
+            // an event through THE write entry every producer calls, holding ONLY its own lane, with a PASSIVE ANSWER of its own
+            // producer (a fresh session each event): its witness entry is a field the merge takes from the BASE, not from the call
+            // — a re-merge over an OLDER file without a call loses it, and the lane's value too (round 3's defect loses both)
+            n++; const old = inp === 'L5', five = inp === 'E5' || old, dead = inp === 'R7', u = dead ? 100 : old ? 50 + n : 10 + n, at = old ? lastAt5 - 5 : 1000 + n * 10, lane = five ? 'fiveHour' : 'sevenDay', lk = five ? 'plan:5h' : 'plan:7d';
             const args = { cacheDir: dW, key, obj: { fetchedAt: at, source: 'rate-limit-event', [lane]: { utilization: u / 100, resetsAt: five ? 1786900000 : 1787500000 } }, measuredAt: at, source: 'rate-limit-event', backend: 'claude',
               passiveAnswer: { producer: 'sess-' + n, weekSig: 'wk', fiveHour: null, absent5h: false }, stated: [lk], refused: dead ? [lk] : [] };
             UW.writeCacheObject(args);
             const c = realMerge(chain, { ...args, obj: { ...args.obj } }, { quiet: true }); if (c.ok) { chain = c.out; chainMark = markOf(chain); }
-            last[lane] = u; producers.push('sess-' + n);
+            if (old) last.fiveHour = util(chain, 'fiveHour');   // an OLDER reading: the synchronous chain says what it leaves
+            else { last[lane] = u; if (five) lastAt5 = at; }
+            producers.push('sess-' + n);
           } else if (inp === 'TAKE') { st.inflight = { bytes: st.owed.produce(), on: st.owed.onWritten }; st.owed = null; }
           else if (inp === 'OK') { const w = st.inflight; st.inflight = null; fs.writeFileSync(f, w.bytes); if (w.on) w.on(true, null); }
           else if (inp === 'FAIL') { const w = st.inflight; st.inflight = null; if (w.on) w.on(false, Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })); if (!st.owed) st.owed = st.last; }
@@ -658,7 +664,7 @@ await (async () => {
           if (!bad && n) { let names = []; try { names = UW.listCacheDir(dW); } catch { } if (!names.includes(path.basename(f))) bad = `(III) after ${inp} the folder's reader does not list the readings file`; }
         };
         for (const inp of seq) { await apply(inp); if (bad) break; }
-        const enabled = ['E5', 'E7', 'R7', ...(st.owed && !st.inflight ? ['TAKE'] : []), ...(st.inflight ? ['OK', 'FAIL'] : []), ...(begins.length ? ['BEGIN'] : []), ...(reads.length ? ['END', 'REFUSE'] : []), ...(otherUsed ? [] : ['OTHER'])];
+        const enabled = ['E5', 'E7', 'R7', ...(older && lastAt5 != null ? ['L5'] : []), ...(st.owed && !st.inflight ? ['TAKE'] : []), ...(st.inflight ? ['OK', 'FAIL'] : []), ...(begins.length ? ['BEGIN'] : []), ...(reads.length ? ['END', 'REFUSE'] : []), ...(otherUsed ? [] : ['OTHER'])];
         if (!bad) {   // brought to rest by GOOD landings
           for (let i = 0; i < 64; i++) {
             if (reads.length) await apply('END'); else if (begins.length) await apply('BEGIN'); else if (st.inflight) await apply('OK'); else if (st.owed) await apply('TAKE'); else break;
@@ -685,10 +691,10 @@ await (async () => {
       finally { UW.mergeCacheObject = realMerge; M.useStoreWriter(null); try { fs.rmSync(f, { force: true }); } catch { } }
       return { sequences, found, ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e6) };
     };
-    for (const [cap, depth] of WALK_CAPS) {
-      const wk = await walk(HUB, { cap, depth });
+    for (const [cap, depth, older] of WALK_CAPS) {
+      const wk = await walk(HUB, { cap, depth, older });
       console.log(`    the walk: ${wk.sequences} sequences (every prefix brought to rest) up to depth ${depth}, cap ${cap}, in ${wk.ms} ms`);
-      ok(!wk.found.length, `⑪ THE WALK at cap ${cap}: every sequence of up to ${depth} inputs (E5 E7 R7 TAKE OK FAIL BEGIN END REFUSE, OTHER once) — ${wk.sequences} sequences, each brought to rest — keeps the laws: every reader sees every event (its value, its passive answer, the 7d refusal mark as the synchronous chain holds it), the folder's reader lists the file, no re-merge past the cap, every event on disk, no pending copy outliving its newest bytes`, JSON.stringify(wk.found.slice(0, 3)));
+      ok(!wk.found.length, `⑪ THE WALK at cap ${cap}: every sequence of up to ${depth} inputs (E5 E7 R7${older ? ' L5' : ''} TAKE OK FAIL BEGIN END REFUSE, OTHER once) — ${wk.sequences} sequences, each brought to rest — keeps the laws: every reader sees every event (its value, its passive answer, the 7d refusal mark as the synchronous chain holds it), the folder's reader lists the file, no re-merge past the cap, every event on disk, no pending copy outliving its newest bytes`, JSON.stringify(wk.found.slice(0, 3)));
     }
     const plants = [
       ['round 1 — the law not asked at the re-merge\'s exit (the copy stranded)', '} else settle(file, p); };', '} };'],
