@@ -414,7 +414,9 @@ const fixes2 = (async () => {
       await w.until(() => w.find('session'), 8000, 'session');
       w.send({ type: 'chat-input', text: reason ? 'hello' : 'quiet skipped', msgId: 'n1' });
       await w.until(() => wlog(w).includes('[stderr] jetski: no output produced'), 8000, 'jetski\'s line');
-      await sleep(200); // the card (if any) is recorded in the same call; its stdout line lands after
+      // B-e818 (the batcher: «:416 still sleeps 200 ms»): the wrapper DECIDES in the same call as the jetski line — a card record
+      // (stdout, it lands after the log line) or «no soft-deny card: …» (the log) — wait on that decision, never a 200 ms sleep
+      await w.until(() => w.all('permission_request').length > 0 || /no soft-deny card: /.test(wlog(w)), 8000, 'the card or its «no soft-deny card» line');
       return { cards: w.all('permission_request').map((r) => r.toolCall.title), nudged: agyLines(w).some((c) => /^<vibespace-reminder>/.test(c)), why: (/no soft-deny card: ([^\n]*)/.exec(wlog(w)) || [])[1] || null };
     } finally { await ended(w); }
   };
