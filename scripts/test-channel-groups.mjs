@@ -837,13 +837,13 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   f.close();
   const truth = (st, gid, who, since) => st.readTail('groups', gid, { limit: 5000 }).filter((r) => r.at > since && ((r.raw && r.raw.kind) || 'message') === 'message' && !(r.author && r.author.id === who)).length;
   const sinceOf = (st, gid, who) => { const m = st.groups.live().groups[gid].members.find((x) => x.member === who); return Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : m.joinedAt - 1; };
-  const boot = (ge, midRead = null, onSay = null) => {
+  const boot = (ge, midRead = null, onSay = null, opts = {}) => {
     const st = createChannelStore({ dir: path.join(dataDir, 'channels') });
     const seen = { sync: 0, async: [], done: 0 }, rt = st.readTail, rta = st.readTailAsync;
     const b = { st, seen, eng: null, spyOff: () => { st.readTail = rt; } };
     st.readTail = (...a) => { seen.sync++; return rt.apply(st, a); };
     st.readTailAsync = async (ad, gid, o) => { seen.async.push({ gid, windowBytes: o && o.windowBytes }); try { const r = await rta.call(st, ad, gid, o); if (midRead) await midRead(b, gid); return r; } finally { seen.done++; } };
-    b.eng = ge.create({ store: st, deliver: null, broadcast: (m) => { if (onSay) onSay(m); }, now: () => Date.now(), roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+    b.eng = ge.create({ store: st, deliver: null, broadcast: (m) => { if (onSay) onSay(m); }, now: () => Date.now(), roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} }, ...opts });
     return b;
   };
   // the warm-up has ENDED its reads: every async read FINISHED (its spy's finally), or the sync reads counted — then turns for its last count
@@ -868,7 +868,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   // never a synchronous read of every cold group in that turn; the warm-up's end says the list ONCE, every count in it
   const MUTWU = mutantCopies('chan-groups-warm', REPO);
   const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
-  const COLD = "    if (!log && coldIds && coldIds.has(g.id)) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }\n";
+  const COLD = "    if (!log && ((coldIds && coldIds.has(g.id)) || stuckIds.has(g.id))) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }\n";
   const early = async (ge) => {
     const said = [];
     const b = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') said.push(m); });
@@ -889,6 +889,74 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   ok(geSrc.split(COLD).length === 2 && relReader !== geSrc, 'CONTROL (the release\'s reader): its plant — the cold-group line — is spelled exactly once');
   const e2 = await early(MUTWU.load('src/server/groups-engine.js', relReader, 'release-reader'));
   ok(e2.sync0 === NG * 2 && e2.nulls === 0, `CONTROL (the release's reader): ${e2.sync0} SYNC log reads in the start's own turn (every cold group, the owner's list and a member's) ⇒ RED`);
+  // B-b17f's remainder cure (主开发 21:43Z, shoulds 1–3). (f) should 1: ONE warm read that never settles holds neither the
+  // warm-up nor the other counts — past its bound the group stays «not counted yet», said ONCE by name; it is counted (and the list
+  // said) when its read lands at last
+  {
+    const stuckG = ids[2]; let landNow = null; const hang = new Promise((r) => { landNow = r; });
+    const scene = async (ge) => {
+      const said = [], warns = [];
+      let ends = null; const end = new Promise((r) => { ends = r; });
+      const b = boot(ge, async (bb, gid) => { if (gid === stuckG) await hang; }, (m) => { if (m && m.type === 'channel-groups-updated') { said.push(m); if (said.length === 1) ends(); } }, { warmReadBoundMs: 40, log: { info() {}, log() {}, warn: (l) => warns.push(String(l)) } });
+      b.eng.list();   // a reader in the start's turn: every count «not counted yet»
+      await Promise.race([end, new Promise((r) => setTimeout(r, 3000))]);   // the warm-up's said end (a bound: the control never says it)
+      const l1 = b.eng.list();
+      return { b, said, warns, l1 };
+    };
+    const f1 = await scene(GE);
+    const g1 = f1.l1.find((g) => g.id === stuckG), others = f1.l1.filter((g) => g.id !== stuckG);
+    const named = f1.warns.filter((l) => l.includes(stuckG) && /could not read the log of group/.test(l));
+    let landed = null; const landSaid = new Promise((r) => { landed = r; }); const watch = setInterval(() => { if (f1.said.length >= 2) landed(); }, 2);
+    landNow();   // the read lands at last
+    await Promise.race([landSaid, new Promise((r) => setTimeout(r, 3000))]); clearInterval(watch);
+    const g1b = f1.b.eng.list().find((g) => g.id === stuckG), want1 = truth(f1.b.st, stuckG, G.OWNER, 0), wantOthers = others.every((g) => g.unread === truth(f1.b.st, g.id, G.OWNER, 0));
+    f1.b.st.close();
+    ok(g1 && g1.unread === null && others.length === NG - 1 && wantOthers && named.length === 1 && f1.said[0] && !f1.said[0].changed.includes(stuckG) && g1b && g1b.unread === want1 && f1.said[1] && f1.said[1].changed.length === 1 && f1.said[1].changed[0] === stuckG,
+      `§3g2 (f) one warm read that never settles: the other ${others.length} groups counted (= from scratch), the warm-up's end said; the stuck group «not counted yet» (${g1 && g1.unread}), said once by name (${named.length} line); its read landing at last: counted ${g1b && g1b.unread} = ${want1}, the list said again naming it alone`);
+    const BND = '          const got = await bounded(rd);\n';
+    const noBound = geSrc.replace(BND, '          const got = await rd;\n');
+    ok(geSrc.split(BND).length === 2 && noBound !== geSrc, 'CONTROL (no bound on a warm read): its plant — the bounded await — is spelled exactly once');
+    let landNow2 = null; const hang2 = new Promise((r) => { landNow2 = r; });
+    const said2 = [];
+    const b2c = boot(MUTWU.load('src/server/groups-engine.js', noBound, 'nobound'), async (bb, gid) => { if (gid === stuckG) await hang2; }, (m) => { if (m && m.type === 'channel-groups-updated') said2.push(m); }, { warmReadBoundMs: 40 });
+    b2c.eng.list();
+    await new Promise((r) => setTimeout(r, 400));   // ten times the bound
+    const nulls2 = b2c.eng.list().filter((g) => g.unread === null).length, said2n = said2.length;   // read BEFORE the read lands
+    landNow2(); await settle(b2c, NG); for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+    b2c.st.close();
+    ok(nulls2 >= NG - 2 && !said2n, `CONTROL (no bound): the warm-up waits on the one read — ${nulls2} of ${NG} counts still «not counted yet» after ten bounds, ${said2n} end said ⇒ RED`);
+  }
+  // (g) should 3: a group MADE AFTER THE START is never cold — its count is a number at once, the warm-up still running
+  {
+    const b7 = boot(GE);
+    const g7 = await b7.eng.create({ by: A, name: 'made after the start', members: [B], quiet: true });
+    await b7.eng.post({ group: g7.group.id, from: A, text: 'a post in a group made after the start' });
+    const c7 = (b7.eng.listFor(B).find((x) => x.id === g7.group.id) || {}).unread, cold7 = b7.eng.listFor(B).filter((x) => x.unread === null).length;
+    await settle(b7, NG); for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+    b7.st.close();
+    ok(c7 === 1, `§3g2 (g) a group made after the start (a post by another member in it): its count ${c7} at once — never «not counted yet» (${cold7} group(s) of the start still were at that moment)`);
+  }
+  // (h) should 3: a warm read that FAILS (an unreadable log) leaves the group to the next reader, as before; and when NOBODY was
+  // answered null the warm-up's end says nothing
+  {
+    const bad8 = ids[4], said8 = [];
+    let warmed8 = null; const end8 = new Promise((r) => { warmed8 = r; });
+    const b8 = boot(GE, async (bb, gid) => { if (gid === bad8) throw new Error('an unreadable log (a stand-in)'); }, (m) => { if (m && m.type === 'channel-groups-updated') said8.push(m); }, { onWarmed: () => warmed8() });
+    await end8;   // the warm-up's END, told (nobody was answered null: no broadcast to wait on) — never a count of turns
+    const s8 = b8.seen.sync, l8 = b8.eng.list(), r8 = b8.seen.sync - s8;
+    const wrong = l8.filter((g) => g.unread !== truth(b8.st, g.id, G.OWNER, 0)).map((g) => g.id);
+    b8.st.close();
+    ok(!said8.length && r8 === 1 && wrong.length === 0 && l8.every((g) => Number.isInteger(g.unread)),
+      `§3g2 (h) a warm read that fails: the group is counted by the next reader (${r8} sync read — that group's alone), every count = from scratch; nobody was answered null ⇒ the warm-up's end said nothing (${said8.length} broadcast)`);
+  }
+  // should 2: the panel reads a count not made yet (null) as 0 until the warm-up's end says it — no badge, never «null»
+  {
+    const { groupListRows } = await import(path.join(REPO, 'src/lib/channel-groups-view.js'));
+    const rows = groupListRows({ groups: [{ id: 'g-null', name: 'cold', unread: null }, { id: 'g-3', name: 'warm', unread: 3 }] }).rows || groupListRows({ groups: [{ id: 'g-null', name: 'cold', unread: null }, { id: 'g-3', name: 'warm', unread: 3 }] });
+    const list = Array.isArray(rows) ? rows : [];
+    const rn = list.find((r) => r.id === 'g-null'), r3 = list.find((r) => r.id === 'g-3');
+    ok(rn && rn.unread === 0 && r3 && r3.unread === 3, `§3g2 the panel's row for a count not made yet: unread ${rn && rn.unread} (no badge until the warm-up's end says it), a counted one ${r3 && r3.unread}`);
+  }
   // (c) A RECORD LANDS WHILE A GROUP'S LOG IS READ (after its bytes were read): that group is not counted from the read. The
   // post's own broadcast recounts the OWNER's count; a MEMBER's is recounted by nobody — the warm-up would keep it stale
   const late = ids[3];
@@ -907,7 +975,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   await settle(b3, NG * 2);
   ok(start > 0 && b3.seen.sync >= NG * 2 && b3.seen.async.length === 0, `CONTROL (the old warm-up): ${b3.seen.sync} SYNC reads of whole logs on the loop for ${NG} groups (the owner and each member apiece, four groups a turn) ⇒ RED`);
   b3.st.close();
-  const noCheck = geSrc.replace("          if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) continue;\n", "          if (!now2) continue;\n");
+  const noCheck = geSrc.replace("if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) return false;", "if (!now2) return false;");   // the check lives in countFrom (the cure: one helper for the warm read and a late one)
   const b4 = boot(MUTWU.load('src/server/groups-engine.js', noCheck, 'nolanded'), landed);
   await settle(b4, NG);
   const c4 = memberCount(b4), c4c = memberCount(b4, C);
@@ -920,8 +988,8 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   const modeTo = async (mode) => { const st = createChannelStore({ dir: path.join(dataDir, 'channels') }); await st.groups.update((gr) => { gr.groups[g5].members.find((x) => x.member === B).notify = mode; }); st.close(); };
   const modeScene = async (ge) => {
     await modeTo('mention');
-    const said5 = [];
-    const b5 = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') said5.push(m); });
+    let saidEnd = null; const end5 = new Promise((r) => { saidEnd = r; });
+    const b5 = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') saidEnd(m); });
     b5.eng.list(); for (const who of [A, B, C]) b5.eng.listFor(who);   // the readers before the warm-up's first turn (the release's memoised every count)
     const pre = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread;   // B-b17f's remainder: null — a cold count is never memoised by a reader
     // the state setNotify leaves (a mode moved, no record), set in the same turn — before the warm-up's first turn, so it
@@ -932,7 +1000,8 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     for (let k = 0; k < NG * 3; k++) await new Promise((r) => setImmediate(r));   // the warm-up's turns, one per group
     // B-b17f's remainder: a reader answered null memoised nothing — the warm-up then READS every group (async) and says its
     // end (one broadcast); the release's reader memoised every count — its warm-up reads only the changed group
-    for (let k = 0; k < 400 && (pre === null ? !said5.length : b5.seen.async.length > b5.seen.done); k++) await new Promise((r) => setTimeout(r, 5));
+    if (pre === null) await end5;   // should 4 (主开发 21:43Z): the said end, awaited — never a timer of rounds
+    else await settle(b5, 1);       // the release's reader memoised every count: its warm-up reads only the changed group (one read)
     const got = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread, want = truth(b5.st, g5, B, sinceOf(b5.st, g5, B));
     b5.st.close();
     return { ok: was === 'mention', got, want, pre };

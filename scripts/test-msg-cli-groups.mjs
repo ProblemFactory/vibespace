@@ -139,6 +139,11 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const r2 = await run(['groups']);
   ok(seen.length === before + 2 && seen.slice(-2).every((x) => x.method === 'GET' && x.path === '/api/agent/msg/groups') && r.out === r2.out, '`group list` and `groups` are the same GET /groups', JSON.stringify(seen.slice(-2)));
   ok(/g-0000abcd  "api" — 3 unread · your notify: mention/.test(r.out), 'group list prints id · name · unread · the caller\'s mode', r.out);
+  // B-b17f's remainder cure (主开发 21:43Z, should 2): a count the hub's start has not made yet (null) is SAID — never «null unread»
+  override = (key) => (key === 'GET /api/agent/msg/groups' ? { status: 200, body: { groups: [{ id: 'g-0000abcd', name: 'api', pair: false, archived: false, unread: null, notify: 'mention', members: [{ name: 'alpha', notify: 'next-turn', live: true }] }] } } : null);
+  const rn = await run(['group', 'list']);
+  override = null;
+  ok(/g-0000abcd  "api" — unread not counted yet \(the hub just started\) · your notify: mention/.test(rn.out) && !/null/.test(rn.out), 'a count the hub has not made yet (null at its start) is said — never «null unread»', rn.out);
 
   r = await run(['read', 'api', '--before', '1700000000000', '--limit', '20']);
   ok(last().path === '/api/agent/msg/read' && same(last().query, { group: 'api', before: '1700000000000', limit: '20' }), 'read <group> --before <ts> --limit n ⇒ the query', JSON.stringify(last().query));

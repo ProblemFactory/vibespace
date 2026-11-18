@@ -91,6 +91,9 @@ const TEXT_MAX = 16 * 1024;
 const LOG_READ = 2000;
 // B-b17f: the boot warm-up reads a group's log in windows this size, each parsed in its own turn of the loop
 const WARM_WINDOW_BYTES = 64 * 1024;
+// B-b17f's remainder cure (主开发 21:43Z, should 1): ONE group's warm read that has not settled after this long never holds the
+// warm-up — that group stays «not counted yet» (said once, by name) and is counted when its read lands; the others go on
+const WARM_READ_BOUND_MS = 10000;
 const READ_MAX = 200;
 const LAST_TEXT_MAX = 160;
 const WAITING_NAMED = 3;        // the trailer names at most this many waiting groups, then counts
@@ -125,6 +128,8 @@ function create({
   broadcast = () => {},
   now = () => Date.now(),
   log = console,
+  warmReadBoundMs = WARM_READ_BOUND_MS,   // B-b17f's remainder cure: a seam for the leg (a never-settling read, a short bound)
+  onWarmed = null,   // B-b17f's remainder cure: the warm-up's END, told (a seam for the legs — the end is said only when a reader got null)
   // `() => [{cid, name, groups[], reachability}]` — the live agent sessions
   // (the wiring's liveSessions). Reach and names are asked of THIS, per call.
   roster = () => [],
@@ -332,6 +337,7 @@ function create({
   // warm-up's end announces the list once when a reader was answered null. coldIds: the groups of the start, not yet passed
   let coldIds = null;
   const coldAsked = new Set();
+  const stuckIds = new Set();   // the cure (should 1): groups whose warm read passed its bound and has not landed — cold until it does
   // B-a354: a `mention` member counts only what reaches it (B-a354's rule, read through reachFor) — its mode is part of the memo's facts
   const modeOf = (g, who) => { const m = who === G.OWNER ? null : G.memberOf(g, who); return m ? m.notify : null; };
   function unreadFor(g, who, since, log = null) {   // `log` (B-b17f, the boot warm-up): the group's records already read
@@ -341,7 +347,7 @@ function create({
     const sig = mode === 'mention' ? reachSig(g, who) : '';
     // B-b17f's remainder: a COLD group's reader memoises nothing (the warm-up's count is the first memo) — an owed count is
     // null, «not counted yet»; nothing owed is 0 by the facts alone
-    if (!log && coldIds && coldIds.has(g.id)) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }
+    if (!log && ((coldIds && coldIds.has(g.id)) || stuckIds.has(g.id))) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }
     if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, mode, sig, n: 0 }); return 0; }
     const m = unreadMemo.get(key);
     if (m && m.since === since && m.lastAt === lastAt && m.mode === mode && m.sig === sig) return m.n;
@@ -1867,6 +1873,18 @@ function create({
     const turn = () => new Promise((r) => { const h = setImmediate(r); if (h && h.unref) h.unref(); });
     const whos = (g) => [[G.OWNER, ownerReadOf(g.id)], ...g.members.map((m) => [m.member, memberSince(m)])];
     const clearedN = (g) => (g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).length : 0);
+    // a group is counted from its read only if nothing landed in it during the read (its lastAt and cleared index unchanged)
+    const countFrom = (id, records, lastAt, cl) => { const now2 = getGroup(id); if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) return false; for (const [who, since] of whos(now2)) unreadFor(now2, who, since, records); return true; };
+    const STUCK = Symbol('stuck');
+    const bounded = (rd) => new Promise((resolve, reject) => { const t = setTimeout(() => resolve(STUCK), warmReadBoundMs); if (t && t.unref) t.unref(); rd.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); }); });
+    // should 1: the read past its bound — said ONCE by name; the group answers «not counted yet» until its read lands, then it is
+    // counted and the list said (a read that fails at last, or a record that landed meanwhile: the next reader counts it, as before)
+    const stuck = (id, rd, lastAt, cl) => {
+      stuckIds.add(id);
+      try { log.warn && log.warn(`[groups] the boot warm-up could not read the log of group ${id} within ${Math.round(warmReadBoundMs / 1000)} s — its unread counts say «not counted yet» until the read lands; the other groups go on`); } catch { }
+      rd.then((v) => { stuckIds.delete(id); countFrom(id, v.records, lastAt, cl); }, () => { stuckIds.delete(id); })
+        .then(() => { if (coldAsked.has(id) && !(coldIds && coldIds.size)) { coldAsked.delete(id); announce([id], null, null, { pending: false }); } });
+    };
     try { coldIds = new Set(Object.keys(all())); } catch { coldIds = null; }   // the groups of the start (a later one is never cold)
     (async () => {
       await turn();
@@ -1877,18 +1895,20 @@ function create({
           if (!g) continue;
           const lastAt = Number(g.lastAt) || 0, cl = clearedN(g);
           if (!whos(g).some(([who, since]) => unreadOwed(g, who, since))) continue;   // every count known: nothing to read
-          const { records } = await readFoldedAsync(id, { limit: LOG_READ, windowBytes: WARM_WINDOW_BYTES });
-          const now2 = getGroup(id);
-          if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) continue;
-          for (const [who, since] of whos(now2)) unreadFor(now2, who, since, records);
+          const rd = readFoldedAsync(id, { limit: LOG_READ, windowBytes: WARM_WINDOW_BYTES });
+          const got = await bounded(rd);
+          if (got === STUCK) { stuck(id, rd, lastAt, cl); continue; }   // should 1: never held by one read — it lands later
+          countFrom(id, got.records, lastAt, cl);
         } catch { /* an unreadable log: the next reader counts it */ }
-        finally { if (coldIds) coldIds.delete(id); }   // passed: counted, nothing owed, a record landed during the read or unreadable — the next reader counts it
+        finally { if (coldIds) coldIds.delete(id); }   // passed: counted, nothing owed, a record landed during the read, unreadable (the next reader counts it) or stuck (cold until it lands)
         await turn();
       }
     })().catch(() => { }).finally(() => {
       coldIds = null;
-      if (!coldAsked.size) return;
-      const asked = [...coldAsked]; coldAsked.clear();
+      try { if (typeof onWarmed === 'function') onWarmed(); } catch { }
+      const asked = [...coldAsked].filter((id) => !stuckIds.has(id));   // a stuck group is said when its read lands
+      for (const id of asked) coldAsked.delete(id);
+      if (!asked.length) return;
       announce(asked, null, null, { pending: false });   // the counts a reader was answered null for, said once (no pending moved)
     });
   })();
