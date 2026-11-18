@@ -200,8 +200,7 @@ console.log(`    the next prompt context: ${sizeOf(String(pc2.json?.context || '
 ok(!/browser profile changed/.test(String(pc2.json?.context || '')), '…once');
 for (const l of journal.split('\n').filter((x) => /pending notice\(s\) wait/.test(x))) console.log(`    server: ${l.replace(/^.*?\[inject\]/, '[inject]').slice(0, 200)}`);
 ok(seen.lastIndexOf('browser profile changed') === seen.search(/browser profile changed: Personal → Work \(by user\)(?![\s\S]*browser profile changed)/), 'the queued profile changes rode OLDEST FIRST — the last one the agent read is the present (the nudge\'s Personal → Work)');
-const routeSrc = fs.readFileSync(path.join(repo, 'src/routes/browser.js'), 'utf8');
-ok(!/spendGuard|authorizeUnattendedSpend|spendReason|deliverToConversation/.test(routeSrc), 'the nudge route names no spend reason and asks no ladder — zero billed turns by construction');
+// (the nudge route's source pin of src/routes/browser.js: MOVED to the fast scripts/test-profile-blindness-chip-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 // back on the pin ⇒ neutral again, and the nudge has nothing to say
 r = await agent('POST', '/api/agent/browser/resolve', { handle: 'work', argv: ['snapshot'] });
 ok(r.status === 200 && r.json.ok && r.json.isDefault === true, 'the agent resolves onto Work (the pin)');

@@ -43,7 +43,7 @@
 //      focus kept in his reach, releases at their press's window, his moved window re-mapped; no size from Watch's picture)
 //   §4 A SATELLITE PICTURE IS ONE INPUT WITH ITS IME (src/lib/keyboard-yield.js sameInput)
 //   §5 THE WINDOW'S DOORS (source pins of src/lib/desktop-app-window.js, browser-live-window.js, xpra-view.js, style.css) and
-//      their words (literal t() with zh + ja)
+//      their words (literal t() with zh + ja) — MOVED with its five door mutants to the fast scripts/test-browser-x-seat-pins.mjs
 //   §6 MUTANTS — each rule's line undone in a copy of src: the leg that names it goes red
 // Run: node scripts/test-browser-x-seat.mjs
 import fs from 'node:fs';
@@ -61,7 +61,6 @@ let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 4000, step = 20) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { v = null; } if (v) return v; await sleep(step); } return null; };
-const read = (root, rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const ROOT = scratch('bxseat'); fs.mkdirSync(ROOT, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 const quiet = { log() { }, warn() { } };
@@ -628,32 +627,7 @@ async function satelliteFacts(root) {
   const shell = new El('DIV', 'picture-shell', win), mainPane = new El('DIV', 'xpra-pane', shell), mainCanvas = new El('CANVAS', '', mainPane), mainIme = new El('TEXTAREA', 'xpra-ime', mainPane);
   return { satellite: KY.sameInput(canvas, ime), otherSatellite: KY.sameInput(canvas, otherIme), main: KY.sameInput(mainCanvas, mainIme) };
 }
-/** §5 — the doors' source facts of ONE tree; → facts */
-function doorFacts(root) {
-  const dw = read(root, 'src/lib/desktop-app-window.js'), live = read(root, 'src/lib/browser-live-window.js'), view = read(root, 'src/lib/xpra-view.js'), css = read(root, 'public/style.css');
-  const rule = (css.match(/\n\.desktop-app-xseat \{[^}]*\}/) || [''])[0];
-  return {
-    unknownIsWatch: /const seatState = \(\) => \(browserDisplay\(\) \? bseat\.seat \|\| 'watch' :/.test(dw),
-    failedIsWatch: /if \(!r \|\| r\.error \|\| !r\.seat\) setBrowserSeat\('watch', null, \{ failed: true \}\);/.test(dw) && dw.includes("t('View only — this window\\'s seat could not be read; it is asked again when it reconnects')"),
-    told: /onSeat: \(v\) => applyBrowserSeat\(v\),/.test(dw) && /seat: \(v\) => \{ try \{ onSeat\?\.\(v\); \}/.test(view) && read(root, 'src/lib/xpra-client.js').includes("case 'vibespace-seat':"),
-    labelIsAct: /xDoorBtn\.textContent = doorAct === 'take' \? t\('Use it here'\) : doorAct === 'open' \? t\('Open your browsing window'\) : t\('Browse yourself'\);/.test(dw)
-      && /const takeSeatHere = \(\) => fetchJson\(`\/api\/desktop\/apps\/\$\{encodeURIComponent\(id\)\}\/browser-seat`, \{ method: 'POST'/.test(dw)
-      && /if \(doorAct === 'take'\) \{\n\s*const r = await takeSeatHere\(\);/.test(dw)
-      && /if \(\(doorAct === 'browse' \|\| doorAct === 'open'\) && typeof app\.browseYourself === 'function'\) \{\n\s*await takeSeatHere\(\);/.test(dw)
-      && !/xDoorBtn\.textContent = t\('Take over'\)/.test(dw),
-    doorVerdict: /const a = deskDoorAct\(\{ profile: prof, human: browserHuman\(\) \}\);/.test(dw) && /xDoorBtn\.style\.display = doorAct \? '' : 'none';/.test(dw),
-    inputMode: /const next = m === 'watch' \|\| m === 'blocked' \|\| m === 'input' \? \(m === 'input' \? 'watch' : m\) : 'active';/.test(view) && /const sends = \(\) => mode === 'active' \|\| \(mode === 'watch' && inputSeat\);/.test(view) && /client\.viewOnly = viewOnly \|\| !sends\(\);/.test(view),
-    liveDoorHuman: /deskDoorOf\(\{ source: pictureNow\(\), xShown: xOn\(\), stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: st\.fact && st\.fact\.stuck \}\), human: !!H \}\)/.test(live), // the .367 seam: the banner's passkey fact first
-    liveDoorRejudged: /const renderMode = \(\) => \{\n    renderDeskDoor\(\);/.test(live) && /scheduleReport\(\); renderDeskDoor\(\);/.test(live) && /renderOwner\(\); renderDeskDoor\(\);/.test(live) && /const renderDialog = \(\) => \{\n    renderDeskDoor\(\);/.test(live),
-    themeShadow: !!rule && !/rgba?\(/.test(rule) && rule.includes('box-shadow: var(--shadow-window)'),
-    oneRank: /w\.el\.style\.zIndex = String\(Z_FLOOR \+ stackRank\(win\)\);/.test(view) && /import \{[^}]*\bstackRank\b[^}]*\} from '\.\/xpra-proto\.js';/.test(view) && !/Z_REACH|Z_BASE/.test(view)
-      && /\.sort\(\(a, b\) => P\.stackRank\(b\) - P\.stackRank\(a\)\)\[0\] \|\| null;/.test(read(root, 'src/lib/xpra-client.js')),
-    clientRefusalSaid: /onRefused: \(v\) => sayClientRefusal\(v\),/.test(dw) && dw.includes("if (sayPaced('click-first', now)) { showToast(t('Click your window first — another window is over it there, so the scroll would land in that one')")
-      && /refused: \(v\) => \{ try \{ onRefused\?\.\(v\); \}/.test(view) && read(root, 'src/lib/xpra-client.js').includes("emit('refused', { act: 'wheel', code: 'click-first' }); return; }"),
-    toastOnActs: /const more = \(Number\(v\.acts\) \|\| 0\) > bseat\.acts;/.test(dw) && /if \(more && bseat\.seat === 'input'\) \{/.test(dw),
-    dw, live,
-  };
-}
+/* (§5 — doorFacts(root), the doors' source facts of ONE tree: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate) */
 
 
 // ═══ §1 ═══
@@ -769,7 +743,7 @@ ok(S.reconnectKeeps === true, "r3 MINOR — a pane that RECONNECTS (its old sock
 ok(S.leaveReelect === true, 'the pane that held it gone: the newest remaining pane takes the seat');
 ok(S.noAskAfterClose === true, "r5 MINOR C — his socket closed with a read deferred: the one asked at once stands, the deferred one is never asked after the close", S.closeAsks);
 ok(S.toldEnd === true && S.endCut === true, 'his holding ended (human-end): cut again, told');
-const D = doorFacts(REPO);
+// (const D = doorFacts(REPO) — §5's source facts: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 console.log('§3 the routes the window asks, and the client');
 ok(S.routeWatch && S.routeWatch.status === 200 && S.routeWatch.seat === 'watch' && S.routeWatch.why === 'not-browsing' && S.routeWatch.profileId === 'bp-x1', `before: 'watch' / 'not-browsing' for his socket, the browser named (${JSON.stringify(S.routeWatch)})`);
 ok(S.routeInput && S.routeInput.seat === 'input' && S.routeInput.why === null && S.routeAgent && S.routeAgent.seat === 'watch' && S.routeAgent.why === 'watch-mode', `holding: 'input' for his socket, 'watch' / 'watch-mode' for the agent's (${JSON.stringify([S.routeInput, S.routeAgent])})`);
@@ -805,7 +779,7 @@ ok(S.routeBad === 400 && S.routeMissing === 404 && S.routeApp && S.routeApp.stat
   ok(!pf.error && pf.reachAboveAgents === true && pf.outsideSeat === true, "r4 MAJOR 1 kept — his reach (his main, then his dialog) above the agents' top-levels and dialogs; outside the input seat a dialog above a main, z orders a tier");
   ok(!pf.error && pf.front === HIS, `r5 MINOR B — in his input seat frontOf names his reach first (HIS over a later agent window and its dialog; a popup never) — never z alone (${pf.front}); r6: never the drawing's tiers either (test-xpra-client §XS)`);
   ok(!pf.error && pf.underBadge === true, 'every window under the fit badge (z-index 400000): the rank is capped (STACK_Z_CAP; the client renumbers z before it)');
-  ok(D.oneRank === true, "r5 — ONE drawn order: the view's z-index is Z_FLOOR + stackRank and windowAt sorts by P.stackRank (what is drawn on top is what his press hits); r6: the front is frontOf's own question");
+  // (r5 — ONE drawn order, the doors' oneRank source pin: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ═══ §4 ═══
@@ -816,27 +790,8 @@ console.log('§4 a satellite picture is one input with its own IME (src/lib/keyb
   ok(f.otherSatellite === false && f.main === true, 'another satellite\'s textarea is not; the main picture shell\'s rule is unchanged');
 }
 
-// ═══ §5 ═══
-console.log("§5 the window's doors (source pins) and their words");
-{
-  ok(D.unknownIsWatch, "FAIL 3 — a browser display's pane is WATCH until the bridge (or the route) says otherwise — never this window's election's 'active'");
-  ok(D.failedIsWatch, 'FAIL 3 — a failed seat answer is WATCH and SAID («…seat could not be read…»), never active by default');
-  ok(D.told, "FAIL 3 — the window takes the bridge's in-band word (xpra-client → xpra-view onSeat → the window)");
-  ok(D.toastOnActs, "r3 — the window's one toast is for a refused ACT (his press, his key: `acts`); a quiet refusal is told, never toasted");
-  ok(D.clientRefusalSaid, "r6 MINOR 1 — his wheel the CLIENT refused (a raise would take his focus from his own dialog: nothing sent) reaches his Desktop window (xpra-client on.refused → xpra-view onRefused) and is said, paced like the bridge's refusals");
-  ok(D.labelIsAct, "MAJOR B — the door's label IS its act: «Use it here» POSTs the seat, «Browse yourself» / «Open your browsing window» open his own tab (and hold his seat in THIS pane — measured: a synced copy on another client took it); no «Take over» that is no takeover");
-  ok(D.doorVerdict, "MAJOR B — the door's act is deskDoorAct's (a conversation's temporary browser: no button, the words say why)");
-  ok(D.inputMode, "the view's 'input' mode: Watch's picture (nothing sized), his input sent");
-  ok(D.liveDoorHuman && D.liveDoorRejudged, "the live view's raw-fallback door: only in his browse-yourself window, judged again at every fact, X mount / unmount, mode and digest change");
-  ok(D.themeShadow, 'the Watch door strip\'s shadow is the theme\'s (--shadow-window), never a literal colour');
-  const zh = read(REPO, 'src/lib/i18n-zh.js'), ja = read(REPO, 'src/lib/i18n-ja.js');
-  const keys = [...D.dw.matchAll(/\bt\((?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]).replace(/\\(['"])/g, '$1')).filter((k) => /^(View only — |Use it here|Only your own window|Make this window the one|Open your own tab in this browser|You browse this browser yourself|You are browsing it|Browse yourself|Open your browsing window)/.test(k));
-  const has = (src, k) => src.includes(JSON.stringify(k)) || src.includes(`'${k.replace(/'/g, "\\'")}'`);
-  ok(keys.length >= 12 && keys.every((k) => has(zh, k) && has(ja, k)), `every word of the doors is a literal t() with zh + ja (${keys.length})`, keys.filter((k) => !has(zh, k) || !has(ja, k)));
-  const PICw = W0.PIC.DESK_DOOR_WORDS || {};
-  ok(D.live.includes('t("' + PICw.line + '")') && D.live.includes("t('" + PICw.button + "')") && has(zh, PICw.line) && has(ja, PICw.line) && has(zh, PICw.button) && has(ja, PICw.button), "the live view says the door's words (literal t() of DESK_DOOR_WORDS, zh + ja)");
-  ok(zh.includes('只能看——这个浏览器由「{name}」的 agent 在操作；自己浏览后可在这里操作你自己的窗口'), "zh says the owner's sentence, its way true to its act: 只能看——这个浏览器由 <X> 在操作；自己浏览后可在这里操作你自己的窗口");
-}
+// ═══ §5 ═══ (the window's doors — source pins of src/lib/desktop-app-window.js, browser-live-window.js, xpra-view.js, xpra-client.js,
+// public/style.css — and their words: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ═══ §6 ═══
 console.log('§6 mutants — each rule undone in a copy of src: its leg goes red');
@@ -895,17 +850,14 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     { tag: 'reach-over-popups', file: 'src/lib/xpra-proto.js', from: "const tier = win.kind === 'popup' ? 4 : (win.reach ? 2 : 0) + (win.kind === 'dialog' ? 1 : 0);", to: "const tier = (win.reach ? 5 : 0) + (win.kind === 'popup' ? 4 : win.kind === 'dialog' ? 1 : 0);", proto: true, red: (f) => !f.error && f.popupAboveReach === false },
     { tag: 'no-reach-tier', file: 'src/lib/xpra-proto.js', from: "const tier = win.kind === 'popup' ? 4 : (win.reach ? 2 : 0) + (win.kind === 'dialog' ? 1 : 0);", to: "const tier = win.kind === 'popup' ? 4 : (win.kind === 'dialog' ? 1 : 0);", proto: true, red: (f) => !f.error && f.reachAboveAgents === false },
     { tag: 'front-by-z', file: 'src/lib/xpra-proto.js', from: 'if (heldWindow(win) && (!best || frontRank(win) > frontRank(best))) best = win;', to: 'if (heldWindow(win) && (!best || win.z > best.z)) best = win;', proto: true, red: (f) => !f.error && f.front !== HIS },
-    { tag: 'view-own-order', file: 'src/lib/xpra-view.js', from: 'w.el.style.zIndex = String(Z_FLOOR + stackRank(win));', to: "w.el.style.zIndex = String((win.reach ? 400000 : 0) + ({ main: 1000, dialog: 200000, popup: 300000 }[win.kind] || 1000) + Math.min(win.z, 99999));", door: true, red: (d) => d.oneRank === false },
+    // (the door mutant view-own-order of src/lib/xpra-view.js — the oneRank leg's red control: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
     { tag: 'button-release-at-pointer', file: XCF, from: 'else if (buttonWid.has(b)) { at = windows.get(buttonWid.get(b)) || win; buttonWid.delete(b); }', to: '', client: true, red: (c) => !c.error && JSON.stringify(c.btn.slice(-2)) !== JSON.stringify([[HIS, true], [HIS, false]]) },
     { tag: 'no-remap-on-move', file: XCF, from: 'if (moved && watch && !viewOnly && seatWids && seatWids.has(wid) && win.mapped) send(', to: 'if (false) send(', client: true, red: (c) => !c.error && !c.maps.some((m) => JSON.stringify(m) === JSON.stringify([HIS, 300, 200, 400, 300])) },
     { tag: 'door-on-any-prompt', file: 'src/browser-picture.js', from: "(stuck.state === 'prompt' && !!stuck.prompt && stuck.prompt.native === true)", to: "(stuck.state === 'prompt')", pure: true, red: (P) => P.deskDoorOf({ source: { source: 'x', displaySession: 'da-x1' }, stuck: { state: 'prompt', prompt: { type: 'file' } }, human: true }) === 'da-x1' },
     { tag: 'door-in-any-view', file: 'src/browser-picture.js', from: 'if (!human || !source ||', to: 'if (!source ||', pure: true, red: (P) => P.deskDoorOf({ source: { source: 'x', displaySession: 'da-x1' }, stuck: { state: 'passkey', headed: true } }) === 'da-x1' },
     { tag: 'temporary-door', file: 'src/browser-picture.js', from: "if (!profile || profile.ephemeral === true) return { act: null, code: 'not_attachable' };", to: "if (!profile) return { act: 'browse', code: null };", pure: true, red: (P) => P.deskDoorAct({ profile: null }).act !== null },
     { tag: 'satellite-not-one-input', file: 'src/lib/keyboard-yield.js', from: '(el.closest(SATELLITE_HOST) || el.closest(INPUT_HOSTS))', to: 'el.closest(INPUT_HOSTS)', sat: true, red: (f) => f.satellite === false },
-    { tag: 'door-says-take-over', file: 'src/lib/desktop-app-window.js', from: ": doorAct === 'open' ? t('Open your browsing window') : t('Browse yourself');", to: ": t('Take over');", door: true, red: (d) => d.labelIsAct === false },
-    { tag: 'unread-is-active', file: 'src/lib/desktop-app-window.js', from: "browserDisplay() ? bseat.seat || 'watch' :", to: "browserDisplay() && bseat.seat ? bseat.seat :", door: true, red: (d) => d.unknownIsWatch === false },
-    { tag: 'client-refusal-silent', file: 'src/lib/desktop-app-window.js', from: '    onRefused: (v) => sayClientRefusal(v),', to: '   ', door: true, red: (d) => d.clientRefusalSaid === false },
-    { tag: 'toast-on-any-refusal', file: 'src/lib/desktop-app-window.js', from: 'const more = (Number(v.acts) || 0) > bseat.acts;', to: 'const more = (Number(v.refused) || 0) > bseat.refused;', door: true, red: (d) => d.toastOnActs === false },
+    // (the four door mutants of src/lib/desktop-app-window.js — §5's red controls: MOVED to the fast scripts/test-browser-x-seat-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   ];
   for (const m of MUTANTS) {
     const f = path.join(M, m.file), orig = fs.readFileSync(f, 'utf8');
@@ -913,9 +865,9 @@ console.log('§6 mutants — each rule undone in a copy of src: its leg goes red
     fs.writeFileSync(f, orig.replace(m.from, m.to));
     for (const k of Object.keys(require.cache)) if (k.startsWith(M + path.sep)) delete require.cache[k];
     let facts = null;
-    try { facts = m.pure ? load(M).PIC : m.proto ? protoFacts(await import(pathToFileURL(path.join(M, m.file)).href + `?mutant=${m.tag}`)) : m.sat ? await satelliteFacts(M + '/./') : m.door ? doorFacts(M) : m.client ? await clientFacts(M, `?mutant=${m.tag}`) : await scene(M, m.tag, m.need); } catch (e) { facts = { error: String(e && e.message) }; }
+    try { facts = m.pure ? load(M).PIC : m.proto ? protoFacts(await import(pathToFileURL(path.join(M, m.file)).href + `?mutant=${m.tag}`)) : m.sat ? await satelliteFacts(M + '/./') : m.client ? await clientFacts(M, `?mutant=${m.tag}`) : await scene(M, m.tag, m.need); } catch (e) { facts = { error: String(e && e.message) }; }
     fs.writeFileSync(f, orig);
-    const shown = facts && !m.pure && !m.door ? (m.client && facts.r5 ? facts.r5 : facts) : undefined;
+    const shown = facts && !m.pure ? (m.client && facts.r5 ? facts.r5 : facts) : undefined;
     ok(!!facts && !facts.error && m.red(facts), `MUTANT ${m.tag} (${m.file}) ⇒ its leg goes RED`, shown);
   }
 }

@@ -951,19 +951,7 @@ console.log('— ②b MULTIVIEW: a helper\'s browser through the real bridge (it
 }
 
 // ═══ ③ headless chrome: the WINDOW on a worktree server ═══════════════════
-// integration 2.369.192 (B-b122, the .190 heavy red): the boot splash fades at opacity 0 over everything (z-index 999999)
-// for 300 ms after app.ready and took the first press of a freshly loaded page. SOURCE PIN: its pointer-events go the
-// moment the fade starts (the same statement, BEFORE the opacity); the behavioural pin is ⑥'s negative control — its
-// press right after a reload (clickOnce waits for elementFromPoint to be the picture, which a pointer-events:none
-// splash never is)
-{
-  const cj = fs.readFileSync(path.join(repo, 'src/client.js'), 'utf8');
-  const line = cj.split('\n').find((l) => /getElementById\('loading-screen'\)/.test(l) ? false : /\bsplash\.style\.opacity = '0'/.test(l)) || '';
-  const pe = line.indexOf("splash.style.pointerEvents = 'none'"), op = line.indexOf("splash.style.opacity = '0'");
-  ok(pe >= 0 && op > pe && /setTimeout\(\(\) => splash\.remove\(\), 300\)/.test(line), 'the fading boot splash takes no clicks: pointer-events none is set in the statement that starts the fade, before the opacity (src/client.js)', line.trim());
-  const pre = line.replace("splash.style.pointerEvents = 'none'; ", '');
-  ok(pre !== line && pre.indexOf("splash.style.pointerEvents = 'none'") < 0, 'CONTROL: the pre-fix statement (opacity only) carries no pointer-events — the pin above can go red');
-}
+// (the boot splash's SOURCE PIN of src/client.js and its text-only CONTROL — integration 2.369.192, B-b122: MOVED to the fast scripts/test-browser-live-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate; ⑥'s behavioural negative control stays here)
 
 console.log('— ③ the browser-live window in headless chrome (worktree server, fake claude + fake agent-browser)');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
