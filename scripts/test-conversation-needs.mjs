@@ -685,6 +685,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
   function fakeView(C, items, s, e, { hidden = new Set(), resolved = [] } = {}) {
     const list = new El(); DOC.children.push(list); list.parentNode = DOC;
     const v = { _messageList: list, _elements: new Map(), _messages: [], _total: C.length, _teleported: false, _pinned: true, log: [], chip: null, gate: null, _lastNavAt: 0, _lastPositionAt: 0 };
+    v._chooseAim = () => { };   // B-ef04 cure 2: the REAL _notePositioning arms the press re-aim (its legs: test-chat-trim-guard); this suite judges no aim
     v.app = { __model: { loaded: true, todos: { open: items, resolved }, wordsOf: (i) => i.text, byId: (id) => items.find((i) => i.id === id) }, foryouRows: null };
     v._statusBar = {}; // (lane needs-card-tail r10: no chip — the pass's dock list is read off `dock`, below)
     v.setWindow = (a, b) => { for (const c of list.children) c.parentNode = null; list.children = []; v._elements.clear(); v._windowStart = a; v._windowEnd = b; v._messages = C.slice(a, b); for (const m of v._messages) { if (hidden.has(m.id)) continue; const el = new El(); el.classList.add('chat-msg'); el.dataset.msgId = m.id; list.append(el); v._elements.set(m.id, el); } };
@@ -1052,9 +1053,18 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       const src = SRC.slice(a, b).trim().replace(/,$/, '').replace(/^async (\w+)\(/, 'async function $1(').replace(/^(\w+)\(/, 'function $1(');
       try { return new Function('t', `return (${src});`)((s) => String(s)); } catch { return null; }
     };
+    // a method read to its OWN close (the first `  }` at the class's indent after its head): a method the product later puts after
+    // it never joins the slice (B-ef04 cure 2 put _chooseAim right after _notePositioning, and the slice to the next doc comment held
+    // two methods — the extraction failed and ⑩e r5 threw)
+    const methodTo = (SRC, head) => {
+      const a = SRC.indexOf(head), e = a < 0 ? -1 : SRC.indexOf('\n  }\n', a);
+      if (a < 0 || e < 0) return null;
+      const src = SRC.slice(a, e + 4).trim().replace(/^(\w+)\(/, 'function $1(');
+      try { return new Function('t', `return (${src});`)((s) => String(s)); } catch { return null; }
+    };
     const REAL5 = { _setStableHeights: methodOf(SEEKS, '    _setStableHeights(stable, ', '    _maybeSeekLater() {'), _scrollElStable: methodOf(SEEKS, '    _scrollElStable(el, ', '    async _seekTeleport(line) {'),
       _scrollToRange: methodOf(SRCH, '  _scrollToRange(range', '  /** Open every collapsed'), _noteUserNav: method('  _noteUserNav(via) {', '  /** Did the READER position'),
-      _navigatedSince: method('  _navigatedSince(since) {', '  /** '), _notePositioning: method('  _notePositioning(via) {', '  /** Did this press land on the list') };
+      _navigatedSince: method('  _navigatedSince(since) {', '  /** '), _notePositioning: methodTo(CVS, '  _notePositioning(via) {') };
     ok(Object.values(REAL5).every((f) => typeof f === 'function'), 'the REAL _setStableHeights / _scrollElStable (chat-view-seek.js), _scrollToRange (chat-search.js), _noteUserNav / _navigatedSince / _notePositioning (chat-view.js) are read out of the sources', Object.keys(REAL5).filter((k) => typeof REAL5[k] !== 'function'));
     /** a teleported search slab: the REAL stamp writers and the REAL tail jump over a fake list (the tail page held by `tailGate`) */
     const replayView = (C) => {
@@ -1260,7 +1270,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       const [onNav] = own(/\n\s+onNav: (\([^)]*\) => this\._noteUserNav\([^)]*\)),\n/, '');
       const fn = (re) => { const m = re.exec(src.CVS); try { return m ? new Function(`return (function () ${m[1]});`)() : null; } catch { return null; } };
       return { minimapIdx, minimapTime, onNav, scrollBtn: fn(/this\._scrollBtn\.onclick = \(\) => (\{[\s\S]*?\n {4}\});/), onSend: fn(/\n {6}onSend: \(\) => (\{[\s\S]*?\n {6}\}),\n {6}onInterrupt:/),
-        _noteUserNav: methodOf(src.CVS, '  _noteUserNav(via) {', '  /** Did the READER position'), _notePositioning: methodOf(src.CVS, '  _notePositioning(via) {', '  /** Did this press land on the list'),
+        _noteUserNav: methodOf(src.CVS, '  _noteUserNav(via) {', '  /** Did the READER position'), _notePositioning: methodTo(src.CVS, '  _notePositioning(via) {'),
         jumpToIndex: methodOf(src.CVS, '  async jumpToIndex(', '  // Jump to the bottom of the conversation.'), jumpToBottom: methodOf(src.CVS, '  async jumpToBottom(', '  /** Replay the live ops a tail fetch held'),
         jumpToPendingAsk: methodOf(src.CVS, '  async jumpToPendingAsk(', '  /** A helper card\'s lifecycle chip'), _landOnHeader: methodOf(src.CVS, '  _landOnHeader(run) {', '  // Collapse from the bar/footer'),
         _jumpToFileTime: methodOf(src.SEEKS, '    async _jumpToFileTime(ts, line) {', '    _scrollElStable(el, '), jumpToFileMatch: methodOf(src.SEEKS, '    async jumpToFileMatch(match) {', '    _scrollToNearestTs('),
@@ -1359,7 +1369,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
             _elements: new Map(), _messages: [], _renderedMsgIds: new Set(), _runs: [], _tailCall: 0, _tailHold: null, _windowGen: 0, _search: null, _pendingAsks: [], _askElement: () => null,
             _messageList: { scrollTop: 0, scrollHeight: 9000, clientHeight: 600, querySelector: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, bottom: 600, left: 0, right: 0, width: 10, height: 600 }) },
             _container: { classList: { contains: () => false, add() { }, remove() { } } }, _scrollBtn: { classList: { add() { }, remove() { }, toggle() { } } },
-            _trace(k, d) { if (k === 'userNav') v.log.push(`nav:${d && d.via}`); }, _traceExpect() { }, _cancelForcedScroll() { }, _clearWheelCarry() { }, _beginHistoryLoad: () => () => { }, _showHistoryStatus() { },
+            _trace(k, d) { if (k === 'userNav') v.log.push(`nav:${d && d.via}`); }, _traceExpect() { }, _cancelForcedScroll() { }, _chooseAim() { }, _clearWheelCarry() { }, _beginHistoryLoad: () => () => { }, _showHistoryStatus() { },
             _setPinned(p) { v._pinned = !!p; }, _armScrollFine() { }, _forceScrollToBottom() { bottom(v); }, _scrollToBottom() { bottom(v); }, _scheduleRunBar() { }, _scrollElStable() { v._lastJumpAt = Date.now(); }, _reportVisibleTsRange() { }, _scheduleAxSync() { }, _releaseTailHold() { },
             _fetchMessagePage: hang, _fetchMessages: hang, _seekTeleport: hang, _scrollToNearestTs: () => false, _gapElForLine: () => null, _nearestElByTs: () => null, _tsOfRenderedEl: () => 0,
             _onCreateMessage() { }, _resetGapAfterJump() { }, _updateRuns() { }, _setRunOpen() { }, ...arm() };
