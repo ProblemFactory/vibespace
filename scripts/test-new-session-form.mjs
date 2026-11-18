@@ -290,7 +290,8 @@ console.log('⑥ what Create sends — the v3 choices give the v2 form\'s bytes 
     out.keptAnswer = !!self._nsAdmits && self._nsAdmits.profiles.length === 1; out.asked = asks.length ? asks[0] : null;
     ws[0]({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { progress: [] } }] }); flush(); out.logOnly = loads.length;
     ws[0]({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { name: 'renamed' } }] }); flush(); out.meta = loads.length;
-    ws[0]({ type: 'channels-updated' }); flush(); out.channels = loads.length;
+    ws[0]({ type: 'channels-updated', changed: ['c1'], changedKeys: ['acc-1/c1'], partial: true }); ws[0]({ type: 'channels-updated', changed: ['c1', 'c2'], changedKeys: ['acc-1/c1', 'acc-1/c2'], partial: false }); flush(); out.messagePass = loads.length;
+    ws[0]({ type: 'channels-updated', changed: [], changedKeys: [], partial: false }); flush(); out.channels = loads.length;
     document.activeElement = SEL; fire('sync'); flush(); out.afterSelect = loads.length;
     document.activeElement = TEXT; fire('sync'); flush(); out.whileTyping = loads.length;
     document.activeElement = OUT; fire('right:focusout'); flush(); out.afterBlur = loads.length;
@@ -302,13 +303,15 @@ console.log('⑥ what Create sends — the v3 choices give the v2 form\'s bytes 
   const R = run(blk);
   const metaMoves = TD.metaChanged({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { name: 'renamed' } }] }) && !TD.metaChanged({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { progress: [] } }] });
   ok(!!blk && R.coalesced === 1 && R.keptAnswer && R.asked && R.asked[0] === 'tg-1,tg-2' && R.asked[1] === 'p1:"only"' && R.asked[2] === null
-    && metaMoves && R.logOnly === 1 && R.meta === 2 && R.channels === R.meta + 1 && R.afterSelect === R.channels + 1 && R.whileTyping === R.afterSelect && R.afterBlur === R.whileTyping + 1
+    && metaMoves && R.logOnly === 1 && R.meta === 2 && R.messagePass === R.meta && R.channels === R.meta + 1 && R.afterSelect === R.channels + 1 && R.whileTyping === R.afterSelect && R.afterBlur === R.whileTyping + 1
     && R.whilePressed === R.afterBlur && R.afterRelease === R.whilePressed + 1 && R.closed === R.afterRelease,
-    'B-a858: three grant landings ⇒ ONE re-read; the admission asked again with its own key (the old answer kept); a log-only Task Group delta re-reads nothing, a meta one does; a channel account change does; a picked select does not hold it, typing does until the blur, a press does until its release anywhere; a closed form re-reads nothing', { R, metaMoves });
+    'B-a858: three grant landings ⇒ ONE re-read; the admission asked again with its own key (the old answer kept); a log-only Task Group delta re-reads nothing, a meta one does; a channel MESSAGE pass (named conversations — partial or past the bound) re-reads nothing, an ACCOUNT-level channel change does; a picked select does not hold it, typing does until the blur, a press does until its release anywhere; a closed form re-reads nothing', { R, metaMoves });
   const noSync = blk.replace("sync.on('grants', '*', reread);", '');
   ok(blk.includes("sync.on('grants', '*', reread);") && run(noSync).coalesced === 0, 'CONTROL (B-a858): without the grants subscription a landed grant re-reads nothing — the base\'s stale words (RED)', run(noSync));
   const noMeta = blk.replace("(msg.type === 'tasks-updated' && metaChanged(msg))", "msg.type === 'tasks-updated'");
   ok((blk.includes("(msg.type === 'tasks-updated' && metaChanged(msg))") && run(noMeta).logOnly === 2), 'CONTROL (B-a858): an unfiltered Task Group delta re-reads on a log line (the reader\'s must-fix) — RED', run(noMeta));
+  const noAcct = blk.replace("(msg.type === 'channels-updated' && accountLevel(msg))", "msg.type === 'channels-updated'");
+  ok(blk.includes("(msg.type === 'channels-updated' && accountLevel(msg))") && run(noAcct).messagePass > run(noAcct).meta, 'CONTROL (B-a858 cure): every channel signal re-reading (the account filter removed) loads the hub at each message pass — RED', run(noAcct));
   const noAsk = blk.replace("this._nsAdmitsAsk = null; this._loadNsAdmits(", "this._nsAdmits = null; (() => {})(");
   ok(blk.includes("this._nsAdmitsAsk = null; this._loadNsAdmits(") && !run(noAsk).keptAnswer, 'CONTROL (B-a858): a re-read that drops the admission answer without asking again (the first cut) loses the profiles open to the picked group — RED', run(noAsk));
 }

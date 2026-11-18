@@ -77,7 +77,10 @@ export function installNewSessionForm(App) {
         this._nsLoadAccounts(); }, 150); };
       this._nsLiveReread = reread;
       const sync = getStateSync(); if (sync) { try { sync.init('grants'); sync.on('grants', '*', reread); } catch { /* no mirror: the open and the interactions still paint */ } }
-      this.ws?.onGlobal?.((msg) => { if (msg && ((msg.type === 'tasks-updated' && metaChanged(msg)) || msg.type === 'channels-updated')) reread(); });
+      // a channel signal re-reads only at an ACCOUNT-level change (it names no conversation: auth, enable, grains) — never at a message
+      // pass (a hot account sends one per pass: 2 + N requests and a whole column redrawn each time, an open list closed under the hand)
+      const accountLevel = (m) => !m.partial && !(Array.isArray(m.changedKeys) && m.changedKeys.length);
+      this.ws?.onGlobal?.((msg) => { if (msg && ((msg.type === 'tasks-updated' && metaChanged(msg)) || (msg.type === 'channels-updated' && accountLevel(msg)))) reread(); });
       const right = $('ns-right');
       if (right) right.addEventListener('pointerdown', () => { this._nsPressing = true; });
       const settle = () => { if (this._nsPressing !== true && !this._nsLiveOwed) return; this._nsPressing = false; if (this._nsLiveOwed) setTimeout(() => { if (!busy() && this._nsLiveOwed) reread(); }, 0); };
