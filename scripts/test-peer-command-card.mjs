@@ -354,18 +354,82 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     { type: 'command_lifecycle', state: 'started', uuid: V('11'), command_uuid: V('12') },
     { type: 'system', subtype: 'init', uuid: V('13'), session_id: 'x' },
     { type: 'assistant', uuid: V('14'), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } },
+    { type: 'result', uuid: V('15'), subtype: 'success', session_id: 'x' },
+    { type: 'frame_stamp', msg_id: 'web-p2', cli_uuid: V('16') },   // a SECOND person frame: sbSeenFirst once collapsed every frame_stamp onto one key
+    { type: 'system', subtype: 'init', uuid: V('17'), session_id: 'x', user_message_uuids: [V('16')] },
   ];
   const facts = (sx) => `${(sx._turnBy && sx._turnBy.by) || 'unrecorded'}|${JSON.stringify(sx._turnByBackground || [])}`;
   const viaParse = mkSession('w-par-parse'), viaDev = { name: 'dev', host: 'h9', backend: 'claude' }, viaMix = mkSession('w-par-mix');
   const fP = [], fD = [], fM = [];
   seq.forEach((r, i) => {
     viaParse.p.data(J(r)); fP.push(facts(viaParse.s));
-    brain.claudeSideEffects(viaDev, 'dev', r); fD.push(facts(viaDev));
-    if (i % 2) { brain.claudeSideEffects(viaMix.s, 'mix', r); viaMix.p.data(J(r)); } else { viaMix.p.data(J(r)); brain.claudeSideEffects(viaMix.s, 'mix', r); }
+    if (brain.sbSeenFirst(viaDev, r)) brain.claudeSideEffects(viaDev, 'dev', r); fD.push(facts(viaDev));   // server.js's own device path: the gate, then the families
+    const dev = () => { if (brain.sbSeenFirst(viaMix.s, r)) brain.claudeSideEffects(viaMix.s, 'mix', r); };
+    if (i % 2) { dev(); viaMix.p.data(J(r)); } else { viaMix.p.data(J(r)); dev(); }
     fM.push(facts(viaMix.s));
   });
   ok(`B-d868 PARITY (as-if-must (2)): the same stream through the parse alone, the device feed alone and both interleaved gives the same opener record for record (${fP.join(' · ')})`,
-    JSON.stringify(fP) === JSON.stringify(fD) && JSON.stringify(fP) === JSON.stringify(fM) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|'), JSON.stringify({ fP, fD, fM }));
+    JSON.stringify(fP) === JSON.stringify(fD) && JSON.stringify(fP) === JSON.stringify(fM) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|') && fP[15].startsWith('person|'), JSON.stringify({ fP, fD, fM }));
+  const brainCopy = (src, name) => MU.load('src/server/session-brain.js', src, name);
+  // 主开发's as-if-must (12:09Z): A LATE BACKLOG FROM THE DEVICE FEED NEVER TAKES AN OLD TURN'S START AGAIN. (a) the stream's own
+  // order: an init or a result from a feed that is BEHIND the last result this session saw opens and ends nothing; (b) an init
+  // that already opened a turn never opens one again — both past the once-memory's size
+  const Tm = (n) => new Date(Date.UTC(2026, 10, 18, 12, 0, 0) + n * 1000).toISOString();
+  const say = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } };
+  const backlogA = (B) => {   // a turn the PARSE never saw (a gap), its records reaching the device feed only after a newer turn
+    const sx = { name: 'bk-a', backend: 'claude' }; B.noteTurnAttach(sx);
+    for (let i = 0; i < 650; i++) B.noteTurnOpener(sx, { ...say, uuid: 'fa-' + i, timestamp: Tm(100 + i) }, 'parse');
+    B.noteTurnOpener(sx, { type: 'result', uuid: V('ra') }, 'parse');
+    B.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: V('ia') }, 'parse');
+    B.noteTurnOpener(sx, { type: 'user', uuid: V('ua'), timestamp: Tm(800), origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>done</task-notification>' } }, 'parse');
+    for (const r of [{ type: 'frame_stamp', cli_uuid: V('pa') }, { ...say, uuid: V('oa'), timestamp: Tm(5) }, { type: 'system', subtype: 'init', uuid: V('i0'), user_message_uuids: [V('pa')] }]) B.noteTurnOpener(sx, r, 'device');
+    return sx;
+  };
+  const backlogB = (B) => {   // a stream with NO stamps: the turn that opened replayed by the device feed after 650 other records
+    const sx = { name: 'bk-b', backend: 'claude' }; B.noteTurnAttach(sx);
+    const old = [{ type: 'frame_stamp', cli_uuid: V('pb') }, { type: 'system', subtype: 'init', uuid: V('ib'), user_message_uuids: [V('pb')] }, { ...say, uuid: V('ob') }, { type: 'result', uuid: V('rb') }];
+    for (const r of old) B.noteTurnOpener(sx, r, 'parse');
+    for (let i = 0; i < 650; i++) B.noteTurnOpener(sx, { ...say, uuid: 'fb-' + i }, 'parse');
+    B.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: V('ic') }, 'parse');
+    B.noteTurnOpener(sx, { type: 'user', uuid: V('uc'), origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>done</task-notification>' } }, 'parse');
+    for (const r of old.slice(0, 2)) B.noteTurnOpener(sx, r, 'device');
+    return sx;
+  };
+  const bA = backlogA(SB), bB = backlogB(SB);
+  ok(`B-d868 (as-if-must 12:09Z): a late backlog never takes an old turn's start — a turn the parse never saw, its records reaching the device feed BEHIND a newer result, opens nothing (${bA._turnBy.by}); an init that already opened a turn, replayed past the once-memory on a stream with no stamps, opens nothing (${bB._turnBy.by})`,
+    bA._turnBy.by === 'task' && bB._turnBy.by === 'task', JSON.stringify({ a: bA._turnBy, b: bB._turnBy }));
+  // the once-per-record rule's own leg (the reader: no red control covered it): the device feed's late copy of the LAST result
+  // reaches the session after the next turn opened (a stream with no stamps) — taken once, it ends nothing
+  const dupResult = (B) => { const sx = { name: 'dup', backend: 'claude' }; B.noteTurnAttach(sx); B.noteTurnOpener(sx, { type: 'result', uuid: V('r9') }, 'parse'); B.noteTurnOpener(sx, { type: 'frame_stamp', cli_uuid: V('p9') }, 'parse'); B.noteTurnOpener(sx, { type: 'system', subtype: 'init', uuid: V('i9'), user_message_uuids: [V('p9')] }, 'parse'); B.noteTurnOpener(sx, { type: 'result', uuid: V('r9') }, 'device'); return sx; };
+  const dR = dupResult(SB);
+  ok(`B-d868: the once-per-record rule — the device feed's late copy of a result already taken ends nothing (${dR._turnBy.by}, live ${dR._turnLive})`, dR._turnBy.by === 'person' && dR._turnLive === true, JSON.stringify(dR._turnBy));
+  // sbSeenFirst keys the wrapper's frame_stamp by the frame it names (it has no uuid): every one passes the device gate once
+  const g = { name: 'g' };
+  const gates = [brain.sbSeenFirst(g, { type: 'frame_stamp', cli_uuid: V('g1') }), brain.sbSeenFirst(g, { type: 'frame_stamp', cli_uuid: V('g2') }), brain.sbSeenFirst(g, { type: 'frame_stamp', cli_uuid: V('g1') })];
+  ok(`B-d868 (its reader): sbSeenFirst keys a frame_stamp by its frame — two frames pass, a repeat does not (${gates.join(',')})`, gates.join() === 'true,true,false', gates.join());
+  // RED CONTROLS (each anchored; a missing anchor fails BY NAME)
+  const fromOrder = "  if ((msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'init')) && (st.feedAt[feed] || 0) < st.resultAt) return;\n";
+  const fromOpened = "  if (msg.type === 'system' && msg.subtype === 'init' && key) { if (st.opened.has(key)) return; st.opened.add(key); if (st.opened.size > 2000) st.opened.delete(st.opened.values().next().value); }\n";
+  const fromSeen = "  if (key) { if (st.seen.has(key)) return;";
+  const fromFsKey = "rec.uuid || (rec.type === 'frame_stamp' && rec.cli_uuid ? 'fs:' + rec.cli_uuid : ((rec.requestId";
+  if (anchor(SBsrc, fromOrder, 'B-d868 the stream\'s order')) {
+    const x = backlogA(brainCopy(SBsrc.replace(fromOrder, ''), 'no-order'));
+    ok(`CONTROL (B-d868): the copy without the stream's order lets the backlog's old init say «${x._turnBy.by}» for the turn running now — the leg goes red`, x._turnBy.by === 'person');
+  }
+  if (anchor(SBsrc, fromOpened, 'B-d868 an init opens once')) {
+    const x = backlogB(brainCopy(SBsrc.replace(fromOpened, ''), 'no-opened'));
+    ok(`CONTROL (B-d868): the copy that forgets the inits it opened lets an unstamped replay say «${x._turnBy.by}» — the leg goes red`, x._turnBy.by === 'person');
+  }
+  if (anchor(SBsrc, fromSeen, 'B-d868 the once-gate')) {
+    const x = dupResult(brainCopy(SBsrc.replace(fromSeen, '  if (key) { if (false) return;'), 'no-once'));
+    ok(`CONTROL (B-d868): the copy without the once-gate lets the late copy of a result end the running turn («${x._turnBy.by}») — the leg goes red`, x._turnBy.by !== 'person');
+  }
+  if (anchor(SBsrc, fromFsKey, 'B-d868 the frame_stamp key')) {
+    const B = brainCopy(SBsrc.replace(fromFsKey, "rec.uuid || (false ? '' : ((rec.requestId"), 'fs-collapse').create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { } });
+    const g2 = { name: 'g2' };
+    const v = [B.sbSeenFirst(g2, { type: 'frame_stamp', cli_uuid: V('h1') }), B.sbSeenFirst(g2, { type: 'frame_stamp', cli_uuid: V('h2') })];
+    ok(`CONTROL (B-d868): the copy keyed requestId:type:subtype collapses the second frame_stamp (${v.join(',')}) — the leg goes red`, v.join() === 'true,false');
+  }
   // (as-if-must (1)) AFTER A RE-ATTACH THE OPENER IS UNKNOWN until a turn starts in its sight: the person's turn, then a fresh
   // attach of the SAME session (a dead bridge healed, a parse gap) — never the previous «you»
   const ra = mkSession('w-reattach');

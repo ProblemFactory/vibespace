@@ -23,9 +23,9 @@ const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = r
 // (claudeSideEffects: the records the parse has not seen). Both feeds carry the same ordered stream, so taking each record at
 // its first appearance keeps the order. The state lives on the SESSION (`_turnOpen`); an attach makes the opener UNKNOWN
 // until a turn starts in its sight (as-if-must (1)): a gap can never leave the previous turn's «you» standing.
-const TURN_SEEN_MAX = 400;
+const TURN_SEEN_MAX = 600;   // the reader's should: the same bound as sbSeenFirst's SB_SEEN_MAX (a feed lagging past it is caught by the order rule below)
 function turnStateOf(session) {
-  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set() });
+  return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set() });
 }
 /** A record's identity for the once-per-record rule: the CLI's own uuid, or the wrapper's stamp of a frame (it has none). */
 function turnKeyOf(msg) {
@@ -54,8 +54,12 @@ function noteTurnCmdRecord(session, cmdUuid, rec) {
 /** An attach (a boot, a re-attach after a dead bridge): the opener is UNKNOWN until a turn starts in this attach's sight. The
  *  background tasks still running (the normalizer's own level set) are unknown too: nobody here saw them start. */
 function noteTurnAttach(session) {
+  const prev = session._turnOpen;
   session._turnOpen = null;
   const st = turnStateOf(session);
+  // the STREAM's facts outlive an attach (where each feed has reached, the last result, the inits that opened a turn): a
+  // backlog arriving right after a re-attach is still a backlog
+  if (prev) { st.feedAt = { ...(prev.feedAt || {}) }; st.resultAt = prev.resultAt || 0; if (prev.opened) st.opened = prev.opened; }
   setTurnBy(session, { by: 'unrecorded', source: 'attach' });
   let live = []; try { live = (session._normalizer?.backgroundTasks?.() || []).map((t) => String(t && t.id).slice(0, 64)).filter(Boolean); } catch { live = []; }
   st.bgLive = live.slice(0, 100);
@@ -65,6 +69,12 @@ function noteTurnAttach(session) {
 function noteTurnOpener(session, msg, feed = 'parse') {
   if (!session || !msg || typeof msg !== 'object') return;
   const st = turnStateOf(session);
+  // THE STREAM'S OWN ORDER (主开发's as-if-must 12:09Z: a late backlog from the device feed — its keys gone from the once-memory —
+  // must never take an old turn's start again): each feed's position in the stream is the newest stamp it has delivered
+  // (the CLI stamps its user / assistant records; init and result carry none). Taken before the once-gate: a record
+  // already taken still says where its feed has reached
+  const ts = typeof msg.timestamp === 'string' ? Date.parse(msg.timestamp) : NaN;
+  if (Number.isFinite(ts) && ts > (st.feedAt[feed] || 0)) st.feedAt[feed] = ts;
   const key = turnKeyOf(msg);
   if (key) { if (st.seen.has(key)) return; st.seen.add(key); if (st.seen.size > TURN_SEEN_MAX) st.seen.delete(st.seen.values().next().value); }
   else if (feed !== 'parse') return;
@@ -82,6 +92,10 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     sayBackground(session, st);
     return;
   }
+  // an init or a result from a feed that is BEHIND the last result this session saw is a backlog's: it opens and ends nothing
+  if ((msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'init')) && (st.feedAt[feed] || 0) < st.resultAt) return;
+  // …and an init that already opened a turn never opens one again, however long ago (a stream with no stamps; the once-memory's 600)
+  if (msg.type === 'system' && msg.subtype === 'init' && key) { if (st.opened.has(key)) return; st.opened.add(key); if (st.opened.size > 2000) st.opened.delete(st.opened.values().next().value); }
   if (msg.type === 'system' && msg.subtype === 'init') {
     st.live = true; session._turnLive = true;   // B-02a3: the turn the CLI is running, by its own records (either feed)
     const cmd = st.cmd;
@@ -102,6 +116,7 @@ function noteTurnOpener(session, msg, feed = 'parse') {
     return;
   }
   if (msg.type === 'result') {
+    st.resultAt = Math.max(st.resultAt, st.feedAt[feed] || 0);   // where the stream stood when this turn ended
     st.live = false; session._turnLive = false; st.cmd = null; st.first = null; st.waitCmd = null;
     setTurnBy(session, { by: 'unrecorded', source: 'turn-ended' });
   }
@@ -224,7 +239,7 @@ function notePublishedChange(session, sid, msg) {
 // server-owned until R6 (the client protocol is untouched by this step).
 const SB_SEEN_MAX = 600;
 function sbSeenFirst(session, rec) {
-  const key = rec.uuid || ((rec.requestId || rec.message?.id || '') + ':' + (rec.type || '') + ':' + (rec.subtype || ''));
+  const key = rec.uuid || (rec.type === 'frame_stamp' && rec.cli_uuid ? 'fs:' + rec.cli_uuid : ((rec.requestId || rec.message?.id || '') + ':' + (rec.type || '') + ':' + (rec.subtype || '')));   // B-d868 (its reader): every frame_stamp collapsed onto «:frame_stamp:», so the device feed took only the first
   if (!key || key === '::') return true; // unidentifiable records: let both run (idempotent families only)
   const seen = session._sbSeen || (session._sbSeen = new Set());
   if (seen.has(key)) return false;
