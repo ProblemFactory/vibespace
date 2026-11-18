@@ -648,16 +648,16 @@ function authorizeUnattendedSpend({
   // which refusalText prints as nothing at all). A window full of HOLDS alone has
   // no oldest stamp — its retryAfter is 0, never `0 + HOUR_MS` (a 1970 instant the
   // client would say as «free now», lane owner-press-attended r2).
-  const unsetSaid = (what) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in Settings → Spending`;   // B-0a33 (3)
+  const unsetSaid = (what, field) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in its row of Settings → Spending: ${SL.settingLink(SPEND_ROW_KEYS[field])}`;   // B-0a33 (3); lane login-request-card (the links unit's owed row link): the row, as its link
   // `need` / `instanceNeed` (lane auto-resume-bulk, the signature above): a cap holds what a batch WILL spend
   const n = Math.max(1, Math.floor(Number(need)) || 1);
   const nAll = Math.max(n, Math.floor(Number(instanceNeed)) || n);
   const asks = (k) => (k > 1 ? ` — this batch needs ${k} more` : '');
-  if (L.perIdentityHour === 0) return no('hour-cap', capUnset(L, 'perIdentityHour') ? unsetSaid('unattended turns per identity per hour') : `unattended turns per identity per hour are set to 0`, 0, null, capUnset(L, 'perIdentityHour') ? { capUnset: true } : null);
+  if (L.perIdentityHour === 0) return no('hour-cap', capUnset(L, 'perIdentityHour') ? unsetSaid('unattended turns per identity per hour', 'perIdentityHour') : `unattended turns per identity per hour are set to 0`, 0, null, capUnset(L, 'perIdentityHour') ? { capUnset: true } : null);
   if (counts.hour + inFlight.identity + n > L.perIdentityHour) return no('hour-cap', `${name} has ${spentWord(counts.promisedHour)} ${counts.hour}${flight(inFlight.identity)} unattended turns this hour${promisedTail(counts.promisedHour)} (cap ${L.perIdentityHour})${asks(n)}`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
-  if (L.perIdentityDay === 0) return no('day-cap', capUnset(L, 'perIdentityDay') ? unsetSaid('unattended turns per identity per day') : `unattended turns per identity per day are set to 0`, 0, null, capUnset(L, 'perIdentityDay') ? { capUnset: true } : null);
+  if (L.perIdentityDay === 0) return no('day-cap', capUnset(L, 'perIdentityDay') ? unsetSaid('unattended turns per identity per day', 'perIdentityDay') : `unattended turns per identity per day are set to 0`, 0, null, capUnset(L, 'perIdentityDay') ? { capUnset: true } : null);
   if (counts.day + inFlight.identity + n > L.perIdentityDay) return no('day-cap', `${name} has ${spentWord(counts.promisedDay)} ${counts.day}${flight(inFlight.identity)} unattended turns today${promisedTail(counts.promisedDay)} (cap ${L.perIdentityDay})${asks(n)}`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
-  if (L.perInstanceDay === 0) return no('instance-cap', capUnset(L, 'perInstanceDay') ? unsetSaid('unattended turns for this instance') : `unattended turns for this instance are set to 0`, 0, null, capUnset(L, 'perInstanceDay') ? { capUnset: true } : null);
+  if (L.perInstanceDay === 0) return no('instance-cap', capUnset(L, 'perInstanceDay') ? unsetSaid('unattended turns for this instance', 'perInstanceDay') : `unattended turns for this instance are set to 0`, 0, null, capUnset(L, 'perInstanceDay') ? { capUnset: true } : null);
   if (counts.instanceDay + inFlight.instance + nAll > L.perInstanceDay) return no('instance-cap', `this instance has ${spentWord(counts.promisedInstanceDay)} ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today${promisedTail(counts.promisedInstanceDay)} (cap ${L.perInstanceDay})${asks(nAll)}`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
   return { ok: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
 }
@@ -877,7 +877,7 @@ function refusalText(v, { sessionName = null, behind = null } = {}) {
   const spent = spentBy ? ` ${promisedHere > 0 ? 'Spent or promised' : 'Spent'} by: ${spentBy}.` : '';
   // B-0a33 round 1: when waiting frames hold the cap, the line names the conversations they wait behind (at most three)
   const wb = promisedHere > 0 && Array.isArray(behind) && behind.length ? ` They wait behind ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more conversations` : ''}.` : '';
-  const row = spendRowOf(v), door = row ? ` The limit: ${SL.settingLink(row)} — the owner changes it there.` : '';   // lane setting-doors pick 1
+  const row = spendRowOf(v), door = row && !String(v.detail || '').includes(SL.settingLink(row)) ? ` The limit: ${SL.settingLink(row)} — the owner changes it there.` : '';   // lane setting-doors pick 1 (an empty cap's detail carries its link already: never said twice)
   return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}${wb}${door}`;
 }
 
@@ -947,6 +947,7 @@ const SPEND_ROW_KEYS = Object.freeze({ perIdentityHour: 'spend.unattendedPerIden
 const DOOR_LINK_WORDS = Object.freeze({
   spending: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change this limit in Settings → Spending: {link}',
   overage: 'Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage»: {link}',
+  unset: 'A limit left empty refuses every turn nobody typed until it is set: set a number in this row of Settings → Spending: {link}. Turns you type, and the buttons you press that say «starts a turn», are never counted.',   // lane login-request-card (the links unit's owed row link): the empty row, linked
 });
 /** PURE. The spending row a verdict names (a ceiling by its cap, overage by its switch), or null. */
 function spendRowOf(v) {
@@ -954,6 +955,8 @@ function spendRowOf(v) {
   if (cap) return SPEND_ROW_KEYS[cap[0]];
   return v && v.why === 'overage-in-use' ? SPEND_ROW_KEYS.allowOverage : null;
 }
+/** PURE. The row a verdict names, as its link (`vibespace://settings/<key>`), or '' — the hand-over toast's words (src/stash-summary.js). */
+function spendRowLink(v) { const row = spendRowOf(v); return row ? SL.settingLink(row) : ''; }
 /** PURE. The ceiling an 80 % warning is about. */
 function warnRowOf(warn) { return warn ? SPEND_ROW_KEYS[warn.scope === 'hour' ? 'perIdentityHour' : warn.scope === 'instance' ? 'perInstanceDay' : 'perIdentityDay'] : null; }
 const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
@@ -1025,7 +1028,7 @@ function noticeText(warn) {
 }
 
 module.exports = {
-  SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, warnRowOf,
+  SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, spendRowLink, warnRowOf,
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   fitPrefix,   // «only the first K» that fits every slot's room (U2 cure's should)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,

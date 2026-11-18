@@ -5,6 +5,7 @@
 // 之类的链接可以让我点了之后直通对应的选项来改». PURE + in-process (the heavy twin, test-setting-links-chrome, presses the links).
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,28 @@ console.log('② the product\'s own sentences carry the row (the Spending family
   const i18n = A.refusalI18n ? A.refusalI18n(v, { sessionName: 'c' }) : null;
   const door = i18n && (i18n.detail || []).find((d) => d.key === A.DOOR_LINK_WORDS.spending);
   ok(door && door.params && door.params.link === 'vibespace://settings/spend.unattendedPerIdentityDay', 'the For-you notice\'s door line (translated on the page) carries the row\'s link as {link}', i18n && i18n.detail);
+  // (the links unit's follow-up on 2.369.410 — the three owed row links) AN EMPTY CEILING NAMES ITS ROW, AS ITS LINK: the agent's
+  // sentence (said ONCE — the refusal line no longer adds «The limit:» after a detail that carries it), the For-you notice's door line
+  // (DOOR_LINK_WORDS.unset), the hand-over toast (the stash summary's words)
+  {
+    const Lu = A.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? '' : undefined));
+    const vu = A.authorizeUnattendedSpend({ reason: 'peer-message', identity: { key: 'k', name: 'acct' }, state: A.emptyBudget(), limits: Lu });
+    const ROW = 'vibespace://settings/spend.unattendedPerIdentityHour', once = (t) => String(t).split(ROW).length - 1;
+    const tu = A.refusalText(vu, {}), iu2 = A.refusalI18n(vu, { sessionName: 'c' }), du = (iu2.detail || []).find((d) => d.key === A.DOOR_LINK_WORDS.unset);
+    const SSm = require(path.join(REPO, 'src/stash-summary.js'));
+    const toast = SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, capUnset: true, identity: { key: 'k', name: 'acct' } }, (k, q) => String(k).replace(/\{(\w+)\}/g, (m, x) => (q && q[x] !== undefined ? String(q[x]) : m)), {});
+    ok(vu.ok === false && vu.capUnset === true && once(tu) === 1 && /no cap is set for unattended turns per identity per hour[^]*: vibespace:\/\/settings\/spend\.unattendedPerIdentityHour/.test(tu)
+      && du && du.params && du.params.link === ROW && once(toast.text) === 1 && toast.door === 'spending',
+      'AN EMPTY CEILING NAMES ITS ROW: the agent\'s refusal (once), the For-you notice\'s door line ({link}), the hand-over toast', { tu, du, toast: toast.text });
+    const src = read('src/spend-authorizer.js'), from = "door = row && !String(v.detail || '').includes(SL.settingLink(row)) ? ";
+    if (!src.includes(from)) throw new Error('mutant anchor missing: the refusal line\'s «said once» rule');
+    const fm = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vs-spend-once-')), 'spend-authorizer.cjs');
+    fs.writeFileSync(fm, src.replace(from, 'door = row ? '));
+    const Am = require(fm);
+    ok(once(Am.refusalText(Am.authorizeUnattendedSpend({ reason: 'peer-message', identity: { key: 'k', name: 'acct' }, state: Am.emptyBudget(), limits: Am.budgetLimits((k) => (k === 'spend.unattendedPerIdentityHour' ? '' : undefined)) }), {})) === 2,
+      'RED CONTROL: a refusal line without the «said once» rule says the empty row\'s link twice — the leg above would read it');
+    fs.rmSync(path.dirname(fm), { recursive: true, force: true });
+  }
   const iu = A.refusalI18n ? A.refusalI18n({ why: 'identity-unknown', limits: v.limits, counts: v.counts }, {}) : null;
   ok(iu && (iu.detail || []).some((d) => d.key === A.DOOR_WORDS.wiring), 'a refusal that names no row keeps its words (no link to a row that cannot help)');
   const w = A.noticeText({ identity: { name: 'acct' }, scope: 'day', used: 160, limit: 200, pct: 80 });
@@ -73,7 +96,7 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
   const quotesEven = (s) => ((s.match(/'/g) || []).length % 2 === 0) && ((s.match(/"/g) || []).length % 2 === 0) && ((s.match(/`/g) || []).length % 2 === 0);
   const isComment = (l, at) => { const t = l.trim(); if (/^(\/\/|\*|\/\*)/.test(t)) return true; const c = l.indexOf('// '); return c >= 0 && c < at && quotesEven(l.slice(0, c)); };
   const SPEND_DEBT = [
-    { file: 'src/spend-authorizer.js', re: /^\s+(spending|overage): 'Turns you type|^\s+overage: 'Paid overage refuses/, why: 'the door line kept for a refusal whose verdict names no row (its linked twin is DOOR_LINK_WORDS)' },
+    { file: 'src/spend-authorizer.js', re: /^\s+(spending|overage): 'Turns you type|^\s+overage: 'Paid overage refuses|^\s+unset: 'A limit left empty refuses every turn nobody typed until it is set: set a number in Settings/, why: 'the door line kept for a refusal whose verdict names no row (its linked twin is DOOR_LINK_WORDS)' },
     { file: 'src/spend-authorizer.js', re: /^\s+waiting: 'Open the conversation they wait behind/, why: 'B-0a33\'s «waiting» door (.402): «Raising the limits … would let more turns run» names the limits in the plural — no ONE row (debt: a door to the Spending section)' },
     { file: 'src/spend-authorizer.js', re: /^\s+(usage|vendor|wiring): /, why: '«the limits in Settings → Spending cannot help here» — a refusal no setting can help names no row, by design' },
     { file: 'src/server/spend-guard.js', re: /'Adjust them in Settings → Spending, or act on the account named above\.'/, why: 'the same notice when the refusal names no row' },
@@ -83,12 +106,9 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     { file: 'src/plugin-settings.js', re: /Settings › Spending show today/, why: 'the LLM plugin\'s budget description naming where its spend is shown — a description, drawn as text' },
     { file: 'src/lib/usage-source.js', re: /\(Settings → Spending\)/, why: 'a tooltip (title text) — no link can live there' },
     // the restack on the train's checkpoint (lane login-request-card, 2026-11-18): bl-accounts batch 1, boarded BEFORE this unit, wrote
-    // four Spending sentences this census reads now — named here, each with its reason; their row links are owed to that row, not
-    // changed by a restack in the owner's money gate
+    // four Spending sentences this census reads now — named here, each with its reason (three of them paid since: the links unit's
+    // follow-up on 2.369.410 links the empty row in the door line's twin, the agent's sentence and the hand-over toast; the ledger's stays, by design)
     { file: 'src/spend-authorizer.js', re: /^\s+ledger: 'This is VibeSpace failing closed, not a limit/, why: 'B-3b0f\'s unreadable-ledger door: «the limits in Settings → Spending cannot help here» — no value of the person\'s to change, so no row, by design' },
-    { file: 'src/spend-authorizer.js', re: /^\s+unset: 'A limit left empty refuses every turn nobody typed/, why: 'B-0a33 (3)\'s «a limit left empty» door — the empty row\'s link is owed (debt: a DOOR_LINK_WORDS.unset twin, as spending/overage have)' },
-    { file: 'src/spend-authorizer.js', re: /const unsetSaid = \(what\) => `no cap is set for/, why: 'B-0a33 (3)\'s agent-facing sentence for an empty cap — its row\'s link is owed (debt: the refusal\'s «The limit:» link, as a set cap has)' },
-    { file: 'src/stash-summary.js', re: /no limit is set for turns nobody typed/, why: 'B-0a33\'s «Not handed over — no limit is set» line (the stash summary) — its row\'s link is owed (debt: the summary\'s spending door draws no link yet)' },
   ];
   const rows = [];
   for (const f of files) {

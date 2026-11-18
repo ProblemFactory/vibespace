@@ -3160,7 +3160,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const i = A.refusalI18n(v, { sessionName: 'ops' });
     const doorKeys = i.detail.map((d) => d.key);
     ok('§5g (3) …the notice reads its own row («no limit is set … — set a number») and the door that sets it, never «switched off — its limit is 0»',
-      /no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key) && doorKeys.includes(A.DOOR_WORDS.unset) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
+      /no limit is set for turns nobody typed on \{account\} — set a number/.test(i.text.key) && doorKeys.includes(A.DOOR_LINK_WORDS.unset) && !/switched off/.test(i.text.key), JSON.stringify(i.text));
     const Li = A.budgetLimits((k) => (k === 'spend.unattendedPerInstanceDay' ? '' : undefined));
     const vi = A.authorizeUnattendedSpend({ reason: 'peer-message', identity: IDg, state: A.emptyBudget(), limits: Li });
     ok('§5g (3) a blank INSTANCE cap: refused, «on this instance»', vi.why === 'instance-cap' && /on this instance — set a number/.test(A.refusalI18n(vi, {}).text.key));
@@ -3169,9 +3169,9 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const SSm = require(path.join(REPO, 'src/stash-summary.js'));
     const toast = SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, capUnset: true, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {});
     ok('§5g (3) the hand-over toast says it (no limit is set — set a number) with the Spending door; a 0 cap still says «switched off»',
-      /no limit is set for turns nobody typed on G: set a number in Settings → Spending/.test(toast.text) && toast.door === 'spending'
+      /no limit is set for turns nobody typed on G: set a number in its row of Settings → Spending: vibespace:\/\/settings\/spend\.unattendedPerIdentityHour\./.test(toast.text) && toast.door === 'spending'
         && /switched off/.test(SSm.handOverRefusalWords({ code: 'spend_refused', why: 'hour-cap', cap: 0, identity: IDg }, (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m)), {}).text), toast.text);
-    const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in Settings → Spending. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in Settings → Spending. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
+    const keys = [...A.REFUSAL_WORDS['cap-unset'], ...A.REFUSAL_WORDS['cap-unset-instance'], A.DOOR_WORDS.unset, A.DOOR_LINK_WORDS.unset, 'Not handed over — no limit is set for turns nobody typed on {account}: set a number in its row of Settings → Spending: {link}. The notices keep waiting.', 'Not handed over — no limit is set for turns nobody typed on this instance: set a number in its row of Settings → Spending: {link}. The notices keep waiting.', 'none — every turn nobody typed is held until a number is set'];
     ok('§5g (3) every new sentence is in zh and ja', keys.every((k) => ZH.has(k) && JA.has(k)), keys.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
     const m = mutantModule('src/spend-authorizer.js', [["    if (field && (v === null || (typeof v === 'string' && !v.trim()))) { unset.push(field); return 0; }\n", '']]);
     ok('§5g (3) CONTROL: the release\'s reading re-applied to a copy (the patch hit)', !m.err && m.hits === 1, m.err || '');
