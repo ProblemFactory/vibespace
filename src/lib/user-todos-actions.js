@@ -800,6 +800,9 @@ export function inboxModel(app) {
     get loaded() { return loaded; },
     byId, sessionFor, displayName, wordsOf, detailOf, recordOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts, pictures,
+    /** lane setting-doors pick 2: every surface draws its rows again on the snapshot it holds — a fact a row reads that is no item's
+     *  changed (a proposed change's value NOW, a hold): the app calls it on the settings store's change and the holds' broadcast */
+    redraw() { if (loaded) emit('todos', todos); },
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
     rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },

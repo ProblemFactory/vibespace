@@ -39,7 +39,7 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
   // stay true is what it always was: the object goes to the file for `key`, and
   // nothing in this function writes that directory behind the choke point.
   ok('§7 …and writes the panel back under that same key', /usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: merged/.test(panelBody), 'panel write site');
-  ok('§7 …and nothing in the panel refresh writes the cache directory directly', !/fs\.writeFileSync\([^)]*USAGE_CACHE_DIR/.test(panelBody) && !/fs\.renameSync/.test(panelBody), 'raw writes inside refreshViaCliPanel');
+  ok('§7 …and nothing in the panel refresh writes the cache directory directly', !/fs\.writeFileSync\([^)]*USAGE_CACHE_DIR/.test(panelBody) && !/fs\.renameSync/.test(panelBody), 'raw writes inside refreshViaCliPanel');   // stale-pins: kept — an absence check
   ok('§7 …and says WHY (a reading with no session is keyed by the credentials its process was handed)', /its identity IS the config dir the spawn was given/.test(ur));
 }
 

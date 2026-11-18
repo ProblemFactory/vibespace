@@ -94,6 +94,7 @@ const OWNERS = Object.freeze([
       name(`codex-(?:${CODEX_MONEY})|oat-(?:file-sync|identity|identity-model|shape-routes)`), new RegExp(`^src/harnesses/(?:${QUOTA_HARNESS})\\.js$`)] },
   { id: 'workspace', words: 'the workspace: tasks, agent groups, For you, grants, automation, artifact rows, the design and doc registries, the decision engine, voice, feedback',
     rules: [lead('task|backlog-select|groups-engine|channel-groups|group-card|msg-acl|worker-dispatch|dispatch-model|foryou|inbox|user-todos|main-asks?|helper-asks?|attention-model|grant-model|grants|ask-grant|ask-setting|setting-holds|automation|artifacts|artifact-registry|doc|published-pages|decision|rule-learning|text-model-client|voice|dropline|feedback|conversation-index|conversation-spec|search-index|search-model|records?-clear|assistant-note|notification-senders|session-status|may-use'),
+      name('image-attach-rule'),   // B-c9ed: THE picture rule — the For-you reply route judges a picture again with it (PURE)
       name('design'), but('design-', 'fs')] },
   { id: 'machines', words: 'the machines registry: hosts and pairing, browser records and leases, jobs records, mounts, desktop apps and windows, plugins, exits',
     rules: [dir('app-kinds|mount-providers|plugins|browser-backends'),

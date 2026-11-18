@@ -339,7 +339,7 @@
   "test-cli-call.mjs": 1,
   "test-cli-caps.mjs": 1,
   "test-cli-cmd-refresh.mjs": 1,
-  "test-cli-env.mjs": 5,
+  "test-cli-env.mjs": 6,
   "test-cli-missing-chrome.mjs": 1,
   "test-cli-one-text.mjs": 1,
   "test-cli-registration.mjs": 1,

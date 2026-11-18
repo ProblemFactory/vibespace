@@ -34,7 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, fixtureSid, ONBOARDED_SOURCE, vncEnv, stillPresser } from './scratch.mjs';
+import { freePorts, scratch, fixtureSid, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE } from './scratch.mjs';
 import { mintRoot, startHub } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (§57c): the tree and the home live in its root
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -125,7 +125,7 @@ const freshReading = () => {
 const baseEnv = { ...process.env }; delete baseEnv.DISPLAY; delete baseEnv.WAYLAND_DISPLAY; delete baseEnv.DBUS_SESSION_BUS_ADDRESS; delete baseEnv.ANTHROPIC_API_KEY;
 const srvEnv = { ...baseEnv, ...VNC_ENV, HOME: fakeHome, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...srvEnv, HOME: fakeHome }, log: 'arb-hub' });   // the HOME named in startHub's own env (test-fixture-isolation)
-const client = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1100,800', `--user-data-dir=${scratch('arb-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
+const client = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1100,800', `--user-data-dir=${scratch('arb-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;

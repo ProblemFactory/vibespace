@@ -977,6 +977,7 @@
 
 - (2026-11-17) «LOCATE IN SIDEBAR» SAID «NOT VISIBLE» ABOUT A ROW ON SCREEN, AND COLLAPSED THE LIST (think-tools-phone): a dead class, the rail's re-click, a look at 60 ms. 不变量 = Locate ends open with the row shown; «not visible» only when true, with its door ⇒ kb-bugfix-invariants
 - (2026-11-17) A STALE PAGE THAT GAVE UP NEVER CHECKED AGAIN — 2.369.404 against 2.369.406 for twelve hours (think-tools-phone): the ready wait gave up at a slow boot, the socket stayed up. 不变量 = a page that knows the hub runs another version reaches it by itself ⇒ kb-bugfix-invariants
+- (2026-11-18) A STOP THAT REACHED THE HELD FRAME'S FOLLOW-UP AFTER ITS REQUEST LEFT WAS A SILENT BILLED REQUEST (B-28b1 = B-1c04). 不变量 = never pretend: a follow-up the wrapper interrupted that still reached the model is recorded on its result, said once in that Stop's line (kb-bugfix-invariants)
 
 ## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
 
@@ -989,10 +990,6 @@
 An anchor carrying anything else stays what the sanitizer returned, an inert in-page anchor. No attribute value is ever skipped by a «not `>`» run.
 
 **Pins:** test-setting-links ⑦, string legs only, old-engine raw strings. In each pass no tag opens outside an attribute, and the ordinary anchor is still rewritten. A mutant with the old pattern is RED in each pass.
-
-- (2026-11-17) «LOCATE IN SIDEBAR» SAID «NOT VISIBLE» ABOUT A ROW ON SCREEN, AND COLLAPSED THE LIST (think-tools-phone): a dead class, the rail's re-click, a look at 60 ms. 不变量 = Locate ends open with the row shown; «not visible» only when true, with its door ⇒ kb-bugfix-invariants
-- (2026-11-17) A STALE PAGE THAT GAVE UP NEVER CHECKED AGAIN — 2.369.404 against 2.369.406 for twelve hours (think-tools-phone): the ready wait gave up at a slow boot, the socket stayed up. 不变量 = a page that knows the hub runs another version reaches it by itself ⇒ kb-bugfix-invariants
-- (2026-11-18) A STOP THAT REACHED THE HELD FRAME'S FOLLOW-UP AFTER ITS REQUEST LEFT WAS A SILENT BILLED REQUEST (B-28b1 = B-1c04). 不变量 = never pretend: a follow-up the wrapper interrupted that still reached the model is recorded on its result, said once in that Stop's line (kb-bugfix-invariants)
 
 ## A STOP THAT REACHED THE HELD FRAME'S FOLLOW-UP AFTER ITS REQUEST LEFT WAS A SILENT BILLED REQUEST (2026-11-18, lane bl-keys-misc, B-28b1 = B-1c04)
 **Symptom.** test-claude-steer-chrome §A ② / ③ red on hosted runners about half the time (CLI 2.1.314 … 2.1.323), green 6/6 and 8/8 on the box: a request reached the mock model after Stop.
