@@ -67,6 +67,33 @@ function claudeForkArgs({ resumeId, fork, forkAt } = {}) {
   return at ? ['--fork-session', '--resume-session-at', at] : ['--fork-session'];
 }
 
+/** PURE: the person's extra args as the spawn reads them — a fork flag dropped (the fork fact owns it), `--settings=<v>` split
+ *  into the two-word form so it IS the one flag. → { xa, dropped } */
+function normalizeExtraArgs(extraArgs = []) {
+  const xa = [], dropped = [];
+  for (let i = 0; i < extraArgs.length; i++) {
+    const a = extraArgs[i];
+    const flag = typeof a === 'string' ? a.split('=')[0] : '';
+    if (FORK_FLAGS.has(flag)) { // the fork fact owns these (claudeForkArgs) — never a second spelling
+      if (flag === '--resume-session-at' && !a.includes('=')) i++;
+      dropped.push(flag);
+      continue;
+    }
+    if (typeof a === 'string' && a.startsWith('--settings=')) xa.push('--settings', a.slice('--settings='.length));
+    else xa.push(a);
+  }
+  return { xa, dropped };
+}
+/** PURE: the person's own settings FILE in normalized extra args (`--settings <v>` whose value is not an inline JSON object), or
+ *  null — the start whose defaults stand down, and the one a subscription pick may set aside (unit «billing pick alive») */
+function settingsFileIn(xa) {
+  const i = Array.isArray(xa) ? xa.indexOf('--settings') : -1;
+  if (i < 0) return null;
+  const v = xa[i + 1];
+  try { const o = JSON.parse(v); if (o && typeof o === 'object' && !Array.isArray(o)) return null; } catch { }
+  return typeof v === 'string' ? v : String(v == null ? '' : v);
+}
+
 const PROMPT_CACHE_FLAGS = [
   { key: 'systemPromptSnapshot', flag: '--system-prompt-snapshot', kind: 'value', validate: (v) => (v === 'on' || v === 'off' ? v : null) },
   { key: 'excludeDynamicSystemPromptSections', flag: '--exclude-dynamic-system-prompt-sections', kind: 'boolean' },
@@ -98,6 +125,10 @@ class ClaudeCodeAdapter extends BackendAdapter {
     this.config = config;
   }
 
+  /** the person's own settings FILE this start's extra args carry (null = none, or an inline JSON object) — the create asks it
+   *  BEFORE the one build, so only such a start waits on the machine's key-helper fact (src/billing-pick.js) */
+  ownSettingsFile(extraArgs) { return settingsFileIn(normalizeExtraArgs(Array.isArray(extraArgs) ? extraArgs : []).xa); }
+
 
   /**
    * Create a Claude Code session.
@@ -107,7 +138,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
    * This adapter provides the command line arguments and session config.
    */
   buildSessionArgs(options) {
-    const { cwd, model, permissionMode, resumeId, sessionName, effort, outputStyle, extraArgs = [], mode = 'chat', neutralizeKeyHelper } = options;
+    const { cwd, model, permissionMode, resumeId, sessionName, effort, outputStyle, extraArgs = [], mode = 'chat', neutralizeKeyHelper, keyHelperNamed } = options;
     // THE INSTANCE SPAWN SETTINGS BAG (design-harness-settings §5): every spawn
     // row of the claude table, typed by the server (harnessSpawnSettings) —
     // brief / the prompt-cache trio / disableModelFallback / tuiRenderer. An
@@ -123,34 +154,23 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // inline JSON object) makes every default this spawn would ADD stand down
     // — the user's file governs (`notes` says so; the server logs it).
     const notes = [];
-    const xa = [];
-    for (let i = 0; i < extraArgs.length; i++) {
-      const a = extraArgs[i];
-      const flag = typeof a === 'string' ? a.split('=')[0] : '';
-      if (FORK_FLAGS.has(flag)) { // the fork fact owns these (claudeForkArgs) — never a second spelling
-        if (flag === '--resume-session-at' && !a.includes('=')) i++;
-        notes.push(`extraArgs ${flag} dropped: the fork flags derive from the fork fact${options.fork ? '' : ' (this create is not a fork)'}`);
-        continue;
-      }
-      if (typeof a === 'string' && a.startsWith('--settings=')) xa.push('--settings', a.slice('--settings='.length));
-      else xa.push(a);
-    }
-    let userSettingsMergeable = (() => {
-      const i = xa.indexOf('--settings');
-      if (i < 0) return true;
-      try { const o = JSON.parse(xa[i + 1]); return !!o && typeof o === 'object' && !Array.isArray(o); } catch { return false; }
-    })();
+    const { xa, dropped } = normalizeExtraArgs(extraArgs);
+    for (const flag of dropped) notes.push(`extraArgs ${flag} dropped: the fork flags derive from the fork fact${options.fork ? '' : ' (this create is not a fork)'}`);
+    let userSettingsMergeable = settingsFileIn(xa) === null;
     // B-8dcf item two (ruled 2026-11-18 01:19Z — src/settings-file-words.js): the person's own settings FILE meets the values this
-    // start adds. An explicit subscription pick NEVER stands down (a money choice a file does not override): the file is set aside
-    // for this start — and so the other defaults apply as on a start without it. Otherwise the file governs: the output style, the
-    // no-fallback setting and the Background Work inbound accept stand down. Each said by name, once per start (`settingsNotes`).
+    // start adds. An explicit subscription pick NEVER stands down (a money choice a file does not override) — but the file is set
+    // aside ONLY WHEN THAT IS NEEDED (the unit «billing pick alive»'s cure, 主开发 09:09Z): the machine's Claude settings name a
+    // key helper (`keyHelperNamed` true — said `billing`), or that fact could not be read (null / not given — billing wins, said
+    // `billingUnread`); then the other defaults apply as on a start without it. A machine that names no helper (false): the file
+    // applies WHOLE, as on the release. Otherwise the file governs: the output style, the no-fallback setting and the Background
+    // Work inbound accept stand down. Each said by name, once per start (`settingsNotes`).
     const settingsNotes = [];
-    if (!userSettingsMergeable && neutralizeKeyHelper) {
+    if (!userSettingsMergeable && neutralizeKeyHelper && keyHelperNamed !== false) {
       const i = xa.indexOf('--settings');
-      notes.push(`subscription pick: the session's own --settings ${JSON.stringify(String(xa[i + 1] || ''))} is set aside for this start (the helper key it may name never bills a subscription pick)`);
+      notes.push(`subscription pick: the session's own --settings ${JSON.stringify(String(xa[i + 1] || ''))} is set aside for this start (${keyHelperNamed === true ? 'the machine\'s Claude settings name a key helper, which never bills a subscription pick' : 'whether the machine\'s Claude settings name a key helper could not be read — the pick bills'})`);
       xa[i + 1] = '{}';
       userSettingsMergeable = true;
-      settingsNotes.push('billing');
+      settingsNotes.push(keyHelperNamed === true ? 'billing' : 'billingUnread');
     }
     const fileGoverns = !userSettingsMergeable;
     const standDown = (kind, what) => { settingsNotes.push(kind); notes.push(`${what} stands down: the session's own --settings ${JSON.stringify(String(xa[xa.indexOf('--settings') + 1] || ''))} is not inline JSON, so its file governs`); };
@@ -357,7 +377,9 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // and the turn succeeds. Harmless no-op on machines without a helper, so
     // it is applied for EVERY explicit subscription pick. (null is NOT usable
     // — the CLI's field-level schema .catch DROPS it.)
-    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });
+    // (the cure: a person's own settings FILE that applies whole — the machine names no helper — is never overwritten by the
+    // inline override: there is no helper to set aside, and the file is that one flag's value)
+    if (neutralizeKeyHelper && !fileGoverns) mergeSettings({ apiKeyHelper: '' });
     // Background-job owner notifications ride the CLI's cross-session
     // messaging inbox (2.344.0). Our sessions run bypassPermissions, whose
     // inbound default HOLDS a message from a sender that can't attest a
@@ -823,4 +845,4 @@ class ClaudeCodeAdapter extends BackendAdapter {
   }
 }
 
-module.exports = { ClaudeCodeAdapter, claudeForkArgs };
+module.exports = { ClaudeCodeAdapter, claudeForkArgs, settingsFileIn, normalizeExtraArgs };

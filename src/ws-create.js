@@ -104,7 +104,7 @@ function resumePoolPin(data, accounts, backend = 'claude') {
 }
 
 function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
-  execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath }) {
+  execFileAsync, pickCodexThreadCandidate, getSessionKey, normalizeComparablePath, helperFactMs = 8000 }) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
@@ -117,7 +117,30 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
   } = ctx;
-  const helperSaidKeys = new Set();   // unit «billing pick alive»: the helper-set-aside keys this hub has said (a said key asks no machine again)
+  const helperSaidKeys = new Set();   // unit «billing pick alive»: the helper-set-aside keys this hub has said (for the notice, a said key asks no machine again)
+  // THE FACT (the unit's cure, src/billing-pick.js): does the machine the CLI runs on name a key helper? → true / false / null (it
+  // cannot be read). A paired machine: its backend status, bounded (no answer in HELPER_FACT_MS = cannot be read). This machine:
+  // the CLI's settings file as the SPAWN's own env places it (its config dir, its HOME) — opened non-blocking (a FIFO never holds a
+  // start), a regular file under 1 MiB, else cannot be read; no such file names nothing.
+  // BOTH roads are bounded (its reader's S1: a config dir on a stuck mount never holds a start): no answer in HELPER_FACT_MS = cannot be read
+  const HELPER_FACT_MS = Number(helperFactMs) > 0 ? Number(helperFactMs) : 8000;   // (helperFactMs: the factory's seam for a suite — the bound's own leg; never a ctx key)
+  const readHelperFactOf = async ({ hostId, backend, creds, env }) => {
+    const row = creds && creds.keyHelper;
+    if (hostId) return BILLPICK.remoteHelperFact(await hosts.backendStatus(hostId), backend);
+    const file = BILLPICK.settingsFileOf(row, { creds, env, home: (env && env.HOME) || os.homedir() });
+    if (!file) return null;
+    let fh = null;
+    try {
+      fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const st = await fh.stat();
+      return st.isFile() && st.size <= 1 << 20 ? BILLPICK.localHelperFact({ text: await fh.readFile('utf8') }, row) : null;
+    } catch (e) { return e && e.code === 'ENOENT' ? BILLPICK.localHelperFact({ missing: true }, row) : null; } finally { try { await fh?.close(); } catch { } }
+  };
+  const readHelperFact = (o) => {
+    let timer = null;
+    const late = new Promise((r) => { timer = setTimeout(() => r(null), HELPER_FACT_MS); timer.unref?.(); });
+    return Promise.race([readHelperFactOf(o).catch(() => null), late]).finally(() => clearTimeout(timer));
+  };
 
   // ── THE AGENT BROWSER'S SPAWN ENVIRONMENT (P0, docs/design-agent-browser-v2
   //    §3.2) — constructed HERE, not in server.js, for two reasons that are both
@@ -942,6 +965,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // passed the adapter its neutralizer — a picked subscription billed the helper's paid credential. So the ONE spawn spec is
           // built HERE, after the account is resolved: the local dtach line, the daemon pipe and every remote builder run its args.
           const keyHelperOff = BILLPICK.setsHelperAside({ creds: harness && harness.creds, account: spawnAccount, linked: linkedAccountId });
+          // THE CURE (主开发 09:09Z, «as if a must»): the person's own settings FILE is set aside only when that is needed — the ONE read of
+          // the fact for this start (shared with the notice below), asked BEFORE the build only by a start that carries such a file (a
+          // start without one never waits on a machine); the spawn's own env places the CLI's settings (agentEnv + the account's env)
+          let helperFactP = null;
+          const helperFact = () => (helperFactP = helperFactP || readHelperFact({ hostId: data.hostId || null, backend, creds: harness && harness.creds,
+            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) } }));
+          // (an ADOPTED process — keeperSid known here — keeps the argv it started with: nothing is asked, and its record reads the file as
+          // GOVERNING — false — so no later push to the running CLI writes over a file it may hold; its reader's m1)
+          const keyHelperNamed = keyHelperOff && typeof adapter.ownSettingsFile === 'function' && adapter.ownSettingsFile(extraArgs) !== null ? (data.keeperSid ? false : await helperFact()) : undefined;
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: commandModel,
@@ -1009,6 +1041,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // unit «billing pick alive» (src/billing-pick.js): a subscription the person picked sets the machine's key helper aside —
             // false for the bare «the CLI's own login» case, whose argv stays the release's byte for byte
             neutralizeKeyHelper: keyHelperOff,
+            // the fact (true / false / null = cannot be read; undefined = not read: the start carries no settings file of the person's)
+            keyHelperNamed,
           });
           // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
           // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
@@ -1636,19 +1670,18 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }
           // unit «billing pick alive»: the rule SAID where the person looks — once per picked account and machine (src/billing-pick.js
           // noticeKey), only at a start that spawned with it (an adopted process keeps the argv it started with) and only when the
-          // Claude settings of the machine the CLI runs on name a helper it set aside (read after the spawn: the start never waits on it)
+          // Claude settings of the machine the CLI runs on name a helper it set aside — the ONE fact of this start (helperFact: read
+          // before the build when the start carries the person's settings file, else now, after the spawn: the start never waits on it)
           if (keyHelperOff && !data.keeperSid && harness && harness.creds && harness.creds.keyHelper) {
-            const row = harness.creds.keyHelper, acctId = (spawnAccount && spawnAccount.id) || linkedAccountId;
-            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: session.hostName || null, hostId: data.hostId || null,
+            const acctId = (spawnAccount && spawnAccount.id) || linkedAccountId;
+            // the paired machine by the name the person reads (the hosts store's record), never its id
+            const hostName = data.hostId ? (() => { try { const h = (hosts && hosts.get(data.hostId)) || {}; return h.name || h.host || null; } catch { return null; } })() : null;
+            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: hostName, hostId: data.hostId || null,
               account: (() => { try { return accounts?.get?.(acctId)?.name || acctId; } catch { return acctId; } })() });
-            // a key this hub already said asks the machine nothing more (a remote start would probe the host again) — the notice
-            // channel says a key once per hub run; the file is the CLI's own (its config dir: CLAUDE_CONFIG_DIR, else ~/.claude)
-            if (said && !helperSaidKeys.has(said.key)) (async () => {
-              const on = data.hostId
-                ? (await hosts.backendStatus(data.hostId))?.[backend]?.keyHelper === true
-                : BILLPICK.namesHelper(JSON.parse(await fs.promises.readFile(BILLPICK.settingsFileOf(row, { creds: harness.creds, env: process.env, home: os.homedir() }), 'utf8')), row);
-              if (on && serverNotice && serverNotice(said.key, said.text, { level: 1, i18n: { key: said.words, params: said.params } }) > 0) helperSaidKeys.add(said.key);
-            })().catch(() => { });
+            // a key this hub already said asks the machine nothing more — the notice channel says a key once per hub run
+            if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {
+              if (on === true && serverNotice && serverNotice(said.key, said.text, { level: 1, i18n: { key: said.words, params: said.params } }) > 0) helperSaidKeys.add(said.key);
+            }).catch(() => { }); } catch { }   // a notice never ends a registered start (a line comment: suites strip block comments across the file)
           }
           // 2.368.0: what this session was spawned with / prefers. undefined on
           // _autoResume means "follow the global default" — the tri-state is

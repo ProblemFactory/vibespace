@@ -610,15 +610,30 @@ console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own set
     ok(withFile.flag === FILE && withFile.flags === 1 && !c.on(withFile) && !withFile.r.env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK && JSON.stringify(withFile.notes.filter((n) => n === k)) === JSON.stringify([k]),
       `⑬b ${k}, the person's settings FILE: it is used as it is (the flag still names the file, once), VibeSpace's value stands down and the start says «${k}» ONCE`, { flag: withFile.flag, notes: withFile.notes });
   }
-  const bill = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true }), billFile = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true, outputStyle: 'Explanatory', extraArgs: file }), noPick = run(ClaudeCodeAdapter, { extraArgs: file });
+  const bill = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true }), billFile = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true, keyHelperNamed: true, outputStyle: 'Explanatory', extraArgs: file }), noPick = run(ClaudeCodeAdapter, { extraArgs: file });
   ok(bill.set && bill.set.apiKeyHelper === '' && !bill.notes.length, '⑬b billing, no file: an explicit subscription pick neutralizes the helper, nothing said');
-  ok(billFile.flag !== FILE && billFile.set && billFile.set.apiKeyHelper === '' && billFile.set.outputStyle === 'Explanatory' && billFile.flags === 1 && JSON.stringify(billFile.notes) === JSON.stringify(['billing']),
-    '⑬b billing WITH the person\'s file: it NEVER stands down — the file is set aside for this start (the helper neutralized; the other values apply as without a file) and the start says «billing» once', { flag: billFile.flag, set: billFile.set, notes: billFile.notes });
-  ok(noPick.flag === FILE && !noPick.notes.length && !(noPick.set && 'apiKeyHelper' in noPick.set) && noPick.r.settingsFileGoverns === true, '⑬b no explicit pick + a file: the file governs (no helper neutralization, nothing set aside) — and says it governs, whatever stood down (batch 21\'s cure)');
-  ok(!bill.r.settingsFileGoverns && !billFile.r.settingsFileGoverns && !run(ClaudeCodeAdapter, { extraArgs: ['--settings', '{"a":1}'] }).r.settingsFileGoverns, '⑬b no file, inline JSON, or a file set aside: nothing governs');
+  ok(billFile.flag !== FILE && billFile.set && billFile.set.apiKeyHelper === '' && billFile.set.outputStyle === 'Explanatory' && billFile.flags === 1 && JSON.stringify(billFile.notes) === JSON.stringify(['billing']) && !billFile.r.settingsFileGoverns,
+    '⑬b billing WITH the person\'s file on a machine whose settings NAME a helper: it never stands down — the file is set aside for this start (the helper neutralized; the other values apply as without a file) and the start says «billing» once', { flag: billFile.flag, set: billFile.set, notes: billFile.notes });
+  // the unit's cure (主开发 09:09Z): the file is set aside ONLY when that is needed
+  const whole = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true, keyHelperNamed: false, outputStyle: 'Explanatory', extraArgs: file });
+  ok(whole.flag === FILE && whole.flags === 1 && JSON.stringify(whole.notes) === JSON.stringify(['outputStyle']) && whole.r.settingsFileGoverns === true,
+    '⑬b billing WITH the person\'s file on a machine that names NO helper: the file applies WHOLE, as on the release (the one flag still names it — never overwritten by the override), the three stand down as with no pick', { flag: whole.flag, notes: whole.notes });
+  for (const [what, named] of [['cannot be read (null)', null], ['was not read (not given)', undefined]]) {
+    const u = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true, keyHelperNamed: named, extraArgs: file });
+    ok(u.flag !== FILE && u.set && u.set.apiKeyHelper === '' && JSON.stringify(u.notes) === JSON.stringify(['billingUnread']) && !u.r.settingsFileGoverns,
+      `⑬b billing WITH the person's file where the helper fact ${what}: billing wins — the file set aside, and the start says «billingUnread» (the words say the fact could not be read)`, { flag: u.flag, notes: u.notes });
+  }
+  ok(noPick.flag === FILE && !noPick.notes.length && !(noPick.set && 'apiKeyHelper' in noPick.set) && noPick.r.settingsFileGoverns === true, '⑬b no explicit pick + a file: the file governs (no helper neutralization, nothing set aside) — and says it governs, whatever stood down');
+  ok(!bill.r.settingsFileGoverns && !run(ClaudeCodeAdapter, { extraArgs: ['--settings', '{"a":1}'] }).r.settingsFileGoverns, '⑬b no file, or inline JSON: nothing governs');
+  {
+    // the create asks the SAME reader before its one build (only such a start waits on the machine's fact)
+    const A = new ClaudeCodeAdapter({ claudeCmd: 'claude' });
+    ok(A.ownSettingsFile(file) === FILE && A.ownSettingsFile([`--settings=${FILE}`]) === FILE && A.ownSettingsFile(['--settings', '{"a":1}']) === null && A.ownSettingsFile(['--model', 'x']) === null && A.ownSettingsFile(undefined) === null
+      && A.ownSettingsFile(['--fork-session', '--settings', FILE]) === FILE, '⑬b ownSettingsFile: the person\'s own file in extra args (both spellings; inline JSON and none are no file)');
+  }
   const all = run(ClaudeCodeAdapter, { outputStyle: 'Explanatory', settings: { disableModelFallback: true }, acceptPeerMessages: true, extraArgs: file });
   ok(JSON.stringify(all.notes) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']) && all.flag === FILE, '⑬b all three at once: each said once, in order; the file intact', all.notes);
-  ok(SFW.SETTINGS_FILE_KINDS.every((k) => typeof SFW.SETTINGS_FILE_WORDS[k] === 'string') && JSON.stringify(SFW.SETTINGS_FILE_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices', 'billing'])
+  ok(SFW.SETTINGS_FILE_KINDS.every((k) => typeof SFW.SETTINGS_FILE_WORDS[k] === 'string') && JSON.stringify(SFW.SETTINGS_FILE_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices', 'billing', 'billingUnread'])
     && JSON.stringify(SFW.GOVERNED_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']), '⑬b every kind has its words (src/settings-file-words.js); a governing file covers the three');
   // RED controls: the release's adapter overwrote the person's file with the three; a copy where the billing one stands down like the three
   let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/adapters/claude-code.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
@@ -676,13 +691,20 @@ console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own set
     if (relH) { const BH = M13.load('src/harnesses/claude.js', relH, 'release-harness'); const r = BH.spawn.statusline(['--settings', FILE], 'vs-status'); ok(r[1] !== FILE, '⑬b RED control: the release\'s statusline merge rewrote the person\'s file into {statusLine} (the terminal start lost the file whole)', r); }
     else console.log('  - SKIP ⑬b RED control: the release b06f36e90 is not in this clone (its history is not here)');
   }
-  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok(Object.values(SFW.SETTINGS_FILE_WORDS).every((w) => d.includes(JSON.stringify(w) + ':')), `⑬b ${path.basename(f)} words all four`); }
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok(Object.values(SFW.SETTINGS_FILE_WORDS).every((w) => d.includes(JSON.stringify(w) + ':')), `⑬b ${path.basename(f)} words all five`); }
   const src = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf8');
-  const A1 = "    if (!userSettingsMergeable && neutralizeKeyHelper) {", A2 = "    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });";
-  if (src.includes(A1) && src.includes(A2)) {
-    const W = M13.load('src/adapters/claude-code.js', src.replace(A1, '    if (false) {').replace(A2, "    if (neutralizeKeyHelper && !fileGoverns) mergeSettings({ apiKeyHelper: '' });"), 'file-wins').ClaudeCodeAdapter;
-    const w = run(W, { neutralizeKeyHelper: true, extraArgs: file });
+  const A1 = "    if (!userSettingsMergeable && neutralizeKeyHelper && keyHelperNamed !== false) {", A2 = "    if (neutralizeKeyHelper && !fileGoverns) mergeSettings({ apiKeyHelper: '' });";
+  if (src.split(A1).length === 2 && src.split(A2).length === 2) {
+    const W = M13.load('src/adapters/claude-code.js', src.replace(A1, '    if (false) {'), 'file-wins').ClaudeCodeAdapter;
+    const w = run(W, { neutralizeKeyHelper: true, keyHelperNamed: true, extraArgs: file });
     ok(w.flag === FILE && !(w.set && 'apiKeyHelper' in w.set), '⑬b RED control (the billing rule): a copy where the subscription pick stands down like the three leaves the helper NOT neutralized under a file — the billing leg can go red', { flag: w.flag });
+    // the unit's tip before its cure: the file set aside at EVERY subscription start, a machine naming no helper too
+    const U = M13.load('src/adapters/claude-code.js', src.replace(A1, '    if (!userSettingsMergeable && neutralizeKeyHelper) {'), 'aside-always').ClaudeCodeAdapter;   // stale-pins: kept — the RED control re-plants the unit's set-aside without the helper fact on purpose
+    const u = run(U, { neutralizeKeyHelper: true, keyHelperNamed: false, extraArgs: file });
+    ok(u.flag !== FILE && JSON.stringify(u.notes) !== JSON.stringify([]) && u.notes[0] !== 'outputStyle', '⑬b RED control (the cure): the set-aside without the helper fact (71e7a658e\'s rule) drops the file on a machine that names no helper — the «applies whole» leg can go red', { flag: u.flag, notes: u.notes });
+    const O = M13.load('src/adapters/claude-code.js', src.replace(A2, "    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });"), 'override-over-file').ClaudeCodeAdapter;   // stale-pins: kept — the RED control re-plants the override merged over the file on purpose
+    const o = run(O, { neutralizeKeyHelper: true, keyHelperNamed: false, extraArgs: file });
+    ok(o.flag !== FILE, '⑬b RED control: the override merged without the governs guard writes inline JSON over the person\'s file (the flag names it no more) — the «applies whole» leg can go red', { flag: o.flag });
   } else ok(false, '⑬b control needles exist');
   for (const row of copiesCensus(M13.files, M13.dir, REPO, { label: '⑬b ' })) ok(row.pass, row.name, row.detail);
 }

@@ -83,7 +83,7 @@ ok(/fork: true,/.test(doFork) && /forkAtUuid: resumeAt \|\| undefined,/.test(doF
 
 const M = mutantCopies('fork-flag', REPO);
 const adSrc = read('src/adapters/claude-code.js');
-const mutSrc = adSrc.replace("    args.push(...claudeForkArgs({ resumeId, fork: options.fork, forkAt: options.forkAt }));\n", '').replace("      if (FORK_FLAGS.has(flag)) {", '      if (false) {');
+const mutSrc = adSrc.replace("    args.push(...claudeForkArgs({ resumeId, fork: options.fork, forkAt: options.forkAt }));\n", '').replace("    if (FORK_FLAGS.has(flag)) {", '    if (false) {');   // (billing pick alive's cure: the person's extra args are read by normalizeExtraArgs — the adapter's own, shared with the create)
 ok(mutSrc !== adSrc && mutSrc.includes('if (false) {'), 'control edit applied (the adapter reads the flag from the client\'s extraArgs again)');
 const mt = table(M.load('src/adapters/claude-code.js', mutSrc, 'client-flag'));
 ok(!mt.fork && !mt.at, 'control: the client-extraArgs adapter ⇒ an API fork (no extraArgs) RESUMES the parent ⇒ ① RED', JSON.stringify(mt.argv.fork));

@@ -25,6 +25,13 @@
  *   · SAID ONCE, where the person looks, when the rule actually set a helper aside (the machine's settings name one), with its
  *     door: the billing switcher's CLI-login entry bills through the helper again (at the next start).
  *   · A RUNNING conversation is never touched: the answer rides a spawn only.
+ *   · THE PERSON'S OWN SETTINGS FILE IS SET ASIDE ONLY WHEN THAT IS NEEDED (the cure, 主开发 09:09Z — «as if a must»): the one
+ *     inline override cannot ride beside a `--settings <file>` (ONE flag), so a pick used to set the whole file aside at every
+ *     start — its hooks and permission rules lost (a lost deny rule is a safety loss). Now the create reads THE FACT the notice
+ *     reads (helperFact: does the machine the CLI runs on name a helper?) before it builds such a start: named ⇒ the file is
+ *     set aside (said); the fact cannot be read (a settings file that does not parse, a paired machine that does not answer) ⇒
+ *     billing wins and the words say so; not named ⇒ the file applies whole, as on the release (nothing is set aside — a
+ *     helper the person's own file names is that file's own word). A start without such a file never waits on the fact.
  */
 
 /** does this spawn set the machine's key helper aside? `creds` = the harness's creds row, `account` = what
@@ -55,6 +62,28 @@ function namesHelper(settings, row) {
   return typeof v === 'string' ? v.trim() !== '' : !!v;
 }
 
+/** THE FACT, on this machine: the CLI's settings file as read (`text`; `missing` = no such file) → true (a helper is named) /
+ *  false (the file names none, is empty, or there is no file) / null (it cannot be read: not JSON, not an object, a read that failed)
+ *  A PAIRED machine's fact is its device probe's (src/machine-probes.js claudeLoginFacts — keyHelper true / false): that probe has no
+ *  third state, so a file there that does not parse reads as naming none (named in the cure's line; the ssh fallback rung reads the
+ *  key's text, so an EMPTY value there reads as named — billing wins) */
+function localHelperFact({ text = null, missing = false } = {}, row) {
+  if (missing) return false;
+  if (typeof text !== 'string') return null;
+  if (!text.trim()) return false;   // an EMPTY file names nothing (its reader's m4: never «cannot be read»)
+  let o;
+  try { o = JSON.parse(text); } catch { return null; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  return namesHelper(o, row);
+}
+/** THE FACT, on a paired machine: its backend status (hosts.backendStatus — the probe op's facts, or the ssh probe's lines) →
+ *  true (`keyHelper: true`) / false (it answered, naming none) / null (no answer: nothing, or a row that says nothing of the CLI) */
+function remoteHelperFact(status, backend) {
+  const r = status && typeof status === 'object' && backend ? status[backend] : null;
+  if (!r || typeof r !== 'object' || typeof r.installed !== 'boolean') return null;
+  return r.keyHelper === true;
+}
+
 /** the person's words (English t() keys; {name} = the conversation, {account} = the picked subscription, {host} = the machine) */
 const HELPER_SET_ASIDE = Object.freeze({
   local: '{name} bills {account}, the subscription you picked — the apiKeyHelper in this machine’s Claude settings is not used for it. To bill through the helper, set its billing to «CLI login» (from its next start)',
@@ -74,4 +103,4 @@ function helperNotice({ name, account, accountId, host = null, hostId = null } =
   return { key: noticeKey(accountId, hostId), words, params, text };
 }
 
-module.exports = { setsHelperAside, settingsFileOf, namesHelper, HELPER_SET_ASIDE, noticeKey, helperNotice };
+module.exports = { setsHelperAside, settingsFileOf, namesHelper, localHelperFact, remoteHelperFact, HELPER_SET_ASIDE, noticeKey, helperNotice };

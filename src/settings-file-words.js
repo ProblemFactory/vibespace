@@ -11,6 +11,11 @@
  *     set aside for that start. A start that resolves to NO subscription (the CLI's own login, an API key): the file governs
  *     like the three. (Amended 2026-11-18 02:39Z, unit «billing pick alive»: the default a person starred in Manage agents is
  *     their standing pick — one conversation never changes who it bills between its first start and a resume.)
+ *     ONLY WHEN THAT IS NEEDED (the unit's cure, 主开发 09:09Z): the file is set aside only when the Claude settings of the
+ *     machine the CLI runs on really name a key helper (`billing`); where that fact cannot be read (a settings file that does
+ *     not parse, a paired machine that does not answer) billing wins and the words say so (`billingUnread`); in every other
+ *     start the file applies WHOLE, as on the release — its hooks and permission rules are never lost to a helper that is not
+ *     there. (Merging the file and the one override into a file of the conversation's own: backlog B-e7c0.)
  * Each is SAID by name once per conversation start, where the person looks, with its door (the create's notice).
  * SETTINGS_FILE_WORDS[kind] = the person's words (English t() keys, {name} = the conversation; the page words them).
  * The kinds the file GOVERNS ride the session as `_settingsFileGoverns` (meta settingsFileGoverns): the paths that push a value
@@ -22,11 +27,13 @@ const SETTINGS_FILE_WORDS = Object.freeze({
   outputStyle: '{name}: your settings file is used as it is — the output style you picked in VibeSpace is not applied; put it into the file, or drop the --settings flag',
   noFallback: '{name}: your settings file is used as it is — «Disable model fallback» from VibeSpace is not applied; put it into the file, or drop the --settings flag',
   jobNotices: '{name}: your settings file is used as it is — VibeSpace does not set crossSessionInbound, so Background Work notices reach it only if the file accepts them; or drop the --settings flag',
-  billing: '{name} bills the subscription chosen for it, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»',
+  billing: '{name} bills the subscription chosen for it and the Claude settings of its machine name an apiKeyHelper, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»',
+  billingUnread: '{name} bills the subscription chosen for it, and whether the Claude settings of its machine name an apiKeyHelper could not be read, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»',
 });
 const SETTINGS_FILE_KINDS = Object.freeze(Object.keys(SETTINGS_FILE_WORDS));
 /** the kinds a governing file covers (the three; billing is a set-aside, never a governing) */
 const GOVERNED_KINDS = Object.freeze(['outputStyle', 'noFallback', 'jobNotices']);
+/** the kinds a governing file covers (the three; the two billing kinds are a set-aside, never a governing) */
 /** does the person's settings file govern `kind` for this running session? */
 const fileGoverns = (session, kind) => !!(session && Array.isArray(session._settingsFileGoverns) && session._settingsFileGoverns.includes(kind));
 /** the live settings row a kind stands for (harness-config-sync's push) */

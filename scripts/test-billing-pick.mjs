@@ -16,7 +16,13 @@
 //   ⑤ SAID ONCE: the notice when the machine's settings name a helper (a scratch HOME), its key the same for a second start of
 //      the same pick on the same machine, nothing without a helper, nothing for the bare case.
 //   ⑥ RED CONTROLS: the release create bills the helper under a pick (the dormant rule); mutants of this create — the flag
-//      not passed, the rule answering yes for everything, the notice without the helper check — each goes RED.
+//      not passed, the rule answering yes for everything, the notice without the helper check — each goes RED; and the
+//      cure's (主开发 09:09Z): the file set aside at every pick, the said-once memo dropped, the notice reading the hub's env,
+//      the adopted-process skip dropped, the machine named by its id.
+//   THE CURE: the person's own settings file is set aside only when a helper is really named for that machine (② a case per
+//      state: named / none / no file / not JSON; ⑦ a paired machine that names one, none, or does not answer); ⑦ the paired
+//      machine through the real create (its ladder stood in, the REAL hosts.backendStatus over a stub device) and an ADOPTED
+//      process; ⑧ a resume and a fork of a picked conversation; every «nothing said» leg waits on THE FACT (the read settled).
 // Run: node scripts/test-billing-pick.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -101,32 +107,69 @@ function accountsStub({ defaultId = null } = {}) {
   };
 }
 const SOCK = scratchDir('bpick-sock'), BUF = scratchDir('bpick-buf'), CWD = scratchDir('bpick-cwd');
-async function drive(mod, data, { accounts = accountsStub(), pipe = false, wait = 0 } = {}) {
-  const sent = [], spawned = [], pipes = [], notices = [], active = new Map(), noop = () => undefined;
-  const hosts = pipe ? { device: async () => ({ openPipeSession: async (spec) => { pipes.push(spec); return { pid: 4343, write() { }, kill() { } }; } }) } : null;
+// THE FACT A LEG WAITS ON (the cure: never a fixed window): the create's read of the machine's settings file — its open refused, or
+// its handle closed — or a paired machine's backend status answered or failed; `factDone` settles a turn after that (the create's
+// own continuation — judge, then say or not — runs first)
+function factSpy({ hangOpen = false } = {}) {
+  let done = null; const settled = new Promise((r) => { done = r; });
+  const turn = () => setImmediate(() => setImmediate(done));
+  const reads = [];
+  const open = async (file, ...rest) => {
+    const watched = /settings\.json$/.test(String(file));
+    if (watched) reads.push(String(file));
+    if (watched && hangOpen) return new Promise(() => { });   // a config dir on a stuck mount: the open never answers
+    let fh;
+    try { fh = await fs.promises.open(file, ...rest); } catch (e) { if (watched) turn(); throw e; }
+    if (!watched) return fh;
+    const close = fh.close.bind(fh);
+    fh.close = async () => { try { return await close(); } finally { turn(); } };
+    return fh;
+  };
+  const promises = new Proxy(fs.promises, { get: (t, k) => (k === 'open' ? open : t[k]) });
+  return { fs: new Proxy(fs, { get: (t, k) => (k === 'promises' ? promises : t[k]) }), reads, settled, turn };
+}
+const within = (p, ms = 5000) => Promise.race([p.then(() => true), new Promise((r) => setTimeout(() => r(false), ms))]);
+/** ONE create handler (its own said-once memo, as one hub run) — `create` runs one create through it */
+function makeCreate(mod, { accounts = accountsStub(), pipe = false, hosts: hostsIn = null, env = {}, helperFactMs = undefined, hangOpen = false } = {}) {
+  const active = new Map(), noop = () => undefined, pipes = [];
+  let st = null;   // the current create's record
+  const hosts = hostsIn || (pipe ? { device: async () => ({ openPipeSession: async (spec) => { pipes.push(spec); return { pid: 4343, write() { }, kill() { } }; } }) } : null);
+  let spy = factSpy({ hangOpen });
+  const fsOf = new Proxy({}, { get: (t, k) => spy.fs[k] });
   const ctx = new Proxy({
-    activeSessions: active, WS_OPEN: 1, sessionCounterRef: { value: 0 }, adapterRegistry: registry(), hosts, accounts, os, fs, path,
+    activeSessions: active, WS_OPEN: 1, sessionCounterRef: { value: 0 }, adapterRegistry: registry(), hosts, accounts, os, fs: fsOf, path,
     execFileSync: require('child_process').execFileSync, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
     SOCKETS_DIR: SOCK, BUFFERS_DIR: BUF, PTY_WRAPPER: W('pty-wrapper.js'), CHAT_WRAPPER: W('chat-wrapper.js'),
     NODE_CMD: '/n/node', DTACH_CMD: '/stub/dtach', ENV_CMD: '/usr/bin/env', CLAUDE_CMD: EXE, EDITOR_CMD: '/stub/editor/code', AGENT_BIN_DIR: '/stub/bin', PORT: 1, X_ENV: {},
     cliCmds: { forSpawn: async (b, c) => c }, USAGE_STATUSLINE_CMD: '/stub/vibespace-usage', userStatuslineCmd: () => '',
     serverSetting: (k) => (pipe && k === 'agentd.localPipeSessions' ? true : undefined), harnessSetting: noop, harnessDeclares: () => false, harnessSpawnSettings: () => ({}),
     integrationEnabled: () => true, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
-    serverNotice: (key, text, o) => { notices.push({ key, text, ...(o || {}) }); return 1; },
-    pty: { spawn: (cmd, args, opts) => { spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
+    serverNotice: (key, text, o) => { st.notices.push({ key, text, ...(o || {}) }); return 1; },
+    pty: { spawn: (cmd, args, opts) => { st.spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
     setupSessionPty: (s, id, p) => { s.pty = p; },
   }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && /^[a-z]/.test(k) ? noop : undefined)) });
   const handler = mod.createWsCreateHandler({
-    ctx, agentEnv: () => ({ PATH: '/usr/bin:/bin', HOME: os.homedir() }), crashLoopRef: { map: new Map() }, noConvoRef: { map: new Map() },
+    ctx, agentEnv: () => ({ PATH: '/usr/bin:/bin', HOME: os.homedir(), ...env }), crashLoopRef: { map: new Map() }, noConvoRef: { map: new Map() },
     execFileAsync: async () => ({ stdout: '', stderr: '' }), pickCodexThreadCandidate: () => null,
     getSessionKey: (s) => `${s.backend}:${s.backendSessionId}`, normalizeComparablePath: (p) => p,
+    ...(helperFactMs ? { helperFactMs } : {}),   // the factory's seam: the bound's own legs
   });
-  await handler({ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }, { type: 'create', mode: 'chat', backend: 'claude', cwd: CWD, reqId: 'r1', ...data }, new Set());
-  // the notice reads the machine's settings AFTER the spawn: a leg that asks for it waits up to `wait` ms (a fixed wait for a leg that wants none)
-  for (const t0 = Date.now(); wait > 0 && Date.now() - t0 < wait && !notices.some((n) => n.key.startsWith('billing-pick-helper-'));) await new Promise((r) => setTimeout(r, 5));
-  const [id, session] = [...active.entries()][0] || [];
-  return { sent, spawned, pipes, notices, id, session, accounts };
+  return {
+    hosts,
+    async create(data, { wait = 0 } = {}) {
+      spy = factSpy({ hangOpen });
+      if (hosts && hosts._onFact) hosts._onFact = spy.turn;
+      st = { sent: [], spawned: [], pipes, notices: [], accounts, reads: spy.reads, factDone: spy.settled };
+      const before = new Set(active.keys());
+      await handler({ readyState: 1, send: (t) => st.sent.push(JSON.parse(t)) }, { type: 'create', mode: 'chat', backend: 'claude', cwd: CWD, reqId: 'r1', ...data }, new Set());
+      // a leg that asks for the notice waits for THE FACT (the read settled), bounded — never a fixed window
+      if (wait) await within(st.factDone, wait);
+      const [id, session] = [...active.entries()].find(([k]) => !before.has(k)) || [];
+      return { ...st, id, session };
+    },
+  };
 }
+const drive = (mod, data, opts = {}) => makeCreate(mod, opts).create(data, opts);
 /** the line a road runs (dtach's argv from node on, or the pipe's argv) → {line, settings} | {why} */
 function lineOf(x, road = 'dtach') {
   const errs = x.sent.filter((m) => m.type === 'error').map((m) => m.message || m.code);
@@ -167,13 +210,13 @@ process.env.HOME = HOME;
 ok(os.homedir() === HOME && HOME !== home0, 'setup: the create runs under a scratch HOME (the real ~/.claude is never read)', [os.homedir(), HOME]);
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 // a helper named / a settings file that names none / no settings file at all / a file that is not JSON
-const helperOn = (on) => { if (on === 'missing') fs.rmSync(SETTINGS, { force: true }); else fs.writeFileSync(SETTINGS, on === 'garbled' ? '{ "apiKeyHelper": ' : JSON.stringify(on ? { apiKeyHelper: '/usr/local/bin/key-helper' } : { theme: 'dark' })); };
+const helperOn = (on) => { if (on === 'missing') fs.rmSync(SETTINGS, { force: true }); else fs.writeFileSync(SETTINGS, on === 'garbled' ? '{ "apiKeyHelper": ' : on === 'empty' ? '' : JSON.stringify(on ? { apiKeyHelper: '/usr/local/bin/key-helper' } : { theme: 'dark' })); };
 const cfg0 = process.env.CLAUDE_CONFIG_DIR;
 delete process.env.CLAUDE_CONFIG_DIR;   // the CLI's config dir is ~/.claude here unless a leg says otherwise
 helperOn(true);
 const runs = {};
 for (const [what, id] of PICKS) {
-  const x = await drive(wsCreate, { accountId: id }, { wait: 400 });
+  const x = await drive(wsCreate, { accountId: id }, { wait: 5000 });
   const l = lineOf(x);
   runs[id] = x;
   ok(!l.why && neutralized(l), `${what} (${id}): the dtach line's ONE --settings carries apiKeyHelper "" (the helper set aside)`, l.why || l.settings);
@@ -191,14 +234,28 @@ for (const [what, data] of BARE) {
   if (release) { const rel = lineOf(await drive(release, data)); ok(sameLine(now, rel), `${what}: the line is the release create's, byte for byte`, [now.line, rel.line]); }
   else skip(`${what}: the line against the release create's`);
 }
-// a person's own --settings FILE (B-8dcf part two, alive from this unit): under a pick the file is set aside for that start and SAID;
-// with no account the file governs — the line names it, as the release's create built it
+// a person's own --settings FILE (B-8dcf part two, alive from this unit): under a pick the file is set aside for that start — ONLY WHEN
+// THAT IS NEEDED (the cure, 主开发 09:09Z): the machine's settings name a helper (said «billing»), or that fact cannot be read (billing
+// wins, said «billingUnread»); a machine naming none: the file applies WHOLE, as on the release. With no account the file governs.
+const FILE = ['--settings', '/home/u/my-settings.json'];
+const fileKept = (l) => !l.why && l.line[l.line.indexOf('--settings') + 1] === '/home/u/my-settings.json' && l.line.filter((w) => w === '--settings').length === 1;
+const saidKind = (x, k) => x.notices.filter((n) => n.key.startsWith(`settings-file-${k}-`)).length;
 {
-  const FILE = ['--settings', '/home/u/my-settings.json'];
   const x = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: FILE });
   const l = lineOf(x);
-  ok(neutralized(l) && !l.line.includes('/home/u/my-settings.json') && x.notices.some((n) => n.key.startsWith('settings-file-billing-') && n.i18n && /set its billing to «CLI login»/.test(n.i18n.key)),
-    'a pick + the person\'s settings file: the file is set aside for that start (the neutralizer rides the one inline flag) and that is SAID, with the CLI-login door', [l.settings, x.notices.map((n) => n.key)]);
+  ok(neutralized(l) && !l.line.includes('/home/u/my-settings.json') && x.notices.some((n) => n.key.startsWith('settings-file-billing-') && n.i18n && /set its billing to «CLI login»/.test(n.i18n.key) && /name an apiKeyHelper/.test(n.i18n.key)),
+    'a pick + the person\'s settings file on a machine whose settings NAME a helper: the file is set aside for that start (the neutralizer rides the one inline flag) and that is SAID — why, and the CLI-login door', [l.settings, x.notices.map((n) => n.key)]);
+  ok(x.reads.length === 1, 'the fact was read ONCE for that start (before the build; the notice reuses it)', x.reads);
+  for (const [what, state, want] of [['names NO helper', false, 'whole'], ['has no settings file at all', 'missing', 'whole'], ['has an EMPTY settings file (it names nothing)', 'empty', 'whole'], ['has a settings file that is not JSON', 'garbled', 'unread']]) {
+    helperOn(state);
+    const y = await drive(wsCreate, { accountId: 'sub-a1', extraArgs: FILE, outputStyle: 'Explanatory' });
+    const m = lineOf(y);
+    if (want === 'whole') ok(fileKept(m) && !(m.settings && 'apiKeyHelper' in m.settings) && saidKind(y, 'billing') + saidKind(y, 'billingUnread') === 0 && saidKind(y, 'outputStyle') === 1 && y.session && JSON.stringify(y.session._settingsFileGoverns) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']),
+      `a pick + the person's settings file on a machine that ${what}: the file applies WHOLE, as on the release (its hooks and rules kept; nothing set aside, nothing of billing said; the three stand down as with no pick and the file governs every kind)`, [m.line, y.notices.map((n) => n.key), y.session && y.session._settingsFileGoverns]);
+    else ok(neutralized(m) && !m.line.includes('/home/u/my-settings.json') && saidKind(y, 'billingUnread') === 1 && saidKind(y, 'billing') === 0 && y.notices.some((n) => /could not be read/.test((n.i18n && n.i18n.key) || '')),
+      `a pick + the person's settings file on a machine that ${what}: the fact cannot be read — billing wins (the file set aside) and the notice says so`, [m.settings, y.notices.map((n) => n.key)]);
+  }
+  helperOn(true);
   const b = await drive(wsCreate, { accountId: 'subscription', extraArgs: FILE });
   const bl = lineOf(b);
   ok(!bl.why && bl.line[bl.line.indexOf('--settings') + 1] === '/home/u/my-settings.json' && !b.notices.some((n) => n.key.startsWith('settings-file-billing-')), 'the bare case + a settings file: the file governs, nothing set aside', bl.line);
@@ -260,7 +317,7 @@ console.log('— ⑤ SAID ONCE, where the person looks');
   const said = x.notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
   ok(said.length === 1 && said[0].key === 'billing-pick-helper-sub-a1-local' && said[0].level === 1 && said[0].i18n && said[0].i18n.key === BP.HELPER_SET_ASIDE.local
     && said[0].i18n.params.account === 'Work Max' && said[0].text.includes('Work Max'), 'the start that set a helper aside says it: one notice, information level, the page words it (t key + params)', said);
-  const again = (await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 400 })).notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
+  const again = (await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 5000 })).notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
   ok(again.length === 1 && again[0].key === said[0].key, 'a second start of the same pick on the same machine asks under the SAME key — the hub\'s notice channel says a key once', again.map((n) => n.key));
   const pool = runs['pool-p1'].notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
   ok(pool.length === 1 && pool[0].key === 'billing-pick-helper-pool-p1-local' && pool[0].i18n.params.account === 'Team pool', 'another pick has its own key (its own first time)', pool.map((n) => n.key));
@@ -268,19 +325,147 @@ console.log('— ⑤ SAID ONCE, where the person looks');
   ok(bare.length === 0, 'the bare case says nothing (nothing was set aside)', bare);
   for (const [what, state] of [['a settings file that names no helper', false], ['no settings file at all', 'missing'], ['a settings file that is not JSON', 'garbled']]) {
     helperOn(state);
-    const none = await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 150 });   // the window the notice above landed in, and more
-    ok(neutralized(lineOf(none)) && none.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0, `${what}: the line still carries the neutralizer (harmless), and nothing is said`, none.notices);
+    const none = await drive(wsCreate, { accountId: 'sub-a1' });
+    const settled = await within(none.factDone);   // THE FACT: the create's read of the settings file settled (never a fixed window)
+    ok(settled && none.reads.length === 1 && neutralized(lineOf(none)) && none.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0, `${what}: the read settled, the line still carries the neutralizer (harmless), and nothing is said`, { settled, reads: none.reads, notices: none.notices });
   }
-  // the CLI's config dir (CLAUDE_CONFIG_DIR) is where its settings live: a helper named THERE is the one set aside, and said
+  helperOn(true);
+  // THE BOUND (its reader's S1): a config dir on a stuck mount — the open never answers — never holds the start; billing wins, said so
+  {
+    const p = makeCreate(wsCreate, { hangOpen: true, helperFactMs: 300 }).create({ accountId: 'sub-a1', extraArgs: FILE });
+    const done = await within(p, 4000), y = done ? await p : null;
+    ok(done && !!y && neutralized(lineOf(y)) && saidKind(y, 'billingUnread') === 1, 'this machine\'s settings read never answers (a stuck mount): the start goes on at the bound — billing wins, the file set aside, said «billingUnread»', { done, notes: y && y.notices.map((n) => n.key) });
+  }
+  // SAID ONCE through ONE handler (one hub run): the second start of the same pick on the same machine says nothing and ASKS nothing
+  {
+    const one = makeCreate(wsCreate);
+    // (a read the create starts is begun before the create returns — the reader's open is its first step — so `reads` is the fact)
+    const a = await one.create({ accountId: 'sub-a1' }, { wait: 5000 }), b = await one.create({ accountId: 'sub-a1' });
+    ok(a.notices.filter((n) => n.key === 'billing-pick-helper-sub-a1-local').length === 1 && b.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0 && a.reads.length === 1 && b.reads.length === 0 && neutralized(lineOf(b)),
+      'one hub run, two starts of the same pick on the same machine: said at the first; the second says nothing and reads no settings file (a said key asks no machine again) — its line still neutralized', { a: a.notices.map((n) => n.key), b: b.notices.map((n) => n.key), reads: b.reads });
+    const c = await one.create({ accountId: 'pool-p1' }, { wait: 5000 });
+    ok(c.notices.filter((n) => n.key === 'billing-pick-helper-pool-p1-local').length === 1 && c.reads.length === 1, '…another pick in the same run is its own first time (read, said)', c.notices.map((n) => n.key));
+  }
+  // the CLI's config dir (CLAUDE_CONFIG_DIR) is where its settings live — as the SPAWN's own env places it (the cure: never the hub's
+  // process env): a helper named THERE is the one set aside, and said; the hub's own config dir is not the spawn's
   const CFG = path.join(HOME, 'cfg-dir');
   fs.mkdirSync(CFG, { recursive: true });
   fs.writeFileSync(path.join(CFG, 'settings.json'), JSON.stringify({ apiKeyHelper: '/opt/helper' }));
   helperOn(false);
+  const viaDir = await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 5000, env: { CLAUDE_CONFIG_DIR: CFG } });
+  ok(viaDir.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 1 && viaDir.reads[0] === path.join(CFG, 'settings.json'),
+    'the spawn\'s env places the CLI\'s config dir (CLAUDE_CONFIG_DIR) where a helper is named — ~/.claude naming none, the hub\'s env naming no dir — it is read there, and said', { reads: viaDir.reads, notices: viaDir.notices.map((n) => n.key) });
   process.env.CLAUDE_CONFIG_DIR = CFG;
-  const viaDir = (await drive(wsCreate, { accountId: 'sub-a1' }, { wait: 400 })).notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
+  const hubOnly = await drive(wsCreate, { accountId: 'sub-a1' });
+  const hubSettled = await within(hubOnly.factDone);
   delete process.env.CLAUDE_CONFIG_DIR;
-  ok(viaDir.length === 1, 'a helper named in the CLI\'s config dir (CLAUDE_CONFIG_DIR) — ~/.claude naming none — is said', viaDir);
+  ok(hubSettled && hubOnly.reads[0] === SETTINGS && hubOnly.notices.filter((n) => n.key.startsWith('billing-pick-helper-')).length === 0,
+    '…and the reverse: the HUB\'s env names that dir, the spawn\'s does not — the spawn\'s ~/.claude is read (naming none), nothing said', { reads: hubOnly.reads });
   helperOn(true);
+}
+
+console.log('— ⑦ A PAIRED MACHINE through the real create (its ladder stood in — the ssh / dial ladders have their own suites — and the REAL hosts.backendStatus over a stub device)');
+const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+const SPAWN_AT = require.resolve(path.join(REPO, 'src/spawn/index.js'));
+const realSpawn = require(SPAWN_AT);
+/** a copy of a create whose paired-machine ladder answers a spawn line (the remote CLI's argv as the create built it) — a resume
+ *  that asks `_adoptHere` is ADOPTED by it (a live keeper holds the conversation, as src/spawn/ssh.js finds one) */
+function withLadder(src, tag) {
+  const saved = require.cache[SPAWN_AT];
+  // (as src/spawn/ssh.js does on its roads: the session is the machine's — host = its id, hostName = its name)
+  const chat = async (lc) => { if (lc.data._adoptHere) { lc.data.keeperSid = `k-${lc.id}`; lc.data.keeperKind = 'agentd'; } lc.session.host = lc.h.id; lc.session.hostName = lc.h.name; return { spawnCmd: '/stub/ssh', spawnArgs: ['h-2', lc.rcmd, ...lc.rargs], spawnEnvPairs: [], spawnCwd: lc.cwd }; };
+  require.cache[SPAWN_AT] = { id: SPAWN_AT, filename: SPAWN_AT, loaded: true, children: [], paths: [], exports: { ...realSpawn, spawnFor: (h) => (h ? { id: 'ssh', chat } : realSpawn.spawnFor(h)) } };
+  try { return M.load('src/ws-create.js', src, tag); } finally { require.cache[SPAWN_AT] = saved; }
+}
+/** the paired machine «build-box» (id h-2): its device answers the CLI probe (`helper` = its Claude settings name one), or nothing
+ *  answers (`answer` false: the device link and the ssh probe both fail) — or the ssh probe answers `sshOut` */
+function hostsStub({ helper = true, answer = true, sshOut = null, hang = false, owner = null, keeper = null } = {}) {
+  const me = {
+    _onFact: () => { }, asked: [],
+    get: (id) => (id === 'h-2' ? { id: 'h-2', name: 'build-box', host: 'build-box.lan', transport: 'ssh' } : null),
+    deviceBounded: async () => {
+      if (hang) return new Promise(() => { });   // a device that never answers
+      if (!answer || sshOut !== null) throw new Error('device link lost');
+      return { probeCli: async () => ({ facts: { claude: { installed: true, version: '2.1.322', loggedIn: true, loginMethod: 'oauth', ...(helper ? { keyHelper: true } : {}) }, codex: { installed: false, loggedIn: false } } }) };
+    },
+    _hostShell: async (h, script) => { if (String(script).includes('__VS_DIR_OK__')) return '__VS_DIR_OK__'; if (sshOut !== null) return sshOut; throw new Error('ssh: no route to host'); },
+    homeDir: async () => '/home/u', conversationOwner: () => owner, findKeeperFor: async () => keeper, accountsStatus: async () => ({}), invalidateDiscovery: () => { },
+  };
+  me.backendStatus = async (id) => { me.asked.push(id); try { return await HostManager.prototype.backendStatus.call(me, id); } finally { me._onFact(); } };
+  return new Proxy(me, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && k !== 'then' && /^[a-z]/.test(k) ? async () => null : undefined)) });
+}
+const remoteCreate = withLadder(SRC, 'remote-road');
+const R = (data) => ({ hostId: 'h-2', cwd: '/home/u/proj', ...data });
+const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
+{
+  // the fact as the REAL hosts.backendStatus answers it (both of its roads) → the create's reader
+  const op = await hostsStub({ helper: true }).backendStatus('h-2'), opNone = await hostsStub({ helper: false }).backendStatus('h-2');
+  const ssh = await hostsStub({ sshOut: 'claude|yes|2.1.322\ncodex|no|\nclaude-login|yes|oauth\nclaude-helper|yes\ncodex-login|no' }).backendStatus('h-2');
+  const sshNone = await hostsStub({ sshOut: 'claude|yes|2.1.322\ncodex|no|\nclaude-login|yes|oauth\ncodex-login|no' }).backendStatus('h-2');
+  const sshMute = await hostsStub({ sshOut: '' }).backendStatus('h-2');
+  ok(BP.remoteHelperFact(op, 'claude') === true && BP.remoteHelperFact(opNone, 'claude') === false && BP.remoteHelperFact(ssh, 'claude') === true && BP.remoteHelperFact(sshNone, 'claude') === false
+    && BP.remoteHelperFact(sshMute, 'claude') === null && BP.remoteHelperFact(null, 'claude') === null && BP.remoteHelperFact(op, 'codex') === false,
+    'the paired machine\'s FIELD: hosts.backendStatus\'s own answer (the probe op\'s facts, and the ssh probe\'s lines) is read as named / none / cannot be read (an empty answer says nothing of the CLI)', { op: op.claude, ssh: ssh.claude, sshMute });
+  const BPSRC = read('src/billing-pick.js'), FIELD = '  return r.keyHelper === true;';
+  ok(BPSRC.split(FIELD).length === 2, 'setup: the paired machine\'s field is read in ONE place');
+  const other = M.load('src/billing-pick.js', BPSRC.replace(FIELD, '  return r.helper === true;'), 'other-field');
+  ok(other.remoteHelperFact(op, 'claude') === false && other.remoteHelperFact(ssh, 'claude') === false, 'RED CONTROL (a copy of src/billing-pick.js reading another field name): the same answers read «none» where a helper is named — the leg above can go red');
+}
+{
+  const hs = hostsStub({ helper: true });
+  const x = await makeCreate(remoteCreate, { hosts: hs }).create(R({ accountId: 'sub-a1' }), { wait: 5000 });
+  const l = lineOf(x), said = helperSaid(x);
+  ok(!l.why && neutralized(l) && l.line.includes('/stub/ssh'), 'a pick on the paired machine: the remote line (the create\'s argv through the ladder) sets the helper aside', l.why || l.settings);
+  ok(said.length === 1 && said[0].key === 'billing-pick-helper-sub-a1-h-2' && said[0].i18n.key === BP.HELPER_SET_ASIDE.remote && said[0].i18n.params.host === 'build-box' && said[0].text.includes('on build-box') && said[0].text.includes('«CLI login @ build-box»') && !said[0].text.includes('h-2') && hs.asked.join() === 'h-2',
+    'the paired machine whose settings name a helper: asked once (its backend status), said by the machine\'s NAME — never its id — with its door «CLI login @ build-box»', { said, asked: hs.asked });
+  const none = hostsStub({ helper: false }), y = await makeCreate(remoteCreate, { hosts: none }).create(R({ accountId: 'sub-a1' }));
+  const settled = await within(y.factDone);
+  ok(settled && none.asked.length === 1 && helperSaid(y).length === 0 && neutralized(lineOf(y)), 'the paired machine names NO helper: the answer settled, nothing said', { settled, asked: none.asked });
+  const mute = hostsStub({ answer: false }), z = await makeCreate(remoteCreate, { hosts: mute }).create(R({ accountId: 'sub-a1' }));
+  ok(await within(z.factDone) && helperSaid(z).length === 0 && neutralized(lineOf(z)), 'the paired machine does not answer and the start carries no settings file: billing wins anyway (the inline override), nothing to say');
+  const muteF = hostsStub({ answer: false }), f = await makeCreate(remoteCreate, { hosts: muteF }).create(R({ accountId: 'sub-a1', extraArgs: FILE }));
+  ok(neutralized(lineOf(f)) && !lineOf(f).line.includes('/home/u/my-settings.json') && saidKind(f, 'billingUnread') === 1 && muteF.asked.length === 1,
+    'the paired machine does not answer and the start carries the person\'s settings file: billing wins — the file set aside, and the notice says the fact could not be read', { notes: f.notices.map((n) => n.key), asked: muteF.asked });
+  const namedF = hostsStub({ helper: true }), nf = await makeCreate(remoteCreate, { hosts: namedF }).create(R({ accountId: 'sub-a1', extraArgs: FILE }), { wait: 5000 });
+  ok(neutralized(lineOf(nf)) && !lineOf(nf).line.includes('/home/u/my-settings.json') && saidKind(nf, 'billing') === 1 && helperSaid(nf).length === 1 && namedF.asked.length === 1,
+    'the paired machine NAMES a helper and the start carries the person\'s file: the file is set aside on the remote line, said «billing», and the helper notice said — the machine asked ONCE', { notes: nf.notices.map((n) => n.key), asked: namedF.asked });
+  // THE BOUND on the paired machine's road: a device that never answers holds no start
+  const hang = hostsStub({ hang: true }), hp = makeCreate(remoteCreate, { hosts: hang, helperFactMs: 300 }).create(R({ accountId: 'sub-a1', extraArgs: FILE }));
+  const hDone = await within(hp, 4000), hx = hDone ? await hp : null;
+  ok(hDone && !!hx && saidKind(hx, 'billingUnread') === 1 && neutralized(lineOf(hx)), 'a paired machine that never answers: the start goes on at the bound — billing wins, said «billingUnread»', { hDone, notes: hx && hx.notices.map((n) => n.key) });
+  const noneF = hostsStub({ helper: false }), g = await makeCreate(remoteCreate, { hosts: noneF }).create(R({ accountId: 'sub-a1', extraArgs: FILE }));
+  ok(fileKept(lineOf(g)) && saidKind(g, 'billing') + saidKind(g, 'billingUnread') === 0 && noneF.asked.length === 1, 'the paired machine names no helper and the start carries the person\'s file: the file applies whole on the remote line, asked ONCE (before the build; the notice reuses it)', { line: lineOf(g).line, asked: noneF.asked });
+  // AN ADOPTED PROCESS (the default the person starred, a resume a live keeper holds): it keeps the argv it started with — nothing asked, nothing said
+  const ADOPT = { resume: true, resumeId: 'b3c4d5e6-0000-4000-8000-000000000001', _adoptHere: true };
+  const ah = hostsStub({ helper: true }), ad = await makeCreate(remoteCreate, { hosts: ah, accounts: accountsStub({ defaultId: 'sub-a1' }) }).create(R(ADOPT));
+  ok(ad.session && ad.session._accountId === 'sub-a1' && ah.asked.length === 0 && helperSaid(ad).length === 0,
+    'an ADOPTED process (the default the person starred; a live keeper holds the resumed conversation): no machine asked, no helper notice — none of this start\'s argv is its own', { asked: ah.asked, notices: ad.notices.map((n) => n.key) });
+  // (the ladder decides an adoption AFTER the one build, so a start carrying the person's file has asked the fact already — once)
+  const ahF = hostsStub({ helper: true }), adF = await makeCreate(remoteCreate, { hosts: ahF, accounts: accountsStub({ defaultId: 'sub-a1' }) }).create(R({ ...ADOPT, extraArgs: FILE }));
+  // an adoption the create KNOWS before its build (a host-less resume of a conversation a paired machine's live keeper holds — the host
+  // inferred, the keeper found): nothing asked, and the record reads the person's file as GOVERNING (its reader's m1 — no later push to
+  // the running CLI writes over a file it may hold)
+  const ahK = hostsStub({ helper: true, owner: 'h-2', keeper: { sid: 'k-77', kind: 'agentd' } });
+  const adK = await makeCreate(remoteCreate, { hosts: ahK, accounts: accountsStub({ defaultId: 'sub-a1' }) }).create({ cwd: '/home/u/proj', resume: true, resumeId: 'b3c4d5e6-0000-4000-8000-000000000002', extraArgs: FILE });
+  ok(adK.session && adK.session.host === 'h-2' && ahK.asked.length === 0 && JSON.stringify(adK.session._settingsFileGoverns) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']) && adK.notices.filter((n) => n.key.startsWith('settings-file-') || n.key.startsWith('billing-pick-helper-')).length === 0,
+    'an adoption known BEFORE the build (the host inferred, its keeper found): no machine asked, nothing said, and the record keeps the person\'s file as governing all three kinds', { asked: ahK.asked, governs: adK.session && adK.session._settingsFileGoverns, sent: adK.sent.filter((m) => m.type === 'error') });
+  ok(adF.session && helperSaid(adF).length === 0 && adF.notices.filter((n) => n.key.startsWith('settings-file-')).length === 0 && ahF.asked.length === 1,
+    '…with the person\'s settings file: no settings-file words and no helper notice for the adopted process (the fact was asked once, before the build — the ladder adopts after it)', { asked: ahF.asked, notices: adF.notices.map((n) => n.key) });
+}
+
+console.log('— ⑧ A RESUME and A FORK of a picked conversation through the real create');
+{
+  const RID = 'c0ffee00-1111-4222-8333-444455556666';
+  for (const [what, extra, flags] of [['a resume', { resume: true, resumeId: RID }, ['--resume', RID]], ['a fork', { resume: true, resumeId: RID, fork: true }, ['--resume', RID, '--fork-session']]]) {
+    const x = await drive(wsCreate, { accountId: 'sub-a1', ...extra }, { wait: 5000 });
+    const l = lineOf(x), at = l.line ? l.line.indexOf('--resume') : -1;
+    ok(!l.why && neutralized(l) && at > 0 && l.line[at + 1] === RID && flags.every((fl) => l.line.includes(fl)) && (extra.fork ? true : !l.line.includes('--fork-session')) && helperSaid(x).length === 1,
+      `${what} of a picked conversation: the line ${extra.fork ? 'forks' : 'resumes'} it (${flags.join(' ')}) and sets the helper aside; said once`, l.why || { line: l.line, said: helperSaid(x).map((n) => n.key) });
+    helperOn(false);
+    const y = await drive(wsCreate, { accountId: 'sub-a1', ...extra, extraArgs: FILE });
+    ok(fileKept(lineOf(y)) && lineOf(y).line.includes(RID), `${what} with the person's settings file on a machine that names no helper: the file applies whole`, lineOf(y).line);
+    helperOn(true);
+  }
 }
 
 console.log('— ⑥ RED CONTROLS');
@@ -293,12 +478,37 @@ console.log('— ⑥ RED CONTROLS');
     ['the flag not passed', [FLAG_LINE, ''], async (mod) => carriesNone(lineOf(await drive(mod, { accountId: 'sub-a1' })))],
     ['the rule answering yes for everything', ['const keyHelperOff = BILLPICK.setsHelperAside({ creds: harness && harness.creds, account: spawnAccount, linked: linkedAccountId });', 'const keyHelperOff = true;'],
       async (mod) => { const a = lineOf(await drive(mod, { accountId: 'subscription' })), b = lineOf(await drive(wsCreate, { accountId: 'subscription' })); return !sameLine(a, b) && neutralized(a); }],
-    ['the notice without the helper check', ['              if (on && serverNotice && serverNotice(', '              if (serverNotice && serverNotice('],
-      async (mod) => { helperOn(false); const n = (await drive(mod, { accountId: 'sub-a1' }, { wait: 400 })).notices.filter((k) => k.key.startsWith('billing-pick-helper-')).length; helperOn(true); return n === 1; }],
+    ['the notice without the helper check', ['              if (on === true && serverNotice && serverNotice(', '              if (serverNotice && serverNotice('],
+      async (mod) => { helperOn(false); const n = (await drive(mod, { accountId: 'sub-a1' }, { wait: 5000 })).notices.filter((k) => k.key.startsWith('billing-pick-helper-')).length; helperOn(true); return n === 1; }],
+    // the cure's own
+    ['the file set aside at every pick (the unit before its cure)', ['            keyHelperNamed,\n', ''],
+      async (mod) => { helperOn(false); const l = lineOf(await drive(mod, { accountId: 'sub-a1', extraArgs: FILE })); helperOn(true); return !fileKept(l); }],
+    ['the said-once memo dropped', ['            if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {', '            if (said) try { helperFact().then((on) => {'],
+      async (mod) => { const one = makeCreate(mod); await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); const b = await one.create({ accountId: 'sub-a1' }, { wait: 5000 }); return b.reads.length === 1; }],
+    ['«cannot be read» read as «names none» (the file applies whole where billing must win)', ['(data.keeperSid ? false : await helperFact())', '(data.keeperSid ? false : (await helperFact()) === true)'],
+      async (mod) => { helperOn('garbled'); const l = lineOf(await drive(mod, { accountId: 'sub-a1', extraArgs: FILE })); helperOn(true); return fileKept(l); }],
+    ['the notice reading the hub\'s env', ['            env: { ...agentEnv(), ...((spawnAccount && spawnAccount.localEnv) || {}) } }));', '            env: process.env }));'],
+      async (mod) => { helperOn(false); const CFG = path.join(HOME, 'cfg-dir'); const x = await drive(mod, { accountId: 'sub-a1' }, { wait: 5000, env: { CLAUDE_CONFIG_DIR: CFG } }); helperOn(true); return helperSaid(x).length === 0; }],
   ];
   for (const [name, [from, to], red] of MUT) {
     ok(SRC.split(from).length === 2, `setup: «${name}» edits ONE place`);
     const mod = M.load('src/ws-create.js', SRC.replace(from, to), name.replace(/\W+/g, '-').slice(0, 40));
+    ok(await red(mod), `MUTANT ${name} ⇒ the leg it breaks goes RED`);
+  }
+  // the paired machine's mutants run through the same stood-in ladder
+  const RMUT = [
+    ['the adopted-process skip dropped', ['          if (keyHelperOff && !data.keeperSid && harness && harness.creds && harness.creds.keyHelper) {', '          if (keyHelperOff && harness && harness.creds && harness.creds.keyHelper) {'],
+      async (mod) => { const ah = hostsStub({ helper: true }); const ad = await makeCreate(mod, { hosts: ah, accounts: accountsStub({ defaultId: 'sub-a1' }) }).create(R({ resume: true, resumeId: 'b3c4d5e6-0000-4000-8000-000000000001', _adoptHere: true }), { wait: 5000 }); return ah.asked.length === 1 || helperSaid(ad).length === 1; }],
+    ['an adopted process recorded as setting the file aside', ['(data.keeperSid ? false : await helperFact())', '(data.keeperSid ? undefined : await helperFact())'],
+      async (mod) => { const ah = hostsStub({ helper: true, owner: 'h-2', keeper: { sid: 'k-78', kind: 'agentd' } }); const x = await makeCreate(mod, { hosts: ah, accounts: accountsStub({ defaultId: 'sub-a1' }) }).create({ cwd: '/home/u/proj', resume: true, resumeId: 'b3c4d5e6-0000-4000-8000-000000000003', extraArgs: FILE }); return !!x.session && JSON.stringify(x.session._settingsFileGoverns) === '[]'; }],
+    ['the bound dropped', ['    return Promise.race([readHelperFactOf(o).catch(() => null), late]).finally(() => clearTimeout(timer));', '    return readHelperFactOf(o).catch(() => null);'],
+      async (mod) => { const p = makeCreate(mod, { hosts: hostsStub({ hang: true }), helperFactMs: 300 }).create(R({ accountId: 'sub-a1', extraArgs: FILE })); return !(await within(p, 2000)); }],
+    ['the machine named by its id', ['            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: hostName,', '            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: null,'],
+      async (mod) => { const x = await makeCreate(mod, { hosts: hostsStub({ helper: true }) }).create(R({ accountId: 'sub-a1' }), { wait: 5000 }); return helperSaid(x).length === 1 && helperSaid(x)[0].text.includes('on h-2'); }],
+  ];
+  for (const [name, [from, to], red] of RMUT) {
+    ok(SRC.split(from).length === 2, `setup: «${name}» edits ONE place`);
+    const mod = withLadder(SRC.replace(from, to), name.replace(/\W+/g, '-').slice(0, 40));
     ok(await red(mod), `MUTANT ${name} ⇒ the leg it breaks goes RED`);
   }
 }
