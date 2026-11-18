@@ -1618,6 +1618,13 @@ console.log('— ⑫ the doors, pressed: the context door and «⚙ 对话设置
     // the model's face: its label worded, the raw id on the label's OWN hover (title) and in data-raw — one hover away
     const mh = own.bar.element.querySelector('.chat-status-model').innerHTML;
     ok(/<span class="chat-status-model-label" data-raw="claude-fable-5-1" title="claude-fable-5-1">Fable 5\.1<\/span>/.test(mh), `⑬ the model door's face «Fable 5.1», its raw id one hover away on the label (${mh.slice(0, 140)})`);
+    // …worded on the id's TEXT, never over the label's markup (the cure's readers): a refusal's category that spells a family
+    // stays as the CLI said it, while the served id is worded (the old face ran over the whole HTML and wrote «(Sonnet)»)
+    const rf = mk13({});
+    rf.bar.setServedModel('claude-opus-5-5'); rf.bar.setRefusalFallback({ from: 'claude-fable-5-1', to: 'claude-opus-5-5', category: 'sonnet' });
+    const rh = rf.bar.element.querySelector('.chat-status-model').innerHTML;
+    ok(/data-raw="\u26a0 claude-opus-5-5 \u00b7 refusal \(sonnet\)" title="[^"]*">\u26a0 Opus 5\.5 \u00b7 refusal \(sonnet\)<\/span>/.test(rh), `⑬ a refusal's face words the served id only — its category stays the CLI's word (${rh.slice(0, 200)})`);
+    rf.bar.dispose(); rf.host.remove();
     const ownOb = own.bar.element.querySelector('.chat-status-outbox');
     ok(!!ownOb && /\b0\b/.test(ownOb.textContent) && !chipKeys(sub.bar).includes('outbox'), `⑬ the outbox: «${ownOb && ownOb.textContent}» in a conversation of its own, NONE on a subagent's viewer (${chipKeys(sub.bar).join(',')})`);
     sub.bar.setOutbox({ total: 2, waiting: 1 });
