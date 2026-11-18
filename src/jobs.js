@@ -28,7 +28,8 @@ const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Cle
 const SR = require('./store-read.js'); // B-f276: THE STORE READ — a read that failed is no answer (never set aside, never «empty»)
 const asideOf = (file) => file + '.corrupt-' + now();   // the ONE set-aside name (the load's and the read again's — test-store-write-census ⑧ counts it once)
 const READ_AGAIN_MS = 10_000;   // cure r1: a read again past this is said slow; the next try is armed before it is awaited
-const STORE_SHAPE = (v) => Array.isArray(v) && v.every((j) => j != null);   // jobs.json: a list of records (a null entry is torn)
+const STORE_SHAPE = (v) => Array.isArray(v) && v.every((j) => j != null);
+const PARKED_NO_START = 'it ended out of memory and is parked — raise its bound (vibespace-job memory), then start it';   // B-cac2 r2: a park is never undone by an asked start   // jobs.json: a list of records (a null entry is torn)
 // B-2204: a recovered skeleton is the person's alone — one the release wrote with view 'all' is read back owner-less, view 'session'
 const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };
 const LS = require('./job-logs-sweep.js'); // lane job-logs-sweep: what a record no longer lists leaves data/job-logs after 14 days — every removal under job-logs off the main thread
@@ -2100,6 +2101,7 @@ class JobManager {
     job.state = 'starting';
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
+    delete job._startAfterStop;   // B-cac2 (its read r2): a start asked during a stop is the next run's — any new run ends the ask (never a later run's end)
     for (const t of job._killSteps || []) clearTimeout(t); // round 6: …nor does its kill timer — a new run disarms every timer of the last
     delete job._killSteps;
     job.runs = job.runs || [];
@@ -2558,7 +2560,7 @@ class JobManager {
     if (run.endedAt) return; // ONE JUDGE PER RUN END (round 5): a run is judged once — a second caller (an overlapping pass) returns
     run.endedAt = exit.endedAt || now();
     // B-cac2: a start asked while this run's stop ran (or a restart) is taken HERE, at the run's end, on every road out below
-    const startAsked = !!job.startAfterStop; delete job.startAfterStop;
+    const startAsked = !!job._startAfterStop; delete job._startAfterStop;
     // lane jobs-browser (B-dbc1): the run is over — what it held as its conversation (its browser lease + window) is released
     try { this.d.onRunEnded?.(job, run); } catch { }
     run.exit = exit.code;
@@ -2624,7 +2626,7 @@ class JobManager {
       // log's own output (under a forced stop / OOM the process's last words —
       // the wrapper's exit marker only when the wrapper outlived the group)
       run.lastLine = job.clearedAt && !((run.startedAt || 0) > job.clearedAt) ? null : this._lastLogLine(job, run);
-      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked); return; } // lane jobs-memory-bound: the park says the end (once); B-cac2: an asked start is the person's explicit one
+      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked, PARKED_NO_START); return; } // lane jobs-memory-bound: the park says the end (once); B-cac2 r2: never undone by an asked start
       // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
       // creating agent opts scheduled successes into events+notify with
       // --notify-ok (job.notifyOk, inherited by the cron child via the
@@ -2643,17 +2645,20 @@ class JobManager {
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
     if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
-    this._startAskedAtStop(job, startAsked);   // B-cac2: done now that the run has ended — once
+    this._startAskedAtStop(job, startAsked, memPark && memPark.park ? PARKED_NO_START : null);   // B-cac2: done now that the run has ended — once (a memory park: said, not done)
   }
-  /** B-cac2: THE START ASKED DURING A STOP, done when the run ended (an explicit start: it un-parks like one). Kept in the record
-   *  (`startAfterStop`, never a view field) — a hub restarted inside the stop's grace keeps the promise; any later stop clears it.
-   *  A start that cannot be done is SAID where the person and the owner look (the job's events, the owner conversation) */
-  _startAskedAtStop(job, asked) {
+  /** B-cac2: THE START ASKED DURING A STOP, done when the run ended (runtime only — a hub restarted inside the stop's grace
+   *  forgets it, and any new run or later stop ends it). Not done for a job removed meanwhile or after the engine's end; not
+   *  done over a memory park (`refusal`); a start that cannot be done is SAID where the person and the owner look */
+  _startAskedAtStop(job, asked, refusal = null) {
     if (!asked) return;
+    const say = (why) => { const what = `the start asked during its stop was not done: ${why}`; this._touch(job, { what, alarm: true }); this._notifyOwner(job, { what }); this._save(); };
+    if (refusal) { say(refusal); return; }
     setImmediate(() => {
+      if (this._unreadStopped || this.jobs.get(job.id) !== job) return;   // the engine ended, or the job was removed meanwhile
       let r; try { r = this.start(job); } catch (e) { r = { error: (e && e.message) || String(e) }; }
       this.d.log(`[jobs] ${job.id}: the start asked during its stop — ${r && r.error ? `refused: ${r.error}` : 'started'}`);
-      if (r && r.error) { const what = `the start asked during its stop was not done: ${r.error}`; this._touch(job, { what, alarm: true }); this._notifyOwner(job, { what }); this._save(); }
+      if (r && r.error) say(r.error);
     });
   }
   /** round 10: A CUT WALK OF THE PARK'S OR THE STOP'S OWN CLEAR IS SAID AT ONCE — never only when someone presses start (round 9
@@ -3234,12 +3239,12 @@ class JobManager {
     if (s && s.error) return s;
     // a live run whose stop reached no process yet (no pid stamp; its wrapper gone, not judged yet) still ends: the sweep honours
     // the stop once the stamp exists, or judges the run — the start waits for that end too (never «already running»)
-    job.startAfterStop = now(); this._save();
+    job._startAfterStop = true;
     return { ok: true, pending: true, words: 'stopping — it starts again when the stop ends' };
   }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
-    delete job.startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more
+    delete job._startAfterStop;   // B-cac2: a stop pressed after a remembered start (or a restart) means stopped — it starts no more
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
@@ -3272,8 +3277,8 @@ class JobManager {
     // B-cac2 (fb-f4a0c70a84): a START while a STOP's grace runs is no «already running» (the service then ended down and a second
     // start was needed) — it is REMEMBERED and done when the stop ends (_finalizeRun), said with the grace left
     const run0 = job.runs && job.runs[job.runs.length - 1];
-    if ((job._termAt || job._stopForce || job._stopRequested) && this._runLive(job, run0)) {
-      job.startAfterStop = now(); this._save();
+    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {
+      job._startAfterStop = true;
       this.d.log(`[jobs] ${job.id}: a start asked while its stop runs — it starts when the stop ends`);
       const left = job._termAt ? Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000)) : null;   // a forced / not-yet-reached stop has no grace clock
       return { ok: true, pending: true, words: left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends' };
