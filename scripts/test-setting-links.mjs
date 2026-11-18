@@ -92,7 +92,8 @@ console.log('② the product\'s own sentences carry the row (the Spending family
 console.log('③ THE CENSUS — every product sentence that names a place in Settings (grep-derived, printed with its class)');
 {
   const RE = /Settings ?(›|>|→)|⚙ ?→|设置 ?(›|→|>)|in Settings|change it in|raise it in/;
-  const files = execFileSync('git', ['ls-files', 'src'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((f) => /\.(m?js|cjs)$/.test(f) && !/^src\/lib\/i18n-(zh|ja)\.js$/.test(f));
+  // the dictionaries and lane ui-needs-a-button's census table (src/ui-needs.js) QUOTE the product's sentences as data — they draw none
+  const files = execFileSync('git', ['ls-files', 'src'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((f) => /\.(m?js|cjs)$/.test(f) && !/^src\/lib\/i18n-(zh|ja)\.js$/.test(f) && f !== 'src/ui-needs.js');
   const quotesEven = (s) => ((s.match(/'/g) || []).length % 2 === 0) && ((s.match(/"/g) || []).length % 2 === 0) && ((s.match(/`/g) || []).length % 2 === 0);
   const isComment = (l, at) => { const t = l.trim(); if (/^(\/\/|\*|\/\*)/.test(t)) return true; const c = l.indexOf('// '); return c >= 0 && c < at && quotesEven(l.slice(0, c)); };
   const SPEND_DEBT = [
@@ -104,7 +105,7 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     { file: 'src/lib/jobs-layout.js', re: /tr\('Settings → Spending'\)/, why: 'heldText is drawn as plain text by three surfaces (the chat line, the jobs panel, the rail tip) — debt: those surfaces draw no link yet' },
     { file: 'src/lib/settings-schema.js', re: /under the same unattended-spend ceiling \(Settings → Spending\)/, why: 'a Settings row\'s description naming the section beside it — Settings draws descriptions as text (debt: descriptions draw no link)' },
     { file: 'src/plugin-settings.js', re: /Settings › Spending show today/, why: 'the LLM plugin\'s budget description naming where its spend is shown — a description, drawn as text' },
-    { file: 'src/lib/usage-source.js', re: /\(Settings → Spending\)/, why: 'a tooltip (title text) — no link can live there' },
+    // usage-source's overage tip left this list at the move onto 2.369.411's checkpoint (-moved2): lane ui-needs-a-button's words name no place («a Spending setting can allow them»)
     // the restack on the train's checkpoint (lane login-request-card, 2026-11-18): bl-accounts batch 1, boarded BEFORE this unit, wrote
     // four Spending sentences this census reads now — named here, each with its reason (three of them paid since: the links unit's
     // follow-up on 2.369.410 links the empty row in the door line's twin, the agent's sentence and the hand-over toast; the ledger's stays, by design)

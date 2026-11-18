@@ -494,8 +494,8 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
   // answers Off with a toast naming the row by its title
   ok('…Claude\'s «Off» sentence is true in both places: the popup hides its ⟳ under Off, and «Refresh all» stays and says it is off (its toast names «Claude usage refresh») — the button\'s own word in each language',
     C.description.includes('Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.') && /const refreshBtn = odMode === 'off' \? '' :/.test(read('src/lib/usage-meter.js'))
-      && MA_SRC.includes("showToast(t('Claude usage refresh is Off in Settings'), { type: 'error' });") && MA_SRC.includes("refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;")
-      && String(zh[C.description]).includes(zh['Refresh all']) && String(ja[C.description]).includes(ja['Refresh all']) && !!zh['Claude usage refresh is Off in Settings'] && !!ja['Claude usage refresh is Off in Settings'],
+      && MA_SRC.includes("showToast(t('Claude usage refresh is off'), { type: 'error', action: settingsDoor(this, 'accounts.onDemandQuotaRefresh', { label: t('Turn on…') }) || undefined });") && MA_SRC.includes("refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;")
+      && String(zh[C.description]).includes(zh['Refresh all']) && String(ja[C.description]).includes(ja['Refresh all']) && !!zh['Claude usage refresh is off'] && !!ja['Claude usage refresh is off'],
     JSON.stringify([zh['Refresh all'], ja['Refresh all']]));
   ok('…and no word anywhere names the old title «On-demand quota refresh» (the explainer, the toast, the pool\'s notice name «Claude usage refresh»)',
     ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/server/usage-pool-engine.js'].every((f) => !/On-demand quota refresh/.test(read(f).replace(/\/\/[^\n]*/g, ''))) && Object.keys(zh).every((k) => !/On-demand quota refresh/.test(k)));

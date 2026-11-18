@@ -2956,7 +2956,7 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   // the Settings row's wiring (DOM-free here; the drawn row is the integrator's heavy read): the doors drawn with EVERY answer of the
   // engines, the person's POST, the row asked again while a kernel downloads (by the LINE's own tick), each door's answer beside it
   const ui = read('src/lib/settings-ui.js'), css = read('public/style.css');
-  ok(/line\.textContent = engineFactText\(r, t\); this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui)
+  ok(/line\.textContent = engineFactText\(r, t\);\n[^\n]*\n[^\n]*\n\s+if \(d\) line\.append\(' ', needDoorButton\(d\)\);\n\s+this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui)   // the restack -moved2: the line's words, its need door (lane ui-needs-a-button pick 5), then the kernel doors
     && /fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui)
     && ui.includes('const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); };')
     && ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }') && ui.includes('    if (step.tick) tick();\n')

@@ -256,7 +256,7 @@ export function installUsageMeter(App, ctx = {}) {
       if (!acked) {
         const ok = await showConfirmDialog({
           title: t('Check this account’s usage limits now?'),
-          message: t('VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. You can turn it off later with the setting “On-demand quota refresh”. You see this note once.'),
+          message: t('VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. You can turn it off later with the setting “Claude usage refresh”. You see this note once.'),
           confirmText: t('Check now'),
         });
         if (!ok) return;
