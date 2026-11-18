@@ -121,14 +121,18 @@ const shDir = (p) => { const s = String(p == null ? '' : p); const i = s.lastInd
 
 /** `vs_argv <pid> <i>` in JS: the i-th argv word, '' when unknown.
  *  /proc first (zero fork), `ps -o args=` where there is no /proc (macOS/BSD).
- *  NEVER throws — a machine-wide walk races every exiting process. */
-function procArgv(pid, i) {
+ *  NEVER throws — a machine-wide walk races every exiting process.
+ *  B-f64b: WHERE /proc EXISTS a pid it cannot read is gone — no second program (Linux's ps reads the same /proc, so it can
+ *  add nothing; the boot's walk paid one synchronous fork + exec, up to 2 s, per pid that exited mid-walk: 33 s held on a
+ *  busy machine). `opts.execImpl` / `opts.procRoot` are the leg's seams. */
+function procArgv(pid, i, { execImpl = execFileSync, procRoot = PROC_ROOT } = {}) {
   try {
-    const parts = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0');
+    const parts = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf-8').split('\0');
     return parts[i] === undefined ? '' : parts[i];
-  } catch { /* no /proc, or the pid went away — fall through */ }
+  } catch { /* no /proc, or the pid went away */ }
+  if (hasProcfs(procRoot)) return '';   // B-f64b: gone — never a ps per exited pid
   try {
-    const out = execFileSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const out = execImpl('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     return out ? (out.split(/\s+/)[i] || '') : '';
   } catch { return ''; }
 }
@@ -182,17 +186,21 @@ function readPsIdentity(pid, { execImpl = execFileSync, now = Date.now } = {}) {
 /** The whole argv of a live pid, or null when NOTHING on this host can say (no
  *  /proc AND no usable `ps`, hidepid, or the process vanished between reads). */
 function procCmdline(pid, opts) {
+  const procRoot = (opts && opts.procRoot) || PROC_ROOT;
   try {
-    const a = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter((x) => x !== '');
+    const a = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split('\0').filter((x) => x !== '');
     if (a.length) return a;
-  } catch { /* no /proc, hidepid, or it went away — fall through to `ps` */ }
+  } catch { /* no /proc, hidepid, or it went away */ }
+  if (hasProcfs(procRoot)) return null;   // B-f64b: where /proc exists its silence is the answer (ps reads the same /proc)
   const ps = readPsIdentity(pid, opts);
   return ps && ps.argv ? ps.argv : null;
 }
 
 /** The uid a live pid runs as, or null on the same terms. */
 function procUid(pid, opts) {
-  try { return fs.statSync(`/proc/${pid}`).uid; } catch { /* fall through to `ps` */ }
+  const procRoot = (opts && opts.procRoot) || PROC_ROOT;
+  try { return fs.statSync(`${procRoot}/${pid}`).uid; } catch { /* no /proc, or it went away */ }
+  if (hasProcfs(procRoot)) return null;   // B-f64b: as procCmdline
   const ps = readPsIdentity(pid, opts);
   return ps && Number.isFinite(ps.uid) ? ps.uid : null;
 }
@@ -673,7 +681,10 @@ function isCliProcess(pid, name) {
  *  vs_argv silences the WHOLE cmdline compound, not just `tr`: a failing
  *  redirect is reported by the SHELL, and a machine-wide scan races every
  *  exiting process, so `cannot open /proc/N/cmdline` would otherwise land on
- *  the stderr of a script whose stderr the callers read. */
+ *  the stderr of a script whose stderr the callers read.
+ *
+ *  B-f64b: the JS twin answers «gone» with NO ps where /proc exists; this shell twin keeps its `else ps -p` rung — it
+ *  runs on the remote machine through ssh, never on the hub's loop, and the verdicts agree (Linux's ps reads the same /proc). */
 function cliIdentityShellFns() {
   return `vs_argv() {
   if [ -r "/proc/$1/cmdline" ]; then

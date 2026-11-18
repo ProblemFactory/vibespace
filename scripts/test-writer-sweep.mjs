@@ -1136,7 +1136,7 @@ if (fs.existsSync('/proc/self')) {
   const retiredCommIncludes = /comm\.includes\('claude'\)/;
   const retiredCmdlineIncludes = /readFileSync\(`\/proc\/\$\{pid\}\/cmdline`, 'utf-8'\)\.includes\('claude'\)/;
   const retiredCodexArgvRegex = /\(\^\|\\0\|\[\\\/\\s\]\)codex/;
-  const PRE_R3_FACTS = `function pidLooksClaude(pid) {
+  const PRE_R3_FACTS = `function pidLooksClaude(pid) {   // stale-pins: kept — the verbatim pre-r3 source, a retired shape
   try {
     const comm = fs.readFileSync(\`/proc/\${pid}/comm\`, 'utf-8').trim();
     if (comm) return comm.includes('claude') || cmdlineLooksClaude(pid);
@@ -1455,10 +1455,11 @@ echo
   const jsDrv = path.join(pdir, 'noproc-driver.cjs');
   const identPath = new URL('../src/cli-identity.js', import.meta.url).pathname;
   fs.writeFileSync(jsDrv, `const fs = require('fs');
-const rr = fs.readFileSync, rl = fs.readlinkSync;
+const rr = fs.readFileSync, rl = fs.readlinkSync, rs = fs.statSync;
 const gone = () => { const e = new Error('ENOENT: this machine has no /proc'); e.code = 'ENOENT'; throw e; };
 fs.readFileSync = (p, ...r) => (typeof p === 'string' && /^\\/proc\\/\\d+\\/cmdline$/.test(p) ? gone() : rr(p, ...r));
 fs.readlinkSync = (p, ...r) => (typeof p === 'string' && /^\\/proc\\/\\d+\\/exe$/.test(p) ? gone() : rl(p, ...r));
+fs.statSync = (p, ...r) => (p === '/proc/self' ? gone() : rs(p, ...r)); // B-f64b: a machine with NO /proc (where /proc exists, an unreadable pid is gone — no ps)
 const { procArgv, isCliProcess } = require(${JSON.stringify(identPath)});
 const pid = process.argv[2];
 console.log(JSON.stringify({ argv: [0, 1, 2].map((i) => procArgv(pid, i)), isCli: isCliProcess(pid, 'claude') }));
@@ -1823,7 +1824,7 @@ if (fs.existsSync('/proc/self')) {
     //    sweep until B-eac2 residual (c) taught `namesPsP` about it. Every one
     //    of these existed before that and every one of them is a VALUE read;
     //    what was missing was the REASON, which is the thing the sweep is for.
-    { file: 'src/cli-identity.js', needle: `execFileSync('ps', ['-p', String(pid), '-o', 'args=']`,
+    { file: 'src/cli-identity.js', needle: `execImpl('ps', ['-p', String(pid), '-o', 'args=']`,
       why: 'ARGV READ — the JS twin of vs_argv\'s allowlisted `ps -p "$1" -o args=` rung, same non-decision: an unanswerable `ps` yields the empty word that already means "no evidence" to isCliProcess.' },
     { file: 'src/proc-identity.js', needle: `spawnSync('ps', ['-p', String(pid), '-o', 'lstart=']`,
       why: 'START-TIME READ (startToken, moved verbatim from agentd pidStartTime by lane pid-identity-census, B-1cc6 — the no-/proc rung of the pid-identity stamp): it makes a recycled pid DISTINGUISHABLE from the original. An unanswerable `ps` returns \'\' = "no stamp", which is compared as a non-match and therefore never credits a stranger with being ours.' },

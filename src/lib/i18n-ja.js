@@ -645,6 +645,7 @@ export default {
   "Live": "実行中",
   "External": "外部",
   "Stopped": "停止",
+  "Stopped (still checking)": "停止（確認中）",
   "Archived": "アーカイブ済み",
   "Focus window": "ウィンドウをフォーカス",
   "Expand card": "カードを展開",

@@ -1750,7 +1750,7 @@ await section(async () => {
 
   // ── (a) THE PID-QUESTION CENSUS ────────────────────────────────────────────
   const PID_ALLOWED = [
-    { file: 'src/cli-identity.js', needle: "execFileSync('ps', ['-p', String(pid), '-o', 'args=']", why: 'NO-/proc FALLBACK ONLY (procArgv, rung 2 of the identity rule).' },
+    { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-p', String(pid), '-o', 'args=']", why: 'NO-/proc FALLBACK ONLY (procArgv, rung 2 of the identity rule).' },
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-p', String(pid), '-o', 'uid=,args=']", why: 'NO-/proc FALLBACK ONLY (readPsIdentity, per-pid memo) — the {uid, argv} value read the signalling callers share.' },
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-eo', 'pid=,ppid=']", why: 'NO-/proc FALLBACK ONLY, and ONE PER SWEEP for the WHOLE table (parentIndex, memoised) — this is the shape that REPLACED one `ps` per pid. Never reached where /proc exists.' },
     { file: 'src/cli-identity.js', needle: "execFile('pgrep', ['-f', String(needle)]", why: 'NO-/proc FALLBACK ONLY (pidsMatchingCmdline) — ONE per question for the WHOLE table, never one per candidate. Where /proc exists the rung above it reads every `/proc/<pid>/cmdline` into ONE reused buffer, which is why the kill path now starts no child process at all.' },
@@ -1830,7 +1830,7 @@ await section(async () => {
     { file: 'src/session-store.js', needle: 'execFile(cmd, args,', why: 'THE async exec primitive itself, the body of execFileP. It starts nothing on its own — this census is about its CALLERS.' },
     { file: 'src/session-store.js', needle: "execFileP('tmux', ['list-panes'", why: 'ONE PER SWEEP, and only where a `tmux` binary is on PATH (statted, never `which`); the map is cached for TMUX_MAP_TTL_MS so a create/kill burst shares it. This is the one child process a sweep may start.' },
     { file: 'src/session-store.js', needle: "execFileP('ps', ['-p', String(pid), '-o', 'comm=']", why: 'NO-/proc FALLBACK ONLY (isProcessClaudeAsync) — see (a).' },
-    { file: 'src/cli-identity.js', needle: "execFileSync('ps', ['-p', String(pid), '-o', 'args=']", why: 'NO-/proc FALLBACK ONLY (procArgv) — see (a).' },
+    { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-p', String(pid), '-o', 'args=']", why: 'NO-/proc FALLBACK ONLY (procArgv) — see (a).' },
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-p', String(pid), '-o', 'uid=,args=']", why: 'NO-/proc FALLBACK ONLY (readPsIdentity) — see (a).' },
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-eo', 'pid=,ppid=']", why: 'NO-/proc FALLBACK ONLY, ONE per sweep for the whole table — see (a).' },
     { file: 'src/cli-identity.js', needle: "execFile('pgrep', ['-f', String(needle)]", why: 'NO-/proc FALLBACK ONLY (pidsMatchingCmdline), ONE per question — see (a).' },

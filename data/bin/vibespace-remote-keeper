@@ -81,12 +81,15 @@ const log = (m) => { try { process.stderr.write('[keeper] ' + m + '\n'); } catch
 // file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
 /** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
  *  procfs, else 'p' + the `ps -o lstart=` string, else ''. Kept because session metas persist it as `startTime`. */
+let _procfs = null;   // B-f64b: Linux's procfs, read once (a platform fact)
 function startToken(pid) {
   try {
     const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8');
     const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
     if (rest[19]) return 'l' + rest[19];
   } catch { }
+  if (_procfs === null) { try { _procfs = process.platform === 'linux' && fs.statSync('/proc/self').isDirectory(); } catch { _procfs = false; } }
+  if (_procfs) return '';   // B-f64b: on Linux's procfs its silence is the answer (gone) — ps reads the same /proc
   try {
     const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' });
     const s = String(r.stdout || '').trim();

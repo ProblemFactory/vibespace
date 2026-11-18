@@ -646,6 +646,7 @@ export default {
   "Live": "运行中",
   "External": "外部",
   "Stopped": "已停止",
+  "Stopped (still checking)": "已停止（仍在检查）",
   "Archived": "已归档",
   "Focus window": "聚焦窗口",
   "Expand card": "展开卡片",

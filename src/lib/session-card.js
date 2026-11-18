@@ -291,7 +291,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   // container query). Row 2 (task board only, via showCwd): the session's own
   // cwd, left-truncated. Left control icons center across the rows.
   const cwdText = s.cwd ? escHtml(s.cwd.replace(/^\/home\/[^/]+/, '~')) : '';
-  const connLabel = { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('External'), stopped: tr('Stopped') }[s.status] || tr('Stopped');
+  const connLabel = s.status === 'stopped' && s.liveness === 'unknown' ? tr('Stopped (still checking)') // B-f64b: codex's liveness walk has not answered yet
+    : { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('External'), stopped: tr('Stopped') }[s.status] || tr('Stopped');
   card.innerHTML = `<div class="session-card-row">
     <div class="session-card-lines">
       <div class="session-card-main">
