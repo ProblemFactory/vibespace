@@ -201,9 +201,10 @@ function fetchHttps(url, { max = KEY_MAX, timeout = 20000, redirects = 3 } = {})
  * @param markerDir   where the ephemeral-rootfs markers live (the suite points it at a scratch dir)
  * @param fetchSeam   SUITES ONLY: `{hosts: {'<name>.test': '127.0.0.1'}, ca: <PEM>, limits: {idleMs, totalMs, max}}` — a
  *                    loopback "vendor" by a RESERVED `.test` name (never a real site); production passes nothing
+ * @param sysTarball  SUITES ONLY: a stand-in path for the image's minbase tarball (undefined = the image's own; production passes nothing)
  */
 function create({ home = os.homedir(), stateDir, env = () => process.env, log = console, now = Date.now, binOnPath = null, installState = null,
-  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0, witnessDirs = null, engineIds = null } = {}) {
+  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0, witnessDirs = null, engineIds = null, sysTarball = undefined } = {}) {
   if (!stateDir) throw new Error('app-serve: stateDir is required');
   if (typeof env !== 'function') { const e0 = env; env = () => e0; }
   const appsDir = path.join(home, A.APPS_REL);
@@ -220,7 +221,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   let baseMemo = { mtime: null, size: null, list: null, sha: null };
   let listsFlight = null;
   // Layer 1: the app system (a persistent userland on this disk) — active only where VIBESPACE_APP_SYSTEM is set
-  const sys = SS.create({ home, env, runner, log, now, which, validate: M.validateAppRow, rootUid }); // rootUid: a gate's fixture tree stands in for root's (default 0)
+  const sys = SS.create({ home, env, runner, log, now, which, validate: M.validateAppRow, rootUid, tarball: sysTarball }); // rootUid: a gate's fixture tree stands in for root's (default 0); sysTarball: a gate's stand-in for the image's minbase tarball (undefined = the image's own path — B-7f97: a machine that carries it chose rung A under the gate)
 
   async function ensureDirs() {
     await fsp.mkdir(appsDir, { recursive: true, mode: 0o700 });

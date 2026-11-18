@@ -228,15 +228,25 @@ const REAL8 = await (async () => {
   const fake = (file, tag) => fs.writeFileSync(file, `#!/bin/sh\nprintf '{"tag":"${tag}","args":"%s"}\\n' "$*" >> "$VS_MARK"\nexit 0\n`, { mode: 0o755 });
   const PROG = path.join(RB, RN); fake(PROG, 'path-program');
   fake(path.join(RB, 'fakenpx'), 'npx');
-  const home = (shape, rc, { target = 'none' } = {}) => {
+  const home = (shape, rc, { target = 'none', reset = false, rcPath = true } = {}) => {
     const h = path.join(DIR, 'homes', shape); fs.mkdirSync(h, { recursive: true });
     fs.writeFileSync(path.join(h, '.zshenv'), 'skip_global_compinit=1\n');
-    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), rc + '\n');
+    // B-7f97 (lane bl-tests-e): the program's folder reaches the shell as a PERSON's does — the person's rc puts it on PATH. A login
+    // bash on Debian sources /etc/profile, which RESETS PATH (the second test machine: every «on PATH» shape read «bash refused»);
+    // the inherited PATH alone judged the machine's profile, not the product. The rc line reads its folder from ~/.vs-on-path
+    // (written by envOf for an «on PATH» shape only): the shell is asked under serviceEnv's ALLOWLIST (src/server/cli-cmd.js),
+    // which keeps HOME and drops any other name. `reset` = a profile that resets PATH before the rc (Debian's /etc/profile);
+    // `rcPath: false` = no such rc line (the leg as it was — the CONTROL shape)
+    const head = (reset ? 'PATH=/usr/bin:/bin\n' : '') + (rcPath ? '[ -r "$HOME/.vs-on-path" ] && PATH="$(cat "$HOME/.vs-on-path"):$PATH" && export PATH\n' : '');
+    for (const f of ['.zshrc', '.bash_profile']) fs.writeFileSync(path.join(h, f), head + rc + '\n');
     if (target !== 'none') { fs.mkdirSync(path.join(h, '.local-cli'), { recursive: true }); if (target === 'exec') fake(path.join(h, '.local-cli', RN), 'alias-target'); else fs.writeFileSync(path.join(h, '.local-cli', RN), 'not a program\n', { mode: 0o644 }); }
     return h;
   };
   const SHELLS = [['zsh', ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p))], ['bash', ['/bin/bash', '/usr/bin/bash'].find((p) => fs.existsSync(p))]].filter(([, p]) => p);
-  const envOf = (h, onPath) => ({ HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' });
+  const envOf = (h, onPath) => {
+    if (onPath) fs.writeFileSync(path.join(h, '.vs-on-path'), RB);   // B-7f97: the folder the person's rc line puts on PATH (HOME survives the allowlist)
+    return { HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' };
+  };
   const INST = `alias ${RN}="~/.local-cli/${RN}"`;
   // [label, home, PATH has the program dir, the want: { target | prog | refused: 'wrapper' | 'missing' | 'not-executable' | 'none' }]
   const SHAPES = [
@@ -251,6 +261,8 @@ const REAL8 = await (async () => {
     ['the installer alias naming a file that is NOT executable ⇒ refused by its cause', home('noexec', INST, { target: 'noexec' }), false, { refused: 'not-executable' }],
     ['r3 C: the person aliases the lookup words (alias type=\'type -a\', whence, command, unalias), no program ⇒ none — never «could not be asked»', home('builtin-alias', "alias type='type -a'\nalias whence='whence -a'\nalias command='command -p'\nalias unalias='echo'"), false, { refused: 'none' }],
     ['a plain program, no wrapper ⇒ that program', home('plain', ''), true, { prog: null }],
+    ['B-7f97: a plain program on PATH under a profile that RESETS PATH first (Debian\'s /etc/profile in a login bash) ⇒ that program — the person\'s rc line puts its folder back', home('reset', '', { reset: true }), true, { prog: null }],
+    ['B-7f97 CONTROL: the same reset with NO rc line (the leg as it was: the inherited PATH alone) ⇒ refused, none — the machine\'s profile decided it (red)', home('reset-as-was', '', { reset: true, rcPath: false }), true, { refused: 'none' }],
   ];
   const runCli = (cmd, mark) => new Promise((res) => {
     const c = spawn(cmd, ['--stream', 'a b'], { env: { PATH: '/usr/bin:/bin', VS_MARK: mark }, stdio: 'ignore' });

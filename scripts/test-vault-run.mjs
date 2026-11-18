@@ -494,9 +494,14 @@ async function newShapeCards(doorMod) {
       onStatus: (f) => subs.push(f),
     };
     const bw = await world({ instance: 'cluster', askMs: 60 });
-    const bd = bw.mk(DOOR, { userTodos: store });
+    // B-7f97: THE VERDICT DOES NOT FOLLOW THE MACHINE'S TEMP FOLDER — this door is given a temp folder of its own (as a test
+    // machine's private TMPDIR /tmp/vt-XXXXXX gives it), and the rerun's folder is INSIDE the conversation's project folder, which
+    // the fence admits wherever the temp folder is; the folder BESIDE it (the leg as it was) was admitted only through the door's
+    // default os.tmpdir() = /tmp, the scratch root's parent — under a private TMPDIR it was refused cwd_refused and no card came
+    const privTmp = path.join(bw.dir, 'private-tmp'); fs.mkdirSync(privTmp, { recursive: true });
+    const bd = bw.mk(DOOR, { userTodos: store, tmpDir: privTmp });
     bd.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });   // open the entry for runs (the capStore door shares the vault with world)
-    const other = path.join(bw.dir, 'elsewhere'); fs.mkdirSync(other, { recursive: true });
+    const other = path.join(bw.work, 'elsewhere'); fs.mkdirSync(other, { recursive: true });
     const A = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/api/stat'];
     const openAsk = () => store.snapshot().open.find((x) => x.action && x.action.type === 'vault-run-ask');
     let dA = false; const pA = bd.run({ caller: bw.caller, args: A, cwd: bw.work }).then((r) => (dA = true, r));
@@ -510,6 +515,9 @@ async function newShapeCards(doorMod) {
     await pB;
     const wa = cb && cb.facts && cb.facts.whyAgain;
     ok(!!cb && !!wa && wa.code === 'folder', 'round 25 (minor 6b): the SAME command rerun in a DIFFERENT folder draws a card whose facts.whyAgain names the one difference (folder) — a1f79c42 drew the card but named no reason', { card: !!cb, whyAgain: wa });
+    const beside = path.join(bw.dir, 'elsewhere'); fs.mkdirSync(beside, { recursive: true });
+    const asWas = await bd.run({ caller: bw.caller, args: A, cwd: beside });
+    ok(asWas.code === 'cwd_refused', 'CONTROL B-7f97: the folder BESIDE the project (the leg as it was) under that temp folder is refused cwd_refused — no card, no reason: the leg stood on the machine\'s TMPDIR (red)', asWas.code);
   }
 
   // round 26 (minor): a rerun that differs ONLY by SPACING (same tokens, same order) names 'arg-space', not 'arg-order'. RED on 75ef16b09: arg-order was tested first and a spacing-only rerun has equal sorted word-lists too, so 'arg-space' was unreachable (the card said 参数顺序 for a pure spacing change).

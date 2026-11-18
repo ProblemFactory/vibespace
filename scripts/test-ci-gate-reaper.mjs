@@ -38,6 +38,22 @@ console.log('\n§9 the scratch-orphan reaper');
   const sLive = scratch('live'), sOld = scratch('old'), sYoung = scratch('young');
   const sGone = `/tmp/vs-cigate9-gone-${process.pid}-nowhere`;
   ok(SCRATCH_ROOT_RE.test(sLive) && SCRATCH_ROOT_RE.test(sGone) && SCRATCH_ROOT_RE.test(root) && !SCRATCH_ROOT_RE.test(plain), 'the scratch-root shape is the one scripts/scratch.mjs mints (this suite\'s own mktmp dirs included; a tmp dir without the prefix is not it)');
+  // B-7f97: THE VERDICT DOES NOT FOLLOW THE MACHINE'S TEMP FOLDER — a test machine gives each suite a private TMPDIR
+  // (/tmp/vt-XXXXXX): the kit's mktmp still mints the /tmp/vs-* shape, so a process rooted in one of its dirs names a scratch
+  // root (the §9d evidence legs and the session-bus leg stand on it). CONTROL: the kit as it was (os.tmpdir()) under that
+  // TMPDIR mints outside the shape — such a dir names no root, the three legs went red there (red)
+  {
+    const KIT = fs.readFileSync(path.join(REPO, 'scripts/ci-gate-kit.mjs'), 'utf8');
+    const IMP = "import { createRequire } from 'node:module';\n", AT = 'fs.mkdtempSync(path.join(SCRATCH_TMP, `vs-cigate-${tag}-`))';
+    ok(KIT.includes(IMP) && KIT.includes(AT), 'CONTROL kit-tmp: the patched lines are in ci-gate-kit.mjs');
+    const MK = mutantCopies('cigate9-kit', REPO);
+    const asWas = await import(pathToFileURL(MK.write('scripts/ci-gate-kit.mjs', KIT.replace(IMP, IMP + "import os from 'node:os';\n").replace(AT, 'fs.mkdtempSync(path.join(os.tmpdir(), `vs-cigate-${tag}-`))'), 'tmpdir')).href);
+    const priv = fs.mkdtempSync(path.join(os.tmpdir(), 'cigate9-privtmp-')); tmpDirs.push(priv);
+    const before = process.env.TMPDIR; let now = '', then = '';
+    try { process.env.TMPDIR = priv; now = mktmp('privtmp'); then = asWas.mktmp('privtmp'); tmpDirs.push(then); } finally { if (before === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = before; }
+    ok(SCRATCH_ROOT_RE.test(now) && !now.startsWith(priv + '/') && JSON.stringify(scratchRootsOf({ cwd: path.join(now, 'work') })) === JSON.stringify([now]), `under a private TMPDIR the kit's dir is still scratch-shaped and names its root (${now})`);
+    ok(then.startsWith(priv + '/') && !SCRATCH_ROOT_RE.test(then) && scratchRootsOf({ cwd: path.join(then, 'work') }).length === 0, `CONTROL: the kit as it was mints under that TMPDIR — outside the shape, no root named (red) (${then})`);
+  }
   const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000;
   const mk = (pid, { name, argv, ppid, cwd, env = {}, born = NOW }) => {
     const d = path.join(root, String(pid)); fs.mkdirSync(d);

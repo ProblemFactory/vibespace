@@ -7,7 +7,7 @@
 // counter, the scratch dirs, a REAL git repository + commit, the stub gate repository, a marker writer. One process per
 // part ⇒ this module's counter is that part's own, and `report()` is its verdict line.
 import fs from 'node:fs';
-import os from 'node:os';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,11 @@ export const GIT_ENV = gitEnvFrom(process.env);
 let pass = 0, fail = 0;
 export const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 export const tmpDirs = [];
-export const mktmp = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-cigate-${tag}-`)); tmpDirs.push(d); return d; };
+// B-7f97: the kit's dirs are minted where scripts/scratch.mjs mints its roots (fixture-guard's TMP_ROOTS[0], /tmp), NEVER under
+// os.tmpdir(): a test machine that gives each suite a private TMPDIR (/tmp/vt-XXXXXX) moved them out of the /tmp/vs-* shape the
+// reaper legs judge (test-ci-gate-reaper §9) — three legs went red on the machine's temp setting, not on the tree
+const SCRATCH_TMP = createRequire(import.meta.url)('../src/fixture-guard.js').TMP_ROOTS[0];
+export const mktmp = (tag) => { const d = fs.mkdtempSync(path.join(SCRATCH_TMP, `vs-cigate-${tag}-`)); tmpDirs.push(d); return d; };
 export const git = (root, args, env = GIT_ENV) => {
   const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', env });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${(r.stderr || '').trim()}`);

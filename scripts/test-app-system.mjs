@@ -195,21 +195,41 @@ const off = SS.create({ home, env: () => ({}), runner: stub(), platform: 'linux'
 const vOff = await off.view({ facts: { distro: 'debian', codename: 'bookworm', arch: 'amd64', sudo: true } });
 ok(vOff.enabled === false && vOff.blocked === 'not-enabled' && calls.length === 0, 'not enabled: the view says so and NOTHING ran (no sudo, no install, no audit) — a bare-metal / systemd install never touches sudoers');
 calls.length = 0;
-const on = SS.create({ home, env: () => ({ VIBESPACE_APP_SYSTEM: '1' }), runner: stub({ 'vs-sys-install': { code: 0, stdout: '= helper installed\n= sudoers installed\n= ok\n', stderr: '' } }), platform: 'linux', which: (n) => (n === 'debootstrap' ? '/usr/sbin/debootstrap' : null) });
+// B-7f97 (lane bl-tests-e): the image's minbase TARBALL is a machine path (src/app-system.js MINBASE_TARBALL) — a machine that
+// carries it chose rung A here (the second test machine: both rung-B legs red). The gate names an ABSENT stand-in, as it stubs
+// debootstrap's road: the verdict never depends on the machine's installed files.
+const NO_TARBALL = path.join(dir, 'no-minbase.tar.gz');
+const on = SS.create({ home, env: () => ({ VIBESPACE_APP_SYSTEM: '1' }), runner: stub({ 'vs-sys-install': { code: 0, stdout: '= helper installed\n= sudoers installed\n= ok\n', stderr: '' } }), platform: 'linux', which: (n) => (n === 'debootstrap' ? '/usr/sbin/debootstrap' : null), tarball: NO_TARBALL });
 const vOn = await on.view({ facts: { distro: 'debian', codename: 'bookworm', arch: 'amd64', sudo: true } });
 const inst = calls.find((c) => c.includes('vs-sys-install'));
 ok(inst && same(inst.slice(0, 4), ['sudo', '-n', 'sh', '-c']) && inst[5] === 'vs-sys-install' && inst[6] === path.join(repo, 'deploy/sysroot/vs-sysroot-enter') && inst[7] === path.join(repo, 'deploy/sysroot/vibespace-sysroot.sudoers') && on.helperState().installed === true, 'enabled: after listen the helper + drop-in are installed FROM THE CHECKOUT through `sudo -n sh -c INSTALL_SCRIPT` (once — the boot step is memoized)');
 ok(vOn.canCreate === true && vOn.rung === 'b' && !calls.some((c) => c.includes('--audit')), 'no app system yet: Set up offered (rung B: debootstrap on PATH); no audit without one');
+{ // B-7f97 CONTROL: the same view over a tarball that IS there chooses rung A — the stand-in is honoured, and a machine that carries the image's tarball would have flipped the leg above
+  const TAR = path.join(dir, 'minbase-here.tar.gz'); fs.writeFileSync(TAR, ''); const n0 = calls.length;
+  const withTar = SS.create({ home, env: () => ({ VIBESPACE_APP_SYSTEM: '1' }), runner: stub({ 'vs-sys-install': { code: 0, stdout: '= ok\n', stderr: '' } }), platform: 'linux', which: (n) => (n === 'debootstrap' ? '/usr/sbin/debootstrap' : null), tarball: TAR });
+  const vTar = await withTar.view({ facts: { distro: 'debian', codename: 'bookworm', arch: 'amd64', sudo: true } });
+  ok(vTar.rung === 'a', `CONTROL (B-7f97): a tarball that is there ⇒ rung A — the machine's own file decided the rung before the stand-in (${vTar.rung})`);
+  calls.length = n0; fs.rmSync(TAR, { force: true }); // the legs below read the calls of `on` only
+}
 fs.mkdirSync(path.join(home, '.vibespace/sysroot/rootfs/etc'), { recursive: true });
 fs.writeFileSync(path.join(home, '.vibespace/sysroot/rootfs/etc/vibespace-sysroot.json'), ID({}));
 const vMine = await on.view({ facts: { distro: 'debian', codename: 'bookworm', arch: 'amd64', sudo: true } });
 ok(vMine.created && vMine.blocked === 'not-root-owned' && !vMine.usable && (await on.catalog()).length === 0, 'a userland the USER owns (not root) is refused by name — no rows, no shims, nothing planned into it');
 const osr = path.join(dir, 'os-release'); fs.writeFileSync(osr, 'ID=debian\nVERSION_CODENAME=bookworm\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n');
 fs.rmSync(path.join(home, '.vibespace/sysroot/rootfs'), { recursive: true, force: true });
-const apps = AS.create({ home, stateDir: path.join(dir, 'state'), env: () => ({ VIBESPACE_APP_SYSTEM: '1', PATH: '/usr/bin:/bin' }), osRelease: osr, binOnPath: (n) => ({ 'apt-get': '/usr/bin/apt-get', sudo: '/usr/bin/sudo', debootstrap: '/usr/sbin/debootstrap' })[n] || null, runner: stub({ '--print-architecture': { code: 0, stdout: 'amd64\n', stderr: '' }, 'vs-sys-install': { code: 0, stdout: '= ok\n', stderr: '' } }), dpkgStatus: path.join(dir, 'none'), markerDir: path.join(dir, 'm'), systemLists: path.join(dir, 'lists') });
+const AS_OPTS = { home, stateDir: path.join(dir, 'state'), env: () => ({ VIBESPACE_APP_SYSTEM: '1', PATH: '/usr/bin:/bin' }), osRelease: osr, binOnPath: (n) => ({ 'apt-get': '/usr/bin/apt-get', sudo: '/usr/bin/sudo', debootstrap: '/usr/sbin/debootstrap' })[n] || null, runner: stub({ '--print-architecture': { code: 0, stdout: 'amd64\n', stderr: '' }, 'vs-sys-install': { code: 0, stdout: '= ok\n', stderr: '' } }), dpkgStatus: path.join(dir, 'none'), markerDir: path.join(dir, 'm'), systemLists: path.join(dir, 'lists'), sysTarball: NO_TARBALL };
+const apps = AS.create(AS_OPTS);
 fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
 const pc = await apps.plan({ kind: 'sys-create' });
 ok(pc.plan.ok && pc.plan.mode === 'create' && pc.plan.layer === 'sys' && same(pc.plan.argv.slice(5), ['vs-sys', 'create', 'sysroot', pc.plan.nonce, '--', 'b', 'bookworm']) && pc.plan.commands.some((c) => /debootstrap --variant=minbase bookworm/.test(c)), 'Set up → a plan through the package slot: SYS_SCRIPT create, rung B, the machine\'s own codename; its commands say debootstrap');
+{ // B-7f97 CONTROL (app-serve's own seam): the same plan over a tarball that IS there is rung A — `sysTarball` reaches the app
+  // system's half; without it the image's own path decides, and a machine that carries that tarball planned rung A above (red)
+  const TAR = path.join(dir, 'minbase-plan.tar.gz'); fs.writeFileSync(TAR, ''); const n0 = calls.length;
+  fs.mkdirSync(path.join(dir, 'state-a'), { recursive: true });
+  const pa = await AS.create({ ...AS_OPTS, stateDir: path.join(dir, 'state-a'), sysTarball: TAR }).plan({ kind: 'sys-create' });
+  ok(pa.plan.ok && same(pa.plan.argv.slice(-3), ['--', 'a', 'bookworm']), `CONTROL (B-7f97): app-serve's sysTarball over a tarball that is there ⇒ the plan is rung A — the seam reaches the app system (${pa.plan.ok ? pa.plan.argv.slice(-3).join(' ') : pa.plan.code})`);
+  calls.length = n0; fs.rmSync(TAR, { force: true });
+}
 const pr2 = await apps.plan({ kind: 'repair' });
 const st = await apps.status();
 ok(!pr2.plan.ok && pr2.plan.code === 'no_app_system' && st.appSystem && st.appSystem.enabled && st.appSystem.canCreate === true && Array.isArray(st.entries), 'Repair with no app system: refused by name; GET /api/apps carries `appSystem` (the dialog\'s contract)');
