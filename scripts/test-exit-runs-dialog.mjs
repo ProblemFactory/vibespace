@@ -26,8 +26,9 @@
 //      and a card drawn without the state are closed as before. LAW 4 — the preview's common left margin (the fewest leading
 //      spaces among its non-blank lines) is not DRAWN (a span chat.css hides) while the pre's text keeps every byte (Copy
 //      reads textContent): «      42» draws «42»; a deeper line keeps its extra indent; a blank line stays; a tab-led line
-//      hides nothing; the stderr preview too; «Show output» is drawn as itself. Its CONTROLS: (h) no keeper (the release:
-//      a redraw closes every fold), (i) the release's drawing (the margin drawn)
+//      hides nothing; the stderr preview too; «Show output» is drawn as itself. The redraw also through the VIEW'S OWN SWAP:
+//      the real ChatView._swapMessageEl (chat-view.js bundled) with the view's _peerOpen / _setPeerOpen. Its CONTROLS: (h, h2)
+//      no keeper (the release: a redraw / the swap closes every fold), (i) the release's drawing (the margin drawn)
 //   §4 CONTROLS (patched copies of the source, bundled in memory — src/ never touched): the painter's hover title back;
 //      the body's command cut to the head; the card without its command block; the command on the card again
 //      outside its fold (d); a row without the icon; the 2.369.207 duration words (f); the fold without the device's
@@ -66,6 +67,7 @@ class FakeEl {
   querySelectorAll(sel) { const m = /^:scope\s*>\s*(.+)$/.exec(sel); return m ? this.children.filter((c) => c._match(m[1].trim())) : this.all.filter((c) => c._match(sel.trim())); }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   remove() { if (this.parentElement) this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1); this.parentElement = null; }
+  replaceWith(n) { const p = this.parentElement; if (!p) return; if (n.parentElement) n.remove(); p.children.splice(p.children.indexOf(this), 1, n); n.parentElement = p; this.parentElement = null; }   // chat-view _swapMessageEl's own move (§5)
 }
 const titled = (root) => [root, ...root.all].filter((n) => typeof n.title === 'string' && n.title !== '' || 'title' in n.attrs);
 globalThis.window = globalThis;
@@ -215,6 +217,25 @@ ok(k5.shape && k5.kept, 'law 3: «Technical details», «Show output» and an en
 ok(k5.closedStays && JSON.stringify(k5.keys) === JSON.stringify(['m1#raw', 'm1#tech']), 'law 3: one closed by the person stays closed on the next redraw; the state is the message\'s (`<id>#tech`, `#out`, `#raw`)', k5.keys);
 ok(k5.others, 'law 3: another message\'s card, and a card drawn without the view\'s state, are closed as before', k5);
 const RSRC = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+// THE VIEW'S OWN SWAP (主开发 2026-11-17 23:4xZ: «one leg that redraws the row through the view's own swap while each fold is
+// open»): the REAL ChatView.prototype._swapMessageEl moves a fresh card of the same record into the list in place of the old
+// one, and the fold state is the view's own — _peerOpen through _setPeerOpen, handed to the renderer as chat-view's
+// constructor hands it (the `peerFold` literal pinned below)
+const CVM = await bundle('src/lib/chat-view.js');
+const CV_SRC = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+const swapCase = (Rm) => {
+  const V = Object.create(CVM.ChatView.prototype);
+  Object.assign(V, { _peerOpen: new Set(), _elements: new Map(), _runs: [], _runExpanded: new Set(), _runStickyOpen: new Set(), _renderers: { addWrapToggles() {}, addOpenInEditorBtn() {} }, _applyElementMarks() {}, _reserveFreshHeights() {} });
+  const peerFold = { isOpen: (id) => V._peerOpen.has(id), set: (id, open, el) => V._setPeerOpen(id, open, el) };   // chat-view's constructor, as is
+  const cardOf = () => { const c = document.createElement('div'); c.className = 'chat-msg chat-vs-notice chat-machine-compact chat-run-member'; c.dataset.msgId = 'm1'; c.appendChild(Rm.exitRunBlock(RUN6, { id: 'm1', fold: peerFold })); return c; };
+  const list = document.createElement('div'), old = cardOf(); list.appendChild(old); V._elements.set('m1', old);
+  const f0 = foldsOf(old); press(f0.tech, true); press(f0.out, true); press(f0.raw, true);
+  const fresh = cardOf(), back = V._swapMessageEl(old, fresh, 'm1'), f1 = foldsOf(fresh);
+  return { swapped: back === fresh && list.children[0] === fresh && V._elements.get('m1') === fresh && fresh.classList.contains('chat-machine-compact'), open: !!(f1.tech.open && f1.out.open && f1.raw.open), state: [...V._peerOpen].sort() };
+};
+const sw = swapCase(R);
+ok(/peerFold: \{ isOpen: \(id\) => this\._peerOpen\.has\(id\), set: \(id, open, el\) => this\._setPeerOpen\(id, open, el\) \}/.test(CV_SRC), 'law 3: chat-view hands the renderer ITS per-message fold state (peerFold → _peerOpen / _setPeerOpen) — the state this leg drives');
+ok(sw.swapped && sw.open && JSON.stringify(sw.state) === JSON.stringify(['m1#out', 'm1#raw', 'm1#tech']), 'law 3, THE VIEW\'S OWN SWAP: each fold open, the row redrawn through ChatView._swapMessageEl (a fresh card of the same record in its place, the run classes carried) — every fold is open on the new card', sw);
 ok(/el\.appendChild\(exitRunBlock\(msg\.exitRun, \{ id: msg\.id, fold: this\._peerFold \}\)\)/.test(RSRC), 'law 3: the notice renderer hands the card its message id and the view\'s per-message fold state (this._peerFold, the compact line\'s own)');
 const drawnOf = (pre) => pre.children.length ? pre.children.filter((c) => !c._cls.includes('chat-exit-margin')).map((c) => c.textContent).join('') : pre.textContent;
 const marginCase = (Rm, stdout, stderr = '') => { const pre = Rm.exitRunBlock({ cmd: 'x', code: 0, stdout, stderr, cut: {} }).querySelector('.chat-exit-out'); return { text: pre.textContent, drawn: drawnOf(pre), spans: pre.querySelectorAll('.chat-exit-margin').length }; };
@@ -227,7 +248,9 @@ ok(/display: none/.test(rule(CSS, '.chat-exit-margin')), 'law 4: chat.css draws 
 const ph = patched('src/lib/chat-renderers.js', "  if (!det || !fold || !id) return;\n  const key = `${id}#${which}`;", "  return; // CONTROL: no keeper (the release)\n  const key = `${id}#${which}`;");
 const pi = patched('src/lib/chat-renderers.js', '  drawPreview(pre, pv.lines);', "  pre.textContent = pv.lines.join('\\n'); // CONTROL: the release's drawing");
 ok(ph.applies && pi.applies, '§5 patches apply');
-ok(!keepCase(await bundle('src/lib/chat-renderers.js', ph)).kept, 'CONTROL (h): no keeper (the release) — the redraw closes every fold: §5\'s law 3 leg goes red');
+const PH = await bundle('src/lib/chat-renderers.js', ph);
+ok(!keepCase(PH).kept, 'CONTROL (h): no keeper (the release) — the redraw closes every fold: §5\'s law 3 leg goes red');
+ok(swapCase(PH).swapped && !swapCase(PH).open, 'CONTROL (h2): no keeper (the release) through the view\'s own swap — the swapped card\'s folds are CLOSED: §5\'s swap leg goes red');
 ok(marginCase(await bundle('src/lib/chat-renderers.js', pi), '      42\n').drawn !== '42', 'CONTROL (i): the release\'s drawing — «      42» drawn with its margin: §5\'s law 4 leg goes red');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
