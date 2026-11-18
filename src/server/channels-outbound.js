@@ -1093,6 +1093,11 @@ function create(engineCtx) {
     // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): WHAT THE CARD SHOWS IS WHAT LANDS — files this account cannot
     // carry leave only as the owner's "Send without the file" (`withoutFiles`); a plain Approve is refused, nothing sent
     const stored0 = reactionKind ? [] : P.storedAttachments(p0);
+    // B-09d2 r1 (the lane's adversarial read): a proposal stored BEFORE the submit check — files with a placement the row's
+    // files may not take — is refused at Approve by the same rule: nothing sent, it still waits (reject it, or send it
+    // without the files)
+    const plNow = composing ? null : P.placementOf(p0);
+    if (stored0.length && !withoutFiles && plNow && c && !P.filePlacementsOf(c).includes(plNow)) return { ok: false, code: 'placement-not-offered', why: 'with-files', placement: plNow, offered: P.filePlacementsOf(c), error: `files cannot go with ${P.PLACEMENT_NOUNS[plNow]} on this channel — nothing was sent; send it without the files, or reject it and propose it again` };
     const fb = stored0.length && rec ? filesBlockedOf(filesOfferFor(rec, cc, t)) : null;
     if (stored0.length && withoutFiles && !String((edited ? text : p0.text) || '').trim()) return { ok: false, code: 'bad-proposal', why: 'nothing-without-files', error: 'this proposal is only its files — without them nothing is left to send; reject it, or re-authorize the account and approve again', proposal: proposalView(p0) };
     if (fb && !withoutFiles) return { ok: false, code: 'attachments-not-sendable', why: 'attachments-not-sendable', requiredScopes: fb.requiredScopes, error: `this account's sign-in cannot send files (needs ${fb.requiredScopes.join(' or ')}) — nothing was sent; re-authorize the account, or approve it as "Send without the file"`, proposal: proposalView(p0) };

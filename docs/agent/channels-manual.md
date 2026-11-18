@@ -781,7 +781,8 @@ Without a workspace app, the person makes their own app with a one-time setup to
   (`mention-ambiguous`, the names listed) — write the handle or the full name; nobody ⇒ the words go out as plain text
   and notify nobody. `@here` / `@channel` / `@everyone` are sent as plain words (S1 never broadcasts).
 - A reply to a message lands in its thread (Slack's norm); `--also-in-chat` also shows it in the channel
-  (`reply_broadcast`). Over 4 000 characters is refused — split it.
+  (`reply_broadcast`) — never with `--attach` (Slack shares a file in a thread OR in the channel: refused when you
+  propose). Over 4 000 characters is refused — split it.
 - The card also says who will SEE it (a DM, a private channel's members, everyone in the workspace, or "includes
   people from <other organization>" on a Slack Connect channel). Read it before proposing anything private.
 - A send whose answer was lost stays `unknown`: Slack has no idempotency key, so nothing resends it — the person checks

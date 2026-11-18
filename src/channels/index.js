@@ -505,8 +505,10 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
       // B-09d2: where a reply WITH FILES may land (absent ⇒ every declared placement) — a subset of `placements`; a
       // reply placed elsewhere with files is refused at submit, never at the approved send
       if (t.filePlacements !== undefined) {
-        if (!Array.isArray(t.filePlacements) || t.filePlacements.some((x) => !t.placements.includes(x))) bad(`caps.threads.filePlacements must be a list of the declared placements (${t.placements.join('|')})`);
+        if (!Array.isArray(t.filePlacements) || !t.filePlacements.length || t.filePlacements.some((x) => !t.placements.includes(x))) bad(`caps.threads.filePlacements must be a non-empty list of the declared placements (${t.placements.join('|')})`);
         else if (!c.sendAttachments) bad('caps.threads.filePlacements on an adapter that sends no attachments (caps.sendAttachments is empty)');
+        // r1 (the lane's adversarial read): a reply with files and no flags takes the root norm — it must be among them
+        else if (t.rootReply && !t.filePlacements.includes(t.rootReply)) bad(`caps.threads.filePlacements must include the rootReply (${t.rootReply}) — a reply with files and no flags lands there`);
       }
       const roots = t.placements.filter((x) => ROOT_REPLIES.includes(x));
       if (roots.length ? !roots.includes(t.rootReply) : (t.rootReply !== undefined && t.rootReply !== null)) bad(`caps.threads.rootReply must be one of the declared ${roots.length ? roots.join('|') : '(none — nothing answers a message)'} (the vendor's norm for a reply to a message outside any thread)`);

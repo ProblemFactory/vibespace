@@ -537,7 +537,8 @@ function filePlacementsOf(caps) {
  *  nothing): THE VERDICT WITH ITS FILES — `files` = how many attachments the reply carries; a placement the adapter's
  *  `filePlacements` does not take is refused HERE (`placement-not-offered`, why `with-files`, `offered` = where files may
  *  go), so a card never offers an Approve that cannot send. */
-const PLACEMENT_FLAGS = Object.freeze({ chat: 'no --to', quote: '--to', thread: '--in-thread', 'thread+chat': '--in-thread --also-in-chat' });
+const PLACEMENT_FLAGS = Object.freeze({ chat: 'no --to', quote: '--to <id>', thread: '--to <id> --in-thread', 'thread+chat': '--to <id> --also-in-chat' });   // the CLI's forms (vibespace-channels PLACEMENT_FLAGS)
+const PLACEMENT_NOUNS = Object.freeze({ chat: 'a plain message', quote: 'a quoted reply', thread: 'a reply in a thread', 'thread+chat': 'a reply in a thread that is also shown in the chat' });
 function placementVerdict(args = {}) {
   const v = placementOnly(args);
   const files = Math.max(0, Math.floor(Number(args.files) || 0));
@@ -545,7 +546,7 @@ function placementVerdict(args = {}) {
   const may = filePlacementsOf(args.caps);
   if (may.includes(v.placement)) return v;
   return { ok: false, code: 'placement-not-offered', why: 'with-files', placement: v.placement, offered: may,
-    error: `files cannot go with a reply ${placementWords(v.placement)} on this channel (${PLACEMENT_FLAGS[v.placement]} with files) — nothing was created; with files, reply ${may.map(placementWords).filter(Boolean).join(' or ') || 'nowhere here'}${may.includes('thread') ? ' (--in-thread, without --also-in-chat)' : ''}, or send the files in a message of their own` };
+    error: `files cannot go with ${PLACEMENT_NOUNS[v.placement]} on this channel (${PLACEMENT_FLAGS[v.placement]} with --attach) — nothing was created; with files, send ${may.map((x) => `${PLACEMENT_NOUNS[x]} (${PLACEMENT_FLAGS[x]})`).join(' or ')}` };
 }
 function placementOnly({ requested = null, replyTo = null, caps = null, parent = null, alias = false } = {}) {
   const offered = placementsOf(caps);
@@ -1735,7 +1736,7 @@ module.exports = {
   canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction, decideRecall, recallVerdict,
-  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, filePlacementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
+  PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, PLACEMENT_NOUNS, isThreadPlacement, placementsOf, filePlacementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
   // r6 verify (2026-09-28): what you approve is what runs — the reply's anchor (F1), its recipients (F3),

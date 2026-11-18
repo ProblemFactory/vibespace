@@ -121,15 +121,15 @@ console.log('① the placement table per vendor (PURE policy)');
   // files ride only the placements the row's `filePlacements` takes — refused HERE, before a proposal exists
   const fv = (requested, files, caps = SLACK) => P.placementVerdict({ requested, replyTo: requested === 'chat' ? null : 'm-1', caps, files });
   const F9 = { both: fv('thread+chat', 2), thread: fv('thread', 2), chat: fv('chat', 1), norm: fv(null, 1), noFiles: fv('thread+chat', 0), lark: fv('thread', 3, lark.caps), larkQuote: fv('quote', 1, lark.caps) };
-  ok(F9.both.code === 'placement-not-offered' && F9.both.why === 'with-files' && F9.both.placement === 'thread+chat' && J(F9.both.offered) === J(['chat', 'thread']) && /--in-thread --also-in-chat with files/.test(F9.both.error) && /nothing was created/.test(F9.both.error)
+  ok(F9.both.code === 'placement-not-offered' && F9.both.why === 'with-files' && F9.both.placement === 'thread+chat' && J(F9.both.offered) === J(['chat', 'thread']) && /\(--to <id> --also-in-chat with --attach\)/.test(F9.both.error) && /nothing was created/.test(F9.both.error) && /a reply in a thread \(--to <id> --in-thread\)/.test(F9.both.error)
     && F9.thread.ok && F9.thread.placement === 'thread' && F9.chat.ok && F9.norm.ok && F9.norm.placement === 'thread' && F9.noFiles.ok && F9.noFiles.placement === 'thread+chat' && F9.lark.ok && F9.larkQuote.ok
     && J(P.filePlacementsOf(SLACK)) === J(['chat', 'thread']) && J(P.filePlacementsOf(lark.caps)) === J(P.placementsOf(lark.caps)),
     'B-09d2 THE VERDICT WITH ITS FILES: on Slack a reply with files in the thread AND the chat is refused (placement-not-offered, why with-files, offered chat / thread, the flags named, nothing created); files into the thread, the chat, or by the root norm pass; no files ⇒ thread+chat as before; a row with no filePlacements (Lark) takes files in every placement it offers', F9);
   const SLACK_REAL = require(path.join(REPO, 'src/channels/slack.js')).caps;
   const capsBad = (over) => { try { CH.validateCaps('x-files', { ...SLACK_REAL, ...over }); return null; } catch (e) { return String(e.message || e); } };
-  const C9 = { real: capsBad({}), notDeclared: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: ['quote'] } }), notList: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: 'chat' } }), noFiles: capsBad({ sendAttachments: null }) };
-  ok(C9.real === null && /filePlacements must be a list of the declared placements/.test(C9.notDeclared || '') && /filePlacements must be a list/.test(C9.notList || '') && /sends no attachments/.test(C9.noFiles || '') && J(SLACK_REAL.threads.filePlacements) === J(['chat', 'thread']),
-    'B-09d2 THE CONTRACT: Slack\'s shipped row declares filePlacements chat / thread and passes validateCaps; a placement it does not offer, a non-list, and filePlacements on an adapter that sends no attachments are each refused by name', C9);
+  const C9 = { real: capsBad({}), notDeclared: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: ['quote'] } }), notList: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: 'chat' } }), empty: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: [] } }), noRoot: capsBad({ threads: { ...SLACK_REAL.threads, filePlacements: ['chat'] } }), noFiles: capsBad({ sendAttachments: null }) };
+  ok(C9.real === null && /filePlacements must be a non-empty list of the declared placements/.test(C9.notDeclared || '') && /must be a non-empty list/.test(C9.notList || '') && /must be a non-empty list/.test(C9.empty || '') && /must include the rootReply \(thread\)/.test(C9.noRoot || '') && /sends no attachments/.test(C9.noFiles || '') && J(SLACK_REAL.threads.filePlacements) === J(['chat', 'thread']),
+    'B-09d2 THE CONTRACT: Slack\'s shipped row declares filePlacements chat / thread and passes validateCaps; a placement it does not offer, a non-list, an EMPTY list, a list without the rootReply (r1: a reply with files and no flags lands there) and filePlacements on an adapter that sends no attachments are each refused by name', C9);
   // the pre-enum reading (a suite's scripted module) and the CLAMP (a declaration can never widen a control)
   const LEGACY = { sendAs: ['user'], threads: { read: 'vendor', replyInto: true, listing: 'inline' } };
   ok(P.rootReplyOf(LEGACY) === 'quote' && P.rootReplyOf({ sendAs: ['user'] }) === 'quote' && P.rootReplyOf({ sendAs: [] }) === null, 'a row with no `placements` reads as the pre-enum contract: a reply in the list (quote) is its norm');
@@ -313,6 +313,15 @@ async function engineLeg() {
   R.sFilesBoth = await eng.propose(AG, SK, CID, { text: 'sf', replyTo: 'm-1', placement: 'thread+chat', attachments: FILE });
   R.filesCreatedOnRefusal = count() - fb0;
   R.sFilesThread = await eng.propose(AG, SK, CID, { text: 'st', replyTo: 'm-1', placement: 'thread', attachments: FILE });
+  // r1: a proposal stored BEFORE the submit check (files + thread+chat) is refused at Approve — nothing sent, it still waits
+  if (R.sFilesThread.ok) {
+    const sid = R.sFilesThread.proposal.id, sent0 = (sent[SK] || []).length;
+    await eng.store.outbox.update((ob) => { ob.proposals[sid].placement = 'thread+chat'; });
+    R.apOld = await eng.approve(sid);
+    R.oldState = eng.store.outbox.snapshot().proposals[sid].state;
+    R.oldSent = (sent[SK] || []).length - sent0;
+    await eng.store.outbox.update((ob) => { ob.proposals[sid].placement = 'thread'; });
+  }
   // a proposal stored BEFORE the enum: only `inThread` (the alias) — read and sent as thread
   const legacyId = 'p-legacy-1';
   await eng.store.outbox.update((ob) => { const src = ob.proposals[R.thread.proposal.id]; const q = JSON.parse(JSON.stringify(src)); delete q.placement; delete q.replyQuote; delete q.placementDefaulted; q.id = legacyId; q.text = 'legacy'; q.originalText = 'legacy'; ob.proposals[legacyId] = q; });
@@ -330,6 +339,8 @@ async function engineLeg() {
   ok(R.logged, 'setup: the three messages are in the log (a plain one, a vendor thread\'s root, a reply inside it)');
   ok(R.sFilesBoth.ok === false && R.sFilesBoth.code === 'placement-not-offered' && R.sFilesBoth.why === 'with-files' && R.filesCreatedOnRefusal === 0 && R.sFilesThread.ok === true && R.sFilesThread.proposal.placement === 'thread',
     'B-09d2 THE ENGINE: a Slack-shaped reply with a file and thread+chat is refused at submit by name — NOTHING is created (no card offers an Approve that cannot send); the same file into the thread is filed', { both: R.sFilesBoth && { ok: R.sFilesBoth.ok, code: R.sFilesBoth.code, why: R.sFilesBoth.why, error: R.sFilesBoth.error }, created: R.filesCreatedOnRefusal, thread: R.sFilesThread && { ok: R.sFilesThread.ok, code: R.sFilesThread.code, error: R.sFilesThread.error } });
+  ok(R.apOld && R.apOld.ok === false && R.apOld.code === 'placement-not-offered' && R.apOld.why === 'with-files' && R.oldState === 'awaiting-approval' && R.oldSent === 0,
+    'B-09d2 r1 THE APPROVAL: a proposal stored before the submit check (files + thread+chat) is refused at Approve by the same rule — nothing sent, it still waits', { ap: R.apOld && { ok: R.apOld.ok, code: R.apOld.code, why: R.apOld.why }, state: R.oldState, sent: R.oldSent });
   const q = R.quote.proposal, t = R.thread.proposal, pl = R.plain.proposal;
   ok(R.quote.ok && q.placement === 'quote' && q.placementDefaulted === 'root' && !q.inThread && q.replyQuote && q.replyQuote.text === 'a plain question' && q.placementText === 'as a quoted reply, in the chat', 'Lark-shaped, --to alone on a message OUTSIDE a thread ⇒ stored `quote` (the vendor\'s norm, said as the default), the answered message quoted for the card', J(q && { placement: q.placement, d: q.placementDefaulted, rq: q.replyQuote }));
   ok(R.thread.ok && t.placement === 'thread' && t.placementDefaulted === 'parent-in-thread' && t.inThread === true && t.threadKey === 'omt_t' && t.threadQuote && t.threadQuote.text === 'a reply inside' && t.replyQuote.text === 'a reply inside', '…on a message INSIDE a vendor thread ⇒ stored `thread` (it cannot be quoted from the main list), with inThread + threadKey + threadQuote as the alias', J(t && { placement: t.placement, d: t.placementDefaulted, key: t.threadKey }));
