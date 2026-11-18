@@ -18,7 +18,9 @@
 //
 // CHECKED, NEVER TRUSTED: the stripped text is parsed again and its token stream — every token's kind and exact
 // source text, and whether a line break stands before it (what automatic semicolon insertion reads) — must equal the
-// original's, else this throws and the build fails. Same tokens, same breaks ⇒ the same program. Deterministic: the
+// original's, else this throws and the build fails. Same tokens, same breaks ⇒ the same program — with ONE thing the
+// check cannot see: a function's own source text (Function.prototype.toString loses its comments and margins). Measured
+// 2026-11-17: nothing in the device code reads one (no fn.toString / String(fn) / new Function over a function's text). Deterministic: the
 // same esbuild output strips to the same bytes in any checkout (the signed release depends on it, scripts/agentd-release.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -121,7 +123,13 @@ const real = (p) => { try { return fs.realpathSync(p); } catch { return path.res
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
   const file = path.resolve(process.argv[2] || 'data/bin/vibespace-agentd.js');
   const src = fs.readFileSync(file, 'utf8');
-  const out = stripBundle(src);
+  let out;
+  try { out = stripBundle(src); } catch (e) {
+    // the build fails by name; esbuild's unstripped bytes stay, so a manifest copy left by an earlier SIGNED build must not sit
+    // beside them (agentd-release.mjs, which would have judged them, never runs) — the hub then says unsigned and pushes nothing
+    try { fs.unlinkSync(file.replace(/\.js$/, '') + '.manifest.json'); } catch { }
+    throw e;
+  }
   const tmp = file + '.' + process.pid + '.tmp';
   try { fs.writeFileSync(tmp, out); fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
   console.log(`agentd-bundle-strip: ${path.basename(file)} ${Buffer.byteLength(src)} → ${Buffer.byteLength(out)} bytes (comments and indentation; the token stream checked equal)`);

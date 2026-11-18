@@ -7522,12 +7522,14 @@ await section(async () => {
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
   const plain107 = r107.outputFiles[0].text, text107 = shipped107(r107), size107 = Buffer.byteLength(text107);
   ok(/--external:xlsx\b/.test(flags107) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
-  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the 2.369.407 sources' ${RELEASE_BUNDLE_BYTES} bytes, as shipped (${size107})`, size107);
+  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the 2.369.407 sources' ${RELEASE_BUNDLE_BYTES} bytes, as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code raises RELEASE_BUNDLE_BYTES here to the size this leg prints, in the same commit, with its reason' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
   // libraries' legal notices stay, every line keeps its own spacing, a second pass changes nothing
   const legal107 = (t) => t.slice(t.lastIndexOf('/*! Bundled license information'));
   const margin107 = text107.split('\n').filter((l) => /^[ \t]/.test(l)).length;
+  // the signed release needs every hub to strip the same esbuild output to the same bytes: the REAL bundle is a fixed point
+  ok(strip107(text107, undefined, { check: false }) === text107, `§107 the shipped bundle is a fixed point of the strip — a second pass over all ${Buffer.byteLength(text107)} bytes changes nothing`);
   ok(banners107(plain107).length > 100 && banners107(text107).join('\n') === banners107(plain107).join('\n') && plain107.includes('/*! Bundled license information') && legal107(text107) === legal107(plain107),
     `§107 the strip keeps every module banner (${banners107(text107).length}, in order) and the libraries' licence block byte for byte; ${margin107} line(s) still open with a margin — each inside a template literal, a string or a kept comment`);
   ok(/(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/.test(text107) && /createInjector\(\{\s*platform: process\.platform,/.test(text107) && /capabilities: \[[^\]]*"desktop-serve"/.test(text107),
