@@ -24,6 +24,11 @@ const OLD_RE = /^[a-z][a-z0-9]*$/;   // an old user as claude-home's staleUsers 
 // B-8033 cure 2: the starts a folder that cannot move is tried, then the move is marked (said once). A try counts once per
 // TRY_GAP_MS — a restart loop during a short outage spends one, never all three
 const MOVE_TRIES = 3, TRY_GAP_MS = 10 * 60e3;
+/** B-8033 cure 3: how many folders the start that MOVED judged old projects (its HOME marker); a marker from before this
+ *  count says what it moved. */
+function judgedOf(hm) {
+  try { const j = JSON.parse(fs.readFileSync(hm, 'utf8')); return Number.isFinite(j.judgedOld) ? j.judgedOld : Number(j.moved) || 0; } catch { return 0; }
+}
 /** Is /home/<old> gone? — the check claude-home's staleUsers asks too (B-8033 cure: both sources of an old user agree). */
 const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);
 /** The old users this HOME's markers name for `user` — moved by an install over this HOME (its rewrite owed per data/) —
@@ -86,13 +91,16 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
       if (homeDone && dataDone) continue;
       log.log(`[migrate] home rename detected: /home/${old} → ${home} — ${[!homeDone && 'projdirs', !dataDone && 'recorded paths'].filter(Boolean).join(' + ')}`);
       let moved = 0, rewrote = 0;
-      let whole = true, sameName = 0, undecided = 0;
+      let whole = true, sameName = 0, undecided = 0, judged = 0, marked = homeDone;
       if (!homeDone) {
         for (const hr of hrs) {
-          moved += hr.moveUser(home, old, user) || 0;
+          const ctx = {};   // B-8033 cure 3: ONE verdict per folder per boot — the move and the count of what is left share it
+          const m = hr.moveUser(home, old, user, ctx) || 0;
+          moved += m;
           // B-8033 cure: the marker says the move is WHOLE — a projdir whose rename failed (EACCES / EXDEV) withholds it (tried
           // again at the next start); one left behind by same-name transcripts is SAID with its count and needs no retry
-          if (typeof hr.leftAfterMove === 'function') { const l = hr.leftAfterMove(home, old, user) || {}; if (l.failed) whole = false; sameName += l.sameName || 0; undecided += l.undecided || 0; }
+          if (typeof hr.leftAfterMove === 'function') { const l = hr.leftAfterMove(home, old, user, ctx) || {}; if (l.failed) whole = false; sameName += l.sameName || 0; undecided += l.undecided || 0; judged += Number.isFinite(l.judged) ? l.judged : m; }
+          else judged += m;
         }
         if (sameName) log.warn(`[migrate] home rename: ${sameName} project folder(s) of /home/${old} stay under the old name — each name in them is in the new folder too (never overwritten; a subfolder's own files are not compared)`);
         // B-8033 cure 2: a folder whose owner no transcript says stays where it is (never moved on a guess) — said
@@ -110,18 +118,27 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
         const gaveUp = !whole && tries >= MOVE_TRIES;
         if (!whole && !gaveUp) {
           log.warn(`[migrate] home rename: a project folder of /home/${old} could not be moved — no marker; tried again at the next start (${tries} of ${MOVE_TRIES})`);
-          if (counted) writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => fs.promises.writeFile(tf, JSON.stringify({ tries, at: now() })))
+          if (counted) writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => fs.promises.writeFile(`${tf}.tmp`, JSON.stringify({ tries, at: now() }))).then(() => fs.promises.rename(`${tf}.tmp`, tf))   // cure 3: by temp and rename
             .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — tried again at the next start`)));
         } else {
           if (gaveUp) log.warn(`[migrate] home rename: a project folder of /home/${old} could not be moved in ${MOVE_TRIES} starts — it stays under the old name; marked, not tried again`);
-          const mark = JSON.stringify({ at: Date.now(), moved, ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}), ...(gaveUp ? { gaveUp: true } : {}) });
+          const mark = JSON.stringify({ at: Date.now(), moved, judgedOld: judged, ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}), ...(gaveUp ? { gaveUp: true } : {}) });
+          writes.push(fs.promises.unlink(tf).catch(() => { }));   // cure 3: the tries go once the move is marked
+          marked = true;
           writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => fs.promises.writeFile(hm, mark))
             .catch((e) => log.warn(`[migrate] home rename: the projdirs marker could not be written (${e.message}) — another install over this HOME moves again (a merge, never an overwrite)`)));
         }
       }
       if (!dataDone) {
-        rewrote = rewriteStores(dataDir, metaDir, old, user, log);
-        fs.writeFileSync(dm, JSON.stringify({ at: Date.now(), rewrote }));
+        // B-8033 cure 3: the stores are rewritten ONLY for an old user the move JUDGED old — a folder of it judged an old project in
+        // place (this start, or the HOME marker's record of the start that moved). A name taken from a folder name alone (the
+        // person john.smith, no /home/john here) rewrites nothing: a paired machine's own /home/john/… path stays
+        // …and while the move is not marked and nothing was judged old yet (a transcript unreadable this start), the data half
+        // waits for a later start — it is never marked «kept» on a verdict still owed
+        const judgedOld = !homeDone ? judged : judgedOf(hm);
+        if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log);
+        else if (marked) log.log(`[migrate] home rename: no folder of /home/${old} was judged an old project — its recorded paths stay as they are`);
+        if (judgedOld > 0 || marked) fs.writeFileSync(dm, JSON.stringify({ at: Date.now(), rewrote, ...(judgedOld > 0 ? {} : { kept: true }) }));
       }
       log.log(`[migrate] home rename done: ${moved} projdirs, ${rewrote} stores rewritten (backups *.pre-home-migrate)`);
       out.push({ old, user, moved, rewrote, home: !homeDone, data: !dataDone, whole, ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}) });

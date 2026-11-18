@@ -10,7 +10,6 @@
 // .claude/projects layout lives only here.
 const fs = require('fs');
 const path = require('path');
-const { cwdToProjectDir } = require('../session-store');
 
 const projectsDirOf = (home) => path.join(home, '.claude', 'projects');
 
@@ -24,22 +23,29 @@ const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);
 const projDirOf = (cwd) => String(cwd || '').replace(/[^a-zA-Z0-9]/g, '-');
 const ownPrefixOf = (user) => projDirOf(path.posix.join('/home', String(user)));
 const underPrefix = (d, P) => d === P || d.startsWith(P + '-');
-const CWD_READ_MAX = 4 * 1024 * 1024;   // per transcript: far enough for any record that names its working folder
-const READ_ERR = Symbol('unreadable');
+const CWD_READ_MAX = 1024 * 1024;   // per transcript: far enough for any record that names its working folder
+// B-8033 cure 3: THE BOOT READS ARE BOUNDED AND DONE ONCE — a folder's transcripts share READ_BUDGET bytes; a folder whose
+// transcripts do not all speak within it is undecided (it stays, said), never a guess. Counted (readCounts) for the legs.
+const READ_BUDGET = 8 * 1024 * 1024;
+const reads = { opens: 0, bytes: 0, folders: 0 };
+const readCounts = () => ({ ...reads });
+const READ_ERR = Symbol('unreadable'), OVER = Symbol('over budget');
 /** The first record of a transcript that carries its OWN working folder (a top-level `cwd`) — a record without one never ends
  *  the search; null = none in the first CWD_READ_MAX bytes; READ_ERR = the transcript could not be read (EIO, ESTALE …). */
-function firstCwdOf(file) {
+function firstCwdOf(file, budget = { left: READ_BUDGET }) {
   const { StringDecoder } = require('string_decoder');
   const dec = new StringDecoder('utf8'), b = Buffer.alloc(65536);
   const cwdOfLine = (l) => { if (!l || !l.includes('"cwd"')) return null; try { const o = JSON.parse(l); return o && typeof o === 'object' && typeof o.cwd === 'string' && o.cwd ? o.cwd : null; } catch { return null; } };
   let fd = null;
   try {
     fd = fs.openSync(file, 'r');
+    reads.opens++;
     let pos = 0, rest = '';
     while (pos < CWD_READ_MAX) {
-      const n = fs.readSync(fd, b, 0, b.length, pos);
+      if (budget.left <= 0) return OVER;
+      const n = fs.readSync(fd, b, 0, Math.min(b.length, budget.left), pos);
       if (n <= 0) break;
-      pos += n;
+      pos += n; budget.left -= n; reads.bytes += n;
       const text = dec.write(b.subarray(0, n));
       let at = text.indexOf('\n');
       if (at < 0) { rest += text; continue; }   // a long line: carried, never re-split
@@ -51,22 +57,44 @@ function firstCwdOf(file) {
     return cwdOfLine(rest + dec.end());
   } catch { return READ_ERR; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
 }
-/** Whose is this `-home-<old>…` folder? Every transcript in it is asked: 'old' = each one that names a working folder names a
- *  /home/<old>(/…) one whose encoding IS the folder's name (an old project still in place — once moved, the name no longer
- *  matches: never moved twice); 'own' = each names another; null = none says, or they DISAGREE — the folder stays, said;
- *  'error' = a transcript could not be read — a failed move (tried again, bounded), never a verdict. */
+/** Whose is this `-home-<old>…` folder? Every transcript in it is asked, within the folder's READ_BUDGET: 'old' = each one that
+ *  names a working folder names a /home/<old>(/…) one whose encoding IS the folder's name (an old project still in place — once
+ *  moved, the name no longer matches: never moved twice); 'own' = each names a working folder outside /home/<old>; null = none
+ *  says, they DISAGREE, one names a folder under /home/<old> whose encoding is NOT this name (cure 3: undecided, said — never
+ *  silently «own»), or the budget ran out first — the folder stays, said; 'error' = a transcript could not be read — a failed
+ *  move (tried again, bounded), never a verdict.
+ *  Two working folders can encode to ONE name (/home/vibe/alice-notes and /home/vibe-alice/notes both → -home-vibe-alice-notes):
+ *  the folder moves only when EVERY transcript that names a working folder says «old project in place»; a transcript that names
+ *  none cannot veto — it is no evidence either way. */
 function ownerByCwd(dir, old) {
   let names = [];
   try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort(); } catch { return 'error'; }
-  const seen = new Set();
+  reads.folders++;
+  const seen = new Set(), budget = { left: READ_BUDGET };
   for (const f of names) {
-    const cwd = firstCwdOf(path.join(dir, f));
+    const cwd = firstCwdOf(path.join(dir, f), budget);
     if (cwd === READ_ERR) return 'error';
+    if (cwd === OVER) return null;
     if (cwd == null) continue;
-    seen.add((cwd === `/home/${old}` || cwd.startsWith(`/home/${old}/`)) && projDirOf(cwd) === path.basename(dir) ? 'old' : 'own');
+    const underOld = cwd === `/home/${old}` || cwd.startsWith(`/home/${old}/`);
+    seen.add(!underOld ? 'own' : projDirOf(cwd) === path.basename(dir) ? 'old' : '?');
   }
-  return seen.size === 1 ? [...seen][0] : null;
+  return seen.size === 1 && !seen.has('?') ? [...seen][0] : null;
 }
+/** B-8033 cure 3: ONE verdict per candidate folder per boot — the move and the count of what is left read THIS map, never a
+ *  transcript twice. A link (the symlinked-home deploy) is no candidate: lstat first, nothing is ever read through it. */
+function ownersOf(home, old) {
+  const projectsDir = projectsDirOf(home), out = new Map();
+  let names = []; try { names = fs.readdirSync(projectsDir); } catch { return out; }
+  for (const d of names) {
+    if (!oldFolderOf(d, old)) continue;
+    let st = null; try { st = fs.lstatSync(path.join(projectsDir, d)); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    out.set(d, ownerByCwd(path.join(projectsDir, d), old));
+  }
+  return out;
+}
+const ctxOwners = (ctx, home, old) => (ctx && ctx.owners) || (ctx ? (ctx.owners = ownersOf(home, old)) : ownersOf(home, old));
 /** The folders a move of <old> asks about: its bare home folder `-home-<old>` (conversations started in ~) and `-home-<old>-…`;
  *  the new name of one: the bare one → the new bare folder, any other → under it. */
 const oldFolderOf = (d, old) => d === `-home-${old}` || d.startsWith(`-home-${old}-`);
@@ -85,13 +113,12 @@ function staleUsers(home, user, { homeGone = homeGoneOnDisk } = {}) {
 
 /** Re-encode -home-<old>-* → -home-<user>-* (merge, never overwrite: both sides
  *  may hold transcripts). Returns the number of projdirs moved. */
-function moveUser(home, old, user) {
+function moveUser(home, old, user, ctx = null) {
   const projectsDir = projectsDirOf(home);
   let moved = 0;
-  const P = ownPrefixOf(user);
+  const P = ownPrefixOf(user), owners = ctxOwners(ctx, home, old);
   for (const d of fs.readdirSync(projectsDir)) {
-    if (!oldFolderOf(d, old)) continue;
-    if (ownerByCwd(path.join(projectsDir, d), old) !== 'old') continue;   // B-8033 cure 2: only an old project still in place moves — the person's own, an undecided one and an unreadable one stay
+    if (owners.get(d) !== 'old') continue;   // B-8033 cure 2/3: only an old project still in place moves (this boot's one verdict) — the person's own, an undecided one and an unreadable one stay
     const nd = newNameOf(d, old, P);
     const src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
     try {
@@ -112,16 +139,14 @@ function moveUser(home, old, user) {
  *  one lacks (or whose new one is no folder) is a FAILED move (EACCES / EXDEV, logged by moveUser) — tried again; one whose
  *  every file the new one has too is a same-name leftover (never overwritten — moveUser's merge rule) — kept and said. The
  *  symlinked-home deploy's links (relinkLegacy) are no leftovers. */
-function leftAfterMove(home, old, user) {
+function leftAfterMove(home, old, user, ctx = null) {
   const projectsDir = projectsDirOf(home);
   let failed = 0, sameName = 0, undecided = 0, names = [];
-  try { names = fs.readdirSync(projectsDir); } catch { return { failed, sameName, undecided }; }
-  const P = ownPrefixOf(user);
+  try { names = fs.readdirSync(projectsDir); } catch { return { failed, sameName, undecided, judged: 0 }; }
+  const P = ownPrefixOf(user), owners = ctxOwners(ctx, home, old);
   for (const d of names) {
-    if (!oldFolderOf(d, old)) continue;
-    let st0 = null; try { st0 = fs.lstatSync(path.join(projectsDir, d)); } catch { continue; }
-    if (!st0.isDirectory()) continue;   // the symlinked-home deploy's links are no leftovers
-    const who = ownerByCwd(path.join(projectsDir, d), old);   // B-8033 cure 2: own ⇒ never moved; undecided ⇒ stays, said; unreadable ⇒ failed (tried again)
+    if (!owners.has(d)) continue;   // B-8033 cure 3: not a candidate of this boot's first pass (a destination, a link) — never read
+    const who = owners.get(d);   // own ⇒ never moved; undecided ⇒ stays, said; unreadable ⇒ failed (tried again)
     if (who === 'error') { failed++; continue; }
     if (who === null) { undecided++; continue; }
     if (who !== 'old') continue;
@@ -132,7 +157,7 @@ function leftAfterMove(home, old, user) {
     let dstDir = false; try { dstDir = fs.statSync(dst).isDirectory(); } catch { dstDir = false; }
     if (!dstDir || files.some((f) => !fs.existsSync(path.join(dst, f)))) failed++; else sameName++;
   }
-  return { failed, sameName, undecided };
+  return { failed, sameName, undecided, judged: [...owners.values()].filter((v) => v === 'old').length };
 }
 
 /** The symlinked-home deploy (2.236.1): rename each -home-<old>-* dir to the
@@ -141,16 +166,18 @@ function leftAfterMove(home, old, user) {
  *  collisions skipped with a log. */
 function relinkLegacy(home, old) {
   const projectsDir = projectsDirOf(home);
-  const newPrefix = cwdToProjectDir(home); // e.g. -home-userW
+  const newPrefix = projDirOf(home); // e.g. -home-userW — B-8033 cure 3: the same encoder as everything else
   const oldPrefix = `-home-${old}-`;
   let names; try { names = fs.readdirSync(projectsDir); } catch { return; }
   let n = 0;
   for (const d of names) {
     if (!d.startsWith(oldPrefix)) continue;
     const full = path.join(projectsDir, d);
-    if (underPrefix(d, newPrefix) && ownerByCwd(full, old) !== 'old') continue;   // B-8033 cure 2: the new name's own folders, the bare one included (a deeper -x-x-… each boot, ELOOP)
     let ds; try { ds = fs.lstatSync(full); } catch { continue; }
-    if (!ds.isDirectory()) continue; // already a symlink from a prior run
+    if (!ds.isDirectory()) continue; // already a symlink from a prior run — lstat FIRST: nothing is read through a link
+    // B-8033 cure 3: a folder under the new name (the person's own, the bare one, or one whose name cannot say) is never renamed
+    // here and never read — under this deploy /home/<old> resolves to the new home, so an old project's own name keeps working
+    if (underPrefix(d, newPrefix)) continue;
     const target = newPrefix + '-' + d.slice(oldPrefix.length);
     const targetFull = path.join(projectsDir, target);
     if (fs.existsSync(targetFull)) { console.warn(`[migrate] projects collision, left in place: ${d}`); continue; }
@@ -163,4 +190,4 @@ function relinkLegacy(home, old) {
   if (n) console.log(`[migrate] personalized-username: re-encoded ${n} claude project dir(s) ${oldPrefix}* -> ${newPrefix}-* (old names symlinked)`);
 }
 
-module.exports = { staleUsers, moveUser, relinkLegacy, leftAfterMove };
+module.exports = { staleUsers, moveUser, relinkLegacy, leftAfterMove, ownersOf, readCounts };

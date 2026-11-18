@@ -3296,7 +3296,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const base = path.join(tmp, 'b8033');
     const mkHome = (n, dirs) => { const h = path.join(base, n, 'home', 'userN'); for (const d of dirs) { fs.mkdirSync(path.join(h, '.claude', 'projects', d), { recursive: true }); fs.writeFileSync(path.join(h, '.claude', 'projects', d, 's1.jsonl'), JSON.stringify({ type: 'user', cwd: d === '-home-olduser' ? '/home/olduser' : '/home/olduser/' + d.slice('-home-olduser-'.length) }) + '\n'); } fs.mkdirSync(h, { recursive: true }); return h; };   // B-8033 cure 2: each folder's transcript names its working folder
     const mkData = (n) => { const d = path.join(base, n, 'data'); fs.mkdirSync(path.join(d, 'session-meta'), { recursive: true }); fs.writeFileSync(path.join(d, 'mounts.json'), JSON.stringify({ m: [{ path: '/home/olduser/proj' }] })); return d; };
-    const hook = () => { const calls = []; return { calls, staleUsers: CH.staleUsers, leftAfterMove: CH.leftAfterMove, moveUser: (h, old, user) => { calls.push([old, user]); return CH.moveUser(h, old, user); } }; };
+    const hook = () => { const calls = []; return { calls, staleUsers: CH.staleUsers, leftAfterMove: CH.leftAfterMove, moveUser: (h, old, user, ctx) => { calls.push([old, user]); return CH.moveUser(h, old, user, ctx); } }; };
     const GONE = () => true;   // B-8033 cure (3): every old home is gone HERE — the leg asks no /home/<name> of the machine running it
     const quiet = { log() { }, warn() { } };
     const run = async (Mod, dataDir, home, hk, homeGone = GONE, said = null) => { const r = Mod.migrateHomeRename({ dataDir, metaDir: path.join(dataDir, 'session-meta'), home, hooks: [hk], log: said ? { log() { }, warn: (l) => said.push(String(l)) } : quiet, homeGone }); await r.written; return r; };
@@ -3380,6 +3380,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         '-home-olduser-x-zz': { 's1.jsonl': [line({ type: 'summary', summary: 'no working folder anywhere' })] },   // no record says: stays, said
         '-home-olduser-x-mix': { 'a.jsonl': [line({ cwd: '/home/olduser/x-mix' })], 'b.jsonl': [line({ cwd: `/home/${user}/mix` })] },   // they DISAGREE: stays, said
         '-home-olduser-doe-repo': { 's1.jsonl': [line({ type: 'user', cwd: '/home/olduser.doe/repo' })] },          // a colleague's /home/olduser.doe — never «old» on its name alone
+        '-home-olduser-x-sub': { 's1.jsonl': [line({ type: 'user', cwd: '/home/olduser/x-sub/deeper' })] },         // cure 3: under the old home but NOT this name's encoding — undecided, said (never silently «own»)
       };
       for (const [d, files] of Object.entries(tx)) { fs.mkdirSync(path.join(P, d), { recursive: true }); for (const [f, lines] of Object.entries(files)) fs.writeFileSync(path.join(P, d, f), lines.join('\n') + '\n'); }
       const hk = { staleUsers: CHm.staleUsers, leftAfterMove: CHm.leftAfterMove, moveUser: CHm.moveUser };
@@ -3389,31 +3390,33 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       await run(Mod, mkData(`p-${tag}/b`), h, hk);
       return { p1, m1, p2: projOf(h), said };
     };
-    const WANT = '-home-olduser-doe-repo,-home-olduser-x,-home-olduser-x-mix,-home-olduser-x-p,-home-olduser-x-q,-home-olduser-x-x-notes,-home-olduser-x-zz';
+    const WANT = '-home-olduser-doe-repo,-home-olduser-x,-home-olduser-x-mix,-home-olduser-x-p,-home-olduser-x-q,-home-olduser-x-sub,-home-olduser-x-x-notes,-home-olduser-x-zz';
     const PS = await prefixScene(CH, 'real');
-    ok(PS.p1 === WANT && PS.m1 && PS.p2 === PS.p1 && PS.said.some((l) => /^\[migrate\] home rename: 2 project folder\(s\) of \/home\/olduser could not be told apart/.test(l)),
+    ok(PS.p1 === WANT && PS.m1 && PS.p2 === PS.p1 && PS.said.some((l) => /^\[migrate\] home rename: 3 project folder\(s\) of \/home\/olduser could not be told apart/.test(l)),
       'B-8033 cure 2: olduser → olduser-x moves the old projects ONCE (x-notes too — its transcripts read past records with no working folder, across a chunk) and nothing else: the person\'s own (-x, the BARE home folder; -x-q) and a colleague\'s /home/olduser.doe stay; -x-zz (none says) and -x-mix (they disagree) stay, said; marked; the next start renames nothing', PS);
     for (const [nm, u] of [['dotted', 'olduser.x'], ['underscored', 'olduser_x']]) {
       const D = await prefixScene(CH, nm, u);
       ok(D.p1 === WANT && D.m1 && D.p2 === D.p1, `B-8033 cure 2: a ${nm} new name (${u} — claude encodes it -home-olduser-x) keeps the person's own folders where resume looks; the old ones land there too`, D);
     }
     const MUT = (from, to, tag, user) => { ok(CHSRC.split(from).length === 2, `ANCHOR (${tag}): spelled once`, from.slice(0, 80)); return prefixScene(MH.load('src/harnesses/claude-home.js', CHSRC.split(from).join(to), tag), tag, user); };
-    const N1 = await MUT("    if (ownerByCwd(path.join(projectsDir, d), old) !== 'old') continue;", "    if (ownerByCwd(path.join(projectsDir, d), old) === 'own') continue;", 'm-move-unless-own');
+    const N1 = await MUT("    if (owners.get(d) !== 'old') continue;", "    if (owners.get(d) === 'own') continue;", 'm-move-unless-own');
     ok(N1.p1 !== WANT && !N1.p1.split(',').includes('-home-olduser-x-zz'), 'MUTANT RED: a folder moved unless it is surely the person\'s own ⇒ the undecided ones are moved on a guess', N1);
     const N2 = await MUT("const ownPrefixOf = (user) => projDirOf(path.posix.join('/home', String(user)));", 'const ownPrefixOf = (user) => `-home-${user}`;', 'm-raw', 'olduser.x');
     ok(N2.p1 !== WANT, 'MUTANT RED: the raw user name as the new prefix ⇒ a dotted name\'s old projects land where claude never looks', N2);
     const N3 = await MUT('      let c = cwdOfLine(rest + text.slice(0, at));\n      if (c != null) return c;', '      return cwdOfLine(rest + text.slice(0, at));', 'm-first-record');
     ok(N3.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: the first record decides ⇒ the old project whose transcript opens with a summary stays under its old name for good', N3);
-    const N4 = await MUT("? 'old' : 'own');", "? 'own' : 'own');", 'm-never-old');
+    const N4 = await MUT("projDirOf(cwd) === path.basename(dir) ? 'old' : '?');", "projDirOf(cwd) === path.basename(dir) ? '?' : '?');", 'm-never-old');
     ok(N4.p1.split(',').includes('-home-olduser-p'), 'MUTANT RED: nothing ever «old» ⇒ the old projects are stranded', N4);
-    const N5 = await MUT('  return seen.size === 1 ? [...seen][0] : null;', '  return seen.size ? [...seen][0] : null;', 'm-first-transcript');
+    const N5 = await MUT("  return seen.size === 1 && !seen.has('?') ? [...seen][0] : null;", '  return seen.size ? [...seen][0] : null;', 'm-first-transcript');
     ok(N5.p1.split(',').includes('-home-olduser-x-x-mix'), 'MUTANT RED: the first transcript decides ⇒ a folder whose transcripts disagree is moved (a conversation started in ~ goes with it)', N5);
-    const N6 = await MUT('    if (cwd == null) continue;\n    seen.add(', '    if (cwd == null) return null;\n    seen.add(', 'm-stop-at-silent');
+    const N6 = await MUT('    if (cwd == null) continue;\n    const underOld', '    if (cwd == null) return null;\n    const underOld', 'm-stop-at-silent');
     ok(N6.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: a transcript naming no working folder ends the search ⇒ x-notes stranded', N6);
-    const N7 = await MUT('const CWD_READ_MAX = 4 * 1024 * 1024;', 'const CWD_READ_MAX = 1;', 'm-short-read');
+    const N7 = await MUT('const CWD_READ_MAX = 1024 * 1024;', 'const CWD_READ_MAX = 1;', 'm-short-read');
     ok(N7.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: a read that stops at the first chunk ⇒ the working folder past it is never seen', N7);
     const N8 = await MUT("      rest = text.slice(text.lastIndexOf('\\n') + 1);", "      rest = '';", 'm-no-carry');
     ok(N8.p1.split(',').includes('-home-olduser-x-notes'), 'MUTANT RED: a line split across chunks not carried ⇒ the straddling working folder is lost', N8);
+    const N9 = await MUT("projDirOf(cwd) === path.basename(dir) ? 'old' : '?');", "projDirOf(cwd) === path.basename(dir) ? 'old' : 'own');", 'm-mismatch-own');   // stale-pins: kept — a deliberate mutant restoring cure 2's silent «own»
+    ok(N9.p1 === WANT && !N9.said.some((l) => /^\[migrate\] home rename: 3 project folder\(s\)/.test(l)), 'MUTANT RED (cure 3): a working folder under the old home that is not the name\'s encoding taken as «own» ⇒ the folder stays SILENTLY (not counted, not said)', N9.said);
     // the OLD user's BARE home folder (conversations started in ~): it names the old user and moves to the new bare folder
     const bareScene = async (CHm, tag) => {
       const hk = { staleUsers: CHm.staleUsers, leftAfterMove: CHm.leftAfterMove, moveUser: CHm.moveUser }, home = mkHome(`bare-${tag}`, ['-home-olduser']);
@@ -3428,7 +3431,77 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(MB.projs === '-home-olduser', 'MUTANT RED: the bare folder unread ⇒ the old user is never found from it; its conversations stay where resume no longer looks', MB);
     // relinkLegacy (the symlinked-home deploy) follows the same law — pinned, not driven: its new prefix is the encoding of the
     // WHOLE home path, and a scratch home never encodes to -home-<name>
-    ok(CHSRC.includes("    if (underPrefix(d, newPrefix) && ownerByCwd(full, old) !== 'old') continue;"), 'B-8033 cure 2: relinkLegacy skips the new name\'s own folders (the bare one included) by the same law');
+    ok(CHSRC.includes('  const newPrefix = projDirOf(home);') && CHSRC.includes('    if (underPrefix(d, newPrefix)) continue;'), 'B-8033 cure 3: relinkLegacy uses the same encoder and never renames a folder under the new name (the bare one included)');
+    // cure 3: THE RELINK READS NO TRANSCRIPT — lstat FIRST, a link is skipped before anything is opened; it runs at EVERY boot of
+    // a symlink deploy, so a read here would be paid at every start
+    const relinkReads = (CHm, tag) => {
+      const rh = path.join(base, `rl-${tag}`, 'home', 'userN'), RP = path.join(rh, '.claude', 'projects'), TG = path.join(base, `rl-${tag}`, 'target');
+      fs.mkdirSync(TG, { recursive: true }); fs.writeFileSync(path.join(TG, 's1.jsonl'), JSON.stringify({ cwd: '/home/olduser/l' }) + '\n');
+      fs.mkdirSync(path.join(RP, '-home-olduser-d'), { recursive: true }); fs.writeFileSync(path.join(RP, '-home-olduser-d', 's1.jsonl'), JSON.stringify({ cwd: '/home/olduser/d' }) + '\n');
+      fs.symlinkSync(TG, path.join(RP, '-home-olduser-l'));
+      const r0 = CHm.readCounts().opens, quietLog = console.log; console.log = () => { };
+      try { CHm.relinkLegacy(rh, 'olduser'); CHm.relinkLegacy(rh, 'olduser'); } finally { console.log = quietLog; }
+      return CHm.readCounts().opens - r0;
+    };
+    ok(relinkReads(CH, 'real') === 0, 'B-8033 cure 3: two relinks over a link and a folder open NO transcript (lstat first)');
+    const LST = '    let ds; try { ds = fs.lstatSync(full); } catch { continue; }';
+    ok(CHSRC.split(LST).length === 2, 'ANCHOR: the relink\'s lstat, spelled once');
+    ok(relinkReads(MH.load('src/harnesses/claude-home.js', CHSRC.replace(LST, '    ownerByCwd(full, old);\n' + LST), 'relink-reads'), 'm9') > 0, 'MUTANT RED: a relink that asks a transcript before its lstat ⇒ reads through the link, at every boot');
+    // cure 3 (A): ONE VERDICT PER FOLDER PER BOOT — the move and the count of what is left share it; counted on a fixture of N folders
+    const countScene = async (CHm, tag, k = 5) => {
+      const h = path.join(base, `n-${tag}`, 'home', 'olduser-x'), P = path.join(h, '.claude', 'projects');
+      for (let i = 1; i <= k; i++) for (const [d, cwd] of [[`-home-olduser-p${i}`, `/home/olduser/p${i}`], [`-home-olduser-x-q${i}`, `/home/olduser-x/q${i}`]]) {
+        fs.mkdirSync(path.join(P, d), { recursive: true });
+        for (const f of ['a.jsonl', 'b.jsonl']) fs.writeFileSync(path.join(P, d, f), JSON.stringify({ type: 'user', cwd }) + '\n');
+      }
+      const before = CHm.readCounts();
+      await run(require('../' + HRS), mkData(`n-${tag}/a`), h, { staleUsers: CHm.staleUsers, leftAfterMove: CHm.leftAfterMove, moveUser: CHm.moveUser });
+      const after = CHm.readCounts();
+      return { folders: after.folders - before.folders, opens: after.opens - before.opens, n: 2 * k, transcripts: 4 * k, projs: projOf(h).split(',').length };
+    };
+    const NC = await countScene(CH, 'real');
+    console.log(`    B-8033 cure 3 — reads for a fixture of ${NC.n} candidate folders (${NC.transcripts} transcripts): ${NC.folders} folder verdicts, ${NC.opens} transcript opens`);
+    ok(NC.folders === NC.n && NC.opens === NC.transcripts, `B-8033 cure 3: ONE verdict per folder per boot — ${NC.n} folders, ${NC.transcripts} transcripts ⇒ ${NC.folders} verdicts and ${NC.opens} opens (each transcript once)`, NC);
+    const CTX = 'const ctxOwners = (ctx, home, old) => (ctx && ctx.owners) || (ctx ? (ctx.owners = ownersOf(home, old)) : ownersOf(home, old));';
+    ok(CHSRC.split(CTX).length === 2, 'ANCHOR: the shared verdicts, spelled once');
+    const NB = await countScene(MH.load('src/harnesses/claude-home.js', CHSRC.replace(CTX, 'const ctxOwners = (ctx, home, old) => ownersOf(home, old);'), 'two-passes'), 'm10');
+    console.log(`    …the two passes of cure 2 (the move, then the count of what is left, each reading): ${NB.folders} folder verdicts, ${NB.opens} transcript opens`);
+    ok(NB.opens > NC.opens && NB.folders > NC.folders, 'MUTANT RED: each pass reads for itself (cure 2) ⇒ the transcripts are read again by the count of what is left', NB);
+    // cure 3 (B): THE STORES ARE REWRITTEN ONLY FOR A USER THE MOVE JUDGED OLD — the person olduser.x, no /home/olduser here: its own
+    // folders name «olduser» by their name alone; a paired machine's /home/olduser/proj in mounts.json is NOT rewritten
+    const judgedScene = async (Mod, tag) => {
+      const h = path.join(base, `j-${tag}`, 'home', 'olduser.x'), P = path.join(h, '.claude', 'projects');
+      for (const [d, cwd] of [['-home-olduser-x', '/home/olduser.x'], ['-home-olduser-x-q', '/home/olduser.x/q']]) { fs.mkdirSync(path.join(P, d), { recursive: true }); fs.writeFileSync(path.join(P, d, 's1.jsonl'), JSON.stringify({ type: 'user', cwd }) + '\n'); }
+      const dA = mkData(`j-${tag}/a`), dB = mkData(`j-${tag}/b`);
+      await run(Mod, dA, h, hook()); await run(Mod, dB, h, hook());   // the first install, then a second one over the same HOME
+      return { a: mountOf(dA), b: mountOf(dB), marker: fs.existsSync(path.join(h, '.vibespace', '.home-migrated-olduser-to-olduser.x')) };
+    };
+    const JS = await judgedScene(require('../' + HRS), 'real');
+    ok(JS.a === '/home/olduser/proj' && JS.b === '/home/olduser/proj' && JS.marker, 'B-8033 cure 3: no folder judged «old» ⇒ NO rewrite — a paired machine\'s /home/olduser/proj stays, for the first install and a second one over the same HOME (the marker\'s judged count)', JS);
+    const JG = 'if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log);';
+    ok(SRC.split(JG).length === 2, 'ANCHOR: the judged gate, spelled once');
+    const JM = await judgedScene(MH.load(HRS, SRC.replace(JG, 'if (true) rewrote = rewriteStores(dataDir, metaDir, old, user, log);'), 'rewrite-ungated'), 'm11');
+    ok(JM.a === '/home/olduser.x/proj', 'MUTANT RED: the rewrite for an old user named by a folder name alone ⇒ the paired machine\'s path is rewritten', JM);
+    // cure 3 (C): A TRANSCRIPT THAT CANNOT BE READ is a FAILED move — not marked, tried again at the next start (a directory named
+    // *.jsonl: open succeeds, read fails EISDIR — on every machine, root included)
+    const unreadScene = async (CHm, tag) => {
+      const home = mkHome(`u-${tag}`, ['-home-olduser-r']), RD = path.join(home, '.claude', 'projects', '-home-olduser-r', 'z.jsonl');
+      fs.mkdirSync(RD);
+      const hk = { staleUsers: CHm.staleUsers, leftAfterMove: CHm.leftAfterMove, moveUser: CHm.moveUser }, d1 = mkData(`u-${tag}/a`), said = [];
+      await run(require('../' + HRS), d1, home, hk, GONE, said);
+      const m1 = fs.existsSync(path.join(home, '.vibespace', NAME)), p1 = projOf(home), mount1 = mountOf(d1);
+      fs.rmSync(RD, { recursive: true });
+      const r2 = Date.now() + 3600e3, rr = require('../' + HRS).migrateHomeRename({ dataDir: d1, metaDir: path.join(d1, 'session-meta'), home, hooks: [hk], log: quiet, homeGone: GONE, now: () => r2 });
+      await rr.written;
+      return { m1, p1, said, mount1, m2: fs.existsSync(path.join(home, '.vibespace', NAME)), p2: projOf(home), mount2: mountOf(d1) };
+    };
+    const US = await unreadScene(CH, 'real');
+    ok(!US.m1 && US.p1 === '-home-olduser-r' && US.said.some((l) => /could not be moved — no marker; tried again at the next start/.test(l)) && US.mount1 === '/home/olduser/proj' && US.m2 && US.p2 === '-home-userN-r' && US.mount2 === '/home/userN/proj',
+      'B-8033 cure 3: a transcript that cannot be read ⇒ a FAILED move — not marked, said, the stores NOT decided yet; once it reads, the next start moves the folder, marks, and rewrites the stores', US);
+    const RE = "    if (cwd === READ_ERR) return 'error';";
+    ok(CHSRC.split(RE).length === 2, 'ANCHOR: the unreadable verdict, spelled once');
+    const UM = await unreadScene(MH.load('src/harnesses/claude-home.js', CHSRC.replace(RE, '    if (cwd === READ_ERR) return null;'), 'unread-undecided'), 'm12');
+    ok(UM.m1 === true, 'MUTANT RED: an unreadable transcript taken as «undecided» ⇒ the move is marked whole at once — one NFS hiccup strands the old project for good', UM);
     // …and a folder that can NEVER move does not make the whole move run again at every start for ever: MOVE_TRIES starts (one a
     // TRY_GAP_MS — a restart loop spends one), then said once and marked
     const HOUR = 3600e3, T0 = Date.UTC(2026, 10, 18, 4, 0);
@@ -3448,6 +3521,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const TS = await triesScene(require('../' + HRS), 'real', HOUR);
     ok(!TS[0].marker && tried(TS[0]) && !TS[1].marker && tried(TS[1]) && TS[2].marker && gave(TS[2]) && TS[3].marker && !tried(TS[3]) && !gave(TS[3]),
       'B-8033 cure 2: a folder that can never move is tried at 3 starts an hour apart, then the move is MARKED and said once — the 4th start runs nothing', TS.map((o) => ({ marker: o.marker, said: o.said.length })));
+    const vsDir = path.join(base, 't-real', 'home', 'userN', '.vibespace');
+    ok(!fs.readdirSync(vsDir).some((f) => /\.tries(\.tmp)?$/.test(f)), 'B-8033 cure 3: the tries are written by temp and rename and REMOVED once the move is marked', fs.readdirSync(vsDir));
     const TL = await triesScene(require('../' + HRS), 'loop', 60e3);
     ok(TL.every((o) => !o.marker && tried(o)), 'B-8033 cure 2: a restart LOOP (4 starts a minute apart) spends one try — it never gives up in minutes', TL.map((o) => o.marker));
     const TRIES = 'const MOVE_TRIES = 3, TRY_GAP_MS = 10 * 60e3;';
