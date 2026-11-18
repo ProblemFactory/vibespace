@@ -393,7 +393,12 @@ const taskDeps = { taskIdsForKey: (bk) => { for (const [, x] of active) if (x &&
 const remoteKeys = () => new Set([...active.values()].filter((x) => x && x._browserKey && (x.hostId || x.host || x._browserVariant === 'H')).map((x) => x._browserKey));
 const mkKeeper = (extra = {}) => K.create({ ...taskDeps, dataDir: DATA, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => live, remoteKeys, runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: (bk) => facts[bk] || { turn: null, name: null }, ...extra });
 const med = MED.create({ log: { log() { }, warn() { } } });
-const k = mkKeeper({ mediator: med });
+// B-518e: THE LIVE SAMPLE FROZEN for this suite — the keeper reads a running browser's process tree on its tick (a 5 s timer: the
+// first sample at a browser's first tick, then every GUARD_SAMPLE_MS) and writes it twice into an agent's reads («live» on the
+// named profiles' records, «usage» on its own ephemeral rows). A tick landing between ④b's two reads made them differ in a packed
+// run (null in one, numbers in the other), whatever the user did — and ④b's own +60 s equals GUARD_SAMPLE_MS, a second window. No
+// leg here reads a sample; ④b asserts none was taken, so a keeper that stopped honouring the option reads red BY NAME
+const k = mkKeeper({ mediator: med, guardSampleMs: Number.MAX_SAFE_INTEGER });
 const be = BE.create({ dataDir: DATA, homeDir: HOME, serverNotice: null, telemetry: null, log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: XDG } });
 const tok = (c) => 'vsst_' + String(c).repeat(24);
 const mkSession = (id, bk, name, { rungD = false, host = null } = {}) => {
@@ -620,7 +625,11 @@ console.log('— ④b the user browsing a profile himself: every agent READ byte
   const during = { A: await reads(sA), B: await reads(sB) };
   const diff = [];
   for (const who of ['A', 'B']) before[who].forEach((x, i) => { if (x !== during[who][i]) { let c = 0; const y = during[who][i]; while (c < x.length && x[c] === y[c]) c++; diff.push({ who, route: GETS[i][1], without: x.slice(Math.max(0, c - 60), c + 120), with: y.slice(Math.max(0, c - 60), c + 160) }); } });
-  ok(!diff.length, `every agent READ (${GETS.length} GET routes × A admitted + B not) is BYTE-IDENTICAL with and without the user browsing — his presence, his driving / away and his press's instant are nobody's to read`, diff.slice(0, 4));
+  ok(!diff.length, `every agent READ (${GETS.length} GET routes × A admitted + B not) is BYTE-IDENTICAL with and without the user browsing — the user's presence, driving / away and press instant are nobody's to read`, diff.slice(0, 4));
+  // (B-518e) the freeze holds: no read before or during carries a process sample — a sample that lands is the keeper tick's, never
+  // the user's, and this suite takes none (the option above)
+  const sampled = ['A', 'B'].flatMap((who) => [...before[who], ...during[who]].filter((x) => /"(?:live|usage)":\{/.test(x)).map((x) => `${who} ${x.slice(0, 60)}`));
+  ok(!sampled.length, `the keeper's live sample is frozen for this suite (guardSampleMs at its largest): no read before or during carries one (${sampled.length})`, sampled.slice(0, 3));
   const w = [];
   for (const s of [sA, sB, sR]) for (const [m, p, body] of WALK(aEph && aEph.profileId, helperKey)) { const r = await j(m, p, body, as(s)); const t = JSON.stringify(r.json); if (HUMAN_RE.test(t)) { const i = t.search(HUMAN_RE); w.push({ who: s.name, m, p, hit: t.match(HUMAN_RE)[0], at: t.slice(Math.max(0, i - 300), i + 60) }); } }
   ok(!w.length, 'the WHOLE walk (every agent route, A / B / R) while he browses: no answer names his key, a human row, his holder or his recording switch', w.slice(0, 4));
