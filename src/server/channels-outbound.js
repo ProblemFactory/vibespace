@@ -136,6 +136,10 @@ function create(engineCtx) {
    *  chain stopped), each aligned with its stored file by position; a file the owner approved WITHOUT (`left-out`: the account
    *  carries none) is not the rest. → [{ n, name }] */
   const REST_NEVER = new Set(['left-out', 'too-large']);   // r3: a refused scope or permission can land once granted — only an account that carries no file, or a file over its limit, is no rest
+  /** the shoulds (主开发 11:18Z): the rest that HOLDS a proposal's «once» — none when the stamped rest is gone or still 'proposed'. A
+   *  rest leaves 'proposed' in the write after its create; every press runs inside onProposal, so no press of this process sits between
+   *  those two writes: a 'proposed' rest seen here is one a stop left (it never left, it never sends) → its id | null */
+  function restHeldBy(p) { if (!p || !p.restSentAs) return null; const r = store.outbox.snapshot().proposals[p.restSentAs]; return r && r.state !== 'proposed' ? r.id : null; }
   function restOf(p) {
     if (!p || p.state !== 'sent' || p.kind) return [];
     const parts = (p.result && Array.isArray(p.result.parts) ? p.result.parts : []).filter((x) => x && x.part === 'attachment');
@@ -168,7 +172,7 @@ function create(engineCtx) {
     return {
       ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
       ...(also ? { also } : {}),   // lane bl-msg B-9b9c: the other replies to this message, resolved now
-      ...(!p.restSentAs && !p.attachmentsGoneAt && restOf(p).length ? { restLeft: restOf(p).length } : {}),   // lane bl-msg B-da74: «Send the rest» is offered
+      ...(!restHeldBy(p) && !p.attachmentsGoneAt && restOf(p).length ? { restLeft: restOf(p).length } : {}),   // lane bl-msg B-da74: «Send the rest» is offered
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
       convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
       // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
@@ -730,6 +734,7 @@ function create(engineCtx) {
       });
       OF.commit(store.dir, staged, created.id);
       staged = null;
+      if (guards && guards.restOf) notifyOutbox([guards.restOf, created.id]);   // the shoulds: every open page stops offering the rest NOW, not after the upload
       auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons });
       await markCollect(created.id, guards, decision);   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
       if (decision.mode === 'direct') {
@@ -741,7 +746,7 @@ function create(engineCtx) {
       OF.discard(staged);
       wakeRefundIfUnsent(gate, guards, convId, created && created.id, { threw: true });
       // the cure: a rest that threw before it was sending frees its original (one that reached `sending` may have landed — it holds)
-      if (created && guards && guards.restOf) await store.outbox.update((ob) => { const q = ob.proposals[created.id], q0 = ob.proposals[guards.restOf]; if (q && q.state === 'proposed' && q0 && q0.restSentAs === created.id) delete q0.restSentAs; }).catch(() => {});
+      if (created && guards && guards.restOf) await store.outbox.update((ob) => { const q = ob.proposals[created.id], q0 = ob.proposals[guards.restOf]; if (q && q.state === 'proposed' && q0 && q0.restSentAs === created.id) delete q0.restSentAs; }).catch((e2) => log.warn(`[channels] ${guards.restOf}: its «Send the rest» stamp could not be freed after the rest threw (${(e2 && e2.message) || e2}) — a press answers rest-already until its rest ends`));
       throw err;
     }
     if (decision.mode !== 'direct') {
@@ -1318,7 +1323,7 @@ function create(engineCtx) {
     if (!p || (agent && !(p.draftedBy && p.draftedBy.kind === 'agent' && p.draftedBy.id === ctx.id))) return { ok: false, code: 'not-found', error: 'no such proposal of yours' };
     if (agent && !stillSees(ctx, p.adapterId, scopeConvOf(p))) return ACL.notFound();   // r2: reach first, before any answer about it
     if (p.state !== 'sent') return { ok: false, code: 'rest-not-sent', error: `proposal ${p.id} is ${p.state} — only a sent one has a rest to send`, state: p.state };
-    if (p.restSentAs) return { ok: false, code: 'rest-already', error: `the rest of ${p.id} is on its way already — proposal ${p.restSentAs}`, proposalId: p.restSentAs };
+    if (restHeldBy(p)) return { ok: false, code: 'rest-already', error: `the rest of ${p.id} is on its way already — proposal ${p.restSentAs}`, proposalId: p.restSentAs };   // the shoulds: a stamp a stop left on a 'proposed' rest is no «once»
     const rest = restOf(p);
     if (!rest.length) return { ok: false, code: 'rest-nothing-left', error: `nothing of proposal ${p.id} is left to send (it landed whole, or what did not land cannot be sent again)` };
     if (p.attachmentsGoneAt) return { ok: false, code: 'rest-files-gone', error: `the files of ${p.id} are no longer kept — attach them again in a new reply` };

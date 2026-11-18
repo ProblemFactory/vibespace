@@ -1221,7 +1221,7 @@ function create(engineCtx) {
       // the cure (主开发 09:24Z): the other order — the asker withdrew while this Allow wrote its watcher: the watch is taken back
       // (a live watch never stands on a request whose card says withdrawn, or denied in another window)
       const endedAs = ((store.index.table('watchRequests') || []).find((r) => r && r.id === requestId) || {}).status;
-      if (undo && endedAs !== 'approved') { try { const g2 = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] }; await setGrain(req0.adapterId, req0.grain, { watchers: [...g2.watchers.filter((x) => x && pkOf(x.principal) !== undo.pk), ...(undo.prev ? [undo.prev] : [])] }, { by }); } catch { } }
+      if (undo && endedAs !== 'approved') { try { const g2 = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] }; const u = await setGrain(req0.adapterId, req0.grain, { watchers: [...g2.watchers.filter((x) => x && pkOf(x.principal) !== undo.pk), ...(undo.prev ? [undo.prev] : [])] }, { by }); if (!u || !u.ok) throw new Error((u && (u.error || u.code)) || 'refused'); } catch (e) { log.warn(`[channels] ${requestId}: the Allow's watch could not be taken back after the request ended ${endedAs} (${(e && e.message) || e}) — a live watch may stand on it`); } }   // the shoulds: a take-back that fails is said
       return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)', ...(endedAs ? { state: endedAs } : {}) };
     }
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}

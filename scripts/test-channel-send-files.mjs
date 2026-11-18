@@ -317,6 +317,18 @@ async function restJudge(ENGm) {
     if (!(again && again.ok === false && again.code === 'rest-already')) out.push(`a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 120)})`);
     const whole = q1 ? await eng.resendRest(q1.id, { ctx: { kind: 'user' } }) : null;
     if (!(whole && whole.ok === false && whole.code === 'rest-nothing-left')) out.push(`a proposal that landed whole offered a rest (${JSON.stringify(whole).slice(0, 120)})`);
+    // the shoulds (主开发 11:18Z): a rest a STOP left in 'proposed' (its create landed, its first move never did) holds no «once» — the
+    // card offers the rest again and the press sends it (the stale record never sends: 'proposed' leaves only by the policy's move)
+    refuse = true;
+    const pr2 = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the second report', attachments: att(), direct: true });
+    const id2 = pr2.ok ? pr2.proposal.id : null, sid = 'p-stale-rest';
+    if (id2) await eng.store.outbox.update((ob) => { const q = ob.proposals[id2]; const st = JSON.parse(JSON.stringify(q)); delete st.restSentAs; delete st.alsoFor; ob.proposals[sid] = { ...st, id: sid, state: 'proposed', restOf: id2, result: null, reason: null, receipt: null, text: '', attachments: [q.attachments[1]], history: [{ state: 'proposed', at: T0, by: 'user' }] }; q.restSentAs = sid; });
+    const v2 = id2 ? (eng.outboxView().proposals || []).find((x) => x.id === id2) || {} : {};
+    refuse = false;
+    const r2 = id2 ? await eng.resendRest(id2, { ctx: { kind: 'user' } }) : null;
+    const q2 = r2 && r2.ok && r2.proposal ? eng.store.outbox.snapshot().proposals[r2.proposal.id] : null;
+    if (!(id2 && v2.restLeft === 1)) out.push(`a stamp a stop left on a 'proposed' rest still hides «Send the rest» (restLeft ${v2.restLeft})`);
+    if (!(q2 && q2.state === 'sent' && q2.restOf === id2 && eng.store.outbox.snapshot().proposals[id2].restSentAs === q2.id)) out.push(`after a stop left the rest 'proposed', the press did not send it (${JSON.stringify(r2).slice(0, 140)})`);
   } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
   return out;
 }
@@ -412,7 +424,11 @@ console.log('⑨ the owner\'s own send (POST …/send) carries files through the
 // lane bl-msg B-da74 («Send the rest»): a SENT proposal whose second file was refused sends ONLY that file again, as a new message —
 // once, from the owner's door; another agent cannot ask; a whole one has no rest; RED CONTROL = the rest never found
 const rest = await restJudge(ENG);
-ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused) is offered the rest, the owner's press sends ONLY b.pdf as one new message, the image is not uploaded again, the first card stops offering it, a second press and a whole one are refused by name${rest.length ? ' — ' + rest.join(' · ') : ''}`);
+ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused) is offered the rest, the owner's press sends ONLY b.pdf as one new message, the image is not uploaded again, the first card stops offering it, a second press and a whole one are refused by name, a rest a stop left 'proposed' holds no «once»${rest.length ? ' — ' + rest.join(' · ') : ''}`);
+// the shoulds: RED CONTROL — the door's «once» read off the bare stamp again (a stop's 'proposed' rest holds it for good)
+{ const STALE = "if (restHeldBy(p)) return { ok: false, code: 'rest-already',";
+  const staleRed = await mutantEngine(STALE, "if (p.restSentAs) return { ok: false, code: 'rest-already',", restJudge, 'rest-stale-holds');   // stale-pins: kept (the OLD door line is the mutant compiled back in, never an anchor)
+  ok(Array.isArray(staleRed) && staleRed.some((x) => /a stop left the rest 'proposed'/.test(x)), `RED CONTROL (the bare stamp holds): after a stop left the rest 'proposed', the press is refused — the leg goes red (${staleRed ? staleRed.join(' · ').slice(0, 200) : 'the control missed its line'})`); }
 const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && !x.lost && !REST_NEVER.has(x.code)", "parts.forEach((x, k) => { if (false && !x.ok && !x.lost && !REST_NEVER.has(x.code)", restJudge, 'no-rest');
 ok(Array.isArray(restRed) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
 const restart = await restRestartJudge(ENG);
