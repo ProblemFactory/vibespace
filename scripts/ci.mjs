@@ -1491,7 +1491,7 @@ const FIXTURE_ACTS = /(worktree|mkdirSync|mkdtempSync|rmSync|rmdirSync|unlinkSyn
 // same sources many times over. Exact: without a `/` no comment can start on the line, string state resets per line, and the
 // loop below copies every other character verbatim — only the block-comment state crosses lines, and it is honoured.
 const STRIPPED = new Map();
-function stripComments(src) {
+export function stripComments(src) {
   const hit = STRIPPED.get(src);
   if (hit !== undefined) return hit;
   const out = stripCommentsOf(src);
@@ -3652,6 +3652,67 @@ export function fastTimingReport(timings, { top = 10, maxMs = FAST_MAX_MS } = {}
   for (const t of sorted.filter((x) => x.ms > maxMs)) lines.push(`[ci] WARNING: ${t.name} took ${(t.ms / 1000).toFixed(1)} s — over THE TIER RULE's ${maxMs / 1000} s for a fast suite (make it fast or move it to the heavy tier; this line does not fail the run)`);
   return lines;
 }
+// MEASURED AGAINST STATED (B-eedd, lane bl-ci 2026-11-17). fastRuleFindings judges a row by its STATED time, so a row that
+// grew never met the 10 s rule and the sum cap understated the gate (test-browser-login stated 1.0 s and read ~111 s;
+// test-stash-strip stated 6.5 s and read 16.3 s). Every WHOLE fast tier run IN PLACE that ends green writes its per-suite readings
+// into the checkout's GIT DIR (`ci-fast-times.json` beside `ci-green`: per worktree, never in the tree — a scratch repository
+// without a .gitignore stays clean; the newest FAST_TIMES_KEEP tiers, newest first, each with its host and the load it started
+// and ended at). An --isolate run (the table is the checkout's, the suites the gated sha's), a part, the Actions runner and a
+// remote run write and judge nothing. The two newest tiers OF THIS HOST are judged by the rule written above the table (the
+// coordinator's ruling, 2026-11-15): a row READ ≥ FAST_MAX_MS at ≥ FALSE_ROW_RATIO × its statement in BOTH is a FALSE ROW. The
+// push gate SAYS each one (a WARNING — THE VERDICT MAY NOT DEPEND ON LOAD, written below: a busy box reads every row slower);
+// the red is `node scripts/ci.mjs --false-rows`, exit 1 naming them — the integrator's step on a train's whole tiers. One tier
+// never judges, nor does the box's ×1.3 thermal reading; the EXCEPTION is never judged. A false row is measured ALONE on the
+// test machine and restated in the box's scale through untouched reference rows (the ruling of 2026-11-17 23:39Z), with its
+// `over:` if it stays ≥ 10 s, or moved heavy.
+export const FALSE_ROW_RATIO = 1.5;
+export const FAST_TIMES_KEEP = 4;
+/** The readings' record of the checkout at `root`: <its git dir>/ci-fast-times.json (null when git cannot name the dir). */
+export const fastTimesPath = (root = repo) => { const gd = gitIn(root, ['rev-parse', '--absolute-git-dir']); return gd ? path.join(gd, 'ci-fast-times.json') : null; };
+/** PURE: the record after one more whole tier `{ sha, at, host, ms: { name: ms } }` — newest first, at most `keep`, a malformed old tier dropped. */
+export function fastTimesRecord(prev, tier, { keep = FAST_TIMES_KEEP } = {}) {
+  const old = prev && Array.isArray(prev.tiers) ? prev.tiers.filter((t) => t && t.ms && typeof t.ms === 'object') : [];
+  return { v: 1, tiers: [tier, ...old].slice(0, keep) };
+}
+/** PURE: the FALSE ROWS of `rows` over the two newest tiers of `record` read on `host` (when one is given) — [{ name, statedMs, readMs: [newest, previous] }]. */
+export function falseFastRows(rows, record, { maxMs = FAST_MAX_MS, ratio = FALSE_ROW_RATIO, host = null } = {}) {
+  const all = record && Array.isArray(record.tiers) ? record.tiers : [];
+  const tiers = all.filter((t) => t && t.ms && typeof t.ms === 'object' && (host === null || t.host === host)).slice(0, 2);
+  if (tiers.length < 2) return [];
+  const out = [];
+  for (const s of rows) {
+    const f = fastRuleFindings(s, '');
+    if (f.kind === 'EXCEPTION' || f.measuredMs === null) continue;
+    const readMs = tiers.map((t) => t.ms[s.name]);
+    if (readMs.every((ms) => typeof ms === 'number' && ms >= maxMs && ms >= ratio * f.measuredMs)) out.push({ name: s.name, statedMs: f.measuredMs, readMs });
+  }
+  return out;
+}
+/** The words of one false row (the gate's warning and --false-rows say the same). */
+export const falseRowLine = (f) => `FALSE ROW: ${f.name} states ${(f.statedMs / 1000).toFixed(1)} s and read ${f.readMs.map((ms) => (ms / 1000).toFixed(1) + ' s').join(' / ')} in the two newest whole fast tiers (≥ ${FAST_MAX_MS / 1000} s at ≥ ×${FALSE_ROW_RATIO}) — measure it alone on the test machine and restate it in the box's scale (its over: if it stays ≥ ${FAST_MAX_MS / 1000} s), or move it heavy`;
+/** A whole in-place tier's readings into the record, then its false rows (none off this box: the Actions runner, a remote run). */
+export function judgeFastReadings(fast, timings, sha, { env = process.env, file = fastTimesPath(), load0 = null, host = os.hostname(), now = Date.now() } = {}) {
+  if (env.GITHUB_ACTIONS || env.VIBESPACE_CI_REMOTE_RUN || !file) return [];
+  let prev = null;
+  try { prev = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { }
+  const record = fastTimesRecord(prev, { sha, at: now, host, load0, load1: load1(), ms: Object.fromEntries(timings.map((t) => [t.name, t.ms])) });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(tmp, JSON.stringify(record) + '\n'); fs.renameSync(tmp, file); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch { } console.log(`[ci] fast readings not recorded (${e.message}) — nothing is judged`); return []; }
+  return falseFastRows(fast, record, { host });
+}
+/** `--false-rows`: the false rows of this checkout's record, read on this host — exit 1 naming them, 0 when none, 2 when nothing can be judged. */
+function falseRowsVerb() {
+  const file = fastTimesPath();
+  let rec = null;
+  try { rec = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { }
+  const host = os.hostname(), mine = rec && Array.isArray(rec.tiers) ? rec.tiers.filter((t) => t && t.host === host).length : 0;
+  if (mine < 2) { console.log(`[ci] --false-rows: ${mine} whole fast tier(s) of this host recorded in ${file || 'no git dir'} — two are needed; nothing judged`); return 2; }
+  const rows = falseFastRows(SUITES.filter((s) => s.tier === 'fast'), rec, { host });
+  for (const f of rows) console.log(`[ci] ${falseRowLine(f)}`);
+  console.log(rows.length ? `\n✗ ${rows.length} false fast row(s)` : '[ci] no false fast row in the two newest whole tiers of this host');
+  return rows.length ? 1 : 0;
+}
 
 /**
  * THE FAST TIER'S LANES — fastGate's loop, exported so test-ci-gate-tiers §8e drives it over planted suites (B-6e71).
@@ -3727,7 +3788,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
  * "ALL GREEN" can never again be a sentence about a tree nobody is publishing.
  */
 async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
-  const t0 = Date.now();
+  const t0 = Date.now(), l0 = load1();
   markCiRun('fast');
   const fast = SUITES.filter((s) => s.tier === 'fast');
   const sha = wantSha || gitOut(['rev-parse', 'HEAD']);
@@ -3796,6 +3857,10 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
     const sum = timings.reduce((n, t) => n + t.ms, 0);
     console.log(`[ci] lanes: ${lanes} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round(serMs / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     for (const line of fastTimingReport(timings)) console.log(line);
+    if (!absent.length && !isolate) { // a WHOLE in-place tier only (B-eedd): its readings recorded, its false rows SAID (the red is --false-rows)
+      const falseRows = judgeFastReadings(fast, timings, sha, { load0: l0 });
+      for (const f of falseRows) console.log(`[ci] WARNING: ${falseRowLine(f)} — not a red here (the verdict may not depend on load); \`node scripts/ci.mjs --false-rows\` is`);
+    }
     const ran = fast.length - absent.length - skippedByName.length;
     const subject = isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)';
     console.log(`\nALL GREEN — fast gate passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}`);
@@ -4612,13 +4677,14 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
   (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
   --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
   --heavy-verdict <sha> --gh-run <id> --markers=<dir>   the CI mirror's green run of exactly <sha>, verified through gh, as the HOSTED half's listed green (B-e381)
   --list-affected      the heavy suites a --range touches · --census · --hosts · --shard-timings <files…>
+  --false-rows         the fast rows read ≥ 10 s at ≥ ×1.5 their statement in this checkout's two newest whole tiers (exit 1 names them)
   --reap [--dry-run]   the scratch reaper
   ops: --markers=<dir> --head=<sha> --lock=<file> --lock-wait-ms=<n> --pid-file=<f> --serial-overlap=<n> --dirty-ok --allow-hub-full
   env: VS_NO_REAL_CLI=1 — the two rows that may talk to the vendor (test-chat-e2e's real turn, test-stdout-registry's wire leg)
@@ -4664,6 +4730,7 @@ function main(argv) {
   const overlapArg = str('serial-overlap');
   const serialOverlap = overlapArg === null ? null : Number(overlapArg);
   if (overlapArg !== null && !(Number.isInteger(serialOverlap) && serialOverlap >= 0)) { console.error(`✗ --serial-overlap wants an integer ≥ 0 (got '${overlapArg}')`); return exitFlushed(2); }
+  if (arg('false-rows')) return exitFlushed(falseRowsVerb()); // B-eedd: the false rows of this checkout's whole fast tiers
   if (arg('census')) return exitFlushed(census());
   if (arg('hosts')) return exitFlushed(hostsReport());
   if (arg('shard-timings') !== undefined) return exitFlushed(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));

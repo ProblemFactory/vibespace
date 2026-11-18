@@ -38,7 +38,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS, FALSE_ROW_RATIO, falseFastRows, fastTimesRecord, fastTimesPath, judgeFastReadings, falseRowLine, stripComments } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { callArgs } from './lib/check.mjs'; // B-1388: a helper's Nth argument (the swap census's argument scanner)
@@ -150,6 +150,52 @@ console.log('\n§2 tier hygiene');
   ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 12,
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
+  // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings
+  // (data/ci-fast-times.json) and a row READ ≥ 10 s at ≥ ×1.5 its statement in BOTH newest whole tiers is a false row (the
+  // coordinator's ruling, 2026-11-15) — the tier reds on it. One tier never judges, nor does the box's ×1.3 thermal reading.
+  { const R = (name, why, over) => ({ name, tier: 'fast', why, ...(over ? { over } : {}) }), rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
+    const rows = [R('grew', 'in-process · 6.6 s'), R('grew-b', 'in-process · 9.5 s'), R('thermal', 'in-process · 8 s'), R('under', 'PURE · 0.6 s'),
+      R('once', 'in-process · 6 s'), R('chat', 'EXCEPTION (x) · 10 s'), R('debt', 'in-process · 12.1 s', DEBT), R('debt-grew', 'in-process · 12.1 s', DEBT)];
+    const tier = (sha, ms) => ({ sha, at: 1, ms });
+    const t1 = tier('b', { grew: 12600, 'grew-b': 14900, thermal: 10400, under: 9900, chat: 40000, debt: 15000, 'debt-grew': 18200 });
+    const t2 = tier('a', { grew: 10000, 'grew-b': 14800, thermal: 10400, under: 10800, once: 20000, chat: 40000, debt: 15000, 'debt-grew': 18200 });
+    const rec = fastTimesRecord(fastTimesRecord(null, t2), t1);
+    const names = falseFastRows(rows, rec).map((f) => f.name).join();
+    ok(names === 'grew,grew-b,debt-grew', `a row read ≥ 10 s at ≥ ×${FALSE_ROW_RATIO} its statement in both newest whole tiers is a FALSE ROW — over its statement, over its debt (${names || 'none'})`);
+    ok(falseFastRows(rows, fastTimesRecord(null, t1)).length === 0, 'NEG: one whole tier never judges (one hot tier is not a false row)');
+    ok(!names.split(',').some((n) => ['thermal', 'under', 'once', 'chat', 'debt'].includes(n)), 'NEG: the ×1.3 thermal reading, a reading under 10 s in one tier, a row one tier did not read, the EXCEPTION and a debt read inside ×1.5 are not false rows');
+    const f = falseFastRows(rows, rec).find((x) => x.name === 'grew');
+    ok(f && f.statedMs === 6600 && f.readMs.join() === '12600,10000', `a false row names its statement and both readings, newest first (${JSON.stringify(f)})`);
+    const kept = [1, 2, 3, 4, 5, 6].reduce((r, i) => fastTimesRecord(r, tier(String(i), {})), { tiers: [null, { sha: 'x' }] });
+    ok(kept.v === 1 && kept.tiers.map((t) => t.sha).join() === '6,5,4,3', `the record keeps the four newest whole tiers, newest first, a malformed old tier dropped (${kept.tiers.map((t) => t.sha).join()})`);
+    ok(falseFastRows(rows, { tiers: [{ ...t1, host: 'h1' }, { ...t2, host: 'h2' }] }, { host: 'h1' }).length === 0 && falseFastRows(rows, { tiers: [{ ...t1, host: 'h1' }, { ...t2, host: 'h1' }] }, { host: 'h1' }).length === 3,
+      'NEG: tiers read on ANOTHER host never judge this one (the statements are one machine\'s scale)');
+    // THE RECORD lives in the checkout's GIT DIR (a scratch repository with no .gitignore stays CLEAN — test-ci-heavy-launch's fast
+    // tier earns its green marker there), and the judge is driven for real: a planted tier + this one, the Actions runner refused
+    const G = mktmp('readings'); git(G, ['init', '-q']); git(G, ['-c', 'user.email=g@t.local', '-c', 'user.name=g', 'commit', '-q', '--allow-empty', '-m', 'root']);
+    const recFile = fastTimesPath(G), tim = [{ name: 'grew', ms: 12600 }, { name: 'thermal', ms: 10400 }];
+    ok(recFile && recFile.startsWith(path.join(fs.realpathSync(G), '.git') + path.sep) && recFile.endsWith('ci-fast-times.json'), `the record is <git dir>/ci-fast-times.json (${recFile && path.relative(G, recFile)})`);
+    fs.writeFileSync(recFile, JSON.stringify(fastTimesRecord(null, { ...t2, host: 'hx' })));
+    const fr = judgeFastReadings(rows, tim, 'c'.repeat(40), { env: {}, file: recFile, host: 'hx', load0: 3.1 });
+    const recd = JSON.parse(fs.readFileSync(recFile, 'utf-8')), porcelain = git(G, ['status', '--porcelain']);
+    ok(fr.map((x) => x.name).join() === 'grew' && recd.tiers.length === 2 && recd.tiers[0].host === 'hx' && recd.tiers[0].load0 === 3.1 && recd.tiers[0].ms.grew === 12600 && porcelain === '' && !fs.readdirSync(path.dirname(recFile)).some((x) => x.endsWith('.tmp')),
+      `judgeFastReadings: the tier joins the record (host, load, readings) and its false rows come back (${fr.map((x) => x.name).join() || 'none'}); the work tree stays clean (status «${porcelain}»), no temp file left`);
+    const fa = path.join(mktmp('readings-gh'), 'r.json');
+    ok(judgeFastReadings(rows, tim, 'c'.repeat(40), { env: { GITHUB_ACTIONS: 'true' }, file: fa, host: 'hx' }).length === 0 && !fs.existsSync(fa)
+      && judgeFastReadings(rows, tim, 'c'.repeat(40), { env: { VIBESPACE_CI_REMOTE_RUN: '1' }, file: fa, host: 'hx' }).length === 0 && !fs.existsSync(fa),
+      'off this box (the Actions runner, a remote run) nothing is recorded or judged');
+    ok(/^FALSE ROW: grew states 6\.6 s and read 12\.6 s \/ 10\.0 s .* measure it alone on the test machine and restate it in the box's scale/.test(falseRowLine(falseFastRows(rows, rec)[0])),
+      'the false row names its statement, both readings and the ruling\'s road (alone on the test machine, the box\'s scale)');
+    // WIRING over the source WITH ITS COMMENTS STRIPPED (a commented-out call is no call): a whole IN-PLACE tier only, before ALL
+    // GREEN, a WARNING — THE VERDICT MAY NOT DEPEND ON LOAD — and the red is the --false-rows verb
+    const ci = stripComments(rd('scripts/ci.mjs'));
+    const gate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('function writeGreenMarker('));
+    const judged = gate.indexOf('judgeFastReadings(fast, timings, sha, { load0: l0 })'), green = gate.indexOf('ALL GREEN — fast gate');
+    ok(judged > 0 && judged < green && /if \(!absent\.length && !isolate\) \{\s*const falseRows = judgeFastReadings/.test(gate) && /console\.log\(`\[ci\] WARNING: \$\{falseRowLine\(f\)\}/.test(gate) && !/falseRows\.length\) \{[^}]*return 1/.test(gate),
+      'WIRING: the fast tier judges its readings after a WHOLE in-place tier, before ALL GREEN, and SAYS each false row — it never reds the push on them (the verdict may not depend on load)');
+    const verb = ci.slice(ci.indexOf('function falseRowsVerb('), ci.indexOf('/**\n * THE FAST TIER.') > 0 ? ci.indexOf('/**\n * THE FAST TIER.') : ci.indexOf('async function fastGate('));
+    ok(/if \(arg\('false-rows'\)\) return exitFlushed\(falseRowsVerb\(\)\);/.test(ci) && /return rows\.length \? 1 : 0;/.test(verb) && /if \(mine < 2\)[^\n]*return 2; \}/.test(verb),
+      'WIRING: `ci.mjs --false-rows` is the red — exit 1 naming the false rows of this host\'s two newest whole tiers, 2 when fewer than two are recorded'); }
   ok(/only a LAW or an EXCEPTION/.test(why('PURE · 1 ms', { allow: ['binary'] })) && /dead allowance/.test(why('LAW architecture · 1 ms', { allow: ['binary'] })),
     'NEG: an allowance on a PURE row, and an allowance nothing needs, are red');
   // …and over REAL suites the rule moved out: each is caught by the shape it moved for.
