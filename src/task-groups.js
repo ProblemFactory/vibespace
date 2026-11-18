@@ -1913,8 +1913,9 @@ class TaskGroupManager {
       r = this._rowsUnread = { gen: this._mfacts.gen(), rev, v };
     }
     if (r.v) return true;
-    // the CWD half: its realpath not read yet AND it could add a group (the rule _memberNeeds applies) — kept per cwd
-    if (a.realCwd || !path.isAbsolute(a.cwd) || DOOR.blocked(a.cwd) || SP.storageRootOf(a.cwd)) return false;
+    // the CWD half: its realpath not read yet AND it could add a group (the rule _memberNeeds applies) — kept per cwd. A
+    // conversation of ANOTHER machine (B-df5f: `hostId`) takes no hub realpath at all, so its cwd is never flagged for one
+    if (a.realCwd || onOtherMachine(a.hostId) || !path.isAbsolute(a.cwd) || DOOR.blocked(a.cwd) || SP.storageRootOf(a.cwd)) return false;
     if (this._mfacts.real(a.cwd) !== undefined) return false;   // read already (the asking started it)
     const c = this._cwdMatters || (this._cwdMatters = new Map());
     const hit = c.get(a.cwd);
@@ -2047,7 +2048,7 @@ class TaskGroupManager {
 
   /** The facts THIS ask needs that were never read (their reads started): the cwd's realpath, and every path a discover
    *  group's resolution asks — a rooted row (a file is no folder), each relative candidate, the group's first folder. */
-  _memberNeeds({ cwd, realCwd } = {}, { rowsOnly = false } = {}) {
+  _memberNeeds({ cwd, realCwd, hostId } = {}, { rowsOnly = false } = {}) {
     if (!rowsOnly && (typeof cwd !== 'string' || !cwd)) return [];   // a key alone needs no file fact
     const discover = (r) => r && Array.isArray(r.tags) && r.tags.includes('discover');
     const groups = Object.values((this._state && this._state.tasks) || {}).filter((t) => t && typeof t === 'object' && !t.archived && this._ctxRows(t).some(discover));
@@ -2063,8 +2064,9 @@ class TaskGroupManager {
       TC.resolveRows(rows, { home: this._home, kindOf: (p) => { const k = this._memberKindOf(p); if (k === 'reading' && local(p)) need.push(['stat', p]); return k; } });
     }
     if (rowsOnly) return need;
-    // THE CWD's REALPATH can only ADD a group whose folders do not already hold the cwd itself: read it only then
-    if (!realCwd && local(cwd) && groups.some((t) => !this.foldersOf(t).some((f) => insideFolder(cwd, f))) && this._mfacts.real(cwd) === undefined) need.push(['realpath', cwd]);
+    // THE CWD's REALPATH can only ADD a group whose folders do not already hold the cwd itself: read it only then — and
+    // only for a conversation of the hub (B-df5f _realHere: another machine's cwd is matched as written, never read here)
+    if (!realCwd && !onOtherMachine(hostId) && local(cwd) && groups.some((t) => !this.foldersOf(t).some((f) => insideFolder(cwd, f))) && this._mfacts.real(cwd) === undefined) need.push(['realpath', cwd]);
     return need;
   }
 

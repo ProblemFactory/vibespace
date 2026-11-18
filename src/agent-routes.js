@@ -480,7 +480,7 @@ const turnRead = new WeakSet();   // the requests whose Context read already ran
 const memberRead = new WeakSet();
 function readMembership(req, res, route, s, id) {
   if (memberRead.has(req) || typeof tasks.membershipRead !== 'function') return false;
-  const p = tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+  const p = tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
   if (!p) return false;
   memberRead.add(req);
   p.then(() => route(req, res), () => route(req, res));
@@ -2736,14 +2736,14 @@ app.get('/api/agent/pages', (req, res) => {
   res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }).map(pageAnswer) : [] });   // verify r6 F3: every name through the belt
 });
 // B-70f9 cure 2: the create door answers EVERY throw by name (src/server/job-where.js answersEveryThrow — async since the folder check).
-// B-55dc ⋈ B-70f9: the route the membership read ENTERS AGAIN (readMembership) is this WRAPPED one, by its name — a throw on the
-// second entry is answered by name too, never a request left open
-const jobsCreateRoute = answersEveryThrow(async (req, res) => {
+// B-55dc ⋈ B-70f9: the handler is NAMED so the membership read can enter it again — and it enters it through the same door
+// (`answersEveryThrow(jobsCreateRoute)` below): a throw on the second entry is answered by name too, never a request left open
+app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req, res) {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
   // B-55dc: the job KEEPS its creator's groups (groupsSnapshot) — who is a member is read first (the deciding door), so a
   // snapshot is never taken from an answer still being read; the route is entered again once it settled (nothing consumed)
-  if (a.session && readMembership(req, res, jobsCreateRoute, a.session, a.sessionId)) return;
+  if (a.session && readMembership(req, res, answersEveryThrow(jobsCreateRoute), a.session, a.sessionId)) return;
   // verify r5: a job is OWNED for good by the conversation that makes it — a borrowed id (a pending fork) is refused
   // by name, like every verb that records a principal; a session with no id yet keeps its lineage-less job
   if (a.caller.borrowed) return res.status(409).json({ error: a.caller.borrowed, code: 'bad-member' });
@@ -2791,8 +2791,7 @@ const jobsCreateRoute = answersEveryThrow(async (req, res) => {
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
   res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
-});
-app.post('/api/agent/jobs', jobsCreateRoute);
+}));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   // ?archived=1 → the caller's VISIBLE archived one-shots (triage §13 rule 5;

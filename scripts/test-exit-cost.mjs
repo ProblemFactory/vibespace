@@ -300,6 +300,15 @@ console.log('⑤ U3 + (B) — the Task Group membership is asked exactly when it
   ]);
   const jRun = await one(EPj.ExitProxyManager, { byGroup: true, during: silent }), jAsk = await one(EPj.ExitProxyManager, { byGroup: true, duringAsk: silent });
   ok(!jRun.revoked && jAsk.ran === 1, `CONTROL (RED): the judge's walk alone ⇒ the removal is neither recorded (revokedDuringRun ${jRun.revoked}) nor refused (the command ran: ${jAsk.ran})`);
+  // B-55dc ⋈ B-48a4 (lg-text-legs-3, the -moved2 meeting): the context B-48a4 asks AGAIN after the run is judged by B-55dc's law — a
+  // membership still being READ when the run ends is NO revocation (the holder is re-judged at the store's signal); a removal still is
+  // (above). RED: B-48a4's line alone (the plant proves itself: compileAt refuses an anchor that is not there exactly once)
+  const reading = async (w) => { w.mgr.groupsOf = () => { const a = []; Object.defineProperty(a, 'unread', { value: true, enumerable: false }); return a; }; };
+  const readRun = await one(ExitProxyManager, { byGroup: true, during: reading });
+  const EPu = compileAt('src/exit-proxy.js', [["    const revokedDuringRun = this._endsOn(E.exitVerdict(accAfter, 'run', ctxAfter), ctxAfter);", "    const revokedDuringRun = !E.exitVerdict(accAfter, 'run', ctxAfter).ok;"]]);   // stale-pins: kept — the RED control PLANTS B-48a4's line alone (the text the meeting replaced)
+  const readRed = await one(EPu.ExitProxyManager, { byGroup: true, during: reading });
+  ok(readRun.ran === 1 && !readRun.revoked && readRed.ran === 1 && readRed.revoked,
+    `B-55dc ⋈ B-48a4: a membership still being READ when the run ends is NOT recorded as a revocation (revokedDuringRun ${readRun.revoked}); RED CONTROL: B-48a4's line alone records it (${readRed.revoked})`, { readRun, readRed });
   const EP3 = compileAt('src/exit-proxy.js', [   // today's: every verdict walks again
     ["    if (namesGroup) return this.ctxFor(session, sessionId);", "    if (namesGroup || true) return this.ctxFor(session, sessionId);"],
   ]);

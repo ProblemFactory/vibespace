@@ -1313,7 +1313,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               const kp = require('./server/browser-keeper.js').keeper();
               // B-55dc THE SPAWN ROAD DECIDES: the Task Group store's first reads for this create (the cwd's realpath, a
               // relative discover row) are awaited off the loop, bounded — the profile and cap rungs below then answer as the release
-              if (kp && integrationOn && typeof kp.taskGroupReadFor === 'function') { const rp = kp.taskGroupReadFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }); if (rp) await rp; }
+              if (kp && integrationOn && typeof kp.taskGroupReadFor === 'function') { const rp = kp.taskGroupReadFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }); if (rp) await rp; }
               if (kp && integrationOn) {
                 forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)

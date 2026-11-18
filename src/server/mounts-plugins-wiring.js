@@ -76,7 +76,7 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
     const g = gs.find((x) => x.id === s._initialGroupId) || gs[0];
     return g ? { id: g.id, name: g.title || null } : null;
   },
-  groupRead: (s, id) => { const tasks = getTasks && getTasks(); return tasks && sessionStatusKey && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : null; },
+  groupRead: (s, id) => { const tasks = getTasks && getTasks(); return tasks && sessionStatusKey && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : null; },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
   collectorToken: () => process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '', selfKeyId: () => feedbackForward.keyId(),
   forwardOf: (id) => feedbackForward.forwardOf(id),   // lane feedback-forward-404: `vibespace-feedback list` says a report stayed here
@@ -1135,9 +1135,9 @@ function createSessionMessages(session, sessionId) {
       },
       // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
       // B-55dc: the deciding door's first reads for a create's facts — ws-create awaits them before the two reads here
-      taskGroupRead: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+      taskGroupRead: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
-        return tasks && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey, cwd, initialGroupId, initialGroupIds }) : null;
+        return tasks && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) : null;
       },
       // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
       taskGroupCap: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {

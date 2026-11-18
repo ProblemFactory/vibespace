@@ -20,6 +20,8 @@
 //   ⑥ a failed read is not a fact · ⑦ the settle fires with re-reads in flight (cure r1) · ⑧ THE CARRY: the four-row
 //     scene of the coordinator's must against the release's answer, the settle of a failed first read, «unknown» at once
 //     for a key in its back-off · ⑨ the no-inline form on a real SafeFs with no live worker (cure r2).
+//   ⑩ the meeting with B-df5f (restack 2.369.411): another machine's conversation is matched as written, its cwd never read,
+//     waited for or flagged; the hub's own is (the control).
 // Run: node scripts/test-membership-doors.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -389,6 +391,35 @@ fs.realpathSync.native = real.native;
   ok(law.answer === 'T-linked' && law.signals === 1 && law.keptAfter && law.stoppedAfter === 0, `when the read lands: the release's answer [${law.answer}], ONE store signal (${law.signals}), and the re-judge at that signal keeps it`, law);
   const red = await leg(false);
   ok(!red.keptDuring && red.stoppedDuring === 1, `RED: the same wiring without the flag DROPS the forward during the stall (${red.stoppedDuring} stopped)`, red);
+}
+
+// ── ⑩ THE MEETING WITH B-df5f (the restack for 2.369.411) — BOTH LAWS: a conversation of ANOTHER machine (`hostId`) is matched
+//      by its cwd as written, never through the hub's realpath (B-df5f); so its cwd is never READ for one, never WAITED for,
+//      never FLAGGED (B-55dc). CONTROL: the hub's own conversation at the same path is read, flagged until then, then a member ──
+{
+  const calls = [];
+  const reader = { call: async (op, payload) => { calls.push(op + ' ' + payload.path); if (op === 'realpath') return { path: await fs.promises.realpath(payload.path) }; const st = await fs.promises.stat(payload.path); return { isDirectory: st.isDirectory(), isFile: st.isFile() }; } };
+  const { tg } = store(tasksOf({ 'T-linked': GROUPS['T-linked'] }), { mirrorFs: () => reader });
+  await refresh(tg);
+  const remote = { cwd: P('L/x'), hostId: 'h-remote' };   // L → B on the HUB; the other machine's L/x is its own folder
+  const r0 = tg.groupsForSession(remote);
+  const needR = tg._memberNeeds(remote);
+  const readR = tg.membershipRead(remote);
+  const dR = await alive(tg.groupsForSessionDecided(remote));
+  await refresh(tg);
+  const st = tg.memberIndexStats();
+  ok(ids(r0) === '' && !r0.unread && needR.length === 0 && readR === null && ids(dR) === '' && !dR.unread && st.waited === 0 && st.bounded === 0 && st.unknownNow === 0 && !calls.includes('realpath ' + P('L/x')),
+    `another machine's conversation in a hub-symlinked folder: matched as written [${ids(r0)}] (B-df5f) — its cwd never READ for a realpath, never WAITED for, never FLAGGED (B-55dc)`, { r0: ids(r0), unread: r0.unread, needR, calls, st });
+  // CONTROL on a store of its own (a realpath the remote ask read would otherwise answer it): the hub's own conversation
+  const calls2 = [];
+  const reader2 = { call: async (op, payload) => { calls2.push(op + ' ' + payload.path); if (op === 'realpath') return { path: await fs.promises.realpath(payload.path) }; const st = await fs.promises.stat(payload.path); return { isDirectory: st.isDirectory(), isFile: st.isFile() }; } };
+  const own = store(tasksOf({ 'T-linked': GROUPS['T-linked'] }), { mirrorFs: () => reader2 }).tg;
+  await refresh(own);
+  const local = { cwd: P('L/x') };
+  const l0 = own.groupsForSession(local); await refresh(own);
+  const l1 = own.groupsForSession(local);
+  ok(ids(l0) === '' && l0.unread === true && calls2.includes('realpath ' + P('L/x')) && ids(l1) === 'T-linked' && !l1.unread,
+    `CONTROL: the hub's own conversation at that path IS read (its realpath), flagged until then, then a member [${ids(l1)}]`, { l0: ids(l0), unread: l0.unread, calls2 });
 }
 
 report();

@@ -260,14 +260,15 @@ const LEGS = {
     fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'link'));   // base/link → folder/sub ON THE HUB
     const tasks = () => ({ 'T-om': { id: 'T-om', title: 'om', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
     const said = [];
-    const ask = (tg, a) => { const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${a.hostId ? a.hostId + ':' : 'here:'}${a.cwd}${a.realCwd ? ' (real ' + a.realCwd + ')' : ''} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : `index ${ids(i)} ≠ walk ${ids(w)}`; };
+    // B-55dc: the hub's realpath is an OFF-LOOP fact — the first ask starts its read; the answer compared is the one once read
+    const ask = async (tg, a) => { tg.groupsForSession(a); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy() && !tg._mmTimer) break; } const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${a.hostId ? a.hostId + ':' : 'here:'}${a.cwd}${a.realCwd ? ' (real ' + a.realCwd + ')' : ''} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : `index ${ids(i)} ≠ walk ${ids(w)}`; };
     const linked = path.join(base, 'link', 'w');
     const t1 = manager(T).tg; t1._state.tasks = tasks(); t1._save();
-    const remote1 = ask(t1, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' }), local1 = ask(t1, { sessionKey: 'claude:om2', cwd: linked });
+    const remote1 = await ask(t1, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' }), local1 = await ask(t1, { sessionKey: 'claude:om2', cwd: linked });
     const t2 = manager(T).tg; t2._state.tasks = tasks(); t2._save();   // the other order (the result map keyed per ask)
-    const local2 = ask(t2, { sessionKey: 'claude:om2', cwd: linked }), remote2 = ask(t2, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' });
-    const written = ask(t2, { sessionKey: 'claude:om3', cwd: path.join(D, 'sub', 'w'), hostId: 'host-dial-far' });
-    const ownReal = ask(t2, { sessionKey: 'claude:om4', cwd: '/far/home/proj', realCwd: path.join(D, 'sub'), hostId: 'host-dial-far' });
+    const local2 = await ask(t2, { sessionKey: 'claude:om2', cwd: linked }), remote2 = await ask(t2, { sessionKey: 'claude:om1', cwd: linked, hostId: 'host-dial-far' });
+    const written = await ask(t2, { sessionKey: 'claude:om3', cwd: path.join(D, 'sub', 'w'), hostId: 'host-dial-far' });
+    const ownReal = await ask(t2, { sessionKey: 'claude:om4', cwd: '/far/home/proj', realCwd: path.join(D, 'sub'), hostId: 'host-dial-far' });
     const okv = remote1 === '' && remote2 === '' && local1 === 'T-om' && local2 === 'T-om' && written === 'T-om' && ownReal === 'T-om';
     return { ok: okv, detail: said.join(' · ') };
   },
@@ -356,7 +357,9 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
 // Task-Group facts (taskGroupDefaultFor / taskGroupCapFor / stampGroupCap) — hands its machine too (src/ + server.js). Each call's
 // OWN argument is cut by bracket matching (multi-line calls included; a hostId of a later call on the same line never counts).
 {
-  const CALLS = /\b(groupsForSession|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap)\(/g;
+  // the restack for 2.369.411 (the meeting with B-55dc): B-55dc's DECIDING doors hand a conversation's cwd too — membershipRead,
+  // groupsForSessionDecided, memberIds (the drawing door's ids, its flag kept) and the keeper's taskGroupReadFor (the create's)
+  const CALLS = /\b(groupsForSession|groupsForSessionDecided|membershipRead|memberIds|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap|taskGroupReadFor)\(/g;
   const inside = (t, open, o, c) => { let d = 0, q = null; for (let k = open; k < t.length; k++) { const ch = t[k];
     if (q) { if (ch === '\\') { k++; continue; } if (ch === q) q = null; continue; }
     if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
@@ -386,8 +389,13 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     return o == null ? { unseen: x } : litOf(o, x); };
   // a machine HANDED: a hostId key whose value is not a literal null / undefined
   const handsMachine = (f) => /\bhostId\b/.test(f) && !/\bhostId\s*:\s*(?:null|undefined)\s*[,}]/.test(f + '}');
-  const missing = (t) => { const out = []; let m; CALLS.lastIndex = 0;
-    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
+  // THE STORE'S OWN RE-ENTRY (B-55dc): inside src/task-groups.js a door that calls another door with its own facts parameter
+  // (`this.groupsForSession(args)`) hands what ITS caller handed — that caller is a row of this census; only there, only `this.`
+  // with a bare name: anywhere else the same shape is UNSEEN (a red — the control below)
+  let reentries = 0;
+  const reentry = (t, file, m, a) => file === 'src/task-groups.js' && t.slice(Math.max(0, m.index - 5), m.index) === 'this.' && /^[A-Za-z_$][\w$]*$/.test(argsOf(a)[0] || '');
+  const missing = (t, file = '') => { const out = []; let m; CALLS.lastIndex = 0;
+    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
       if (f.unseen) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 80)}) — «${f.unseen}» UNSEEN (no object literal of it in this file)`);
       else if (!handsMachine(f.facts)) out.push(`${m[1]}(${(f.via ? f.via + ' = ' : '') + f.facts.replace(/\s+/g, ' ').slice(0, 100)})`); }
     return out; };
@@ -395,12 +403,16 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   walk('src');
   const bad = [];
   let calls = 0, viaVar = 0;
-  for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t)) bad.push(`${f}: ${x}`); }
-  ok(calls >= 26 && viaVar >= 2 && bad.length === 0, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession and the create's Task-Group facts), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
+  for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t, f)) bad.push(`${f}: ${x}`); }
+  ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 3, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
   ok(missing("x = tasks.groupsForSession({\n  sessionKey: k,\n  cwd: s.cwd,\n  initialGroupId: s._initialGroupId,\n});").length === 1, 'CONTROL: a planted MULTI-LINE call that hands a cwd without its machine is caught');
   ok(missing("a = kc.taskGroupCapFor({ cwd, initialGroupId: g }); b = tasks.groupsForSession({ cwd: s.cwd, hostId: s.host || null });").length === 1, 'CONTROL: a hostId of a LATER call on the same line does not cover an earlier one');
   ok(missing("const facts = { cwd: s.cwd, initialGroupId: g };\nconst d = kc.taskGroupDefaultFor(facts); kc.stampGroupCap(k, facts, {});").length === 2, 'CONTROL: a planted VARIABLE whose object literal hands a cwd without its machine is caught at each call that hands it');
   ok(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join('')), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
+  { const before = reentries;
+    ok(/UNSEEN/.test(missing("function f(a) { return this.membershipRead(a); }", 'src/server/other.js').join('')) && missing("x = tasks.membershipRead({ sessionKey: k, cwd: s.cwd });").length === 1 && missing("function f(a) { return this.groupsForSession(a); }", 'src/task-groups.js').length === 0,
+      'CONTROL: a `this.` re-entry with a bare parameter passes ONLY in the store itself (another file: UNSEEN, a red); a deciding door handed a cwd without its machine is caught');
+    reentries = before; }
   ok(missing("function g() { const facts = { cwd, hostId: h }; } function f(s) { const facts = { cwd: s.cwd }; return kc.taskGroupDefaultFor(facts); }").length === 1, 'CONTROL: the NEAREST declaration before the call judges it (another function\'s literal of the same name does not cover it)');
   ok(/spread/.test(missing("x = tasks.groupsForSession({ ...facts, sessionKey: k });").join('')) && missing("x = tasks.groupsForSession({ sessionKey: k, cwd: s.cwd, hostId: null });").length === 1, 'CONTROL: a spread in the facts is UNSEEN; a literal `hostId: null` hands no machine');
 }
@@ -436,6 +448,9 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
     // the hub's discovery row of the conversation (the route stamps the hub's real path), then the page's merge
     const hubRow = { backend: 'claude', sessionId: 'bd-1', sessionKey: 'claude:bd-1', cwd: linked, realCwd: realW };
     const mergedFar = { ...hubRow, host: 'host-dial-far', hostName: 'far' }, mergedHere = { ...hubRow, host: null }, mergedLocalWord = { ...hubRow, host: 'local' };
+    // B-55dc: the server's answer is read OFF the loop (the hub's realpath of the link): each row asked once, the reads landed
+    for (const r of [mergedFar, mergedHere, mergedLocalWord]) serverSays(r);
+    for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy() && !tg._mmTimer) break; }
     const board = boardBy(cwdsOf);
     const seen = [mergedFar, mergedHere, mergedLocalWord].map((r) => `${r.host || 'none'}: board ${board(r)} / server ${serverSays(r)}`);
     ok(board(mergedFar) === false && serverSays(mergedFar) === false && board(mergedHere) === true && serverSays(mergedHere) === true && board(mergedLocalWord) === true && serverSays(mergedLocalWord) === true,

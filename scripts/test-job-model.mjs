@@ -805,7 +805,7 @@ console.log('B-70f9 ① cure: the folder check driven (the door, a schedule\'s f
     ok(answered.length === 2 && answered[0][0] === 500 && answered[0][1].code === 'create-failed' && /the job create failed on the hub: the engine threw after the await — `vibespace-job list --mine` says whether a job was made/.test(answered[0][1].error) && answered[1][0] === 200, 'cure 2: the create door ANSWERS a throw after its await by name (500 create-failed, what to check) — never twice once it answered', answered);
     const r3 = resOf(); let lost = null; await late({}, r3).catch((e) => { lost = e; });
     ok(lost && !r3.headersSent, 'CONTROL (the bare async handler, Express 4): the throw is a rejection nobody answers — the agent\'s command waits');
-    ok(/app\.post\('\/api\/agent\/jobs', answersEveryThrow\(async \(req, res\) => \{/.test(all), 'WIRING: the agent create route IS that door');
+    ok(/app\.post\('\/api\/agent\/jobs', answersEveryThrow\(async function jobsCreateRoute\(req, res\) \{/.test(all) && /readMembership\(req, res, answersEveryThrow\(jobsCreateRoute\), /.test(all), 'WIRING: the agent create route IS that door — and B-55dc\'s membership read enters the named handler again THROUGH that door (a throw on the second entry is answered too)');
     const MI = '22 1 0:20 / / rw - ext4 /dev/root rw\n30 22 0:40 / /mnt/nfs rw - nfs4 srv:/x rw\n';
     let calls = []; const hung = (p) => { calls.push(p); return new Promise(() => { }); };
     const ask = (Mod, cwd, st) => Mod.jobWhere({ body: task(cwd), session: remote, hubMachine: 'hub-box', blocked: () => false, stat: st, statMs: 40, mountinfo: MI });
