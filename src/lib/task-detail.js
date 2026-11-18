@@ -185,7 +185,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // open, typed, picking) — by `ae`, the active element renderSettings read BEFORE it emptied the body. r7 read
     // document.activeElement here, after the empty (always <body>): a row box the person had emptied was refilled under the caret,
     // and words typed and not yet committed were overwritten by the row's own path (a row is matched by its path, so a kept
-    // row's path never changed elsewhere — only the person's words differ from it)
+    // row's path never changed elsewhere — only the person's words differ from it). So a kept row is refilled ONLY when its box
+    // is EMPTY and the person is not in it (inUse counts any typed words): this is no focus guard
     if (!kept) input.value = want; else if (!kept.inUse(ae) && input.value !== want) kept.set(want, { commit: false });
     input.title = r.path;
     if (!kept) pc.appendChild(input);
