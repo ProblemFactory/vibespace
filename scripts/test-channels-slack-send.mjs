@@ -255,8 +255,15 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   // r1 (the lane's adversarial read): each OCCURRENCE judged — two Alices by full name, a full name then the bare first name
   R.both = await sendOf('@Alice Chen please review, @Alice Wong please approve');
   R.thenBare = await sendOf('@Alice Chen and @Alice');
+  // the follow-up (verdict 05:26Z): a name inside a typed token's label is the token's — never a mention of its own
+  R.label = await sendOf('<@U0BOB0001| @Alice Chen> see this');
+  // the follow-up: typed tokens and names share ONE bound of 50 marks; the overflow goes as words, said on the card
+  R.many = await sendOf(`${Array.from({ length: 50 }, (_, i) => `<@U0BOB0001|b${i}>`).join(' ')} and @Alice Chen`);   // 50 typed tokens (their own cap) + one name
   // a member past the first page of lookups: fourteen new members (Zed last), the directory read paced at 6 h
   const added = Array.from({ length: 14 }, (_, i) => ({ id: `U0MEMB${String(i + 1).padStart(3, '0')}`, team_id: 'T0ACME001', name: `m${i + 1}`, real_name: i === 13 ? 'Zed Late' : `Member ${i + 1}`, profile: { display_name: i === 13 ? 'Zed' : `M${i + 1}`, real_name: i === 13 ? 'Zed Late' : `Member ${i + 1}` } }));
+  // the follow-up (verdict 05:26Z, as if a must): two members called «Ada Park» and a third whose HANDLE is ada — the longer
+  // reading answers two ⇒ refused, never a guess down to «@Ada»
+  added.unshift({ id: 'U0ADA0001', team_id: 'T0ACME001', name: 'ada.p1', real_name: 'Ada Park', profile: { display_name: 'Ada P', real_name: 'Ada Park' } }, { id: 'U0ADA0002', team_id: 'T0ACME001', name: 'ada.p2', real_name: 'Ada Park', profile: { display_name: 'Ada K', real_name: 'Ada Park' } }, { id: 'U0ADA0003', team_id: 'T0ACME001', name: 'ada', real_name: 'Ada Lovelace', profile: { display_name: 'Ada L', real_name: 'Ada Lovelace' } });
   // r1: a THREE-word name with two Anns in the channel (named before the fourteen — the first lookups reach them)
   added.unshift({ id: 'U0ANN0001', team_id: 'T0ACME001', name: 'ann.ms', real_name: 'Ann Marie Smith', profile: { display_name: 'Ann', real_name: 'Ann Marie Smith' } }, { id: 'U0ANN0002', team_id: 'T0ACME001', name: 'ann.l', real_name: 'Ann Lee', profile: { display_name: 'Ann', real_name: 'Ann Lee' } });
   const mem = FX['conversations.members'].C0GENERAL.members, ul = FX['users.list'].members;
@@ -267,6 +274,7 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
     if (limited) mode.status429['users.list'] = 30;   // r1: the directory rate-limited — best effort, never a refusal
     R.late = await sendOf('@Zed Late the numbers are in');
     R.three = await sendOf('@Ann Marie Smith the draft is ready');
+    R.adaPark = await sendOf('@Ada Park please look');
   } finally { mem.length = keep.mem; ul.length = keep.ul; for (const u of added) delete FX.users[u.id]; }
   return R;
 }
@@ -278,6 +286,9 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   ok(R.both.sent === '<@U0ALICE01> please review, <@U0ALICE02> please approve' && R.both.notifies.length === 2 && R.thenBare.refused === 'mention-ambiguous',
     `B-a0ae r1 each OCCURRENCE is judged: «@Alice Chen … @Alice Wong» notifies both (their first word alike); «@Alice Chen and @Alice» is refused — the bare «@Alice» answers two people (${JSON.stringify({ both: R.both, thenBare: R.thenBare })})`);
   ok(R.three.sent === '<@U0ANN0001> the draft is ready', `B-a0ae r1 a THREE-word name («@Ann Marie Smith», two Anns in the channel): the longest name that answers one person decides (${JSON.stringify(R.three)})`);
+  ok(R.adaPark.refused === 'mention-ambiguous', `B-a0ae follow-up AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED: «@Ada Park» answers two members ⇒ refused by name — never the third member whose handle is ada (${JSON.stringify(R.adaPark)})`);
+  ok(R.label.sent === '<@U0BOB0001> see this' && R.label.notifies.join() === 'Bob', `B-a0ae follow-up a name inside a typed token's label is the token's: «<@U0BOB0001| @Alice Chen>» notifies Bob alone — shown equals sent (${JSON.stringify(R.label)})`);
+  ok(R.many.notifies.length === 50 && R.many.plain.join() === 'Alice Chen' && /and @Alice Chen$/.test(R.many.sent || ''), `B-a0ae follow-up ONE bound of 50 marks: 50 typed tokens and one name — the 51st mark (the name) goes as words, said on the card («not notified») — never dropped unseen (${JSON.stringify({ notifies: R.many.notifies.length, plain: R.many.plain })})`);
   const RL = await mentionLeg('mentions-limited', undefined, { limited: true });
   ok(RL.late.sent === '@Zed Late the numbers are in' && !RL.late.refused, `B-a0ae r1 the directory read is BEST EFFORT: users.list rate-limited ⇒ the proposal is still made, the unmatched name goes as words (${JSON.stringify(RL.late)})`);
   // CONTROLS: a copy of slack.js without each part turns its own leg red
@@ -285,9 +296,14 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   const cut = (from, to, tag) => { if (ssrc.split(from).length !== 2) return null; const reg = CH.createChannelRegistry(); reg.register(require(MC.write('src/channels/slack.js', ssrc.replace(from, to), tag)).adapter); return reg; };
   const noTwo = cut("        for (const l of longer) { const d = match(l); if (d.length === 1) { hit = [l, d]; break; } }", '', 'a0ae-two');
   const noRaw = cut('        if (ids.includes(r.id) && !(p && p.deleted)) {', '        if (false) {', 'a0ae-raw');
-  const noDir = cut("      if (ids.some((id) => !people.has(id))) { try { await listPeople(); } catch { /* best effort: the lookups' names stand */ } }", '', 'a0ae-dir');
-  ok(!!noTwo && !!noRaw && !!noDir, 'the three patch sites of the B-a0ae controls are in slack.js (once each)');
+  const noDir = cut("      if (ids.some((id) => !people.has(id))) { try { await listPeople({ until: now() + DIRECTORY_PROPOSE_MS }); } catch { /* best effort: the lookups' names stand */ } }", '', 'a0ae-dir');
+  // the follow-up's RED controls: the longest-answering reading (the old fallback to one word) and the catch around the read
+  const noAmb = cut("        for (const l of [...longer, one]) { const d = match(l); if (d.length) { hit = [l, d]; break; } }\n        const [n, distinct] = hit || [one, []];", "        for (const l of longer) { const d = match(l); if (d.length === 1) { hit = [l, d]; break; } }\n        const [n, distinct] = hit || [one, match(one)];", 'a0ae-guess');
+  const noCatch = cut("{ try { await listPeople({ until: now() + DIRECTORY_PROPOSE_MS }); } catch { /* best effort: the lookups' names stand */ } }", "{ await listPeople({ until: now() + DIRECTORY_PROPOSE_MS }); }", 'a0ae-nocatch');
+  ok(!!noTwo && !!noRaw && !!noDir && !!noAmb && !!noCatch, 'the five patch sites of the B-a0ae controls are in slack.js (once each)');
   const C2 = noTwo ? await mentionLeg('a0ae-two', noTwo) : null, CR = noRaw ? await mentionLeg('a0ae-raw', noRaw) : null, CD = noDir ? await mentionLeg('a0ae-dir', noDir) : null;
+  const CA = noAmb ? await mentionLeg('a0ae-guess', noAmb) : null, CC = noCatch ? await mentionLeg('a0ae-nocatch', noCatch, { limited: true }) : null;
+  ok(CA && CA.adaPark.sent === '<@U0ADA0003> please look' && CC && CC.late.refused, `CONTROLS B-a0ae follow-up: the old fallback (a shorter reading when the longer answers TWO) notifies the third member «ada» for «@Ada Park» (${CA && JSON.stringify(CA.adaPark)}); without the catch a rate-limited directory REFUSES the proposal (${CC && JSON.stringify(CC.late)})`);
   ok(C2 && C2.two.refused === 'mention-ambiguous' && CR && /^&lt;@U0BOB0001&gt;/.test(CR.raw.sent || '') && CD && CD.late.sent === '@Zed Late the numbers are in',
     `CONTROLS B-a0ae: without the two-word name «@Alice Chen» is refused as ambiguous (${C2 && JSON.stringify(C2.two)}); without the member check a typed <@U…> is escaped (${CR && CR.raw.sent}); without the directory read the late member notifies nobody (${CD && CD.late.sent})`);
 }

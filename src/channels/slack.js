@@ -112,6 +112,8 @@ const PEOPLE_LOOKUPS_PER_CALL = 10;       // users.info asked per page for autho
 const PEOPLE_LIST_PAGES = 5;              // users.list pages read per 6 h (Tier 2; 200 people a page)
 const MEMBERS_TTL_MS = 30 * 60 * 1000;
 const MEMBERS_MAX = 1000;
+const MENTIONS_MAX = 50;                  // the registry's prepared-mention bound (src/channels/index.js) — counted here first
+const DIRECTORY_PROPOSE_MS = 8000;        // the follow-up: a directory read inside a propose ends well under the CLI's write budget
 const TEAMS_MAX = 50;
 const RX_CACHE_TTL_MS = 60 * 1000;
 const RX_CACHE_MAX = 2000;
@@ -580,13 +582,17 @@ function create(record = {}, deps = {}) {
     if (!people.has(u.id) && people.size >= PEOPLE_MAX) people.delete(people.keys().next().value);
     people.set(u.id, { ...personOf(u), at });
   }
-  async function listPeople() {
+  async function listPeople({ until = null } = {}) {
     if (now() - peopleListedAt < PEOPLE_TTL_MS) return;
+    const was = peopleListedAt;
     peopleListedAt = now();
     let cursor = null;
     for (let i = 0; i < PEOPLE_LIST_PAGES; i++) {
+      // the follow-up: `until` — a propose's read ends at its deadline (the names it could not match stay words)
+      if (until !== null && now() >= until) return;
       let d;
-      try { d = await api('users.list', { limit: 200, ...(cursor ? { cursor } : {}) }); } catch (e) { rateOrNull(e); return; }
+      try { d = await api('users.list', { limit: 200, ...(cursor ? { cursor } : {}) }, until !== null ? { windowOf: () => Math.max(1000, until - now()) } : {}); }
+      catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') peopleListedAt = was; rateOrNull(e); return; }   // follow-up: a read refused for rate never stamps its 6 h
       for (const u of Array.isArray(d.members) ? d.members.slice(0, 1000) : []) rememberPerson(u, now());
       cursor = d.response_metadata && d.response_metadata.next_cursor ? String(d.response_metadata.next_cursor).slice(0, 2048) : null;
       if (!cursor) break;
@@ -708,7 +714,7 @@ function create(record = {}, deps = {}) {
   async function prepareSendImpl(convId, { text = '' } = {}) {
     const t = String(text == null ? '' : text);
     const tooLong = [...t].length > Text.SEND_MAX;
-    const names = Text.atNamePairs(t).filter((n) => !Text.BROADCAST_WORDS.includes(n.one.toLowerCase()));
+    const names = Text.atNamePairs(Text.withoutTypedMentions(t)).filter((n) => !Text.BROADCAST_WORDS.includes(n.one.toLowerCase()));   // follow-up: a name inside a typed token's label is the token's, never a mention of its own
     const raws = Text.rawMentions(t);   // B-a0ae: a typed `<@U…>`
     const out = { notifies: [], unresolved: [], plain: [], mentions: [], tooLong, sendMax: Text.SEND_MAX, at: now() };
     if (names.length || raws.length) {
@@ -717,7 +723,7 @@ function create(record = {}, deps = {}) {
       // B-a0ae: a channel holding members the bounded lookups did not name reads the directory (users.list, Tier 2 —
       // listPeople's own 6 h pace): a person past the first lookups was never matched and their @Name notified nobody.
       // r1: best effort — a rate limit there never refuses the proposal (the names it could not match stay words)
-      if (ids.some((id) => !people.has(id))) { try { await listPeople(); } catch { /* best effort: the lookups' names stand */ } }
+      if (ids.some((id) => !people.has(id))) { try { await listPeople({ until: now() + DIRECTORY_PROPOSE_MS }); } catch { /* best effort: the lookups' names stand */ } }
       const candidates = ids.map((id) => [id, people.get(id)]).filter(([, p]) => p && !p.deleted);
       const match = (n) => {
         const want = fold(n);
@@ -736,14 +742,19 @@ function create(record = {}, deps = {}) {
       for (const { one, longer } of names) {
         // B-a0ae: «@First Last» — the longest name that answers ONE person first (the full name with its spaces: `@Alice
         // Chen`, `@Ann Marie Smith`); else the one word, as before (two people ⇒ refused by name, nobody ⇒ words)
+        // the follow-up (verdict 05:26Z, as if a must): AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED — the longest reading that
+        // answers ANYONE decides (two people ⇒ ambiguous, refused with the names); a shorter one only when it answers nobody
         let hit = null;
-        for (const l of longer) { const d = match(l); if (d.length === 1) { hit = [l, d]; break; } }
-        const [n, distinct] = hit || [one, match(one)];
+        for (const l of [...longer, one]) { const d = match(l); if (d.length) { hit = [l, d]; break; } }
+        const [n, distinct] = hit || [one, []];
         if (distinct.length === 1) { const p = people.get(distinct[0]); out.mentions.push({ name: n, id: distinct[0] }); out.notifies.push(p.name || n); }
         else if (distinct.length > 1) out.unresolved.push(n);
         else out.plain.push(n);
       }
     }
+    // the follow-up: the registry keeps MENTIONS_MAX marks — typed tokens and names counted together; past it they go as
+    // plain words, SAID on the card («not notified»), never dropped unseen
+    if (out.mentions.length > MENTIONS_MAX) { for (const m of out.mentions.splice(MENTIONS_MAX)) out.plain.push(m.name); out.notifies.splice(MENTIONS_MAX); }
     out.text = Text.toMrkdwn(t, out.mentions);
     return out;
   }

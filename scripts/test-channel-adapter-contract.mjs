@@ -292,7 +292,12 @@ for (const { kind, caps } of REGISTERED) {
   ok(isrc.split(KEEP).length === 2, 'CONTROL setup: the bound keeps the raw mark at ONE site');
   const lost = await boundBy(M.load('src/channels/index.js', isrc.replace(KEEP, '({ name: peerName(x.name, 100), id: x.id })'), 'a0ae-bound'));
   ok(!lost.some((m) => m.raw === true), 'CONTROL the bound without the raw keep (the base): every typed mention loses its mark — the send escapes it (the first real gate\'s red)', lost);
-  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: '⑤b ' })) ok(c.pass, c.name, c.detail);
+  // the follow-up (verdict 05:26Z): the typed-token CHECK itself — its own-id condition removed ⇒ another member's token passes as raw
+  const IDCHK = '(x.name.startsWith(`<@${x.id}>`) || x.name.startsWith(`<@${x.id}|`))';
+  ok(isrc.split(IDCHK).length === 2, 'CONTROL setup: the own-id condition is spelled once');
+  const loose = await boundBy(M.load('src/channels/index.js', isrc.replace(IDCHK, 'true'), 'a0ae-any-id'));
+  ok(loose.some((m) => m.raw === true && m.name === '<@U0EVE0001>'), 'CONTROL the own-id condition removed: another member\'s token rides as the mention of the id it was filed under (what the check refuses)', loose);
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: '⑤b ' })) ok(c.pass, c.name, c.detail);
 }
 
 // ── ⑥ registration is LOUD ──

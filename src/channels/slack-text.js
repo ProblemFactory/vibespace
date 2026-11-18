@@ -409,6 +409,9 @@ function atNamePairs(text) {
 /** B-a0ae (fb-c0c6292765: a raw `<@U…>` went out escaped as literal `&lt;@…&gt;`): the `<@ID>` / `<@ID|label>` tokens a text
  *  carries as typed — prepareSend keeps one of a conversation MEMBER as its mention (toMrkdwn's `raw`); any other stays words. */
 const RAW_MENTION_RE = /<@([A-Z0-9][A-Z0-9_]{1,40})(?:\|[^<>\n]{0,80})?>/g;
+/** The follow-up: the text with each typed `<@ID…>` token blanked (same length) — the @Name reader never takes a name from
+ *  inside a token's label (the send turns the whole token into its mention; a label's name would notify nobody). */
+const withoutTypedMentions = (text) => String(text == null ? '' : text).replace(RAW_MENTION_RE, (m) => ' '.repeat(m.length));
 function rawMentions(text) {
   const s = String(text == null ? '' : text).slice(0, SEND_MAX * 2);
   const out = [];
@@ -438,5 +441,5 @@ const EGRESS = Object.freeze([]);
 module.exports = {
   EGRESS,
   TEXT_MAX, SEND_MAX, BLOCKS_MAX, ELEMENTS_MAX, ATTACHMENTS_MAX, FILES_MAX, SLACK_EMOJI, SLACK_QUICK, SUBTYPE_SYS, EKM_TEXT, BROADCAST_WORDS,
-  emojiText, readEntity, mrkdwnText, mrkdwnRuns, mrkdwnBlocks, blockKitBlocks, legacyCards, filesOf, messageParts, slackStoredBlocks, atNames, atNamePairs, rawMentions, toMrkdwn,
+  emojiText, readEntity, mrkdwnText, mrkdwnRuns, mrkdwnBlocks, blockKitBlocks, legacyCards, filesOf, messageParts, slackStoredBlocks, atNames, atNamePairs, rawMentions, withoutTypedMentions, toMrkdwn,
 };

@@ -782,7 +782,10 @@ Without a workspace app, the person makes their own app with a one-time setup to
 - "Reply to Bob in Slack" → `vibespace-channels propose <conv> --text "…"`. EVERY Slack proposal waits for the person's
   approval on the Outbox card — there is no "send directly" on Slack, whatever a policy says.
 - @mentions: write `@Name` (a handle like `@alice.c`, a display name, the full name as Slack shows it — `@Alice Chen` or
-  `@AliceChen` —, or a first name), or a member's Slack id as `<@U0ABC123>` (kept as their mention). The proposal
+  `@AliceChen` —, or a first name), or a member's Slack id as `<@U0ABC123>` (kept as their mention; a name inside its
+  `|label` is not a mention of its own). A name that answers two people is REFUSED, never guessed down to a shorter one;
+  at most 50 marks per message (the rest go as words). Matching a name may read the workspace directory for up to 8 s —
+  a name it could not match in that time stays words (the card says so). The proposal
   RESOLVES each name against the conversation's members when you propose and stores the result: one person ⇒ they are
   notified (the card says "Notifies …"); two people answering one name ⇒ the proposal is REFUSED
   (`mention-ambiguous`, the names listed) — write the handle or the full name; nobody ⇒ the words go out as plain text
@@ -794,8 +797,7 @@ Without a workspace app, the person makes their own app with a one-time setup to
   people from <other organization>" on a Slack Connect channel). Read it before proposing anything private.
 - A send whose answer was lost stays `unknown`: Slack has no idempotency key, so nothing resends it — the person checks
   Slack. Never propose the same text again to "retry".
-- Not in this version: sending files, starting a new DM, Slack search, editing or deleting a sent message, live events.
-  Say so plainly when asked.
+- Not in this version: starting a new DM, editing or deleting a sent message, live events. Say so plainly when asked.
 
 ## The vendor's own API, raw (`api`)
 
