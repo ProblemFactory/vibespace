@@ -212,6 +212,19 @@ export function kernelPollStep(r, polling = false) {
   const due = kernelPollDue(r);
   return { polling: due, tick: due, redraw: true };
 }
+/** B-0bc7 (its verdict's must): a door's old answer ends when its download STARTS — an engine whose kernel moves INTO
+ *  `downloading` from another state (or at the row's first read) — never on a read that still says downloading, so a press on a
+ *  busy door shows its own words. `said` / `states` = id → the answer / id → the last state seen. PURE (new Maps). → {said, states} */
+export function kernelSaidStep({ said = new Map(), states = new Map(), engines = [] } = {}) {
+  const s = new Map(said), st = new Map(states);
+  for (const e of engines || []) {
+    if (!e || e.id == null) continue;
+    const id = String(e.id), now = e.kernel && typeof e.kernel === 'object' ? String(e.kernel.state || '') : '';
+    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);
+    st.set(id, now);
+  }
+  return { said: s, states: st };
+}
 /** B-0bc7: what a person's «Download kernel» answered, in words — '' when it ran (the card's line says the rest through kernel.state);
  *  a refusal by its CODE (the route's own refusals before any byte: disk, build_platform_unsupported, install_running,
  *  browser_engine_protocol; a landing / a put-back in flight; anything else by its code); null ⇒ the hub did not answer. */

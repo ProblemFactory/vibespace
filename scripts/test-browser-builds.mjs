@@ -2961,7 +2961,7 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
     && ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }') && ui.includes('    if (step.tick) tick();\n')
     && !/setInterval\(again/.test(ui) && /const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui) && /b\.classList\.toggle\('is-busy', busy\);/.test(ui) && /if \(d\.busy \|\| this\._kernelAsks\.has\(d\.id\)\) \{ this\._kernelSaid\.set\(d\.id, t\('its kernel is already downloading'\)\); again\(\); return; \}/.test(ui) && !/\.disabled = /.test(ui.slice(ui.indexOf('  _paintKernelDoors('), ui.indexOf('\n  }\n', ui.indexOf('  async _downloadKernel(')))) /* the doors' own code (another row's button, e.g. hooks-create's Apply, is not these doors) */
     && /, \.settings-engine-download \{ flex: none;/.test(css) && /\.settings-engine-doors \{/.test(css),
-    'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again by the line\'s own tick while a kernel downloads (never a timer tied to the POST), disables a busy door, says each door\'s answer beside it — the row\'s own button rule (theme variables)');
+    'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again by the line\'s own tick while a kernel downloads (never a timer tied to the POST), keeps a busy door LIVE and has it say why, says each door\'s answer beside it (the old answer ends only when a download STARTS), redraws only when the doors moved and gives the focus back to its door — the row\'s own button rule (theme variables)');
   // CONTROL: a model copy whose doors skip a FAILED download (only «none yet») — the engine whose download failed would have no door
   const MUTK = mutantCopies('b0bc7-doors', REPO);
   const msrc = read('src/lib/browser-build-model.js');
@@ -2975,6 +2975,29 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   const fCopy2 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(stepNeedle, "  if (!r || r.error) return { polling: false, tick: false, redraw: true };"), 'failed-read-ends', { esm: true });
   const BMy = await import('file://' + fCopy2);
   ok(!judgeStep(BMy), 'CONTROL (B-0bc7, round 2\'s should): a step that lets ONE failed read end the poll (the doors removed, never asked again) goes RED');
+  // its verdict's MUST: a press on a busy door SHOWS its words — the old answer ends when a download STARTS, never on a read that still
+  // says downloading. The leg: the row's first read (a download running), a press on the busy door, the redraw's read (still
+  // downloading) ⇒ the words are drawn; the download ends, a NEW one starts ⇒ the old answer goes
+  const BUSY = 'its kernel is already downloading';
+  const judgeSaid = (BM) => {
+    const dl = [{ id: 'eng-x', kernel: { state: 'downloading' } }], done = [{ id: 'eng-x', kernel: { state: 'installed' } }];
+    const s1 = BM.kernelSaidStep({ engines: dl });
+    const pressed = new Map(s1.said); pressed.set('eng-x', BUSY); // the press on the busy door
+    const s2 = BM.kernelSaidStep({ said: pressed, states: s1.states, engines: dl }); // the redraw the press asks for: still downloading
+    const s3 = BM.kernelSaidStep({ said: new Map([['eng-x', 'the kernel could not be downloaded: disk']]), states: s2.states, engines: done });
+    const s4 = BM.kernelSaidStep({ said: s3.said, states: s3.states, engines: dl }); // a NEW download starts
+    return { drawn: s2.said.get('eng-x') === BUSY, keptOverDone: s3.said.has('eng-x'), endsAtStart: !s4.said.has('eng-x') };
+  };
+  const js = judgeSaid(BMk);
+  ok(js.drawn && js.keptOverDone && js.endsAtStart, `B-0bc7 (its verdict's must): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); an answer stands while nothing downloads (${js.keptOverDone}); a download that STARTS ends it (${js.endsAtStart})`, js);
+  const saidNeedle = "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);";
+  ok(msrc.split(saidNeedle).length === 2, 'B-0bc7 control setup: the «ends at the start» rule is found once in src/lib/browser-build-model.js');
+  const fCopy3 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading') s.delete(id);"), 'said-every-read', { esm: true });
+  const BMz = await import('file://' + fCopy3);
+  ok(!judgeSaid(BMz).drawn, 'CONTROL (B-0bc7, its verdict\'s must): the batch\'s own rule — a downloading read ends the answer (settings-ui\'s old line) — erases the busy press\'s words before they are drawn ⇒ RED', judgeSaid(BMz));
+  const ui2 = read('src/lib/settings-ui.js');
+  ok(ui2.includes('kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines })') && !ui2.includes("if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id));") && ui2.includes('if (box._doorsSig === sig) { if (step.tick) tick(); return; }') && /if \(focused\) \{ const fb = \[\.\.\.box\.querySelectorAll\('button\.settings-engine-download'\)\]\.find\(\(x\) => x\.dataset\.engine === focused\); if \(fb\) fb\.focus\(\); \}/.test(ui2), // stale-pins: kept — a deliberate absence check: the old delete-on-every-read line is gone
+    'B-0bc7 wiring (its verdict): the Settings row asks the PURE step for its answers (the old delete-on-every-downloading-read line gone — stale-pins: kept), redraws only when the doors moved, and gives the focus back to its door');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

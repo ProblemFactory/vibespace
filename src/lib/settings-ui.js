@@ -4,7 +4,7 @@ import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-att
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
-import { kernelDoors, kernelDownloadWords, kernelPollStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
+import { kernelDoors, kernelDownloadWords, kernelPollStep, kernelSaidStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
 import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -747,14 +747,22 @@ class SettingsUI {
     const step = kernelPollStep(r, line._kernelPolling);
     line._kernelPolling = step.polling;
     if (!step.redraw) { if (step.tick) tick(); return; }
-    for (const e of r.engines || []) if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id)); // a download that runs ends that door's old answer
+    // its verdict's must: a door's old answer ends when its download STARTS (kernelSaidStep) — never on a read that still says
+    // downloading, so a press on a busy door SHOWS its words
+    { const ns = kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines }); this._kernelSaid = ns.said; this._kernelStates = ns.states; }
     const doors = kernelDoors(r);
     const said = doors.filter((d) => this._kernelSaid.get(d.id));
     if (!doors.length) { if (box) box.remove(); } else {
       if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
+      // its verdict's should: the 1.5 s tick redraws only when the doors MOVED, and a redraw gives the focus back to its door
+      const sig = JSON.stringify(doors.map((d) => [d.id, d.label, !!(d.busy || this._kernelAsks.has(d.id)), this._kernelSaid.get(d.id) || '']).concat([doors.length]));
+      if (box._doorsSig === sig) { if (step.tick) tick(); return; }
+      box._doorsSig = sig;
+      const focused = document.activeElement && box.contains(document.activeElement) && document.activeElement.dataset ? document.activeElement.dataset.engine || null : null;
       box.replaceChildren(...doors.flatMap((d) => {
         const b = document.createElement('button');
         b.type = 'button';
+        b.dataset.engine = d.id;
         b.className = 'settings-engine-download';
         b.textContent = doors.length > 1 ? t('Download kernel: {plugin}', { plugin: d.label }) : t('Download kernel');
         const busy = d.busy || this._kernelAsks.has(d.id);
@@ -764,6 +772,7 @@ class SettingsUI {
         const w = document.createElement('span'); w.className = 'settings-engine-said'; w.textContent = this._kernelSaid.get(d.id);
         return [b, w];
       }));
+      if (focused) { const fb = [...box.querySelectorAll('button.settings-engine-download')].find((x) => x.dataset.engine === focused); if (fb) fb.focus(); }
     }
     if (step.tick) tick();
   }
