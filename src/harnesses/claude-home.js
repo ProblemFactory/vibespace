@@ -17,31 +17,67 @@ const projectsDirOf = (home) => path.join(home, '.claude', 'projects');
 /** Is /home/<old> gone (a renamed user's old home)? — the default for a caller that hands none; migrateHomeRename hands its ONE
  *  injectable homeGone to both sources of an old user (B-8033 cure), so a test never depends on the paths of its machine. */
 const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);
-/** B-8033 cure r3: a folder under the NEW user's prefix when that prefix extends the old one (vibe → vibe-alice) is AMBIGUOUS by
- *  name — `-home-vibe-alice-notes` is /home/vibe/alice-notes (an old project, to move) or /home/vibe-alice/notes (the new user's
- *  own). Its transcript says which: an old project still to move records a /home/<old>/… cwd whose encoding IS the folder's name
- *  (once moved, the name is the new cwd's encoding and no longer matches — never moved twice). No transcript ⇒ nothing to
- *  resume ⇒ left as it is. Reads the head of at most three transcripts of that one folder. */
-function oldProjectByCwd(dir, old) {
-  let names = [];
-  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).slice(0, 3); } catch { return false; }
-  for (const f of names) {
-    let head = '';
-    try { const fd = fs.openSync(path.join(dir, f), 'r'); try { const b = Buffer.alloc(8192); head = b.toString('utf8', 0, fs.readSync(fd, b, 0, b.length, 0)); } finally { fs.closeSync(fd); } } catch { continue; }
-    const m = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head);
-    if (!m) continue;
-    let cwd = ''; try { cwd = JSON.parse(`"${m[1]}"`); } catch { continue; }
-    return (cwd === `/home/${old}` || cwd.startsWith(`/home/${old}/`)) && cwdToProjectDir(cwd) === path.basename(dir);
-  }
-  return false;
+/** B-8033 cure 2 (主开发's law): THE PERSON'S OWN FOLDERS ARE NEVER MOVED. A folder name is claude's encoding of a working folder
+ *  (every character but a letter or a digit becomes '-' — src/harnesses/helper-transcripts.js projDirOf), so a name alone never
+ *  says whose a folder is (`-home-vibe-alice-notes`: /home/vibe/alice-notes or /home/vibe-alice/notes or /home/vibe.alice/notes).
+ *  A folder MOVES only when its transcripts say it is an old project still in place; anything else stays. */
+const projDirOf = (cwd) => String(cwd || '').replace(/[^a-zA-Z0-9]/g, '-');
+const ownPrefixOf = (user) => projDirOf(path.posix.join('/home', String(user)));
+const underPrefix = (d, P) => d === P || d.startsWith(P + '-');
+const CWD_READ_MAX = 4 * 1024 * 1024;   // per transcript: far enough for any record that names its working folder
+const READ_ERR = Symbol('unreadable');
+/** The first record of a transcript that carries its OWN working folder (a top-level `cwd`) — a record without one never ends
+ *  the search; null = none in the first CWD_READ_MAX bytes; READ_ERR = the transcript could not be read (EIO, ESTALE …). */
+function firstCwdOf(file) {
+  const { StringDecoder } = require('string_decoder');
+  const dec = new StringDecoder('utf8'), b = Buffer.alloc(65536);
+  const cwdOfLine = (l) => { if (!l || !l.includes('"cwd"')) return null; try { const o = JSON.parse(l); return o && typeof o === 'object' && typeof o.cwd === 'string' && o.cwd ? o.cwd : null; } catch { return null; } };
+  let fd = null;
+  try {
+    fd = fs.openSync(file, 'r');
+    let pos = 0, rest = '';
+    while (pos < CWD_READ_MAX) {
+      const n = fs.readSync(fd, b, 0, b.length, pos);
+      if (n <= 0) break;
+      pos += n;
+      const text = dec.write(b.subarray(0, n));
+      let at = text.indexOf('\n');
+      if (at < 0) { rest += text; continue; }   // a long line: carried, never re-split
+      let c = cwdOfLine(rest + text.slice(0, at));
+      if (c != null) return c;
+      for (let from = at + 1; (at = text.indexOf('\n', from)) >= 0; from = at + 1) { c = cwdOfLine(text.slice(from, at)); if (c != null) return c; rest = ''; }
+      rest = text.slice(text.lastIndexOf('\n') + 1);
+    }
+    return cwdOfLine(rest + dec.end());
+  } catch { return READ_ERR; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
 }
+/** Whose is this `-home-<old>…` folder? Every transcript in it is asked: 'old' = each one that names a working folder names a
+ *  /home/<old>(/…) one whose encoding IS the folder's name (an old project still in place — once moved, the name no longer
+ *  matches: never moved twice); 'own' = each names another; null = none says, or they DISAGREE — the folder stays, said;
+ *  'error' = a transcript could not be read — a failed move (tried again, bounded), never a verdict. */
+function ownerByCwd(dir, old) {
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort(); } catch { return 'error'; }
+  const seen = new Set();
+  for (const f of names) {
+    const cwd = firstCwdOf(path.join(dir, f));
+    if (cwd === READ_ERR) return 'error';
+    if (cwd == null) continue;
+    seen.add((cwd === `/home/${old}` || cwd.startsWith(`/home/${old}/`)) && projDirOf(cwd) === path.basename(dir) ? 'old' : 'own');
+  }
+  return seen.size === 1 ? [...seen][0] : null;
+}
+/** The folders a move of <old> asks about: its bare home folder `-home-<old>` (conversations started in ~) and `-home-<old>-…`;
+ *  the new name of one: the bare one → the new bare folder, any other → under it. */
+const oldFolderOf = (d, old) => d === `-home-${old}` || d.startsWith(`-home-${old}-`);
+const newNameOf = (d, old, P) => (d === `-home-${old}` ? P : P + '-' + d.slice(`-home-${old}-`.length));
 /** Old usernames left behind: -home-<old>-… projdirs whose /home/<old> is gone. */
 function staleUsers(home, user, { homeGone = homeGoneOnDisk } = {}) {
   let dirs = [];
   try { dirs = fs.readdirSync(projectsDirOf(home)); } catch { return []; }
   const oldUsers = new Set();
   for (const d of dirs) {
-    const m = /^-home-([a-z][a-z0-9]*)-/.exec(d);
+    const m = /^-home-([a-z][a-z0-9]*)(?:-|$)/.exec(d);   // B-8033 cure 2: the old user's bare home folder names it too
     if (m && m[1] !== user && homeGone(m[1])) oldUsers.add(m[1]);
   }
   return [...oldUsers];
@@ -52,10 +88,11 @@ function staleUsers(home, user, { homeGone = homeGoneOnDisk } = {}) {
 function moveUser(home, old, user) {
   const projectsDir = projectsDirOf(home);
   let moved = 0;
+  const P = ownPrefixOf(user);
   for (const d of fs.readdirSync(projectsDir)) {
-    if (!d.startsWith(`-home-${old}-`)) continue;
-    if (`-home-${user}-`.startsWith(`-home-${old}-`) && d.startsWith(`-home-${user}-`) && !oldProjectByCwd(path.join(projectsDir, d), old)) continue;   // B-8033 cure r2/r3: vibe → vibe-alice — the new user's own folders are never moved; an old project whose name only LOOKS new is (its transcript's cwd)
-    const nd = `-home-${user}-` + d.slice(`-home-${old}-`.length);
+    if (!oldFolderOf(d, old)) continue;
+    if (ownerByCwd(path.join(projectsDir, d), old) !== 'old') continue;   // B-8033 cure 2: only an old project still in place moves — the person's own, an undecided one and an unreadable one stay
+    const nd = newNameOf(d, old, P);
     const src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
     try {
       if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }
@@ -77,19 +114,25 @@ function moveUser(home, old, user) {
  *  symlinked-home deploy's links (relinkLegacy) are no leftovers. */
 function leftAfterMove(home, old, user) {
   const projectsDir = projectsDirOf(home);
-  let failed = 0, sameName = 0, names = [];
-  try { names = fs.readdirSync(projectsDir); } catch { return { failed, sameName }; }
+  let failed = 0, sameName = 0, undecided = 0, names = [];
+  try { names = fs.readdirSync(projectsDir); } catch { return { failed, sameName, undecided }; }
+  const P = ownPrefixOf(user);
   for (const d of names) {
-    if (!d.startsWith(`-home-${old}-`)) continue;
-    if (`-home-${user}-`.startsWith(`-home-${old}-`) && d.startsWith(`-home-${user}-`) && !oldProjectByCwd(path.join(projectsDir, d), old)) continue;   // B-8033 cure r2/r3: vibe → vibe-alice — the new user's own folders are never moved; an old project whose name only LOOKS new is (its transcript's cwd)
-    const src = path.join(projectsDir, d), dst = path.join(projectsDir, `-home-${user}-` + d.slice(`-home-${old}-`.length));
+    if (!oldFolderOf(d, old)) continue;
+    let st0 = null; try { st0 = fs.lstatSync(path.join(projectsDir, d)); } catch { continue; }
+    if (!st0.isDirectory()) continue;   // the symlinked-home deploy's links are no leftovers
+    const who = ownerByCwd(path.join(projectsDir, d), old);   // B-8033 cure 2: own ⇒ never moved; undecided ⇒ stays, said; unreadable ⇒ failed (tried again)
+    if (who === 'error') { failed++; continue; }
+    if (who === null) { undecided++; continue; }
+    if (who !== 'old') continue;
+    const src = path.join(projectsDir, d), dst = path.join(projectsDir, newNameOf(d, old, P));
     let st = null; try { st = fs.lstatSync(src); } catch { continue; }
     if (!st.isDirectory()) continue;
     let files = []; try { files = fs.readdirSync(src); } catch { failed++; continue; }
     let dstDir = false; try { dstDir = fs.statSync(dst).isDirectory(); } catch { dstDir = false; }
     if (!dstDir || files.some((f) => !fs.existsSync(path.join(dst, f)))) failed++; else sameName++;
   }
-  return { failed, sameName };
+  return { failed, sameName, undecided };
 }
 
 /** The symlinked-home deploy (2.236.1): rename each -home-<old>-* dir to the
@@ -105,7 +148,7 @@ function relinkLegacy(home, old) {
   for (const d of names) {
     if (!d.startsWith(oldPrefix)) continue;
     const full = path.join(projectsDir, d);
-    if ((newPrefix + '-').startsWith(oldPrefix) && d.startsWith(newPrefix + '-') && !oldProjectByCwd(full, old)) continue;   // B-8033 cure r3: the new name's own folders (a deeper -x-x-… each boot, ELOOP)
+    if (underPrefix(d, newPrefix) && ownerByCwd(full, old) !== 'old') continue;   // B-8033 cure 2: the new name's own folders, the bare one included (a deeper -x-x-… each boot, ELOOP)
     let ds; try { ds = fs.lstatSync(full); } catch { continue; }
     if (!ds.isDirectory()) continue; // already a symlink from a prior run
     const target = newPrefix + '-' + d.slice(oldPrefix.length);

@@ -162,7 +162,7 @@ export const ROWS = [
   ['src/server/goal-sync.js', 'own-tree', 3, null, CLI],
   ['src/server/grants-store.js', 'own-tree', 3, null, 'lane grants-unify: THE grants store reads data/grants.json once at create (the server\'s own store), stats its own data/grants-audit.jsonl before rotating it, and asks whether data/grants.json is on disk (the boot\'s rollback check — verify F2)'],
   ['src/server/grants-migration.js', 'own-tree', 3, null, 'lane grants-unify: 2026-10-grants-unify reads the server\'s own stores under data/ (hosts.json, browser-profiles.json, automation-keys.json, window-reach.json, task-groups.json, channels/index.json) once, at the migration, and data/hosts.json again to carry the asks'],
-  ['src/server/home-rename.js', 'own-tree', 7, null, 'B-8033 (moved from server.js migrateHomeRename): the boot home-rename migration reads its two markers, lists ~/.vibespace for the old users its markers name and asks whether /home/<old> is gone (a stat of that name) (data/ and ~/.vibespace — VibeSpace\'s own trees), data/\'s small stores and data/session-meta (the checkout\'s own)'],
+  ['src/server/home-rename.js', 'own-tree', 8, null, 'B-8033 (moved from server.js migrateHomeRename): the boot home-rename migration reads its two markers (cure 2: and the tries beside the HOME one), lists ~/.vibespace for the old users its markers name and asks whether /home/<old> is gone (a stat of that name) (data/ and ~/.vibespace — VibeSpace\'s own trees), data/\'s small stores and data/session-meta (the checkout\'s own)'],
   ['src/server/hook-root-watch.js', 'own-tree', 2, null, CLI],
   ['src/server/incident-wiring.js', 'own-tree', 6, null, DATA],
   ['src/server/instance-url.js', 'own-tree', 1, null, DATA],
