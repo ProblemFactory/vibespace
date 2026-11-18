@@ -2,7 +2,7 @@
 // LANE BROWSER-STUCK (2026-09-28 — userW's "jarvis-work 卡死"; the owner's ruling "让agent知道这个对话框的存在和交互能力"):
 // A PAGE DIALOG IS A FACT OF THE AGENT'S VERB, never a timeout to guess from. Fast tier: in-process + a fake CDP browser
 // endpoint + a fake browser CLI + the REAL routes, the REAL CLI, the REAL dialog watch, the REAL bridge (free ports,
-// scratch dirs, zero vendor calls).
+// scratch dirs, zero vendor calls).  (the UI words: the fast scripts/test-browser-stuck-pins.mjs)
 //   ① PURE src/browser-stuck.js — the record, the per-kind auto-answer (alert only), THE sentence (the ruling's head
 //      verbatim, per kind, the repeat's duration), the notes, the idle notice, the browser CLI's own lines (MEASURED on
 //      0.38.1), the navigate / stuck verdicts, the UI words for every kind × accept/dismiss × en/zh/ja;
@@ -16,7 +16,7 @@
 //      through the watch; an alert's note; the user's answer told once; `browser_interrupted` while the user drives;
 //      the unresponsive note after three timeouts;
 //   ④ the REAL bridge: the viewer's `dialog` record, the late viewer's replay, `dialog-answer` = the user's answer, the
-//      agent's act on the trace taps, the tab each relay shows;
+//      agent's act on the trace taps, the tab each relay shows;  (MOVED to the fast scripts/test-browser-stuck-pins.mjs)
 //   ⑤ the keeper's seams: `noAutoDialog` in a lease session's file and in a launch file ONLY for a record launched with
 //      it (no relaunch at the update), the stuck fact on factFor, the fact's words;
 //   ⑥ teaching: the manual's "Page dialogs" section, the ONE tools-intro line under the inline cap, the CLI usage;
@@ -227,12 +227,7 @@ function a2Holes(mod) {
   ok(red.join(',') === '1.2,1.8,1.9,1.11,1.12', 'CONTROLS: each of the five parts reverted ALONE reddens its own leg (they stayed green in the r1 suite)', red);
   // #1: the frame FOLD is channel-record's — the tags + both patterns pinned by source, and the fold equal to inertFrameLine
   // over a seeded corpus of frame-shaped lines (the only difference allowed: pageText's own bound and invisible strip)
-  const crSrc = fs.readFileSync(path.join(REPO, 'src/channel-record.js'), 'utf8');
-  const openOf = (x) => (x.match(/^const FRAME_OPEN_RE = .*$/m) || [''])[0];
-  // the .197 integration: lane lark-search-poll verify r3 gave channel-record THE FOLDER (a tag split by an invisible / control
-  // character is live) — the line is copied again, and its supporting constants are pinned equal too (the head, the names)
-  const constOf = (x, n) => (x.match(new RegExp(`^const ${n} = .*$`, 'm')) || [''])[0];
-  ok(openOf(crSrc) && openOf(crSrc) === openOf(src) && ['FRAME_FOLD', 'FOLD', 'FOLD_G', 'lookThrough', 'FRAME_NAMES', 'FRAME_HEAD', 'FRAME_TAIL'].every((n) => constOf(crSrc, n) && constOf(crSrc, n) === constOf(src, n)) && ST.FRAME_OPEN_RE.flags === 'iuy', 'r2 #1 pin: FRAME_OPEN_RE is channel-record\'s own line, character for character, over the same folder constants (r1 pinned only FRAME_TAGS and FRAME_TAG_RE)');
+  // (#1's source pins — browser-stuck.js copies channel-record's FRAME_OPEN_RE line and its supporting constants (src/channel-record.js): MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
   const bits = ['<', '</', '< /', '>', ' ', 'a', '"', '=', 'x=1', ...CR.FRAME_TAGS, 'vibespace-note', 'VIBESPACE-X', 'system-reminder', '<system-reminder', '</system-reminder>', '<persisted-output >'];
   const diffs = []; let folded = 0;
@@ -284,30 +279,7 @@ function invisibleLeak(mod) {
   ok(src.includes(needle), 'control setup: the pair-safe cut is found in src/browser-stuck.js');
   ok(cuts(MUT.load('src/browser-stuck.js', src.replace(needle, 'const n = max - 1;'), 'r2-1-split')).some((x) => LONE.test(x)), 'CONTROL: the r1 cut (max − 1 code units) leaves a lone surrogate — the leg above reddens on it');
 }
-// the UI words: every kind × accept/dismiss × en/zh/ja — every key a dictionary entry
-{
-  const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
-  const keys = new Set();
-  const rec = (s, p) => { keys.add(s); return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); };
-  const tOf = (dict) => (s, p) => String(dict[s] || s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
-  const rows = [];
-  for (const type of ['alert', 'confirm', 'prompt', 'beforeunload', 'dialog']) {
-    const dd = ST.dialogFromCdp({ type, message: type === 'beforeunload' ? '' : 'Q?', defaultPrompt: 'd' }, {});
-    const en = ST.dialogWords(dd, rec);
-    rows.push({ type, en, zh: ST.dialogWords(dd, tOf(zh)), ja: ST.dialogWords(dd, tOf(ja)) });
-  }
-  for (const a of [{ by: 'auto', how: 'accepted' }, { by: 'user', how: 'accepted' }, { by: 'user', how: 'dismissed' }]) ST.answeredWords(a, rec);
-  for (const f of [{ state: 'dialog' }, { state: 'unresponsive' }]) ST.stuckWords(f, rec);
-  const byType = Object.fromEntries(rows.map((r) => [r.type, r]));
-  ok(byType.beforeunload.en.accept === 'Leave page' && byType.beforeunload.en.dismiss === 'Stay on page' && /discards what was typed/.test(byType.beforeunload.en.consequence) && byType.beforeunload.en.body === 'Changes you made may not be saved.'
-    && byType.confirm.en.accept === 'OK' && byType.confirm.en.dismiss === 'Cancel' && byType.alert.en.dismiss === null && byType.prompt.en.prompt === true && byType.prompt.en.defaultValue === 'd', 'dialogWords: per kind — a leave-page dialog says Leave / Stay and what leaving loses; an alert has OK only; a prompt a text box with its default');
-  const missing = [...keys].filter((k) => !(k in zh) || !(k in ja));
-  ok(keys.size >= 18 && missing.length === 0, `every UI key of the dialog card / toast / stuck banner has a zh AND a ja entry (${keys.size} keys)`, missing);
-  ok(rows.every((r) => r.zh.title !== r.en.title && r.ja.title !== r.en.title) && byType.beforeunload.zh.accept === '离开页面' && byType.beforeunload.ja.dismiss === 'ページに留まる', 'zh / ja render translated words for every kind (not the English fallback)');
-  const liveSrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  const liveKeys = ['Could not restart the browser: {why}', 'The browser was restarted — its tabs open fresh', 'The browser was stopped — the agent’s next browser command starts it fresh', 'The dialog could not be answered: {why}'];
-  ok(liveKeys.every((k) => liveSrc.includes(`t('${k}'`) && k in zh && k in ja), 'the live view\'s own new toasts are literal t() keys with zh + ja entries');
-}
+// (the UI words — every kind × accept/dismiss × en/zh/ja a dictionary entry, the live view's toasts literal t() keys: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 // VERIFY r2 (reproduced): a beforeunload's BLOCK (what the bridge sends the live view, what an idle notice stores) carried
 // Chrome's English sentence as its message — the zh / ja live view showed it untranslated, the notice called it "the page's
 // own words"
@@ -464,9 +436,7 @@ console.log('①b PURE the navigation loop (the measured 0.38.1 shapes) + the si
   ok(!/<\/?system-reminder>/.test(evil) && /"https:\/\/y\.test\/\\""/.test(evil), 'the addresses are page content: frame-inert, quoted (a `"` never closes the quote)', evil);
   ok(ST.loopText({ urls: ['https://a.test/'], hops: 9, sinceMs: 8000, host: 'bad host;rm -rf' }).includes('site-reset <host>'), 'a host that is not a host name is never put in a command line');
   ok(ST.loopPasses('stop') && ST.loopPasses('tab') && ST.loopPasses('screenshot') && ST.loopPasses('open') && ST.loopPasses('site-reset') && !ST.loopPasses('snapshot') && !ST.loopPasses('click') && !ST.loopPasses('get'), 'the ways out still run on a looping tab; a page-waiting verb is answered with the loop');
-  const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-  const fb = /const LOOP_PASS_FALLBACK = new Set\((\[[^\]]*\])\)/.exec(cliSrc);
-  ok(fb && JSON.stringify(JSON.parse(fb[1].replace(/'/g, '"')).sort()) === JSON.stringify([...ST.LOOP_PASS_VERBS].sort()), 'the CLI\'s fallback list (an older rules file beside it on a host) is THE same list', fb && fb[1]);
+  // (the CLI's LOOP_PASS_FALLBACK equals ST.LOOP_PASS_VERBS — a pin of data/bin/vibespace-browser against src/browser-stuck.js: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const w = ST.loopWords({ urls: ['https://a.test/login', 'https://a.test/app'], hops: 7, sinceMs: 4200 }, (s, p) => ST.pageText(String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? p[k] : m))));
   ok(w.chip === 'page keeps reloading' && w.line === 'The page keeps bouncing between https://a.test/login ↔ https://a.test/app — its stored login may be stale' && w.hops === '7 loads in 4 s', 'the UI words (the chip, the line with the cycle, the count)', w);
   const f = ST.stuckFact({ loop: l });
@@ -518,9 +488,7 @@ console.log('①b PURE the navigation loop (the measured 0.38.1 shapes) + the si
   const r4vi = ST.navigationLoopVerdict(irregular, { now: irregular[irregular.length - 1].at });
   ok(r4vi && !r4vi.period, 'irregular gaps are no period', r4vi);
   ok(ST.LOOP_READ_VERBS.every((v) => ST.loopReads(v) && !ST.loopPasses(v)) && !ST.loopReads('click') && !ST.loopReads('wait') && !ST.loopReads('find') && !ST.loopReads('eval'), 'loopReads: snapshot / get / is / console / errors — never a way-out verb, never an acting or waiting one');
-  const cliSrc4 = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-  const fb4 = /const LOOP_READ_FALLBACK = new Set\(\[([^\]]*)\]\);/.exec(cliSrc4);
-  ok(fb4 && JSON.stringify(fb4[1].split(',').map((x) => x.trim().replace(/^'|'$/g, ''))) === JSON.stringify([...ST.LOOP_READ_VERBS]), 'the CLI\'s reading fallback equals LOOP_READ_VERBS');
+  // (the CLI's reading fallback equals LOOP_READ_VERBS — a pin of data/bin/vibespace-browser against src/browser-stuck.js: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(ST.loopBlock(r4vd).readable === true && ST.loopBlock(r4vd).period === 1000 && ST.loopBlock(r4vp.v).readable === false, 'loopBlock carries readable + period (the fact, the route, --json)');
   // HELD (stated): 19 ever-new page hops, a 9 s pause, 19 more — never a loop: the pause ends the run, and a hop slower than the
   // 8 s quiet bound lets its page load (`open` settles) or says it is loading at every timeout (r1 A7)
@@ -1159,8 +1127,7 @@ async function noticeFlood({ replaceKind, withWithdraw }) {
   const pend = await noticeFlood({ replaceKind: true, withWithdraw: true });
   const dl = pend.filter((x) => x.kind === 'browser-dialog');
   ok(pend.some((x) => x.kind === 'browser-takeover') && dl.length === 1 && dl[0].dialog.message === 'Still open', 'notice flood: ten dialogs the user answered leave NO stale notice, the one still open leaves ONE, and the takeover notice the agent is owed survives', pend.map((x) => x.kind + ':' + (x.dialog ? x.dialog.message : '')));
-  const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/st\.pushNotice\(sessionStatusKey\(s, sessionId\), n, \{ replaceKind: true \}\)/.test(wsrc) && /\bwithdraw: \(sessionId, dialogId\) =>[^\n]*st\.dropNotices\(/.test(wsrc) && !/_withdraw: \(sessionId/.test(wsrc), 'wiring pin: the production notice callback replaces by kind and the watch\'s withdraw drops the closed dialog\'s notice');
+  // (the notice wiring pin of src/server/mounts-plugins-wiring.js: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const ctl = await noticeFlood({ replaceKind: false, withWithdraw: false });
   ok(!ctl.some((x) => x.kind === 'browser-takeover') && ctl.length === 8 && ctl.every((x) => x.kind === 'browser-dialog'), 'CONTROL: the shipped callback (push, never withdraw) queues 8 stale dialog notices and EVICTS the takeover notice — the reproduced flood; the leg above reddens on it', ctl.map((x) => x.kind));
 }
@@ -1282,7 +1249,7 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const b1 = await busyRoute(Rb);
   ok(b1.r.status === 409 && b1.r.body.code === 'browser_interrupted' && /your window of this browser/.test(b1.r.body.error) && b1.answered === 0, 'A1: while the user drives the window this lease is in, its `dialog accept` is refused browser_interrupted (named: your window) — the route\'s own input check', b1);
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-  ok(!/driveVerdictFor/.test(rsrc), 'lane browser-windows: the route carries no drive belt any more (the claim is deleted)');
+  // (lane browser-windows: the route carries no drive belt — a source pin of src/routes/browser.js: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const needle = "if (st && st.input === 'user') return res.status(409)";
   // int215: the needle is read INSIDE the dialog route — lane browser-passkey's route (registered before it) carries the
   // same input check, and a bare replace() took that one
@@ -1291,24 +1258,7 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const b2 = await busyRoute(MUT.load('src/routes/browser.js', rsrc.slice(0, cut) + "if (false) return res.status(409)" + rsrc.slice(cut + needle.length), 'busy-none'));
   ok(b2.r.status === 200 && b2.answered === 1, 'CONTROL: without it the direct call answers the dialog under the user\'s hands — the leg reddens on it', b2);
 }
-// VERIFY r1 A6 (LOW): the Agent browser panel's row SAYS a browser launched before the lane still accepts leave-page
-// dialogs itself (the attack: "the profile row says which mode it runs in"; before, nothing on any surface did)
-{
-  const src = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  const zh = (await import('../src/lib/i18n-zh.js')).default, ja = (await import('../src/lib/i18n-ja.js')).default;
-  const KEYW = 'Accepts leave-page dialogs by itself (typed input is lost) until its next start';
-  ok(/function autoDialogsOf\(r\) \{[^\n]*r\.live && !r\.host && b && b\.state === 'ready' && !b\.holdDialogs/.test(src) && src.includes(`autoDialogsOf(r) ? t('${KEYW}')`) && /pageStuckOf\(r\.id\), autoDialogsOf\(r\)(?:, [^\]\n]+)?\]/.test(src) /* lane browser-admin 2a: + the running build after it */ && KEYW in zh && KEYW in ja,
-    'A6: a running local browser whose record carries no `holdDialogs` launch stamp is said on its panel row (keyed signature included; zh + ja)');
-  // VERIFY r2 (the builder's open question 2): the same row offers ONE click to make such a browser hold dialogs — the human
-  // Restart (a confirm first: its tabs close), only where the unresponsive Restart is not already offered
-  const HOLD_KEYS = ['Restart to hold dialogs', 'Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay', 'Restart {label}?', 'Its open tabs close (logins in the profile stay). From its next start VibeSpace holds leave-page dialogs for a decision, so nothing typed on a page is lost without a word.'];
-  // design 015 (lane browser-panel-tidy): the row's acts are the ⋯ menu's — WHICH one is offered is the PURE model's
-  // rowMenu (Restart while the page is stuck, ELSE Restart to hold dialogs); the view runs it by its id (RUN)
-  const model = fs.readFileSync(path.join(REPO, 'src/lib/browser-panel-model.js'), 'utf8');
-  const holdBlock = (src.match(/    'restart-hold': async \(r\) => \{[\s\S]*?\n    \},\n/) || [''])[0];
-  ok(/if \(x\.stuck && x\.stuck\.action && r\.live && !r\.host\) out\.push\(\{ id: 'restart'[^\n]*\n\s*else if \(x\.autoDialogs\) out\.push\(\{ id: 'restart-hold'/.test(model) && /autoDialogs: !!autoText, autoText/.test(src) && /showConfirmDialog\(/.test(holdBlock) && /if \(!yes\) return;/.test(holdBlock) && holdBlock.includes('/api/browser/profiles/${encodeURIComponent(r.id)}/restart') && holdBlock.split('\n').length <= 20 && HOLD_KEYS.every((k2) => (holdBlock.includes(`t('${k2}'`) || model.includes(`t('${k2}'`)) && k2 in zh && k2 in ja), /* design 015: the label + its title are the model's menu item, the confirm the view's act */
-    'r2 pin: a pre-lane browser\'s row offers "Restart to hold dialogs" — a confirm (its tabs close), then the human Restart route; never beside the unresponsive Restart; every word zh + ja', holdBlock.split('\n').length);
-}
+// (VERIFY r1 A6 + r2: the panel row's pins of src/lib/browser-trace-view.js, src/lib/browser-panel-model.js and their zh / ja words: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 // CONTROL 4: a watch that does not accept alerts leaves the page held and says nothing
 {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
@@ -1924,11 +1874,8 @@ console.log('⑤ the keeper: noAutoDialog from a launch on, the stuck fact');
   ok(old && read(old).noAutoDialog === undefined && (read(old).args || []).includes(B.keeperMarkArg(p.id)), 'a browser launched BEFORE the update keeps its launch file as it was (no noAutoDialog) — a different launch config would relaunch its Chrome (measured)', read(old));
   k.reshapeStore((reg) => { reg.browsers[p.id].holdDialogs = true; });
   ok(read(k.machineConfigFile('machine', p.id)).noAutoDialog === true, '…a record LAUNCHED with it (`holdDialogs`, stamped at the launch) carries it in every later call');
-  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  // lane one-browser-b1-mirror-fix: B1's attach road (attachStart — the keeper spawns Chrome itself) is a named profile's
-  // second launch; it stamps beside its mark on one line — two `= true` stamps, each pinned at its own launch
-  ok((ksrc.match(/rec\.holdDialogs = true;/g) || []).length === 2 && /rec\.mark = p\.id;[^\n]*\n\s*rec\.holdDialogs = true;/.test(ksrc) && /async function attachStart\(p, rec[\s\S]{0,3000}?\n\s*rec\.mark = p\.id; rec\.holdDialogs = true;/.test(ksrc) && /rec\.mark = p\.owner\.id;[\s\S]{0,500}?rec\.holdDialogs = pairsHoldDialogs\(pairs\);/.test(ksrc), 'the stamp sits at EVERY launch beside the mark: a named profile\'s always (the driver road\'s and the attach road\'s); an ephemeral\'s only when its pairs name a config that holds (rung N keeps its launch view — a bare escape command must not restart its daemon, test-browser-live lane P F2)');
-  ok(B.generatedConfigParts({ userConfig: {}, holdDialogs: true }).config.noAutoDialog === true && B.generatedConfigParts({ userConfig: { noAutoDialog: false } }).config.noAutoDialog === false && /holdDialogs: true/.test(fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8')), 'generatedConfigParts: ours when asked (a new spawn\'s config — browser-env asks), the user\'s value otherwise');
+  // (the keeper's two holdDialogs launch stamps — a source pin of src/server/browser-keeper.js: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
+  // (generatedConfigParts' noAutoDialog rule — the PURE builder of src/browser-profiles.js and src/server/browser-env.js's ask: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(k.holdsDialogsFor(p.id) === true && (k.reshapeStore((reg) => { reg.browsers[p.id].holdDialogs = false; }), k.holdsDialogsFor(p.id) === false) && (k.reshapeStore((reg) => { reg.browsers[p.id].holdDialogs = true; }), true), 'holdsDialogsFor: a named browser holds dialogs exactly when it was LAUNCHED with the stamp (what the watch asks)');
   {
     // an EPHEMERAL browser (the common case): the config its spawn pairs name decides — a conversation spawned before the
@@ -1961,22 +1908,8 @@ console.log('⑤ the keeper: noAutoDialog from a launch on, the stuck fact');
   k.shutdown();
 }
 
-// ═══ ⑥ teaching ═══
-console.log('⑥ teaching: the manual, the ONE intro line, the CLI usage');
-{
-  const man = fs.readFileSync(path.join(REPO, 'docs/agent/browser-manual.md'), 'utf8');
-  ok(/### Page dialogs/.test(man) && /accept = LEAVE the\s+page and lose what was typed/.test(man) && /dismiss = STAY/.test(man) && /the dialog was answered\s+in the live view/.test(man) && /`dialog_open` is answered, never waited out/.test(man) && !/agent-browser dialog/.test(man), 'the manual\'s "Page dialogs" section: each kind, what accept/dismiss do (a leave-page accept loses the input), the user may answer first, the rule');
-  const AR = require('../src/agent-routes.js');
-  const intro = AR.sessionToolsIntro({ status: true, ask: true, task: true, jobs: true }, { browserVariant: 'D' });
-  ok(intro.includes(AR.BROWSER_DIALOG_LINE) && /dialog_open/.test(AR.BROWSER_DIALOG_LINE) && /vibespace-browser dialog accept \[text\]/.test(AR.BROWSER_DIALOG_LINE) && Buffer.byteLength(intro) < 9600 && (intro.match(/dialog_open/g) || []).length === 1, `the SessionStart tools intro carries ONE line teaching it, and stays under the 9 600 B inline cap (${Buffer.byteLength(intro)} B)`);
-  const usage = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-  ok(/vibespace-browser dialog status \| accept \[text\] \| dismiss/.test(usage) && V.classify(['dialog', 'accept', 'x'], { ours: true }).kind === 'page' && V.classify(['dialog', 'status'], { ours: true }).kind === 'page', 'the CLI\'s usage names the dialog verbs; the verb table admits `dialog status|accept|dismiss` as a page verb');
-  const tv = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8'), wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/const psw = ps \? stuckWords\(ps, t\) : null;/.test(tv) && /bprof-restart/.test(tv) && /\/api\/browser\/profiles\/\$\{encodeURIComponent\(r\.id\)\}\/restart/.test(tv) && /pageStuckOf\(r\.id\), autoDialogsOf\(r\)(?:, [^\]\n]+)?\]\); \};/.test(tv), 'wiring pin: the Agent browser panel\'s row prints the page\'s state and offers Restart (its keyed signature includes it)');
-  ok(/addDigest\(\(\) => \(\{ pageStuck: Object\.fromEntries\(Object\.entries\(browserDialogs\.pageStuckMap\(\)\)\.filter\(\(\[pid\]\) => \{ try \{ return !browserKeeper\.isEphemeral\(pid\)/.test(wiring) && /browserKeeper\.setStuckSource\(\(bk\) => browserDialogs\.stuckForKey\(bk\)\)/.test(wiring) && /browserDialogs\?\.onChange\(kickFacts\)/.test(wiring) && /dialogs: browserDialogs/.test(wiring), 'wiring pin: the watch feeds the keeper\'s fact, the fact republish, the routes, the bridge and the digest (named profiles only — never another conversation\'s ephemeral record)');
-  const hosts = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
-  ok(/'vibespace-browser-stuck\.js'/.test(hosts) && /createBrowserStuckCopy\(\);/.test(fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8')) && fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').includes('data/bin/vibespace-browser-stuck.js'), 'the words ride beside the CLI to every host (AGENT_TOOLS, the boot copy, gitignored)');
-}
+// ═══ ⑥ teaching ═══ (the manual docs/agent/browser-manual.md, the ONE intro line of src/agent-routes.js, the CLI usage of data/bin/vibespace-browser,
+// the panel's Restart and digest wiring, the stuck tool's copy: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 // ── the .197 integration (browse-yourself × browser-stuck): THE USER BROWSING IT HIMSELF IS A HOLDER OF THE BROWSER ──
 // a dialog on HIS tab is his: with his row among the holders the browser is SHARED, so a conversation whose tab the watch
 // cannot attribute is told of none (the established shared rule), and his own driving holds an alert for him
@@ -1988,11 +1921,7 @@ console.log('⑥ teaching: the manual, the ONE intro line, the CLI usage');
   const scShared = dh.scopeFor({ profileId: 'p-shared', browserKey: KC, sessionId: 'sess-c' });
   const scAlone = dh.scopeFor({ profileId: 'p-alone', browserKey: KC, sessionId: 'sess-c' });
   ok(scShared instanceof Set && scShared.size === 0 && scAlone === null, 'the .197 integration: while the user browses the profile himself, a conversation with no attributed tab is told of NO dialog (never his page\'s); alone, every tab is its own', { shared: scShared && [...scShared], alone: scAlone });
-  const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  // int367 (the .367 train): lane passkey-browse-yourself r4 moved the holder rows into ONE composer, browser-dialogs.js
-  // holdersOfKeeper (his row once, flagged) — the wiring hands it the keeper; the pin follows it there
-  const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-  ok(/const holdersOf = require\('\.\/browser-dialogs'\)\.holdersOfKeeper\(\(\) => browserKeeper\);/.test(wsrc) && /const h = typeof k\.humanOf === 'function' \? k\.humanOf\(profileId\) : null;\s*if \(h && h\.browserKey\) out\.push\(\{ browserKey: h\.browserKey, sessionId: null, ephemeral: false, human: true,/.test(dsrc) && /if \(h && h\.human\) return h\.input === 'user';/.test(dsrc), 'WIRING: the watch\'s holders include the user\'s own browsing row (keeper.humanOf), and "the user drives" reads his row\'s own side');
+  // (the .197 integration's holder wiring pins of src/server/mounts-plugins-wiring.js + src/server/browser-dialogs.js: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   dh.shutdown && dh.shutdown();
 }
 for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
