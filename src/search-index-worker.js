@@ -81,7 +81,7 @@ function openOnce() {
 // THE STEP THAT KEEPS THE ROWS (B-b291 cure r2, the reader's N1): a release's index is MIGRATED, never dropped — a
 // conversation the backfill cannot read again (a harness with no transcript reader: its rows came from the live door) would
 // otherwise leave search for good. The step adds its columns; every conversation the backfill CAN read is marked to be read
-// again (its rows are replaced then — `migrated` cursors), and every user row is held as a possible peer card (grp '': the
+// again (its rows are replaced then — `migrated` cursors), and a user row with a peer card's SHAPE (cure 2) is held (grp '': the
 // whole-message rule judges it) until it is. A table set this release does not know is dropped and rebuilt as before.
 const ADDED_COLUMNS = [['grp', 'TEXT'], ['who', 'TEXT']]; // who (B-19bd): a migrated row says nothing until its transcript is read again
 const KNOWN_TABLES = ['msg', 'msg_fts', 'art', 'art_fts', 'cursor', 'meta'];
@@ -93,12 +93,32 @@ function migrate() {
   try {
     for (const [c, ty] of ADDED_COLUMNS) if (!have.has(c)) db.exec(`ALTER TABLE msg ADD COLUMN ${c} ${ty}`);
     db.exec('CREATE INDEX IF NOT EXISTS msg_grp ON msg (grp) WHERE grp IS NOT NULL');
-    if (!have.has('grp')) db.exec("UPDATE msg SET grp = '' WHERE role = 'user'");
+    if (!have.has('grp')) markPeerShaped();
     db.exec("UPDATE cursor SET state = 'migrated' WHERE state = 'done'");
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     db.exec('COMMIT');
     return true;
   } catch { try { db.exec('ROLLBACK'); } catch { } return false; }
+}
+/** THE MIGRATION'S PEER SHAPE (the coordinator's (2) on B-b291's cure): a release row carries no card, so it is held for
+ *  the clear only by the SHAPE of its key — a group card (`gm:<gid>:<at>`, placeGroupCard's id) under its own group, a card
+ *  the server injected outside any record (the card door: `s<n>`) as a possible peer card (''). Every other user row stays
+ *  the person's (null: judged only by a report naming its group, never whole) — a person's own old sentence equal to a
+ *  cleared group message is never rewritten, even where no transcript is read again. (A wrapped frame or a report read
+ *  back is judged by its `(gid)` head whatever its group: a mark would change no verdict.) */
+const PEER_MID_RE = /^s\d+(?:\.\d+)?$/, CARD_MID_RE = /^gm:(g-[0-9a-f]{8}):/;
+function markPeerShaped() {
+  const page = db.prepare("SELECT id, mid FROM msg WHERE role = 'user' AND id > ? ORDER BY id LIMIT 5000");
+  const mark = db.prepare('UPDATE msg SET grp = ? WHERE id = ?');
+  let after = 0, n = 0;
+  for (let rows = page.all(after); rows.length; rows = page.all(after)) {
+    for (const r of rows) {
+      after = r.id;
+      const mid = String(r.mid || ''), card = CARD_MID_RE.exec(mid);
+      if (card) { mark.run(card[1], r.id); n++; } else if (PEER_MID_RE.test(mid)) { mark.run('', r.id); n++; }
+    }
+  }
+  return n;
 }
 
 function open() {
@@ -410,7 +430,7 @@ function status() {
 
 /** Rebuild: every row and cursor dropped; the owner walks again. */
 function drop() {
-  tx(() => { for (const t of ['msg', 'art', 'cursor']) db.exec(`DELETE FROM ${t}`); db.exec("INSERT INTO msg_fts (msg_fts) VALUES ('delete-all')"); db.exec("INSERT INTO art_fts (art_fts) VALUES ('delete-all')"); });
+  tx(() => { for (const t of ['msg', 'art', 'cursor']) db.exec(`DELETE FROM ${t}`); db.exec("INSERT INTO msg_fts (msg_fts) VALUES ('delete-all')"); db.exec("INSERT INTO art_fts (art_fts) VALUES ('delete-all')"); db.exec("DELETE FROM meta WHERE k = 'lastBuild'"); }); // cure 2: the last build goes with the rows (a worker started again mid-walk brings none back)
   try { db.exec('VACUUM'); } catch { }
   return { dropped: true };
 }

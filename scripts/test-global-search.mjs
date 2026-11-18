@@ -387,6 +387,9 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     const ins = db1.prepare('INSERT INTO msg (sid, host, backend, mid, ts, role, body) VALUES (?, ?, ?, ?, ?, ?, ?)'), fts = db1.prepare('INSERT INTO msg_fts (rowid, body) VALUES (?, ?)');
     const put = (sid, backend, mid, body) => { const r = ins.run(sid, '', backend, mid, 1, 'user', body); fts.run(r.lastInsertRowid, M.segment(body)); };
     put('ag-conv-1', 'antigravity', 'x1', 'the olivequartz note of a conversation no transcript reader can read');
+    put('ag-conv-1', 'antigravity', 's3', 'a card the server injected outside any record');   // the card door's key shape
+    put('ag-conv-1', 'antigravity', 'x2', 'Another Claude session sent a message:\nthe wrapped words\n\nThis came from another Claude session — not typed by your user.');
+    put('ag-conv-1', 'antigravity', 'gm:g-0f0f0f0f:1790000000000', 'a group card the live door indexed');   // placeGroupCard's key
     put(MIG_SID, 'claude', 'u:m-old', 'the stalewords row the release wrote');
     db1.prepare('INSERT INTO cursor (file, sid, host, size, mtime, lines, state) VALUES (?, ?, ?, ?, ?, ?, ?)').run(MIG_FILE, MIG_SID, '', fs.statSync(MIG_FILE).size, Math.floor(fs.statSync(MIG_FILE).mtimeMs), 1, 'done');
     db1.prepare('INSERT INTO meta (k, v) VALUES (?, ?)').run('lastBuild', '1790000000000');
@@ -398,13 +401,16 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   const MIG_FILE = path.join(MIG_DIR, MIG_SID + '.jsonl');
   fs.writeFileSync(MIG_FILE, JSON.stringify({ type: 'user', uuid: 'm-1', sessionId: MIG_SID, timestamp: new Date(2e12).toISOString(), message: { role: 'user', content: 'the freshlinden words of the transcript' } }) + '\n');
   const migrateScene = async (workerFile = null) => {
-    const x5 = SI.create({ dataDir: mkV1(), homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, ...(workerFile ? { workerFile } : {}) }); x5.start();
+    const d5 = mkV1();
+    const x5 = SI.create({ dataDir: d5, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, ...(workerFile ? { workerFile } : {}) }); x5.start();
     await x5.call('status', {});
     const f5 = async (w) => (await x5.search({ q: w, scope: 'chats' })).hits.length;
     const m = { migrated: x5.stats().ready && x5.stats().ready.migrated, lastBuild: x5.stats().lastBuild, kept: await f5('olivequartz') };
     const r = await x5.call('indexConversation', { sid: MIG_SID, backend: 'claude', cwd: '/w/mig' });
     Object.assign(m, { reread: !!(r && r.parsed), stale: await f5('stalewords'), fresh: await f5('freshlinden') });
     await x5.close({ final: true });
+    { const { DatabaseSync } = require('node:sqlite'); const db5 = new DatabaseSync(path.join(SI.indexDirFor(d5, home).dir, 'search.db'));
+      m.grps = Object.fromEntries(db5.prepare("SELECT mid, grp FROM msg WHERE sid = 'ag-conv-1'").all().map((r) => [r.mid, r.grp])); db5.close(); }
     return m;
   };
   const mg = await migrateScene();
@@ -434,6 +440,9 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   ok(onw.p6after >= 1, `CONTROL (no wait for the whole set at a boot): the first search answers from the cache-only set and finds the words (${onw.p6after})`, onw);
   const omg = await migrateScene(wmut("if (!fresh && uv > 0 && uv < SCHEMA_VERSION && migrate())", "if (false)", 'nomigrate'));
   ok(omg.kept === 0, `CONTROL (the schema step drops the index, as before the cure): the conversation no transcript reader can read is gone from search (${omg.kept})`, omg);
+  ok(mg.grps && mg.grps.x1 === null && mg.grps.s3 === '' && mg.grps.x2 === null && mg.grps['gm:g-0f0f0f0f:1790000000000'] === 'g-0f0f0f0f', `the migration holds rows by their key's SHAPE: a group card under its own group, the card door's key as a possible peer card; the person's own old row stays theirs — never judged whole (a wrapped frame is judged by its head, as before) (${JSON.stringify(mg.grps)})`, mg);
+  const omk = await migrateScene(wmut('    if (!have.has(\'grp\')) markPeerShaped();', '    if (!have.has(\'grp\')) db.exec("UPDATE msg SET grp = \'\' WHERE role = \'user\'");', 'everyuser'));   // stale-pins: kept (the RED control puts the release's text back)
+  ok(omk.grps && omk.grps.x1 === '', `CONTROL (every release user row held as a peer card, as the cure had it): the person's own row is judged whole — the leg goes RED (${JSON.stringify(omk.grps)})`, omk);
   const ok2 = await scene(wmut("  if (typeof mid === 'string' && mid.startsWith('gm:')) {", "  if (false) {", 'nokey'));
   ok(ok2.keyOnly >= 1, `CONTROL (no card-key branch): a card of the record whose words differ is found again (${ok2.keyOnly})`, ok2);
   const CARRY = "...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : m.originKind === 'peer-message' ? { peerCard: true } : {})";
@@ -464,6 +473,79 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
       `a group whose log could not be read is named partial, not cached, and read again at the next ask (${asyncReads} async reads by the asks; the boot warm-up's ${warmReads} apart)`, { r1, r2, warmReads });
     st0.close();
   }
+  // CURE 2 (lens two's shoulds, each a few lines): a Rebuild's drop forgets the last build — a worker started again
+  // mid-walk brings none back, so the line keeps «Indexing…»; a walk whose closing call failed still ends «building» —
+  // an open window stops asking every 3 s; a whole hand-over gives a later partial set its ten tries again. RED controls.
+  {
+    const lbScene = async (workerFile = null) => {
+      const d7 = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-lb-'));
+      const mk = () => SI.create({ dataDir: d7, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, ...(workerFile ? { workerFile } : {}) });
+      const a = mk(); a.start(); await a.call('noteBuild', { at: 1790000000000 }); await a.call('drop', {}); await a.close({ final: true });
+      const b = mk(); b.start(); await b.call('status', {}); const lb = b.stats().lastBuild; await b.close({ final: true });
+      return lb;
+    };
+    const lb = await lbScene();
+    ok(lb === null, `a Rebuild's drop forgets the last build: a worker started again before the walk ended says «Indexing…» (lastBuild ${lb})`);
+    const lbc = await lbScene(wmut(`db.exec("INSERT INTO art_fts (art_fts) VALUES ('delete-all')"); db.exec("DELETE FROM meta WHERE k = 'lastBuild'"); });`, `db.exec("INSERT INTO art_fts (art_fts) VALUES ('delete-all')"); });`, 'dropkeeps'));   // stale-pins: kept (the RED control puts the release's text back)
+    ok(lbc === 1790000000000, `CONTROL (the drop keeps the meta): the old last build comes back — the leg goes RED (${lbc})`);
+    const wthrow = wmut('function sweepArtifacts() {', "function sweepArtifacts() { throw new Error('a closing call that fails (stand-in)');", 'sweepfails');
+    const walkScene = async (O) => {
+      const x8 = O.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-walk-')), homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, workerFile: wthrow });
+      x8.start(); await x8.call('status', {}); await x8.backfill();
+      const out = { lastBuild: x8.stats().lastBuild, running: x8.stats().backfill.running }; await x8.close({ final: true });
+      return out;
+    };
+    const wk = await walkScene(SI);
+    ok(!!wk.lastBuild && wk.running === false, `a walk whose closing call failed (sweepArtifacts throws) still ends «building» — the line and the window's re-ask stop (lastBuild ${wk.lastBuild})`, wk);
+    const WALK_END = "      try { await call('sweepArtifacts', {}); } catch { }\n      if (gen === buildGen && st !== 'closed' && st !== 'disabled') {";
+    const wkc = await walkScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, WALK_END), "      try { await call('sweepArtifacts', {}); await call('noteBuild', { at: now() }); lastBuildAt = now(); } catch { }\n      if (false) {"), 'walkend'));
+    ok(wkc.lastBuild === null, `CONTROL (one try around the closing calls, as before): the failed sweep leaves the index «building» for good — the leg goes RED (${wkc.lastBuild})`, wkc);
+    const retryScene = async (O) => {
+      let asks = 0, gaveUp, wholeSeen, guard;
+      const done = new Promise((r) => { gaveUp = r; }), third = new Promise((r) => { wholeSeen = r; });
+      const log9 = { log() { }, error() { }, warn(m) { if (String(m).includes('still partial after 10 tries')) gaveUp(); } };
+      const x9 = O.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-retry-')), homeDir: home, log: log9, exitHook: false, bootDelayMs: 1e9, clearedRetryMs: 1,
+        clearedCopiesAll: async () => { asks++; if (asks === 3) { wholeSeen(); return { groups: {}, partial: [] }; } return { groups: {}, partial: ['g-unread'] }; } });
+      x9.start(); await Promise.race([third, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard); await x9.call('status', {});
+      await x9.close();          // a worker started again in the same process (an idle exit) hands the set over again
+      x9.start();
+      await Promise.race([done, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard);
+      const n = asks; await x9.close({ final: true });
+      return n;
+    };
+    const ra = await retryScene(SI);
+    ok(ra === 14, `a whole hand-over gives a later partial set its ten tries again: 2 partial + the whole, then 1 + 10 tries after a worker restart (${ra} asks)`);
+    const rac = await retryScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, 'if (partial.length) retryCleared(); else clearedRetries = 0;'), 'if (partial.length) retryCleared();'), 'noreset'));
+    ok(rac === 12, `CONTROL (the counter never reset): the partial set after the restart gets only the tries left over — the leg goes RED (${rac} asks)`);
+    // the cure's second reader: a Rebuild pressed DURING a walk — that walk ends without «built» (the drop removed what it had
+    // walked) and a fresh walk follows it; a walk broken off by the final close builds nothing either
+    const genScene = async (O, { closeMid = false } = {}) => {
+      let release = null, lists = 0, atSecond = 'not asked', rebuilt, guard;
+      const walked = new Promise((r) => { rebuilt = r; });   // the Rebuild's own walk says so at its end (its log line)
+      const x = O.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-gen-')), homeDir: home, exitHook: false, bootDelayMs: 1e9,
+        log: { log(m) { if (String(m).includes('backfill (rebuild)')) rebuilt(); }, warn() { }, error() { } },
+        listConversations: async () => { lists++; if (lists === 1) { await new Promise((r) => { release = r; }); return []; } if (lists === 2) atSecond = x.stats().lastBuild; return []; } });
+      x.start(); await x.call('status', {});
+      const first = x.backfill();           // a walk in flight: its list is still being read
+      if (closeMid) await x.close({ final: true }); else await x.rebuild();
+      release(); await first;
+      for (let i = 0; i < 50 && !closeMid && lists < 2; i++) await new Promise((r) => setImmediate(r));   // a walk that follows starts at once
+      if (lists >= 2) { await Promise.race([walked, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard); }
+      const out = { lists, atSecond, end: x.stats().lastBuild };
+      if (!closeMid) await x.close({ final: true });
+      return out;
+    };
+    const gn = await genScene(SI);
+    ok(gn.lists === 2 && gn.atSecond === null && !!gn.end, `a Rebuild during a walk: that walk ends without «built» and a fresh walk follows it — only that one sets the last build (${gn.lists} walks, ${gn.atSecond} between them)`, gn);
+    const gnc = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (st !== 'closed' && st !== 'disabled') {"), 'nogen'));
+    ok(gnc.atSecond !== null && gnc.atSecond !== 'not asked', `CONTROL (no build generation): the overtaken walk says «built» while the index is empty again — the leg goes RED (${gnc.atSecond})`, gnc);
+    const gnf = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "} finally { Promise.resolve(walking).catch(() => { }).then(() => backfill({ reason: 'rebuild' })).catch(() => { }); }"), "} finally { backfill({ reason: 'rebuild' }).catch(() => { }); }"), 'nochain'));
+    ok(gnf.lists === 1 && !gnf.end, `CONTROL (no fresh walk after the one in flight): the Rebuild walks nothing — the leg goes RED (${gnf.lists} walk)`, gnf);
+    const cl = await genScene(SI, { closeMid: true });
+    ok(cl.end === null, `a walk broken off by the final close builds nothing (${cl.end})`, cl);
+    const clc = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (gen === buildGen) {"), 'noclosed'), { closeMid: true });
+    ok(clc.end !== null, `CONTROL (no state guard): the broken-off walk says «built» — the leg goes RED (${clc.end})`, clc);
+  }
   // the wiring (channels-wiring: the ONE place the engine and the index meet) + the device words the sentence
   const CWT = read('src/server/channels-wiring.js');
   ok(/try \{ SEARCH\.noteCleared\(gid\); \}/.test(CWT) && CWT.includes('SEARCH.setClearedSource((gid, o) => groups.clearedCopies(gid, o), () => groups.clearedCopiesAsync());'), 'the channels wiring tells the index of every clear and hands it the groups engine\'s clearedCopies (+ its async twin for a start)');
@@ -480,6 +562,121 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     `the count line says the index is building beside «No matches» / «N matches» until one build finished; a periodic walk over a whole index adds nothing («${running}» · «${notYet}» · «${notYet0}» · «${built}» · «${walking}»)`);
   ok(/status\.textContent = searchStatusText\(r\);/.test(read('src/lib/search-window.js')) && /app\.ws\.onGlobal\(onClear\)/.test(read('src/lib/search-window.js')) && /app\.ws\.offGlobal\(onClear\)/.test(read('src/lib/search-window.js')),
     'the window paints that line, and asks an open query again when a group message is cleared anywhere (listener removed with the window)');
+  // CURE 2 (the skeptic's should on R3 + the cure's second reader): the SAME query asked again — the 3 s re-ask while the
+  // index builds, a clear, the window's door, all through run → paint — keeps the person's place: the selected hit by its
+  // key, an opened «+N more», a kept hit re-ranked past the fold (its group opens); a «+N more» click keeps the selection
+  // on its row; every «Files» group is its own; an error answer forgets the place; a new query starts afresh.
+  // FUNCTIONAL over the real openSearchWindow on a small DOM, each piece with a RED control.
+  {
+    class N {
+      constructor(tag) {
+        this.tagName = tag; this.children = []; this.parent = null; this.className = ''; this._t = ''; this.attrs = {};
+        const me = this;
+        this.classList = { has: (c) => me.className.split(/\s+/).includes(c), add(c) { if (!this.has(c)) me.className = (me.className + ' ' + c).trim(); },
+          remove(c) { me.className = me.className.split(/\s+/).filter((x) => x && x !== c).join(' '); }, toggle(c, on) { if (on ?? !this.has(c)) this.add(c); else this.remove(c); }, contains(c) { return this.has(c); } };
+      }
+      get textContent() { return this._t + this.children.map((c) => c.textContent).join(''); }
+      set textContent(v) { for (const c of this.children) c.parent = null; this.children = []; this._t = String(v); }
+      get isConnected() { let n = this; while (n.parent) n = n.parent; return !!n._root; }
+      static of(n) { const k = typeof n === 'string' ? Object.assign(new N('#text'), { _t: n }) : n; if (k.parent) { k.parent.children.splice(k.parent.children.indexOf(k), 1); k.parent = null; } return k; }
+      append(...ns) { for (const n of ns) { const k = N.of(n); k.parent = this; this.children.push(k); } }
+      appendChild(n) { this.append(n); return n; }
+      replaceChildren(...ns) { for (const c of this.children) c.parent = null; this.children = []; this._t = ''; this.append(...ns); }
+      replaceWith(...ns) { const p = this.parent; if (!p) return; const ks = ns.map((n) => N.of(n)); p.children.splice(p.children.indexOf(this), 1, ...ks); for (const k of ks) k.parent = p; this.parent = null; }
+      querySelectorAll(sel) { const c = sel.slice(1), out = []; const walk = (n) => { for (const k of n.children) { if (k.classList.has(c)) out.push(k); walk(k); } }; walk(this); return out; }
+      setAttribute(k, v) { this.attrs[k] = v; } scrollIntoView() { } focus() { }
+    }
+    const drive = async (SWx, answerOf, q, steps) => {
+      const doc0 = globalThis.document, fetch0 = globalThis.fetch, asked = [];
+      globalThis.document = { createElement: (t) => new N(t), addEventListener() { }, removeEventListener() { } };
+      globalThis.fetch = async (u) => { asked.push(u); const a = answerOf(asked.length, new URL(u, 'http://x').searchParams.get('q')); return { ok: a.ok !== false, json: async () => { if (a.thrown) throw new SyntaxError('not JSON (stand-in)'); return a; } }; };
+      const win = { id: 'sw-1', content: Object.assign(new N('div'), { _root: true }), _listenerCtl: new AbortController(), _openSpec: {} };
+      const app = { wm: { windows: new Map(), createWindow: () => win, revealWindow() { }, closeWindow() { } }, ws: { onGlobal() { }, offGlobal() { } }, sidebar: null, sessions: new Map() };
+      const painted = async (n) => { for (let i = 0; i < 50 && asked.length < n; i++) await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r)); };
+      try {
+        SWx.openSearchWindow(app, { q }); await painted(1);
+        const [box, , status, list] = win.content.children[0].children;
+        const hits = () => list.querySelectorAll('.search-hit');
+        const h = { list, status, hits, key: (e) => box.onkeydown({ key: e, preventDefault() { } }), act: () => hits().findIndex((r) => r.classList.has('active')),
+          more: (i) => list.children[i].querySelectorAll('.search-more')[0].onclick(), ask: async (nq) => { const n = asked.length + 1; win._searchSet(nq); await painted(n); } };
+        return await steps(h);
+      } finally { win._listenerCtl.abort(); globalThis.document = doc0; globalThis.fetch = fetch0; }
+    };
+    const building = { state: 'ready', backfill: { running: true, done: 1, total: 9 }, lastBuild: null };
+    const msgs = (sid, ids) => ids.map((u) => ({ kind: 'message', sid, host: '', uuid: u, role: 'user', ts: 0, snippet: { text: `the ${u} words`, ranges: [] } }));
+    const ans = (hits) => ({ total: hits.length, took: 1, hits, index: building });
+    const scenes = {
+      place: [(n, q) => ans(msgs('sw-conv', [0, 1, 2, 3, 4, 5].map((i) => `${q}-${i}`))), 'quartz', async (h) => {
+        h.more(0); for (let i = 0; i < 4; i++) h.key('ArrowDown');
+        const o = { before: h.act(), keyBefore: h.hits()[3]._key };
+        await h.ask('quartz');
+        Object.assign(o, { rows: h.hits().length, more: h.list.querySelectorAll('.search-more').length, after: h.act(), keyAfter: h.hits()[Math.max(0, h.act())]._key, actives: h.hits().filter((r) => r.classList.has('active')).length });
+        h.key('ArrowDown'); o.next = h.act();
+        await h.ask('basalt');
+        return Object.assign(o, { freshRows: h.hits().length, freshMore: h.list.querySelectorAll('.search-more').length, freshAct: h.act() });
+      }],
+      afterMore: [() => ans([...msgs('sw-a', ['a0', 'a1', 'a2', 'a3', 'a4']), ...msgs('sw-b', ['b0', 'b1', 'b2'])]), 'quartz', async (h) => {
+        for (let i = 0; i < 5; i++) h.key('ArrowDown');           // B's second hit
+        const want = h.hits()[4]._key; h.more(0);                 // then A's «+2 more»
+        const o = { want, afterClick: h.act() }; h.key('ArrowDown'); o.next = h.hits()[h.act()]._key; h.key('ArrowUp');
+        await h.ask('quartz');
+        return Object.assign(o, { kept: h.hits()[Math.max(0, h.act())]._key, act: h.act() });
+      }],
+      fold: [(n) => ans(msgs('sw-conv', n === 1 ? ['f0', 'f1', 'f2', 'f3', 'f4'] : ['f0', 'f2', 'f3', 'f4', 'f1'])), 'quartz', async (h) => {
+        h.key('ArrowDown'); h.key('ArrowDown');                   // f1, then re-ranked fifth
+        const want = h.hits()[1]._key; await h.ask('quartz');
+        return { want, rows: h.hits().length, kept: h.act() >= 0 ? h.hits()[h.act()]._key : null };
+      }],
+      files: [() => ans(['sa', 'sb'].flatMap((sid) => [0, 1, 2, 3, 4].map((i) => ({ kind: 'artifact', sessionId: sid, host: '', path: `/w/${sid}/f${i}.md`, snippet: { text: 'x', ranges: [] } })))), 'quartz', async (h) => {
+        h.more(0); await h.ask('quartz');
+        const g = h.list.children;
+        return { groups: g.length, a: g[0] ? g[0].querySelectorAll('.search-hit').length : 0, b: g[1] ? g[1].querySelectorAll('.search-hit').length : 0, bMore: g[1] ? g[1].querySelectorAll('.search-more').length : 0 };
+      }],
+      error: [(n, q) => (n === 2 ? { ok: false, error: 'the index did not answer (stand-in)' } : ans(msgs('sw-conv', [0, 1, 2, 3, 4, 5].map((i) => `${q}-${i}`)))), 'quartz', async (h) => {
+        h.more(0); for (let i = 0; i < 4; i++) h.key('ArrowDown');
+        await h.ask('quartz'); const said = h.status.textContent;
+        await h.ask('quartz');
+        return { said, act: h.act(), more: h.list.querySelectorAll('.search-more').length };
+      }],
+      thrown: [(n, q) => (n === 2 ? { thrown: true } : ans(msgs('sw-conv', [0, 1, 2, 3, 4, 5].map((i) => `${q}-${i}`)))), 'quartz', async (h) => {
+        h.more(0); for (let i = 0; i < 4; i++) h.key('ArrowDown');
+        await h.ask('quartz'); const said = h.status.textContent;
+        await h.ask('quartz');
+        return { said, act: h.act(), more: h.list.querySelectorAll('.search-more').length };
+      }],
+    };
+    const run5 = async (SWx, name) => drive(SWx, ...scenes[name]);
+    const pl = await run5(SWm, 'place');
+    ok(pl.before === 3 && pl.rows === 6 && pl.more === 0 && pl.after === 3 && pl.keyAfter === pl.keyBefore && pl.actives === 1 && pl.next === 4,
+      `the same query asked again keeps the person's place: the fourth hit stays selected (by its key) and the opened «+3 more» stays open; the next key moves on from it (${pl.after} → ${pl.next})`, pl);
+    ok(pl.freshRows === 3 && pl.freshMore === 1 && pl.freshAct === -1, 'a new query starts afresh: nothing selected, the group folded to three hits', pl);
+    const am = await run5(SWm, 'afterMore');
+    ok(am.afterClick === 6 && am.kept === am.want && am.next === '|m|sw-b|b2', `a «+N more» click keeps the selection on its row (B's second hit, now the seventh) — the keys and the re-ask follow it (${am.afterClick})`, am);
+    const fo = await run5(SWm, 'fold');
+    ok(fo.rows === 5 && fo.kept === fo.want, 'a kept hit the answer re-ranked past the fold opens its group and stays selected', fo);
+    const fi = await run5(SWm, 'files');
+    ok(fi.groups === 2 && fi.a === 5 && fi.b === 3 && fi.bMore === 1, `every «Files» group is its own: the opened one stays open, the other stays folded and drawn (${fi.groups} groups, ${fi.a} + ${fi.b} hits)`, fi);
+    const er = await run5(SWm, 'error');
+    ok(er.said === 'the index did not answer (stand-in)' && er.act === -1 && er.more === 1, 'an error answer forgets the place: the next answer to the same query starts afresh (no old hit for Enter)', er);
+    const th = await run5(SWm, 'thrown');
+    ok(th.said === 'Search failed' && th.act === -1 && th.more === 1, 'an answer that is not JSON (a proxy\'s page) forgets the place too', th);
+    // the RED controls: each piece put back as it was (the copy's registrations cut — the real module holds them)
+    const SWsrc = read('src/lib/search-window.js');
+    const REG = "\nregisterWindowType({ type: 'search'";
+    const copy = async (from, to, tag) => { const src = SWsrc.replace(pin(SWsrc, from), to); return import(pathToFileURL(MUT.write('src/lib/search-window.js', src.slice(0, src.indexOf(pin(src, REG))) + '\n', tag, { esm: true })).href); };
+    const plc = await run5(await copy('const same = !!q && q === painted; painted = q;', 'const same = false; painted = q;', 'nokeep'), 'place');
+    ok(plc.after === -1 && plc.more === 1 && plc.next === 0, `CONTROL (no keep): the re-ask drops the selection and folds the group — Enter would open the first hit — the leg goes RED (${plc.after}, ${plc.more})`, plc);
+    const amc = await run5(await copy('const cur = rows[sel]; more.replaceWith(...hits.slice(3).map(addHit)); rows = [...list.querySelectorAll(\'.search-hit\')]; sel = cur ? rows.indexOf(cur) : -1;', 'more.replaceWith(...hits.slice(3).map(addHit)); rows = [...list.querySelectorAll(\'.search-hit\')];', 'staleclick'), 'afterMore');
+    ok(amc.kept !== amc.want, `CONTROL (the click keeps a stale index): the re-ask moves the selection to A's fifth hit — the leg goes RED (${amc.kept})`, amc);
+    const foc = await run5(await copy('(open.has(gk) || (!!keep && hits.slice(3).some((h) => hitKey(h) === keep)))', 'open.has(gk)', 'nofold'), 'fold');
+    ok(foc.kept === null && foc.rows === 3, 'CONTROL (a kept hit past the fold is dropped): nothing stays selected — the leg goes RED', foc);
+    const fic = await run5(await copy("const gk = (first.kind === 'artifact' ? 'files|' : 'm|') + gkey;", "const gk = (first.host || '') + '|' + (first.kind === 'artifact' ? 'files' : first.sid);", 'filesone'), 'files');   // stale-pins: kept (the RED control puts the release's text back)
+    ok(!(fic.groups === 2 && fic.a === 5 && fic.b === 3), `CONTROL (one key for every «Files» group): the repaint draws them as one node — the leg goes RED (${fic.groups} groups, ${fic.a} + ${fic.b})`, fic);
+    const erc = await run5(await copy("if (!res.ok) { list.textContent = ''; rows = []; sel = -1; painted = ''; status.textContent", "if (!res.ok) { list.textContent = ''; status.textContent", 'errkeeps'), 'error');   // stale-pins: kept (the RED control puts the release's text back)
+    ok(erc.act !== -1, `CONTROL (the error keeps the old place): the old selection comes back after the error — the leg goes RED (${erc.act})`, erc);
+    const thc = await run5(await copy("if (e.name !== 'AbortError') { rows = []; sel = -1; painted = ''; status.textContent = t('Search failed'); } }", "if (e.name !== 'AbortError') status.textContent = t('Search failed'); }", 'thrownkeeps'), 'thrown');   // stale-pins: kept (the RED control puts the release's text back)
+    ok(thc.act !== -1, `CONTROL (a thrown answer keeps the old place): the old selection comes back — the leg goes RED (${thc.act})`, thc);
+  }
 }
 console.log('§11 who wrote a hit (B-19bd): a user row the person never typed carries the person-row verdict');
 {

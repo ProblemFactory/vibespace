@@ -56,7 +56,7 @@ function localDiskVerdict(dir, dataReal, { statfs = fs.statfsSync } = {}) {
 
 function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirname, '..', 'search-index-worker.js'), buffersDir = null,
   listConversations = async () => [], activeSessions = () => new Map(), log = console, heapMb = 1536, idleExitMs = 10 * 60 * 1000,
-  bootDelayMs = 60 * 1000, backfillEveryMs = 30 * 60 * 1000, liveDebounceMs = 1500, closeBoundMs = 2000, exitHook = true, statfs, now = () => Date.now(),
+  bootDelayMs = 60 * 1000, backfillEveryMs = 30 * 60 * 1000, clearedRetryMs = 60 * 1000, liveDebounceMs = 1500, closeBoundMs = 2000, exitHook = true, statfs, now = () => Date.now(),
   clearedCopies = (gid, o) => (clearedSource ? clearedSource(gid, o) : {}), clearedCopiesAll = () => (clearedSourceAll ? clearedSourceAll() : null) } = {}) {
   let worker = null, dir = null, dataReal = null, st = 'off', reason = REASON.OFF, code = null, ready = null;
   let seq = 1, idleTimer = null, lastCallAt = 0, backfillTimer = null, walking = null;
@@ -68,7 +68,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   let droppedSaidAt = 0;
   // R5/R6 (the cure's reader): «a build has finished since this index was (re)created» — from the worker's meta at open
   // (never after a rebuild from scratch), set when a walk ends, unset by a rebuild; a window says «Indexing…» until it is
-  let lastBuildAt = null, scheduledAt = 0, clearedRetries = 0;
+  let lastBuildAt = null, scheduledAt = 0, clearedRetries = 0, buildGen = 0; // buildGen: a Rebuild bumps it — a walk it overtook builds nothing (cure 2)
 
   const setState = (s, r = null, extra = {}) => { st = s; reason = r; code = extra.code || null; };
   const onMessage = (m) => {
@@ -140,11 +140,11 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   }
   let clearedReady = null;
   /** The async set handed over: `whole` only when every group was read (a group whose log could not be read is asked again). */
-  const handOver = (r) => { const groups = (r && r.groups) || {}, partial = (r && Array.isArray(r.partial)) ? r.partial : []; if (partial.length) retryCleared(); return call('addCleared', { groups, whole: !partial.length }); };
+  const handOver = (r) => { const groups = (r && r.groups) || {}, partial = (r && Array.isArray(r.partial)) ? r.partial : []; if (partial.length) retryCleared(); else clearedRetries = 0; return call('addCleared', { groups, whole: !partial.length }); }; // a whole set gives a later partial its ten tries again (cure 2)
   function retryCleared() {
     if (clearedRetries >= 10) { log.warn?.('[search-index] the cleared group messages are still partial after 10 tries — the next worker start asks again'); return; }
     clearedRetries++;
-    const t = setTimeout(() => { if (!worker) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r ? handOver(r) : null)).catch(() => retryCleared()); }, 60e3); t.unref?.();
+    const t = setTimeout(() => { if (!worker) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r ? handOver(r) : null)).catch(() => retryCleared()); }, clearedRetryMs); t.unref?.();
   }
   const CLEARED_WAIT_MS = 5000;
   const copiesOf = (gid, o) => { try { return clearedCopies(gid, o) || {}; } catch (e) { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); return {}; } };
@@ -231,7 +231,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   async function backfill({ reason: why = 'tick' } = {}) {
     if (walking) return walking;
     walking = (async () => {
-      const t0 = now();
+      const t0 = now(), gen = buildGen;
       Object.assign(progress, { running: true, startedAt: t0, done: 0, total: 0, rows: 0, bytes: 0 });
       let list = [];
       try { list = (await listConversations()) || []; } catch (e) { log.warn?.(`[search-index] backfill: the conversation list failed: ${e.message}`); }
@@ -250,7 +250,11 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
         // idle pacing: yield every conversation, back off while the loop lags
         for (let i = 0; i < 20 && (await lagMs()) > 50; i++) await sleep(250);
       }
-      try { await call('sweepArtifacts', {}); await call('noteBuild', { at: now() }); lastBuildAt = now(); } catch { }
+      try { await call('sweepArtifacts', {}); } catch { }
+      if (gen === buildGen && st !== 'closed' && st !== 'disabled') { // cure 2: a walk a Rebuild overtook, or one broken off, built nothing
+        try { await call('noteBuild', { at: now() }); } catch { }
+        lastBuildAt = now(); // a walk that ended says so even when a closing call failed — an open window stops asking
+      }
       Object.assign(progress, { running: false, finishedAt: now(), ms: now() - t0 });
       log.log?.(`[search-index] backfill (${why}): ${progress.done} of ${progress.total} conversations, ${progress.rows} new messages, ${Math.round(progress.bytes / 1048576)} MB read in ${progress.ms} ms`);
     })().finally(() => { walking = null; });
@@ -279,10 +283,12 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     try { return { ...base, index: await call('status', {}, { timeoutMs: 15000 }), state: st }; } catch { return base; }
   }
   async function rebuild() {
-    await call('drop', {});
-    lastBuildAt = null; // the window says «Indexing…» until this walk ends
-    names.clear();
-    backfill({ reason: 'rebuild' }).catch(() => { });
+    buildGen++; // cure 2: a walk already running ends without «built» (the drop removed what it had walked)
+    try {
+      await call('drop', {});
+      lastBuildAt = null; // the window says «Indexing…» until this walk ends
+      names.clear();
+    } finally { Promise.resolve(walking).catch(() => { }).then(() => backfill({ reason: 'rebuild' })).catch(() => { }); } // a fresh walk after the one in flight (even when the drop failed: the overtaken walk built nothing)
     return { ok: true, rebuilding: true };
   }
   async function forget({ sid, host = '' } = {}) { return call('clearConversation', { sid, host }); }

@@ -106,7 +106,7 @@ export function openSearchWindow(app, opts = {}) {
   const list = el('div', 'search-list'); list.setAttribute('role', 'listbox');
   root.append(box, chips, status, list);
   winInfo.content.appendChild(root);
-  let ac = null, timer = null, poll = null, rerun = null, rows = [], sel = -1;
+  let ac = null, timer = null, poll = null, rerun = null, rows = [], sel = -1, painted = '';
 
   const paintChips = () => { chips.textContent = ''; for (const [k, label] of SCOPES) { const c = el('button', 'search-chip' + (k === scope ? ' on' : ''), t(label)); c.onclick = () => { scope = k; paintChips(); run(); }; chips.append(c); } };
   const select = (i) => { sel = Math.max(-1, Math.min(rows.length - 1, i)); rows.forEach((r, j) => r.classList.toggle('active', j === sel)); if (sel >= 0) rows[sel].scrollIntoView({ block: 'nearest' }); };
@@ -121,20 +121,24 @@ export function openSearchWindow(app, opts = {}) {
     if (indexPending(st)) poll = setTimeout(idleState, 1000);
   }
   const hitKey = (h) => (h.host || '') + '|' + (h.kind === 'artifact' ? 'a|' + h.path : 'm|' + h.sid + '|' + (h.uuid || ''));
-  function paint(r) {
+  function paint(r, q = '') {
     // KEYED: the rows / groups this paint draws again are the SAME nodes (a scope chip filters in place)
     const oldGroups = new Map([...list.children].filter((g) => g._key).map((g) => [g._key, g]));
     const oldRows = new Map([...list.querySelectorAll('.search-hit')].filter((h) => h._key).map((h) => [h._key, h]));
+    // B-b291 cure 2 (lens two): the SAME query asked again (the 3 s re-ask while the index builds, a clear, the window's door)
+    // keeps the person's place — the selected hit by its key, every group whose «+N more» is open; a new query starts afresh
+    const same = !!q && q === painted; painted = q;
+    const keep = same && sel >= 0 && rows[sel] ? rows[sel]._key : null, open = new Set(same ? [...list.children].filter((g) => g._open).map((g) => g._key) : []);
     rows = []; sel = -1;
     const groups = new Map(), drawn = [];
     for (const h of r.hits || []) { const k = (h.host || '') + '|' + (h.kind === 'artifact' ? h.sessionId : h.sid); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(h); }
     status.textContent = searchStatusText(r);
     clearTimeout(rerun); if (indexBuilding(r.index)) rerun = setTimeout(() => { if (box.value.trim()) run(); }, 3000); // the answer is asked again while the index builds (the cure's reader R3)
-    for (const [, hits] of groups) {
+    for (const [gkey, hits] of groups) {
       const first = hits[0];
       const s = first.kind === 'message' ? sessionFor(app, first.sid, first.host) : null;
-      const gk = (first.host || '') + '|' + (first.kind === 'artifact' ? 'files' : first.sid);
-      const g = oldGroups.get(gk) || el('div', 'search-group'); g._key = gk;
+      const gk = (first.kind === 'artifact' ? 'files|' : 'm|') + gkey; // one node per drawn group — the group's own key (every «Files» group shared one: a repaint drew one node for them)
+      const g = oldGroups.get(gk) || el('div', 'search-group'); g._key = gk; g._open = hits.length > 3 && (open.has(gk) || (!!keep && hits.slice(3).some((h) => hitKey(h) === keep)));
       const head = el('div', 'search-group-head');
       if (s && (s.status === 'live' || s.webuiId)) head.append(el('span', 'palette-dot on'));
       const name = el('span', 'search-group-name', first.kind === 'artifact' ? t('Files') : labelOf(app, s, first)); name.title = name.textContent;
@@ -149,10 +153,10 @@ export function openSearchWindow(app, opts = {}) {
         row._hit = h;
         return row;
       };
-      const kids = [head, ...hits.slice(0, 3).map(addHit)];
-      if (hits.length > 3) {
+      const kids = [head, ...(g._open ? hits : hits.slice(0, 3)).map(addHit)];
+      if (hits.length > 3 && !g._open) {
         const more = el('button', 'search-more', t('+{n} more', { n: hits.length - 3 }));
-        more.onclick = () => { more.replaceWith(...hits.slice(3).map(addHit)); rows = [...list.querySelectorAll('.search-hit')]; };
+        more.onclick = () => { g._open = true; const cur = rows[sel]; more.replaceWith(...hits.slice(3).map(addHit)); rows = [...list.querySelectorAll('.search-hit')]; sel = cur ? rows.indexOf(cur) : -1; };
         kids.push(more);
       }
       g.replaceChildren(...kids);
@@ -160,21 +164,22 @@ export function openSearchWindow(app, opts = {}) {
     }
     list.replaceChildren(...drawn);
     rows = [...list.querySelectorAll('.search-hit')];
+    if (keep) { sel = rows.findIndex((x) => x._key === keep); if (sel >= 0) rows[sel].classList.add('active'); }
   }
   async function run() {
     const v = box.value.trim();
     winInfo._openSpec && (winInfo._openSpec.scope = scope);
     if (ac) ac.abort();
-    if (!v) { list.textContent = ''; rows = []; idleState(); return; }
+    if (!v) { list.textContent = ''; rows = []; painted = ''; idleState(); return; }
     ac = new AbortController();
     const my = ac;
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(v)}&scope=${scope}&limit=30`, { signal: my.signal });
       const r = await res.json();
       if (my !== ac || !root.isConnected) return;
-      if (!res.ok) { list.textContent = ''; status.textContent = r.error || t('Search failed'); return; }
-      paint(r);
-    } catch (e) { if (e.name !== 'AbortError') status.textContent = t('Search failed'); }
+      if (!res.ok) { list.textContent = ''; rows = []; sel = -1; painted = ''; status.textContent = r.error || t('Search failed'); return; }
+      paint(r, scope + '\n' + v);
+    } catch (e) { if (e.name !== 'AbortError') { rows = []; sel = -1; painted = ''; status.textContent = t('Search failed'); } } // a failed answer forgets the place too
   }
   box.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
   box.onkeydown = (e) => {
