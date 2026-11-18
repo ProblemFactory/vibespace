@@ -139,10 +139,10 @@ const WORDS = Object.freeze({
   card_changed: 'that website login changed after it was shown — nothing was changed; read it again',
   // B-ef1b: the retired job-secrets notice's buttons (src/server/job-secrets-door.js) — the client words them itself (zh / ja)
   job_secrets_answer: 'the answer is move or delete', job_secrets_busy: 'the file is being moved — try again in a moment',
-  job_secrets_gone: 'the file is not there any more — the notice is settled', job_secrets_not_a_file: 'something other than a file has that name — nothing was read',
+  job_secrets_gone: 'the file is not there any more — the notice is settled', job_secrets_not_a_file: 'data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted; a link: put the file it points to in its place; a second name: delete that other name; a folder: move it out of the way; then press again',
   job_secrets_unreadable: 'the file could not be read as a list of names and values — nothing was moved', job_secrets_nothing: 'the file holds no value to move — delete it instead',
   job_secrets_undeletable: 'the file could not be deleted — nothing was moved; delete it yourself or try again',
-  job_secrets_value_shape: 'a value is not a plain text, number or true/false (a list, an object, or text with spaces around it) — nothing was moved; the file is kept',
+  job_secrets_value_shape: 'a value is not a plain text, number or true/false (a list, an object, or text with spaces around it) — nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again',
   job_secrets_changed: 'the file changed while it was being moved — nothing was moved; press again',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';

@@ -1594,12 +1594,12 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(f.posts >= 2 && f.untils[1].length === 1 && f.untils[1][0] >= f.press2 + 30 * 86400e3, '(f) r13: another end chosen after the row landed ⇒ the row posts again with «30 days» counted from THAT press (not from the first landing)', f);
   ok(f.posts === 2, '(g) r13: …and the next repeated Save posts nothing (the landing moved the pin)', { posts: f.posts });
   const pinFrom = '    if (endPin != null && !p.error && p.changed && inputsOf() !== landedInputs) { saveAt = Date.now(); p = planOf(); }\n';
-  const pinMove = 'landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }';
+  const pinMove = 'landedRow(r, pick.except, polWas); endPin = at; landedInputs = edited ? inputs0 : inputsOf(); previewNow(); }';
   const srcVU = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
   ok(srcVU.split(pinFrom).length === 2 && srcVU.split(pinMove).length === 2, 'the RED controls\' plants are where they claim: the changed Save\'s own instant, and the landing that moves the pin — each once', { from: srcVU.split(pinFrom).length - 1, move: srcVU.split(pinMove).length - 1 });
   const rf = await drive2(await bundleVU(swap(pinFrom, '')));
   ok(rf.posts === 2 && rf.untils[1][0] < rf.press2 + 30 * 86400e3, '(h) RED — the pin applied to a Save that CHANGES the row (B-f212\'s shape): «30 days» counted from the first landing, short of 30 days from the press', rf);
-  const rg = await drive2(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); if (endPin == null) { endPin = saveAt; landedInputs = inputsOf(); } previewNow(); }')));   // stale-pins: kept — a RED control: the pin set only at the first landing, restored on purpose
+  const rg = await drive2(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); if (endPin == null) { endPin = at; landedInputs = edited ? inputs0 : inputsOf(); } previewNow(); }')));   // stale-pins: kept — a RED control: the pin set only at the first landing, restored on purpose
   ok(rg.posts === 3, '(i) RED — the pin kept at the FIRST landing: the repeated Save after the changed one posts the row a third time', { posts: rg.posts, untils: rg.untils });
   // r13 (the shoulds' read): a change the HUB made is no reason to count anew — an older hub answers a landed Save WITHOUT the
   // row (every next Save then posts the row whole): with nothing the owner changed, the repeated Save posts the SAME ends
@@ -1614,6 +1614,33 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(srcVU.split(inPlant).length === 2 && /try \{ plan = planNow\(\); \}/.test(srcVU), 'the plant of (k) is where it claims (the owner\'s inputs, once), and the preview draws planNow — the Save\'s own plan', srcVU.split(inPlant).length - 1);
   const rk = await drive2(await bundleVU(swap(inPlant, '')), { routes: noUseRoutes, change: false });
   ok(rk.posts >= 2 && rk.untils[1][0] > rk.untils[0][0], '(k) RED — re-timed on ANY change (the hub\'s too): the repeated Save over an older hub posts a LATER end (B-f212\'s own fault back)', { posts: rk.posts, untils: rk.untils });
+  // r14 (主开发's read of r13): an EDIT while the Save's post is in flight — the preview redraws the shared instant — the landing
+  // pins THIS Save's own instant and the inputs it POSTED, so the owner's next Save (another end) counts from its own press
+  const drive3 = async (show, { revert = false } = {}) => {
+    const calls = [], base = sweepRoutes(calls); let during = null;
+    const P = newPage({ routes: async (url, method, body) => { if (url === '/api/vault/use-grants' && method === 'POST' && during) { const d = during; during = null; await new Promise((r) => realSetTimeout(r, 15)); d(); } return base(url, method, body); } });
+    show({ id: ENTRY, label: 'API key', run: { use: { to: [ada], except: [], entryHosts: [] } } }, { app: VU_APP, refresh: () => { } });
+    const pol = byCls(P.shell.body, 'vw-use-policy-in'), endSel = byCls(P.shell.body, 'vw-use-end');
+    endSel.value = '8h'; pol.value = 'Only for the staging deploy';
+    during = () => { endSel.value = '30d'; endSel.fire('change'); };   // the owner picks another end while the post is in flight (the preview redraws)
+    await saved(P, P.shell.opts.unsaved.save());   // «8 hours» lands; the policy half refused: the dialog stays open
+    await new Promise((r) => realSetTimeout(r, 15));
+    if (revert) { endSel.value = '8h'; endSel.fire('change'); }   // the owner takes the in-flight edit back: what landed is what the dialog says again
+    const press2 = Date.now();
+    await saved(P, P.shell.opts.unsaved.save());   // the owner's «30 days» (or, reverted, a repeated Save of what landed)
+    return { edited: during === null, posts: calls.length, press2, untils: calls.map((b) => (b.to || []).flatMap((m) => (m.scopes || []).map((sc) => sc.until || 0))) };
+  };
+  const n3 = await drive3(real);
+  ok(n3.edited && n3.posts === 2 && n3.untils[1].length === 1 && n3.untils[1][0] >= n3.press2 + 30 * 86400e3, '(n) r14: another end picked WHILE the first Save was in flight ⇒ the next Save posts «30 days» counted from its own press (the landing pinned what was posted)', n3);
+  // the read of r14: the instant half on its own — an edit in flight TAKEN BACK before the next Save: that Save is a repeated Save of
+  // what landed (ends from the press that posted it) ⇒ it posts NOTHING; RED (q): the landing pins the flight's instant (the shared one)
+  const n4 = await drive3(real, { revert: true });
+  ok(n4.edited && n4.posts === 1, '(p) r14: an end picked while the post was in flight, then taken back ⇒ the next Save posts nothing (the pin is the press that posted, not the flight)', n4);
+  const rq = await drive3(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = edited ? inputs0 : inputsOf(); previewNow(); }')), { revert: true });
+  ok(rq.edited && rq.posts === 2 && rq.untils[1][0] > rq.untils[0][0], '(q) RED — the landing pins the shared instant (the preview\'s, during the flight): the taken-back Save re-posts the row with a LATER end (B-f212\'s own fault)', { posts: rq.posts, untils: rq.untils });
+  ok(srcVU.split(pinMove).length === 2, 'the RED control\'s plant of (o) is where it claims: the landing pins the Save\'s own instant and inputs, once', srcVU.split(pinMove).length - 1);
+  const ro = await drive3(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }')));   // stale-pins: kept — a RED control: r13's landing (the shared instant, the inputs as shown) restored on purpose
+  ok(ro.edited && ro.posts === 2 && ro.untils[1][0] < ro.press2 + 30 * 86400e3, '(o) RED — the landing reads the shared instant and the inputs as the page shows them (r13): the in-flight edit counts as landed, the «30 days» count from the flight — short of 30 days from the press', { posts: ro.posts, untils: ro.untils, press2: ro.press2 });
   // r13 «also» (B-bc3b's read: the own-entry dialog words had only a picture) — the REAL dialog over an agent's OWN entry says a
   // grantee gets no card (another host is refused), and the «let the agent ask … --standing» line is not there (another
   // conversation's --standing ask is refused on it); an owner's entry keeps that line

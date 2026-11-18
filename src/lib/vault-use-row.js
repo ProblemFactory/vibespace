@@ -401,6 +401,9 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     // B-f212: every end of this press's plan counts from the landed pin; r13: a Save the OWNER changed since (another end, a member
     // added, hours later in the same open dialog) counts from THIS press, never a past one
     const plan = planNow();
+    // r14 (主开发's read of r13): THIS Save's instant and inputs, taken at its plan — the preview redraws the shared `saveAt` (and
+    // the owner may edit) while the post is in flight; the landing pins what was POSTED, never what the page shows by then
+    const at = saveAt, inputs0 = inputsOf();
     if (plan.error) { err.textContent = plan.error; return false; }
     const { to, pick, removed, changed } = plan;
     const polWas = (u.policy && u.policy.text) || '', polNow = polIn.value.trim();
@@ -411,7 +414,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     if (changed) {
       r = await send();
       if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
-      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed); the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
+      if (r && r.ok) { rowSaved = true; const edited = inputsOf() !== inputs0; landedRow(r, pick.except, polWas); endPin = at; landedInputs = edited ? inputs0 : inputsOf(); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed); the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
     }
     if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
       const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});

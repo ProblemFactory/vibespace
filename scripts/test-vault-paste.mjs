@@ -535,10 +535,14 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   const f2 = freeNames(W).length, shapes = [];
   for (const doc of [{ FIRST_ONE: jsVals[0], A_LIST: [1, 2] }, { FIRST_ONE: jsVals[0], AN_OBJECT: { k: 'v' } }, { FIRST_ONE: jsVals[0], SPACED: ' ' + jsVals[1] + ' ' }]) { plantJS(W, doc); const r = await S.hit('/api/vault/job-secrets/move'); shapes.push({ status: r.status, code: r.json.code, name: r.json.name, kept: jsHere(W), sealed: freeNames(W).length - f2 }); }
   ok(shapes.every((x) => x.status === 422 && x.code === 'job_secrets_value_shape' && x.kept && x.sealed === 0) && shapes.map((x) => x.name).join() === 'A_LIST,AN_OBJECT,SPACED', 'a list / an object / text with spaces around it ⇒ job_secrets_value_shape BY NAME — nothing sealed (FIRST_ONE neither), the file kept', shapes);
+  { plantJS(W, { FIRST_ONE: jsVals[0], A_LIST: [1, 2] }); const r = await S.hit('/api/vault/job-secrets/move');
+    ok(r.json.code === 'job_secrets_value_shape' && /the file is kept: correct that value in data\/job-secrets\.retired\.json, then press again/.test(r.json.error || ''), 'r14: the ROUTE\'s own words for job_secrets_value_shape name the way on (correct that value, then press again)', r.json);
+  }   // the refusal keeps the file — the next leg renames it (the read: never unlink it here)
   // the read (r1): Delete removes a regular file of ONE name only — a symlink by that name is refused (the values would stay on disk)
   const target = path.join(W.dataDir, 'elsewhere.json'); fs.renameSync(path.join(W.dataDir, JS_FILE), target); fs.symlinkSync(target, path.join(W.dataDir, JS_FILE));
   const viaLink = await S.hit('/api/vault/job-secrets/delete');
   ok(viaLink.status === 409 && viaLink.json.code === 'job_secrets_not_a_file' && fs.existsSync(target) && fs.lstatSync(path.join(W.dataDir, JS_FILE)).isSymbolicLink(), 'Delete over a SYMLINK by that name ⇒ job_secrets_not_a_file — neither the link nor its target touched', viaLink.json);
+  ok(/a link: put the file it points to in its place; a second name: delete that other name; a folder: move it out of the way; then press again/.test(viaLink.json.error || ''), 'r14: the ROUTE\'s own words for job_secrets_not_a_file name the way on too (an API caller reads them; the page words them itself)', viaLink.json);
   fs.unlinkSync(path.join(W.dataDir, JS_FILE)); fs.unlinkSync(target);
   // the read (r1): the file the values came from is the file deleted — one edited while the move ran keeps every byte, nothing sealed
   plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });

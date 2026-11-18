@@ -1131,10 +1131,10 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     // as itself (the OFF came before it: not the news) AND the switch as it is: «the entry itself is switched off (it already was
     // when they approved)», never «the entry was not switched off» (the door's `off` on the ended fact)
     const offFirst = async (mod) => {
-      const wo = await world(), heldO = [];
-      wo.door = wo.mk(mod, { timers: { set: (fn, ms) => { heldO.push({ fn, ms }); return heldO.length; }, clear: () => { } } });
+      const wo = await world(), heldO = []; let clk = Date.now();   // r14 (主开发's read): the door's OWN clock orders the OFF and the approval — never a real wait
+      wo.door = wo.mk(mod, { timers: { set: (fn, ms) => { heldO.push({ fn, ms }); return heldO.length; }, clear: () => { } }, now: () => clk });
       openRow(wo); wo.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner switched the entry OFF first
-      await sleep(5);   // the approval comes AFTER the OFF (offAt < the grant's at)
+      clk += 1000;   // the approval comes a second AFTER the OFF on the door's clock (offAt < the grant's at)
       const qo = wo.door.request({ caller: c8, entry: M1, purpose: 'one upload' });
       wo.door.answerRequest(qo.askId, { answer: 'once', reauthed: true, person: true });
       const ro = await runAnswered(wo, ENV('env'), { caller: c8 });
