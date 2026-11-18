@@ -144,7 +144,7 @@ const mutant = (text, re, to) => { if (!re.test(text)) throw new Error('control 
 const REAL = load('real', TEXT);
 // (a) THE BASE'S RULE: every block a Copy + Wrap toolbar (a file's picker too), laid AFTER its block (f5e087bb5's overlay)
 const controls = () => ({ BASE_RULE: load('base', mutant(mutant(TEXT, /const \{ kind, tools, at \} = preToolsOf\((\w+)\);/, 'const { kind, tools, at } = { kind: "code", tools: ["copy", "wrap", ...($1.classList.contains("chat-code-block") ? ["lang"] : [])], at: "row" };'),
-  /wrapper\.insertBefore\(toolbar, \w+\);/, 'wrapper.appendChild(toolbar);')),
+  /wrapper\.insertBefore\(toolbar, \w+\);/, 'wrapper.appendChild(toolbar);')),   // stale-pins: kept (the base's toolbar-after-the-block, planted by this red control on purpose)
 // (b) a table that drops Copy from code
   NO_COPY: load('nocopy', mutant(mutant(TEXT, /return \{ kind: "code", tools: \["copy", "wrap"\], at: "row" \};/, 'return { kind: "code", tools: ["wrap"], at: "row" };'),
   /toolbar\.appendChild\(copyBtn\);/, 'if (tools.includes("copy")) toolbar.appendChild(copyBtn);')) });
