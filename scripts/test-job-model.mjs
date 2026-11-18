@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // PURE model gate for Background Work (docs/design-background-work.md M1).
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -769,7 +771,8 @@ console.log('B-70f9 ① cure: the folder check driven (the door, a schedule\'s f
   const remote = { host: 'h-lap', hostName: 'laptop' }, task = (cwd) => ({ cmd: { argv: ['true'], ...(cwd !== undefined ? { cwd } : {}) } }), sched = (cwd) => ({ action: { type: 'spawn-task', task: { cmd: { argv: ['true'], cwd } } } });
   const calls = [], st = (ans) => (p) => { calls.push(p); return typeof ans === 'function' ? ans(p) : ans; };
   const dir = { isDirectory: () => true }, file = { isDirectory: () => false }, err = (code) => () => Promise.reject(Object.assign(new Error(code), { code }));
-  const W = (o) => JW.jobWhere({ hubMachine: 'hub-box', blocked: () => false, statMs: 40, ...o });
+  const W = (o) => JW.jobWhere({ hubMachine: 'hub-box', blocked: () => false, statMs: 40, mountinfo: '', ...o });   // an empty mount table: each folder its own key (one leg's stuck stat never meets the next)
+  const keepAll = setInterval(() => { }, 1000);   // stats that never settle: the suite's loop kept alive for the whole block (the hub's always is)
   const local = await W({ body: task('/work/x'), session: {}, stat: st(Promise.resolve(dir)) });
   ok(local.ok && local.words === 'runs on hub-box in /work/x' && !calls.length, 'a conversation on the hub\'s machine: never asked (its folder is the hub\'s)', local);
   const there = await W({ body: task('/srv/shared'), session: remote, stat: st(Promise.resolve(dir)) });
@@ -778,9 +781,7 @@ console.log('B-70f9 ① cure: the folder check driven (the door, a schedule\'s f
   ok(there.ok && /not on laptop/.test(there.words) && !gone.ok && gone.code === 'wrong-machine' && !aFile.ok && aFile.code === 'wrong-machine', 'remote: a folder the hub has runs (said where); one it lacks — or a FILE where a folder is asked — is refused `wrong-machine`', { there, gone: gone.code, aFile: aFile.code });
   const schedGone = await W({ body: sched('/home/u/proj'), session: remote, stat: st(err('ENOENT')) });
   ok(!schedGone.ok && schedGone.code === 'wrong-machine' && JW.cwdOfBody(sched('/a')) === '/a', 'a SCHEDULE\'s task (--every / --cron / --at: the folder inside action.task) is asked too — the first cut never looked (F2)', schedGone);
-  const keep = setInterval(() => { }, 1000);   // the hub's loop is alive; this suite's would end on the bound's unref'd timer alone
   const t0 = Date.now(), hung = await W({ body: task('/mnt/nfs/x'), session: remote, stat: st(() => new Promise(() => { })) });
-  clearInterval(keep);
   ok(!hung.ok && hung.code === 'folder-blocked' && Date.now() - t0 < 2000, 'a stat that never answers (a mount wedged before its first strike) is BOUNDED: «does not answer right now» — never a request left open (F4)', hung);
   let asked = 0; const struck = await W({ body: task('/mnt/dav/x'), session: remote, blocked: () => '/mnt/dav', stat: () => { asked++; return Promise.resolve(dir); } });
   ok(!struck.ok && struck.code === 'folder-blocked' && asked === 0, 'a folder under a mount the door has struck: refused, NEVER asked', struck);
@@ -795,6 +796,37 @@ console.log('B-70f9 ① cure: the folder check driven (the door, a schedule\'s f
   ok(MD.pathBlocked === undefined && thrown instanceof TypeError, 'CONTROL (the first cut\'s door, mountDoor.pathBlocked — no such export): the check THROWS — what hung every remote create (the route now answers it 500 by name)');
   const all = ['src/agent-routes.js', 'src/server/job-where.js'].map((f) => fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8')).join('\n');
   ok(!/pathBlocked/.test(all), 'no caller names a door export that does not exist');
+  // ── B-70f9 cure 2 (主开发 10:30Z, two «as if a must»): every throw of the create door answered; ONE stuck stat a mount
+  const keep2 = setInterval(() => { }, 1000);   // stats that never settle: the suite's loop kept alive (the hub's always is)
+  try {
+    const answered = [], resOf = () => { const r = { headersSent: false, status(c) { r.code = c; return r; }, json(b) { r.headersSent = true; answered.push([r.code || 200, b]); return r; } }; return r; };
+    const late = async (req, res) => { await Promise.resolve(); throw new Error('the engine threw after the await'); };
+    const r1 = resOf(); await JW.answersEveryThrow(late, { warn() { } })({}, r1);
+    const r2 = resOf(); await JW.answersEveryThrow(async (req, res) => { res.json({ success: true }); throw new Error('after the answer'); }, { warn() { } })({}, r2);
+    ok(answered.length === 2 && answered[0][0] === 500 && answered[0][1].code === 'create-failed' && /the job create failed on the hub: the engine threw after the await — `vibespace-job list --mine` says whether a job was made/.test(answered[0][1].error) && answered[1][0] === 200, 'cure 2: the create door ANSWERS a throw after its await by name (500 create-failed, what to check) — never twice once it answered', answered);
+    const r3 = resOf(); let lost = null; await late({}, r3).catch((e) => { lost = e; });
+    ok(lost && !r3.headersSent, 'CONTROL (the bare async handler, Express 4): the throw is a rejection nobody answers — the agent\'s command waits');
+    ok(/app\.post\('\/api\/agent\/jobs', answersEveryThrow\(async \(req, res\) => \{/.test(all), 'WIRING: the agent create route IS that door');
+    const MI = '22 1 0:20 / / rw - ext4 /dev/root rw\n30 22 0:40 / /mnt/nfs rw - nfs4 srv:/x rw\n';
+    let calls = []; const hung = (p) => { calls.push(p); return new Promise(() => { }); };
+    const ask = (Mod, cwd, st) => Mod.jobWhere({ body: task(cwd), session: remote, hubMachine: 'hub-box', blocked: () => false, stat: st, statMs: 40, mountinfo: MI });
+    const a1 = await ask(JW, '/mnt/nfs/c2-a-' + process.pid, hung), a2 = await ask(JW, '/mnt/nfs/c2-b-' + process.pid, hung), a3 = await ask(JW, '/mnt/nfs/c2-a-' + process.pid, hung);
+    const onNfs = calls.length;
+    const other = await ask(JW, '/srv/c2-' + process.pid, (p) => { calls.push(p); return Promise.resolve({ isDirectory: () => true }); });
+    ok([a1, a2, a3].every((v) => !v.ok && v.code === 'folder-blocked') && onNfs === 1 && other.ok && calls.length === 2, 'cure 2: ONE stuck stat a mount — while a stat on /mnt/nfs is out, asks for other folders of that mount and the same folder again answer «does not answer right now» WITHOUT a second stat; another mount is asked as before', { onNfs, calls: calls.length });
+    const MJ = mutantCopies('job-where-70f9', path.join(__dirname_jm, '..'));
+    const old = spawnSync('git', ['-C', path.join(__dirname_jm, '..'), 'show', '1a934459c:src/server/job-where.js'], { encoding: 'utf8' });
+    if (old.status !== 0 || !old.stdout) console.log('  · CONTROL skipped by name: this checkout has no 1a934459c (a shallow copy)');
+    else {
+      const JO = MJ.load('src/server/job-where.js', old.stdout, 'cure1');
+      calls = [];
+      await ask(JO, '/mnt/nfs/c2-ca-' + process.pid, hung); await ask(JO, '/mnt/nfs/c2-cb-' + process.pid, hung); await ask(JO, '/mnt/nfs/c2-ca-' + process.pid, hung);
+      ok(calls.length === 3, 'CONTROL (cure 1, its 3 s race alone, in a copy): every ask parks ONE MORE stat on the wedged mount (3 asks, 3 threads of the pool)', calls.length);
+    }
+    for (const r of copiesCensus(MJ.files, MJ.dir, path.join(__dirname_jm, '..'), { minCopies: 0, label: 'B-70f9 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  } finally { clearInterval(keep2); }
+  ok(M.jobWhereVerdict({ hubMachine: 'hub-box', sessionMachine: 'laptop' }).words === 'runs on hub-box — not on laptop, where your conversation runs', 'cure 2: a notify-only schedule from a remote conversation has no folder — its line says no «the path is used as it is»');
+  clearInterval(keepAll);
 }
 
 // ── B-70f9 ② ENDING A CONVERSATION THAT OWNS RUNNING JOBS: one non-blocking notice, «Stop these too»; the stored flag retired ──

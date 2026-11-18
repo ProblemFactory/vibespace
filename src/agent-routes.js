@@ -8,7 +8,7 @@
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
 const os = require('os');
-const { jobWhere } = require('./server/job-where.js'); // B-70f9: where a job runs — a remote conversation's folder asked through the blocked-path door, bounded
+const { jobWhere, answersEveryThrow } = require('./server/job-where.js'); // B-70f9: where a job runs — a remote conversation's folder asked through the blocked-path door, bounded
 const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
@@ -2694,7 +2694,8 @@ app.get('/api/agent/pages', (req, res) => {
   if (!a.sessionId && !a.conversationId) return res.json({ pages: [] }); // a caller with no scope sees nothing (no all-pages oracle — review-caught)
   res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }).map(pageAnswer) : [] });   // verify r6 F3: every name through the belt
 });
-app.post('/api/agent/jobs', async (req, res) => {
+// B-70f9 cure 2: the create door answers EVERY throw by name (src/server/job-where.js answersEveryThrow — async since the folder check)
+app.post('/api/agent/jobs', answersEveryThrow(async (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
   // verify r5: a job is OWNED for good by the conversation that makes it — a borrowed id (a pending fork) is refused
@@ -2744,7 +2745,7 @@ app.post('/api/agent/jobs', async (req, res) => {
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
   res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
-});
+}));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   // ?archived=1 → the caller's VISIBLE archived one-shots (triage §13 rule 5;

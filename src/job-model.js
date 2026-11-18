@@ -1112,7 +1112,7 @@ function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null,
   if (relative) return { ok: false, code: 'relative-cwd', error: `jobs run on ${hub}, not on ${there} where your conversation runs; ${at ? `«${at}» is a relative folder` : 'no folder was given'} — give --cwd an absolute path that ${hub} has. Nothing was created` };
   if (at && cwdBlocked) return { ok: false, code: 'folder-blocked', error: `jobs run on ${hub}, not on ${there} where your conversation runs; ${at} is on a mount of ${hub} that does not answer right now — nothing was created` };
   if (at && cwdExists === false) return { ok: false, code: 'wrong-machine', error: `jobs run on ${hub}, not on ${there} where your conversation runs; this folder is not there: ${at} — nothing was created. Give --cwd a folder ${hub} has, or run the command on ${there} yourself` };
-  return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs (the path is used as it is on ${hub})` };   // ui-words: the agent's and the CLI's line (the create answer's «where:»), never drawn in a page
+  return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs${at ? ` (the path is used as it is on ${hub})` : ''}` };   // ui-words: the agent's and the CLI's line (the create answer's «where:»), never drawn in a page
 }
 module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
