@@ -7,7 +7,7 @@ a fixed source IP) or must run ON that machine (its GPU, its tools, its files). 
 ## Who may (the user decides)
 
 The user opens each paired machine to conversations under "Who can use it" (Remote tab → the machine
-row's exit icon, or Manage agents → Machines). TWO separate grants per machine:
+row's «Exit: network — … · commands — …» line, or Manage agents → Machines). TWO separate grants per machine:
 
 - **Borrow its network** — `use` / `url`: a SOCKS5 proxy; the tool runs HERE, only its traffic leaves
   from the machine. Proxy-aware TCP only (curl / git / most CLIs honour `ALL_PROXY`); never ICMP, UDP

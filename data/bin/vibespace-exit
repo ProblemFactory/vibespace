@@ -19,7 +19,7 @@
 // SOCKS5 is NOT universal: it can't carry ICMP (ping/traceroute), UDP is
 // spotty, and a tool has to honor the proxy. When `use` won't do, `run` will.
 // WHO MAY (lane-pairing ⑥): the user opens each machine to conversations under
-// "Who can use it" (Remote tab → the machine's exit icon) — TWO separate grants:
+// "Who can use it" (Remote tab → the machine row's «Exit: network — … · commands — …» line) — TWO separate grants:
 // borrow its network (use / url) and run commands on it (run, as the machine's
 // user, up to 30 s; optionally "ask me each time" — the user's Allow in For you,
 // 60 s, else refused). `vibespace-exit list` shows what THIS conversation may do.
@@ -76,7 +76,7 @@ const USAGE = [
   '                                            2.369.205 or later). Prints where it landed, the size and the sha256.',
   '',
   '  <machine> = id / name / unique name substring (omit if only one machine is open to you).',
-  '  The user decides who may: Remote tab → the machine\'s exit icon → "Who can use it" (network and commands are two grants).',
+  '  The user decides who may: Remote tab → the machine row\'s «Exit: network — … · commands — …» line → "Who can use it" (network and commands are two grants).',
   '  Use an exit ONLY when a request needs that machine\'s network position; otherwise go direct.',
 ].join('\n');
 const WAY_OUT = '  way out: ask the user to allow this conversation under "Who can use it" on the machine row (Remote tab)';
@@ -130,7 +130,7 @@ async function main() {
 
   if (cmd === 'list') {
     const { exits } = await get('/api/agent/exit');
-    if (!exits.length) { console.log('  (no machine is open to this conversation — ask the user: Remote tab → the machine\'s exit icon → "Who can use it")'); return; }
+    if (!exits.length) { console.log('  (no machine is open to this conversation — ask the user: Remote tab → the machine row\'s «Exit: network — … · commands — …» line → "Who can use it")'); return; }
     for (const e of exits) {
       const g = e.grants || {};
       console.log(`  ${e.name}${e.online ? '' : ' (offline)'}   network: ${g.use ? 'yes' : 'no'} · commands: ${g.run ? (g.runAsk ? 'ask' : 'yes') : 'no'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);

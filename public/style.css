@@ -8844,6 +8844,17 @@ label.chan-cap-row { cursor: default; }
 /* lane exit-see-whole: the last-run line is a button — it opens the machine's command list */
 button.mounts-exit-last { width: 100%; box-sizing: border-box; margin: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; border: 0; background: none; font-family: inherit; line-height: inherit; text-align: left; cursor: pointer; }
 button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: underline; }
+/* B-cb72 (the owner's pick A): the summary of who may use a machine IS its door — a full-width button with a button's skin at
+   rest, the exit glyph at its head, a chevron at its end, accent while a grant is not nobody; theme variables only */
+button.mounts-exit-door { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; margin: 3px 0 2px; padding: 3px 6px; min-height: 24px; font: inherit; font-size: 10px; line-height: 1.35; text-align: left; color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+button.mounts-exit-door:hover { border-color: var(--text-dim); color: var(--text); }
+button.mounts-exit-door:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
+.mounts-exit-door-glyph, .mounts-exit-door-chev { display: inline-flex; flex: 0 0 auto; }
+.mounts-exit-door-open .mounts-exit-door-glyph { color: var(--accent); }
+.mounts-exit-door-text { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.mounts-exit-door-chev { color: var(--text-dim); }
+@media (hover: none) and (pointer: coarse) { button.mounts-exit-door { min-height: 36px; } }
 .agents-mach-sum:has(.agents-mach-line2) { flex-wrap: wrap; }
 .agents-mach-line2 { flex-basis: 100%; order: 10; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
 .agents-mach-line2[data-dial-state="refused"], .agents-mach-line2[data-dial-state="auth-fail"] { color: var(--red); }

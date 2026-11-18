@@ -24,7 +24,7 @@ const GRANT_FAMILIES = Object.freeze(['browser', 'channel', 'machine']);
 // a family the hub does not grant from an ask: the road that does, named in the refusal (nothing is filed)
 const OTHER_ROADS = Object.freeze({
   channel: 'a channel conversation is asked for with `vibespace-channels request <conv> "why"` — its card in the user\'s For you has an Approve that grants it',
-  machine: 'a machine is opened to a conversation only by the user (Remote tab → the machine\'s exit icon → «Who can use it») — ask in words, and say which machine and why',
+  machine: 'a machine is opened to a conversation only by the user (Remote tab → the machine row\'s «Exit: network — … · commands — …» line → «Who can use it») — ask in words, and say which machine and why',
 });
 const REF_MAX = 120;
 

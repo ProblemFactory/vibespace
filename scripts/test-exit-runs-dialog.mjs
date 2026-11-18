@@ -309,7 +309,7 @@ const mkRow = (withLast) => {
   const row = document.createElement('div'); row.className = 'mounts-row';
   const top = document.createElement('div'); top.className = 'mounts-row-top';
   const sub = document.createElement('div'); sub.className = 'mounts-path';
-  const ex = document.createElement('div'); ex.className = 'mounts-path mounts-exit-line'; ex.textContent = 'Exit: network — nobody';
+  const ex = document.createElement('button'); ex.className = 'mounts-exit-line mounts-exit-door'; ex.textContent = 'Exit: network — nobody';   // B-cb72: the summary IS the door
   row.append(top, sub, ex);
   if (withLast) { const lr = document.createElement('button'); lr.className = 'mounts-path mounts-exit-line mounts-exit-last'; lr.textContent = 'Last run: echo 1'; row.appendChild(lr); }
   const stuck = document.createElement('div'); stuck.className = 'mounts-path mounts-exit-line mounts-agent-stuck'; row.appendChild(stuck);
@@ -325,7 +325,7 @@ const patchCase = (M) => {
   return {
     did: [did1, did2, did3], kept,
     replaced: kept && r1.children[3].textContent === 'Last run: echo 2' && r1.querySelectorAll(':scope > .mounts-exit-last').length === 1,
-    inserted: !!r2.children[3] && r2.children[3].textContent === 'Last run: ls' && r2.children[2].className === 'mounts-path mounts-exit-line' && r2.children[4]._cls.includes('mounts-agent-stuck'),
+    inserted: !!r2.children[3] && r2.children[3].textContent === 'Last run: ls' && r2.children[2].className === 'mounts-exit-line mounts-exit-door' && r2.children[4]._cls.includes('mounts-agent-stuck'),
     removed: r3.querySelectorAll(':scope > .mounts-exit-last').length === 0 && r3.children.length === 4,
   };
 };

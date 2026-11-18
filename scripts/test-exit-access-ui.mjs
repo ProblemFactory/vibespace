@@ -5,7 +5,7 @@
 // run with "Ask me each time". A throwaway worktree server + headless chrome (scripts/pairing-ui-harness.mjs) + a
 // REAL device daemon paired and dialed in (its `run` really runs `sh -lc` on this box) + stub claude sessions with
 // their vsst_ tokens + three Task Groups, the page in zh:
-//   ① the row's exit icon opens the dialog on a FRESH GET — the row's broadcast copy HELD stale (mirror-193's recipe:
+//   ① the row's exit door (its summary line, B-cb72) opens the dialog on a FRESH GET — the row's broadcast copy HELD stale (mirror-193's recipe:
 //      the page's list is a frame behind a route write; the dialog must draw the server's list, not the row's)
 //   ② "Only these" + a Task Group picked with the KEYBOARD + a conversation picked with the MOUSE + 每次都问我 ⇒ Save ⇒
 //      ONE PATCH carrying `session:<webui id>` rows and the `base`; the toast; a SECOND page's row shows the summary
@@ -101,7 +101,8 @@ const W = await bootWorld('exitui');
 const HOST = 'host-dial-exmac';
 const openRemote = async (P) => { await P.evalJs(`(() => { const s = app.sidebar; s.toggle?.(true); if (s._railEl) { if (s._activeTab !== 'mounts') s._railGo('mounts'); else s._render(); } else { s._activeTab = 'mounts'; s._updateTabs?.(); s._render(); } return true; })()`); return P.waitFor(`!!document.querySelector('.mounts-panel')?.offsetParent`, 15000); };
 const rowOf = `([...document.querySelectorAll('.mounts-row')].find((r) => r._hostId === ${JSON.stringify(HOST)}) || null)`;
-const exitIcon = `(${rowOf}?.querySelector('.mounts-row-actions button[title*="出口"], .mounts-row-actions button[title*="as an exit"]') || null)`;
+// B-cb72 (the owner's pick A): the door is the row's summary line itself (a button titled as the icon was), not a strip icon
+const exitIcon = `(${rowOf}?.querySelector('button.mounts-exit-door[title*="出口"], button.mounts-exit-door[title*="as an exit"]') || null)`;
 const patches = (P) => P.requests.filter((r) => r.method === 'PATCH' && r.url.endsWith(`/api/hosts/${HOST}/exit-access`));
 const sec = (g) => `#exit-access-dialog .exit-access-sec[data-grant="${g}"]`;
 
@@ -122,15 +123,16 @@ try {
 
   const P = await W.openPage({ width: 1280, height: 820, lang: 'zh', first: true });
   ok(await openRemote(P), 'the Remote tab');
-  ok(await P.waitFor(`!!${exitIcon}`, 15000), 'the machine row carries the exit icon "谁能把 … 当出口使用…"');
+  ok(await P.waitFor(`!!${exitIcon}`, 15000), 'the machine row\'s summary line IS the door "谁能把 … 当出口使用…" (B-cb72: a button, no strip icon)');
   ok(await P.evalJs(`/^出口：网络 — 没有人 · 命令 — 没有人$/.test(${rowOf}.querySelector('.mounts-exit-line')?.textContent || '')`), 'the row says 出口：网络 — 没有人 · 命令 — 没有人 (the migration default: nobody)');
+  ok(await P.evalJs(`!${exitIcon}.classList.contains('mounts-exit-door-open') && !${rowOf}.querySelector('.mounts-row-actions button[title*="出口"], .mounts-row-actions button[title*="as an exit"]')`), 'B-cb72: nobody ⇒ the door at rest (no accent), and no strip icon carries the exit title any more');
   // ① the row's copy HELD stale: the page stops repainting the panel, the server's list moves on
   await P.evalJs(`(() => { const s = app.sidebar; s.__realRender = s._renderMounts; s._renderMounts = async () => {}; return true; })()`);
   const w1 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'everyone' } });
   ok(w1.status === 200 && w1.j.access.use.mode === 'everyone', 'another writer: network → everyone (the page is not repainted — its row is a frame behind)');
   ok(await P.evalJs(`((app.sidebar._hostsData.hosts.find((h) => h.id === ${JSON.stringify(HOST)}).exit || {}).use || { mode: 'nobody' }).mode === 'nobody'`), '(the page\'s own copy still says nobody)');
-  console.log('① the exit icon opens the dialog on a FRESH GET');
-  ok(await P.realClick(exitIcon), 'a real click on the row\'s exit icon');
+  console.log('① the exit door opens the dialog on a FRESH GET');
+  ok(await P.realClick(exitIcon), 'a real click on the row\'s exit door');
   ok(await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000), 'the dialog 谁能使用 exmac？ opens');
   ok(await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-header h3').textContent === '谁能使用 exmac？'`), 'its title');
   // lane hub-act-ask: THE THIRD LIST — this world is a LOCAL instance: not set ⇒ 一直允许, and the dialog says why
@@ -208,6 +210,13 @@ try {
   await openRemote(P2);
   ok(await P2.waitFor(`/^出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）$/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), 'a SECOND page\'s row shows the summary 出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）');
   ok(await P.waitFor(`/已选 2 个（每次问我）/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), '…and the first page\'s row repainted from the broadcast');
+  ok(await P2.evalJs(`${exitIcon}.classList.contains('mounts-exit-door-open')`), 'B-cb72: a grant that is not nobody ⇒ the door wears the accent');
+  // B-cb72: the KEYBOARD reaches the door and Enter presses it (a button; no row handler swallows the key)
+  ok(await P.evalJs(`(() => { const d = ${exitIcon}; d.focus(); return document.activeElement === d; })()`), 'B-cb72: the door takes keyboard focus');
+  await P.key('Enter', { vk: 13, text: '\r' });
+  ok(await P.waitFor(`!!document.querySelector('${sec('use')}')`, 8000), 'B-cb72: Enter on the focused door opens 谁能使用 exmac？');
+  await P.key('Escape', { vk: 27 });
+  ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), '…and Escape closes it (nothing changed)');
   // ③ the 409 leg + the empty-list refusal
   console.log('③ another writer while the dialog is open ⇒ 409, re-drawn; the empty list refused in place');
   await P.realClick(exitIcon);
@@ -346,14 +355,14 @@ try {
   ok(/已允许/.test(await P.evalJs(`document.getElementById('user-todos-popup').textContent`)) || (await W.api('GET', '/api/user-todos')).j.todos.resolved?.some?.((i) => i.resolvedBy === 'allowed'), 'the item is resolved allowed');
   ok(await P.waitFor(`/^最近一次运行：echo pong — .*，退出码 0$/.test(${rowOf}?.querySelector('.mounts-exit-last')?.textContent || '')`, 8000), 'the machine row shows the last run (最近一次运行：echo pong — <who>, <when>, 退出码 0)', await P.evalJs(`${rowOf}?.querySelector('.mounts-exit-last')?.textContent`));
   // naive-user N-row: at the DEFAULT sidebar width (this page: 1280 px) the machine row showed no name (0 px — eight
-  // icons at flex-shrink 0 took the row), four icons (the exit icon among them) sat past the panel's edge, and the exit
+  // icons at flex-shrink 0 took the row), four icons (the exit icon among them, then) sat past the panel's edge, and the exit
   // summary + the last run were cut "命令 …". THE ROW CENSUS + a patched copy of style.css as the control.
   {
     await openRemote(P);
     await P.evalJs(`(() => { const p = document.querySelector('.mounts-panel'); if (p) p.scrollLeft = 0; return true; })()`);
     await sleep(200);
     const rc = await P.evalJs(machineRowCensusJs(HOST));
-    ok(rc.ok && rc.name === 'exmac' && rc.btns === 9 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), all ${rc.btns} icons inside it, both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, rc);
+    ok(rc.ok && rc.name === 'exmac' && rc.btns === 8 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), all ${rc.btns} icons inside it, both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, rc);
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     ok(ROW_FIX_REVERT.every(([fixed]) => real.split(fixed).length === 2), 'N-row: the fix\'s rules are in public/style.css once each (the control\'s anchors)');
     const MUTR = mutantCopies('exitrow', REPO);

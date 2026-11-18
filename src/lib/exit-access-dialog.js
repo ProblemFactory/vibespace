@@ -52,6 +52,13 @@ export function exitSummaryText(exit) {
   const s = summaryOf(accessOfView(exit));
   return t('Exit: network — {a} · commands — {b}', { a: grantWords(s.use), b: grantWords(s.run, { ask: s.run.ask }) });
 }
+/** B-cb72: either grant is open to someone (not nobody, not unreadable) — the row door's accent, read through the SAME reader
+ *  as the row's words (exitSummaryText), so an unreadable list never wears the accent beside «unreadable». */
+export function exitGranted(exit) {
+  const s = summaryOf(accessOfView(exit));
+  const open = (g) => !!g && g.mode !== 'nobody' && g.mode !== 'unknown';
+  return open(s.use) || open(s.run);
+}
 /** `Last run: ping -c1 … — 运维管理, 3 min ago, exit 0` (the whole command rides the title). */
 export function lastRunText(lr) {
   if (!lr) return t('No command has run here yet');
