@@ -365,8 +365,9 @@ function ownUnlockMissed() { for (const end of [...raceWaits]) end(); raceWaits.
 /** RUN `go` ONCE AFTER THE UNLOCK ASK (B-864f cure — the reader round's must): when the person closes the unlock dialog (an
  *  unlock, 「稍后」, Esc, ✕) OR the vault turns unlocked (this dialog, another tab, another device), whichever comes first.
  *  applyVaultFacts REMOVES the unlock dialog when the facts say unlocked, and a removed form runs none of its closers — so a
- *  `then` alone never ran after a successful unlock. The boot offer's «Unlock and resume all n» (src/lib/layout.js). */
-export function unlockThen(go, { here = false } = {}) {
+ *  `then` alone never ran after a successful unlock. The boot offer's «Unlock and resume all n» (src/lib/layout.js). A RESET
+ *  (not_set_up) while it waits is no unlock: `go` never runs; `ended` (when given) runs once instead (cure 4). */
+export function unlockThen(go, { here = false, ended = null } = {}) {
   let ran = false, off = null;
   const once = () => { if (ran) return; ran = true; if (off) off(); setTimeout(go, 0); };   // after the closing press / outside the facts loop — a zero timer, as a close always ran it
   // `here`: only an unlock made in THIS page counts (the ⚙ press asked for this page's menu — another device's unlock minutes
@@ -376,7 +377,7 @@ export function unlockThen(go, { here = false } = {}) {
   const endUnrun = () => { if (ran) return; ran = true; if (off) off(); };
   off = onVaultFacts((f) => {
     if (!f) return;
-    if (f.state === 'not_set_up') { if (here) endUnrun(); else once(); return; }   // the restack read: a reset while it waits — the ⚙ wait ends unrun, a resume-all goes on (its door comes back)
+    if (f.state === 'not_set_up') { if (ran) return; endUnrun(); if (typeof ended === 'function') setTimeout(ended, 0); return; }   // cure 4 (主开发): a RESET is no unlock — the wait ends unrun, nothing it waited for runs; a caller that asked to hear it (`ended` — the boot offer) gives its door back
     if (f.state !== 'unlocked') return;
     if (!here || unlockedHere) { once(); return; }
     if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);

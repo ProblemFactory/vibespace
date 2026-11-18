@@ -1994,7 +1994,8 @@ class LayoutManager {
     if (!ok) { this._keepOffer(stopped); return; } // dismissed: a door stays while they stay stopped (B-6352)
     this._keepOffer(null);
     try {
-      if (locked && vaultFacts()?.state === 'locked') return await new Promise((done) => unlockThen(() => done(this._resumeAll(stopped))));   // B-864f: unlock FIRST — on the dialog's close OR the unlock, whichever first (a removed dialog runs no closers)
+      if (locked && vaultFacts()?.state === 'locked') return await new Promise((done) => unlockThen(() => done(this._resumeAll(stopped)), { ended: () => done(null) }));   // B-864f: unlock FIRST — on the dialog's close OR the unlock, whichever first (a removed dialog runs no closers); a RESET meanwhile is no unlock: `ended` gives the door back (cure 4)
+      if (locked && vaultFacts()?.state !== 'unlocked') return null;   // cure 4 (its read): a reset that landed while the question was open — no unlock happened: nothing resumed, the finally gives the door back
       return await this._resumeAll(stopped);
     } finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
   }
