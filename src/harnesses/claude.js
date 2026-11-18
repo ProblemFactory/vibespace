@@ -264,6 +264,7 @@ module.exports = {
     // if a future CLI records the commanded value.
     warmTranscript: store.warmSessionJsonlAsync,   // worker-side parse cache
     warmTaskState: store.warmSessionJsonlAsync,    // B-299b A2: before EVERY taskState answer (the attach's payload) — the task-tool scan rides this warm
+    taskStateFromTranscript: true,                 // its task state is READ FROM ITS TRANSCRIPT: a conversation on another machine is asked of that machine (transcript-service taskState) — a harness whose state lives elsewhere (codex's wrapper side file) leaves it unset
     createReader: (session, sessionId, opts) => new store.SessionMessages(session, sessionId, opts || {}), // SessionMessages-shaped reader
     homeRename: require('./claude-home'),           // ~/.claude/projects re-encoding after a home rename (server.js / boot-restore call it)
     writerSweep: claudeWriterSweep,                  // (rid, shq) → POSIX sweep script (writer-sweep.js runs it)

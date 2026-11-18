@@ -250,6 +250,24 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const cRed = await routeOf(mutantCopies('a2-route-gate-r', REPO).load('src/routes/sessions.js', rsrc.replace(TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsNoGate)});`), 'no-gate-route'), 'codex');
     ok(tsSrc.split(GATE).length === 2 && rsrc.split(TSREQ).length === 2 && rsrc.includes('cwd, host: host || null });') && cGreen.asked === '' && cGreen.todos.length === 0 && cGreen.n === 0 && !cGreen.ran && clGreen.asked === 'm1:taskState:claude' && clGreen.todos[0]?.content === 'held on m1' && cRed.asked.includes('m1:taskState:codex'),
       `GET /api/session-todos on m1: a codex conversation answered here as the release did (${cGreen.todos.length} steps; asked of m1: «${cGreen.asked}»; ${cGreen.n} listings, nothing started); a claude one asked of m1 (${clGreen.asked}); RED (no descriptor rule — dec3d0da0): the codex one asked of m1 (${cRed.asked})`, { cGreen, clGreen, cRed });
+    // its TAKEN verdict (small 1): the machine rule reads the descriptor's OWN field (taskStateFromTranscript), never the warm hook
+    // as a second meaning — a codex store that gains a warm stays answered here; one that DECLARES the field is asked of m1. RED: a
+    // service that reads the warm hook ⇒ the warm alone sends a codex conversation's ask to m1
+    {
+      const HX = require(path.join(REPO, 'src/harnesses/codex.js')), FIELD = "store?.taskStateFromTranscript === true;";
+      const tsWarmRule = mutantCopies('a2-route-field', REPO).write('src/transcript-service.js', tsSrc.replace(FIELD, () => "store?.warmTaskState ? true : false;"), 'warm-rule');
+      const RW = mutantCopies('a2-route-field-r', REPO).load('src/routes/sessions.js', rsrc.replace(TSREQ, () => `const { createTranscriptService } = require(${JSON.stringify(tsWarmRule)});`), 'warm-rule-route');
+      const had = { w: HX.store.warmTaskState, f: HX.store.taskStateFromTranscript };
+      let warmOnly = null, declared = null, warmRed = null;
+      try {
+        HX.store.warmTaskState = async () => true; delete HX.store.taskStateFromTranscript;
+        warmOnly = await routeOf(R0, 'codex'); warmRed = await routeOf(RW, 'codex');
+        HX.store.taskStateFromTranscript = true; declared = await routeOf(R0, 'codex');
+      } finally { if (had.w === undefined) delete HX.store.warmTaskState; else HX.store.warmTaskState = had.w; if (had.f === undefined) delete HX.store.taskStateFromTranscript; else HX.store.taskStateFromTranscript = had.f; }
+      const H0 = require(path.join(REPO, 'src/harnesses/claude.js'));
+      ok(tsSrc.split(FIELD).length === 2 && H0.store.taskStateFromTranscript === true && warmOnly.asked === '' && declared.asked === 'm1:taskState:codex' && warmRed.asked.includes('m1:taskState:codex'),
+        `the machine rule is the descriptor's own field: a codex store with a warm hook alone is answered here («${warmOnly.asked}»), one that declares taskStateFromTranscript is asked of m1 (${declared.asked}); RED (the warm hook read as that meaning): ${warmRed.asked}`, { warmOnly, declared, warmRed });
+    }
   }
   console.log('⑥ the subagent metas (B-299b A4): chatStatus probes no project folder for a field nothing reads');
   {

@@ -227,10 +227,10 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   async function taskState(ref) {
     const r = norm(ref);
     // the cure's read (S1): the machine is asked only for a harness whose task state READS ITS TRANSCRIPT (the descriptor's
-    // warmTaskState — claude's task scan); another's state is the wrapper's side file, read here as the release did — never a
+    // taskStateFromTranscript — claude); another's state is the wrapper's side file, read here as the release did — never a
     // device op or a remote find + copy at each Properties refetch for an answer that cannot differ (the route hands every
     // harness its machine; the descriptor decides what it is asked for)
-    let fromTranscript = false; try { fromTranscript = !!harnessOf(r.backend || 'claude').store?.warmTaskState; } catch { }
+    let fromTranscript = false; try { fromTranscript = harnessOf(r.backend || 'claude').store?.taskStateFromTranscript === true; } catch { }   // the descriptor's OWN field (its TAKEN verdict: never the warm hook read as a second meaning)
     const viaDev = fromTranscript ? await tryDevice(r, 'taskState', {}) : undefined;
     if (viaDev) return viaDev;
     if (fromTranscript) await refreshRemote(r);
