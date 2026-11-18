@@ -2,6 +2,66 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.410 — 2026-11-17
+
+### Added
+- After mail could not be read for a while (a sign-in that stopped working, a restart), a Gmail account in Channels says how far back it caught up.
+- When you sign in to an account in Channels but never press Connect, For you says «finish connecting» until the sign-in runs out.
+- Most places that say a machine's agent is too old now have an «Update its agent…» button that opens that machine's pairing command.
+- After you dismiss «Resume interrupted sessions?», each stopped window's bar offers «Resume all N» while two or more of them are still stopped.
+- A web login’s row and its «Use for…» dialog name its two-step code (or none), with a door to change or unbind it, and the passwords it keeps, with when.
+- A conversation window's right-click menu now has Fork…, as the conversation's card in the session list does.
+
+### Changed
+- In a desktop app window, Show window frame and Scale mark the current choice with ✓ on a normal row, no longer greyed out; pressing it keeps it.
+- The agent update a paired machine downloads is about a fifth smaller.
+- A web login’s «Use for…» now covers that login only; «Any site…» and «Any account on a site…» sit on the Web logins header.
+- A wider grant shows on a login as «through» and is changed at its own door.
+
+### Fixed
+- After you disconnect a Gmail account in Channels and sign in again, mail that arrived in between is read, also replies in conversations you already had.
+- In a Task Group's Context table, a path box you are clearing or editing is no longer refilled by a change made elsewhere; Tab into «+ Add a path…» lands there.
+- When an agent proposes several reactions or replies in one conversation within seconds, the chat now shows a card for each, not only the first.
+- In the chat and the Channels menu, an API call you approved or rejected now says what happened to it (ran, rejected, expired) instead of «awaiting you».
+- Background Work jobs recovered from a damaged job list stay listed after the next restart; they used to vanish.
+- A job recovered from a damaged job list is shown to you alone, no longer to every conversation's agent.
+- A scheduled job that runs less often than every two weeks (monthly) keeps its run list and history between runs; they were deleted.
+- When storage briefly fails to read the Background Work job list, the list is kept and read again; it was set aside and the jobs vanished.
+- When VibeSpace cannot read its record of turns nobody typed, it now starts none and says so in For you, instead of counting from zero.
+- A spending limit left empty now holds every turn nobody typed and says «no limit is set — set a number», instead of a silent 0.
+- Lowering a spending limit below the messages already waiting now holds the extra ones for their conversation's next turn instead of running them.
+- A waiting message VibeSpace had given up on is taken back out of the agent's queue, or counted against the limits if it runs anyway.
+- When a page in the agent browser asks you to sign in, its item now appears in For you; it never appeared before.
+- In a shared browser, a conversation that closed its last tab can open a new one again; every try used to fail with «could not be bound».
+- Resting the pointer on «N more waiting» by the For-you button no longer makes it vanish when that card leaves; it reads «Open For you» until you move away.
+- The card by the For-you button and pop-up notices no longer cover a chat's answer buttons (a run card's, a permission request's) when there is room elsewhere.
+- A request to run a command with a stored secret now names the program, the secrets and where it sends in its pop-up and its card by the For-you button.
+- In a short chat window (under about 480 px) the «waiting for you» strip takes one line, the question and View; View opens the whole item in place.
+- Reconnecting a machine's folder no longer disconnects another mounted folder whose path begins the same way (a folder «mac» and one «macbook»).
+- When a machine goes offline, its mounted folder is unmounted at once and shows offline, instead of every read failing «not connected».
+- A command an agent runs on another machine now arrives there exactly as written: quoted words are no longer split apart into a different command.
+- Settings no longer shows an agent's section when your login shell finds no program for it, which starting a conversation with that agent already says.
+- A command's «Technical details» or «Show output» on a Machines card now stays open while the chat redraws; it closed by itself before.
+- A command's short output on a Machines card is shown without its leading spaces (e.g. «42», not «      42»); Copy still copies it exactly.
+- An automation key at «Only the conversations it opens» now acts only on what it opened and on itself, not on conversations another grant of the key names.
+- A conversation that names no key now uses the key granted to it directly before a Task Group's or All agents' key.
+- Later changes to the Cache warmth colours now reach the custom themes you save, unless you changed those colours yourself.
+- After your home folder is renamed, a second VibeSpace install on the same home now updates its own saved folder paths too.
+- A short disk error no longer makes the next start set a usage record aside unread and lose how many entries it had removed.
+- Install plugin… now shows a Plugin Git credential saved while it is open, and says when the vault is locked instead of «not set».
+- An Antigravity conversation whose account was deleted is no longer resumed on another login that does not hold it; it says why.
+- An Antigravity conversation that ran on this machine's own login now resumes there after a restart instead of being refused.
+- «Restore a previous layout» keeps points from across the last hours and days after a burst of changes, and the layout from before a restart is kept and marked.
+- A window opened just before the page reloads or closes (a phone reload, a closed tab) is no longer lost from the layout.
+- When «Open the session list» from a window that lost its conversation finds matches your status filter hides, the list says how many.
+- Locate in sidebar opens the session list on the conversation and flashes it; if a filter hides it, it names the filter and offers a button that shows it.
+- If Locate in sidebar had to switch Recent or History back to this machine to find a conversation, it says so, with a button to switch back.
+- Search everything no longer finds the words of a group message you cleared with Clear content…; after the update the index is built again once.
+- Search everything no longer finds the words of a group message you cleared; while the index is still being built, a search says so.
+- In a very long conversation, the messages sent while the page was reconnecting now appear on the minimap.
+- Search everything no longer labels a message from another conversation, a VibeSpace notice or a compaction summary as «You».
+- In a chat, a compaction summary, the marker of a turn you stopped and a scheduled wake-up prompt show as system notes, not as messages you typed.
+
 ## 2.369.409 — 2026-11-17
 
 ### Fixed
