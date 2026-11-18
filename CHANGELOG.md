@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.411 — 2026-11-18
+
+### Changed
+- Conversations and background jobs now start at a lower CPU priority than VibeSpace, so a busy build gives way to the page; see Session Properties.
+
 ## 2.369.410 — 2026-11-18
 
 ### Added

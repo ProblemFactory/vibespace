@@ -21,7 +21,7 @@ const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('che
   check('agentd.js re-exec spawns via reExecArgv', !!reExecLine, 'the upgrade spawn no longer preserves argv');
   check('agentd.js imports reExecArgv from the side-effect-free module', /require\(['"]\.\/reexec['"]\)/.test(src));
   // the old bare-array form must be GONE from the upgrade spawn
-  check('no bare-array spawn in the upgrade path', !/spawn\(process\.execPath,\s*\[path\.join\(dir,/.test(src));
+  check('no bare-array spawn in the upgrade path', !/spawn\(process\.execPath,\s*\[path\.join\(dir,/.test(src));   // stale-pins: kept (an absence check on agentd.js, not on src/jobs.js)
 }
 
 console.log('(d) the daemon lands the repoint and says a failure (source pins)');

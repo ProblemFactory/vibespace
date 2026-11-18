@@ -139,6 +139,9 @@ function sessionFromMeta(meta, transportFacts) {
     _toolPick: meta.toolPick && typeof meta.toolPick === 'object' && !Array.isArray(meta.toolPick) ? meta.toolPick : null, // lane new-session-form: the 「可用工具」 pick the process was spawned with
     _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart
     _cliTitle: typeof meta.cliTitle === 'string' && meta.cliTitle ? meta.cliTitle : null, // lane session-title-record: the CLI's own title survives a restart
+    // B-460d: the CPU priority the process STARTED with (src/server/spawn-priority.js factOf, spelled inline: this body is
+    // compiled alone by test-oat-identity) — the running process keeps it across the hub's restart, so its properties do
+    _cpuNice: meta.cpuNice && typeof meta.cpuNice === 'object' && Number.isInteger(meta.cpuNice.by) && meta.cpuNice.by >= 0 && meta.cpuNice.by <= 19 && (meta.cpuNice.by > 0 || ['off', 'no-nice', 'remote'].includes(meta.cpuNice.why)) ? (meta.cpuNice.by > 0 ? { by: meta.cpuNice.by } : { by: 0, why: meta.cpuNice.why }) : null,
     // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
     // user-data-dir rung it spawned on. Restored so a later resume of this
     // conversation finds its key and the orphan sweep sees this session as

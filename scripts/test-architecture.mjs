@@ -5994,6 +5994,7 @@ await section(async () => {
   const road93 = {}; for (const r of j93.roads) road93[r.class] = (road93[r.class] || 0) + 1;
   const argv93 = s93.sites.flatMap((x) => (x.argv || []).map((w) => w.name));
   ok(j93.red.length === 0, `§94 ${s93.sites.length} child sites + ${s93.copies.length} whole-env copies: every raw one a row with its reason ${JSON.stringify(cls93)}; ${argv93.length} NAME=value words on argv, none secret-shaped${argv93.length ? ' (' + [...new Set(argv93)].join(' ') + ')' : ''}; ${j93.roads.length} ssh roads ${JSON.stringify(road93)}${j93.red.length ? ' — RED: ' + j93.red.join(' | ') : ''}`);
+  { const rd94b = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } }, pr94b = C.priorityJudge(rd94b, C.filesOf(REPO)); ok(!pr94b.length, `§94b B-460d THE PRIORITY ROADS (scripts/spawn-env-census.mjs): ${C.PRIORITY_ROADS.length} places, every session line a row or an exception (${C.PRIORITY_EXCEPT.length}) — what a local conversation or a job starts takes nice -n 5 there; mutants in test-session-spawn-line ④${pr94b.length ? ' — ' + pr94b.join(' | ') : ''}`); }
   // CONTROLS — one file scanned, judged by its own rows: the Xvnc spawn given `...process.env` / no env at all, the session
   // back on `{ ...process.env, DISPLAY }`, the ssh bridge's env taken away, a new raw probe, an env copied in one function and
   // spawned in another, a dead row ⇒ RED; a comment and a *Sync child stay quiet

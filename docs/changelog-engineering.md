@@ -4,6 +4,19 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.411 — 2026-11-18
+
+### bl-loop-b B-460d — what a conversation starts never outranks the hub (nice +5 on the spawn itself)
+- THE HARM (measured 2026-11-12): conversations and everything they start ran at the hub's own priority; with lanes building, the hub's main thread waited 320 s for a core in 17 minutes. The owner said yes to the proposal on 2026-11-17.
+- THE LAW: a LOCAL conversation and a Background Work job START at `nice -n 5` (+5 over the hub's own niceness) on the spawn itself — src/spawn/line.js `priorityArgv` before `node` in THE session line (the dtach road and the daemon pipe both run it), and before `process.execPath` in src/jobs.js's wrapper spawn. The first process is born with it and everything it starts inherits it; no set-priority call after a fork.
+- THE SETTING `agents.lowerCpuPriority` (default on; the owner's yes covers it): read at each start, a running conversation keeps its priority; off = the release's spawn word for word. A machine with no nice program still starts every conversation, at the hub's priority, and the journal says so once.
+- SAID ONCE where a person looks for «why is my build slower»: Session Properties' identity section, «CPU priority» beside Connection / PID — below the server (nice +5), or the server's own with the reason (off in Settings, no nice program, another machine). The fact rides the session's meta, so a restarted hub still says it.
+- THE CENSUS: scripts/spawn-env-census.mjs `PRIORITY_ROADS` names each road's one place, `PRIORITY_EXCEPT` the remote readopt; test-architecture §94b. A new caller of the session line with no row is red.
+- REMAINDER (named, not here): a paired machine's conversations (the device agent needs a signed release); opencode's serve-owned terminals (no fact, no row); CPU weights or a group per conversation (the separation programme's) — and with it the job's own scope: on a systemd host a job's command runs in a `systemd-run --user --scope` beside vibespace.service, where a niceness does not compete with the hub; only a weight would (said in the kb).
+- DEGRADATION, a real look (this box, two busy node processes pinned to ONE core for 3 s, both under the lane's nice): the one 5 lower got 25.4 % of the core against 74.6 % (the control, the same niceness: 50 / 50).
+- ADVERSARIAL READ (a fresh reader given the diff, the row and the dispatch): F1/F2 test-vault-job and test-jobs-engine cut the job wrapper's argv array by its text — kept as ONE array (spread) so both mutants still find it; F3 an OpenCode serve terminal was given the fact — none now; F4 the cgroup limit above (words corrected: «gives way» for a conversation, the job's scope named as remainder); F6 the census's exception now has a count (a second line there is red); F7 the real-process leg refuses a runner above niceness 14 (where +5 would prove nothing); F9 the job wrapper's spawn gets an 'error' listener (a late exec failure can never crash the hub); F5 the suite's row restated; F8 / F10 / F11 / F12 said in the kb.
+- PINS: test-session-spawn-line ④.
+
 ## 2.369.410 — 2026-11-18
 
 ### bl-mail B-2f6c — a Gmail re-authorize after a Disconnect never read the mail added to known threads

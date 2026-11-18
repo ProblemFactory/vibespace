@@ -13,6 +13,7 @@ import { registerOpenAction } from './window-types.js';
 import { metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): did a tasks-updated delta move anything but a log
 import { ownedJobsView } from '../job-model.js'; // B-70f9 ② (PURE): the jobs this conversation owns, attention first
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
+import { cpuPriorityWords } from './cpu-priority-words.js'; // B-460d (PURE): the CPU priority the conversation started at
 
 /** 2026-09-27: how many browser sessions a conversation has, per ask (the window re-renders on every broadcast, so the
  *  count is remembered here and re-asked at most every 15 s; the row appears once the answer says there are some). */
@@ -255,6 +256,9 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     if (s.startedAt) row(idSec, t('Started'), escHtml(when(s.startedAt, { full: true })));
     const connLabel = { live: t('LIVE (VibeSpace-managed)'), tmux: t('Running in tmux'), external: t('Running externally'), stopped: t('Stopped') }[s.status] || s.status;
     row(idSec, t('Connection'), escHtml(connLabel) + (s.pid ? ` <span style="color:var(--text-dim)">PID ${escHtml(String(s.pid))}</span>` : ''));
+    // B-460d: where a person looks for «why is my build slower» — the priority THIS start got (none for an older start)
+    const cpuWords = cpuPriorityWords(s.cpuNice, t);
+    if (cpuWords) row(idSec, t('CPU priority'), escHtml(cpuWords));
 
     // ── State (current + change) ──
     const stSec = section(t('State'));

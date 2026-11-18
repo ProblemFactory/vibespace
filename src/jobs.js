@@ -16,6 +16,7 @@ const { withoutNoticeHead } = require('./notification-senders.js'); // lane noti
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const { priorityArgv } = require('./spawn/line.js'); // PURE (B-460d): a job's wrapper starts with `nice -n 5` — the words of a start's priority
 const VJ = require('./vault-job.js'); // PURE (lane vault-job-road): a job's --vault values — the grammar, the verdict at every spawn, the fd plan, the frame
 const JN = require('./job-notice.js'); // PURE (lane job-notice-dedupe): a published service's notice is a STATE CHANGE — the verdict over its down record
 const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
@@ -2064,7 +2065,16 @@ class JobManager {
       try { fs.writeFileSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
       // lane vault-job-road: the values' frame is built LAST — nothing that can throw stands between it and its hand-off but the spawn
       if (vj) { const p = vj.door.payload(vj); if (!p.ok) throw new Error(p.words || 'the vault values could not be read'); frame = p.frame; }
-      child = spawn(process.execPath, [wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
+      // B-460d: WHAT A JOB STARTS NEVER OUTRANKS THE HUB — its wrapper is born at `nice -n 5` (the wiring's spawnPriority:
+      // the setting read at THIS start). The wrapper's systemd-run --scope runs in its own process, so the job keeps the
+      // VALUE — but that scope is a cgroup beside the hub's service, where only cpu weights compete (the remainder, named).
+      // The wrapper's own words stay ONE array (suites cut it as a whole: test-vault-job, test-jobs-engine).
+      const pri = typeof this.d.spawnPriority === 'function' ? this.d.spawnPriority() : null;
+      const argv = [...priorityArgv(pri && pri.priority), process.execPath, ...[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]];
+      child = spawn(argv[0], argv.slice(1), { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
+      // an exec that fails late (the nice program gone since the one look) is an 'error' event: never the hub's crash —
+      // the run's wrapper never appears, and the engine's supervision judges a start that wrote no pid
+      child.once('error', (e) => { try { this.d.log && this.d.log(`[jobs] ${job.id}: its wrapper did not start (${argv[0]}): ${e && e.message}`); } catch { } });
     } catch (e) { try { fs.unlinkSync(specPath); } catch { } if (frame) frame.fill(0); throw e; } // a failed write or spawn leaves no spec behind (nor a frame)
     child.unref();
     if (vj) this._handValues(child, job, vj, frame, job.runs[job.runs.length - 1]);

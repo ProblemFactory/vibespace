@@ -390,6 +390,41 @@ export const COPIES = Object.freeze([
   ['src/server/stdout/claude-stream-json.js', 'Object.entries(process.env)) if (!/^GIT_/', 'probe', 1, PROBE + ' (git rev-parse with the hub env minus GIT_*, 6 s)'],
   ['src/usage-routes.js', 'const env = { ...process.env };', 'probe', 1, 'the usage-panel claude probe (spawnSync, bounded), ambient credentials deleted — next: agentEnv'],
 ]);
+// THE PRIORITY ROADS (B-460d, the owner's yes of 2026-11-17 — WHAT A CONVERSATION STARTS NEVER OUTRANKS THE HUB): each road
+// that starts a local conversation or a job has ONE place where its spawn's argv takes `nice -n 5` (src/server/spawn-priority.js
+// decides, src/spawn/line.js priorityArgv spells it). Rows: [file, what, the place spelled, count]. Every caller of the session
+// line (`sessionSpawnLine(`) is a row's file or a PRIORITY_EXCEPT row with its reason — a new road with no priority is RED.
+export const PRIORITY_ROADS = Object.freeze([
+  ['src/spawn/line.js', 'THE session line starts with the start\'s priority words', 'argv: [...priorityArgv(priority), node, wrapper,', 1],
+  ['src/ws-create.js', 'a create asks the start\'s priority (local or not) and hands it to THE line — the dtach road and the daemon pipe run that line', 'const r6Pri = SPRI.priorityFor({ serverSetting, local: !session.host });', 1],
+  ['src/ws-create.js', '…the line is built with it', 'exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,', 1],
+  ['src/jobs.js', 'a job\'s wrapper is spawned with the priority words first', "const argv = [...priorityArgv(pri && pri.priority), process.execPath, ...[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]];", 1],
+  ['src/jobs.js', '…and spawned by that argv', 'child = spawn(argv[0], argv.slice(1), {', 1],
+  ['src/server/jobs-wiring.js', 'the jobs engine is handed the start\'s priority (the setting read per start)', "spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting,", 1],
+]);
+export const PRIORITY_EXCEPT = Object.freeze([
+  // [file, why, the line's own spelling there, count] — a SECOND line in an excepted file (a local one) is RED
+  ['src/server/boot-restore.js', 'the readopt of a REMOTE conversation: its local line runs ssh only — the agent runs on the other machine (a paired machine\'s conversations are the remainder: the device agent needs a signed release)', "exe: 'ssh', args: sshArgs });", 1],
+]);
+/** THE PRIORITY CENSUS: (file) → its text (the mutants hand a patched one) ⇒ the reds, by name */
+export function priorityJudge(read, files) {
+  const red = [];
+  for (const [file, what, needle, count] of PRIORITY_ROADS) {
+    const n = (read(file) || '').split(needle).length - 1;
+    if (n !== count) red.push(`PRIORITY ROAD ${file}: ${what} — «${needle}» ${n}× (the row says ${count}): a start there no longer takes the priority in its ONE place`);
+  }
+  const known = new Set([...PRIORITY_ROADS.map((r) => r[0]), ...PRIORITY_EXCEPT.map((r) => r[0])]);
+  for (const f of files) {
+    if (f === 'src/spawn/line.js' || known.has(f)) continue;
+    if (/\bsessionSpawnLine\(/.test(read(f) || '')) red.push(`UNLISTED session line ${f}: it builds THE session line with no priority row — hand it the start's priority (src/server/spawn-priority.js) or add a PRIORITY_EXCEPT row with the reason`);
+  }
+  for (const [file, , needle, count] of PRIORITY_EXCEPT) {
+    const t = read(file) || '', lines = (t.match(/\bsessionSpawnLine\(/g) || []).length, n = t.split(needle).length - 1;
+    if (!lines) red.push(`DEAD priority exception ${file} — it builds no session line any more`);
+    else if (lines !== count || n !== count) red.push(`PRIORITY EXCEPTION ${file}: ${lines} session line(s), «${needle}» ${n}× — the row excepts ${count}: a new line there takes the start's priority or a row of its own`);
+  }
+  return red;
+}
 export const KINDS = Object.freeze(['probe', 'upstream', 'default', 'self', 'debt']);
 
 /** judge(scan) → { red: [sentences], table: [{ site, class }] } */

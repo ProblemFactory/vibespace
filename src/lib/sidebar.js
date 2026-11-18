@@ -148,6 +148,8 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // lane bypass-no-prompts: how many of the CLI's own asks the bypass door answered this run (server.js `autoAllowed`) —
   // CARRIED-ONLY: Session Properties reads the merged row when it opens; no card draws it
   autoAllowed: { digest: null },
+  // B-460d: the CPU priority the conversation started at (server.js `cpuNice`) — CARRIED-ONLY: Session Properties' row
+  cpuNice: { digest: null },
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */

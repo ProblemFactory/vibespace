@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { spawnFor } = require('./spawn'); // decoupling wave 2b: the per-transport spawn ladders (local / ssh / dial)
 const { sessionSpawnLine } = require('./spawn/line'); // PURE (lane antigravity-spawn-argv): THE local session line — node <wrapper> <buf> <meta> <ONE executable> …args + the env
+const SPRI = require('./server/spawn-priority.js'); // B-460d: the start's CPU priority — a local conversation starts below the hub (nice +5 on the line itself)
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
 const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
@@ -1525,9 +1526,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 }
                 return env;
               })();
-            // THE ONE LINE: `node <wrapper> <buf> <meta> <spawnCmd> …spawnArgs`; the names ride r6Env
+            // THE ONE LINE: `node <wrapper> <buf> <meta> <spawnCmd> …spawnArgs`; the names ride r6Env. B-460d: a LOCAL
+            // conversation's line starts with `nice -n 5` (both roads run it: dtach below, the daemon pipe above it) — the
+            // setting read at THIS start; the fact rides the session (Session Properties) and its meta (a restart keeps it)
+            const r6Pri = SPRI.priorityFor({ serverSetting, local: !session.host });
+            session._cpuNice = ocPty ? null : r6Pri.fact;   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact
             const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
-              exe: spawnCmd, args: spawnArgs,
+              exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,
             });
             const r6Argv = r6Line.argv, r6Env = r6Line.env;
             if (r6Wanted && hosts?.device) {
@@ -1631,6 +1636,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             purpose: session._purpose || undefined, // lane door-day-one-landing: a sign-in terminal stays one after a restart
             cwd,
             spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
+            cpuNice: session._cpuNice || undefined, // B-460d: the CPU priority this start got — a restored session still says it
             agentdPipe: r6Handle ? true : undefined, // R6: daemon-owned pipe session (restore re-opens it, no dtach socket exists)
             host: session.host || null,
             hostName: session.hostName || null,

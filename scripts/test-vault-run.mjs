@@ -86,7 +86,7 @@ const SHORT = 'abc1234';
 // ── THE FAKES: one bin dir first on the child's PATH — a printer (node), a curl (a known tool: «always» is offered) ──
 const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
 const PRINTER = path.join(BIN, 'printer.js');
-fs.writeFileSync(PRINTER, `
+fs.writeFileSync(PRINTER, `// stale-pins: kept (the fake printer's own spawn below, not a pin on src/jobs.js)
 const fs = require('fs'), path = require('path');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const [mode, arg] = process.argv.slice(2);

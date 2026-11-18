@@ -190,6 +190,7 @@ export const ROWS = [
   ['src/server/published-pages.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'publish a user file: the sentence, never a stat'],
   ['src/server/search-index.js', 'own-tree', 5, null, CLI],
   ['src/server/session-stdout.js', 'own-tree', 14, null, PROC],   // lane hub-loop-stalls commit 2 round 3 (law 3) +1: the meta directory listed ONCE per process (knownOnDisk — a file's first version is a fact of the disk)
+  ['src/server/spawn-priority.js', 'own-tree', 1, null, 'B-460d: the nice program in FIXED local system dirs (/usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin) — one look per process, never a user path'],
   ['src/server/spend-guard.js', 'own-tree', 1, null, DATA],
   ['src/server/stash-handover.js', 'own-tree', 1, null, DATA],
   ['src/server/tls.js', 'exempt', 5, null, 'data/tls (its own store: state.json, the Tailscale certificate) + the operator’s VIBESPACE_TLS_CERT / _KEY files — boot config, never a mount'],

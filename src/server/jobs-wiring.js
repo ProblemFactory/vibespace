@@ -149,6 +149,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // while never set — the schema's 4096 is the ladder's last rung, not an owner's word) and the cluster's default (the
     // chart's `jobs.memoryMb` → env VIBESPACE_JOBS_MEMORY_MB)
     memoryCtx: () => ({ setting: serverSetting('jobs.memoryMb'), cluster: process.env.VIBESPACE_JOBS_MEMORY_MB }),
+    // B-460d: a job starts below the hub (nice +5 on its wrapper's spawn) while agents.lowerCpuPriority is on — read per start
+    spawnPriority: () => require('./spawn-priority.js').priorityFor({ serverSetting, log: { warn: (l) => log(l) } }),
   });
   // "Clear content…" (verify r4): every entry the ladder stashes is judged by the jobs store at its write — a frame a
   // wrapper hands back after the clear names a cleared job by id and is held as the sentence (jobs.js judgeHeldEntry)

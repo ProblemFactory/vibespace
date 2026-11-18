@@ -1098,6 +1098,14 @@ const SETTINGS_SCHEMA = {
     label: t('Local sessions via device daemon (R6)'),
     description: t('New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.'),
   },
+  // B-460d (the owner's yes, 2026-11-17): WHAT A CONVERSATION STARTS NEVER OUTRANKS THE HUB — src/server/spawn-priority.js;
+  // read at each START (a running conversation keeps the priority it started with); off = the spawn as it was
+  'agents.lowerCpuPriority': {
+    tier: 'advanced',
+    type: 'boolean', default: true, category: t('Session'), liveApply: true,   // read at each start — never a page refresh
+    label: t('Run conversations below the server\u2019s priority'),
+    description: t('Every conversation and background job on this machine starts at a lower CPU priority than the server (nice +5), and so does everything it starts \u2014 a busy build in a conversation then gives way to the server. Off: they start at the server\u2019s own priority. A change applies from the next start; a running one keeps its priority (Session Properties shows it).'),
+  },
   'agentd.localDiscovery': {
     tier: 'advanced',
     type: 'boolean', default: false, category: t('Session'),
