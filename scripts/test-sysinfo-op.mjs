@@ -26,13 +26,30 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sysop-data-'));
 
 const { DeviceManager } = require(REPO + '/src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
-await dm.connect();
 // B-b403: the daemon is ended ONCE — by the leg after the ops, else at exit (a red, a throw) — by the IDENTITY of this run's own
 // unique root (endDaemonsAndWait: a daemon whose VIBESPACE_AGENTD_ROOT lies under the mkdtemp root above), never a pid by name.
 // The ender takes a /tmp scratch root only (scratch.mjs endDaemonsOf); the leg follows that rule (a TMPDIR elsewhere is said)
 const enderTakes = path.resolve(String(process.env.VIBESPACE_AGENTD_ROOT || '')).startsWith('/tmp/');
+// B-b403 cure 2 (主开发 06:13Z): OFF /tmp the ender refuses the root (endDaemonsOf's rule), so the daemon is ended by ITS OWN pid —
+// the one it wrote in <root>/state/agentd.pid, taken only while that process names this very root (VIBESPACE_DEVICE_ROOT /
+// VIBESPACE_AGENTD_ROOT, as the ender reads them) and is a daemon (comm or argv); anything else is refused by name, never signalled
+const endOwnDaemonByPid = (root, { waitMs = 5000 } = {}) => {
+  const r = path.resolve(String(root || '')), under = (v) => !!v && (path.resolve(v) === r || path.resolve(v).startsWith(r + '/'));
+  if (!r.startsWith(path.resolve(os.tmpdir()) + '/')) return { pid: null, why: `root ${r} is not under this process's temp folder — refused` };   // never a person's own root
+  let pid = 0; try { pid = Number(fs.readFileSync(path.join(r, 'state', 'agentd.pid'), 'utf8').trim()); } catch { return { pid: null, why: 'no pid file' }; }
+  const gone = () => { try { return /^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return true; } };
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return { pid, why: 'not a pid' };
+  if (gone()) return { pid, gone: true, why: 'already gone' };
+  let env = [], comm = '', argv = []; try { env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0'); comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); } catch { }
+  const mine = ['VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT'].some((n) => under((env.find((kv) => kv.startsWith(n + '=')) || '').slice(n.length + 1)));
+  if (!mine || !(comm.startsWith('vibespace-devic') || argv.some((a) => /(?:^|\/)(?:vibespace-)?agentd\.js$/.test(a)))) return { pid, why: `pid ${pid} is not this root's daemon — refused, not signalled` };
+  try { process.kill(pid, 'SIGKILL'); } catch { }
+  const end = Date.now() + waitMs; while (!gone() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  return { pid, gone: gone() };
+};
 let daemonEnded = false;
-process.on('exit', () => { if (!daemonEnded && enderTakes) try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { } });
+process.on('exit', () => { if (!daemonEnded) try { daemonEnded = true; if (enderTakes) endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); else endOwnDaemonByPid(process.env.VIBESPACE_AGENTD_ROOT); } catch { } });
+await dm.connect();   // after the exit hook: a throw here no longer leaks the daemon (cure 2, the reader's note)
 
 // 1. capability advertised + op works against a REAL daemon
 const conn = await dm.connect();
@@ -201,11 +218,37 @@ try { await dm.stop?.(); } catch { }
 // B-b403 (lane bl-scratch, 2026-11-17): the daemon is setsid-detached by design (it outlives a hub), and dm.stop() drops the link
 // only — so it outlived every run, adopted by the user manager. The suite ends the daemon of its own root, and waits.
 {
-  if (!enderTakes) console.log(`  ○ SKIP B-b403's daemon end: the daemon root ${process.env.VIBESPACE_AGENTD_ROOT} lies outside /tmp, and endDaemonsOf refuses such a root by its rule (a /tmp scratch root only): the daemon is left to its own exit and the gate's reaper`);
+  if (!enderTakes) { daemonEnded = true; const e = endOwnDaemonByPid(process.env.VIBESPACE_AGENTD_ROOT); ok(e.gone === true, `B-b403: the daemon root ${process.env.VIBESPACE_AGENTD_ROOT} lies outside /tmp, where endDaemonsOf refuses a root by its rule — so the suite ends its daemon by its own pid, identity-checked (${JSON.stringify(e)})`); }
   else {
     let e = null; daemonEnded = true; try { e = endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch (err) { e = { error: err.message }; }
     ok(!!e && e.pids?.length >= 1 && e.gone === true, `B-b403: the suite ends its device daemon (by its own root's identity) before it ends (${JSON.stringify(e)})`);
   }
+}
+// B-b403 cure 2: the pid road, proven on every box (the test machines' TMPDIR is /tmp, so the real daemon never takes it there) —
+// a stand-in daemon (node running a file named agentd.js, its root in its env), alive and named by its root's pid file, ends. RED
+// CONTROLS, each planted in that file, refused and alive: a stranger of another root (the root check), a process of this root that
+// is not a daemon (the comm / argv check); and a root outside the temp folder is refused before anything is read. The stand-ins
+// share the suite's group and end when their stdin closes, so a signal to the suite never leaves them behind
+{
+  const { spawn: spawnSD } = await import('node:child_process');
+  const sd = path.join(home, 'pid-road'), rootA = path.join(sd, 'root-a'), rootB = path.join(sd, 'root-b');
+  fs.mkdirSync(path.join(rootA, 'state'), { recursive: true });
+  const STAND_IN = "process.stdin.on('end', () => process.exit(0)); process.stdin.on('error', () => process.exit(0)); process.stdin.resume();\n";
+  for (const f of ['agentd.js', 'helper.js']) fs.writeFileSync(path.join(sd, f), STAND_IN);
+  const start = (root, file) => spawnSD(process.execPath, [path.join(sd, file)], { env: { PATH: process.env.PATH, VIBESPACE_AGENTD_ROOT: root }, stdio: ['pipe', 'ignore', 'ignore'] });
+  const a = start(rootA, 'agentd.js'), b = start(rootB, 'agentd.js'), c = start(rootA, 'helper.js');
+  const endSD = () => { for (const k of [a, b, c]) { try { if (k.exitCode === null && k.signalCode === null) k.kill('SIGKILL'); } catch { } } };
+  process.once('exit', endSD);
+  const execd = (k, f) => { try { return fs.readFileSync(`/proc/${k.pid}/cmdline`, 'utf8').includes(f); } catch { return false; } };
+  { const end = Date.now() + 5000; while (!(execd(a, 'agentd.js') && execd(b, 'agentd.js') && execd(c, 'helper.js')) && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); }   // the condition, not a clock
+  const lives = (p) => { try { return !/^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${p}/stat`, 'utf8')); } catch { return false; } };
+  const plant = (k) => { fs.writeFileSync(path.join(rootA, 'state', 'agentd.pid'), String(k.pid)); return endOwnDaemonByPid(rootA); };
+  const stranger = plant(b), notDaemon = plant(c), outside = endOwnDaemonByPid(path.resolve(os.tmpdir(), '..', `vs-outside-root-${process.pid}`));
+  const aliveBefore = lives(a.pid), ended = plant(a);
+  ok(aliveBefore && ended.gone === true && !ended.why, `B-b403 cure 2: off /tmp the daemon is ended by its own pid, identity-checked — the root's daemon, alive, ends (${JSON.stringify(ended)})`);
+  ok(/refused/.test(stranger.why || '') && lives(b.pid) && /refused/.test(notDaemon.why || '') && lives(c.pid) && /not under this process's temp folder/.test(outside.why || ''),
+    `B-b403 cure 2 CONTROLS: refused and alive — a stranger of another root (${stranger.why}), this root's process that is not a daemon (${notDaemon.why}); a root outside the temp folder (${outside.why})`);
+  endSD();
 }
 // ── 2.369.68: `ps` output past 4 MiB must not empty the top-procs list ──
 {

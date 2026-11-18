@@ -121,6 +121,10 @@ if (!ident.hasProcfs()) {
 const kids = [];
 // B-b403: the fixtures that FORK (a shell with children of its own) lead a process group each; the teardown ends the group
 const groupKids = new Set();
+// B-b403 cure 2 (主开发 06:13Z): a fixture's group members, read while its leader lived — a group whose leader was reaped while a
+// member still lives is held by that member, so it is still ended (never a stranger's: the member was read alive in it)
+const groupMembers = new Map();
+const inGroupG = (pid, pg) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'), f = st.slice(st.lastIndexOf(')') + 2).split(' '); return f[0] !== 'Z' && f[0] !== 'X' && Number(f[2]) === pg; } catch { return false; } };   // alive AND still in that group
 {
   const child = spawn('/bin/sleep', ['300'], { stdio: 'ignore' });
   kids.push(child);
@@ -235,7 +239,7 @@ const armSessions = [];
   }
 }
 const cleanup = () => {
-  for (const k of kids) { try { if (groupKids.has(k) && Number.isInteger(k.pid) && k.pid > 1) { groupKids.delete(k); if (k.exitCode === null && k.signalCode === null) process.kill(-k.pid, 'SIGKILL'); } else k.kill('SIGKILL'); } catch { } }   // a group only while its leader is not reaped (it holds the id)   // a group is ended once (cleanup runs again at exit)
+  for (const k of kids) { try { if (groupKids.has(k) && Number.isInteger(k.pid) && k.pid > 1) { groupKids.delete(k); if ((k.exitCode === null && k.signalCode === null) || (groupMembers.get(k) || []).some((m) => inGroupG(m, k.pid))) process.kill(-k.pid, 'SIGKILL'); } else k.kill('SIGKILL'); } catch { } }   // a group once, only while its leader is not reaped or a member read alive holds the id (cleanup runs again at exit)
   try { fs.rmSync(HOME, { recursive: true, force: true }); } catch { }
 };
 process.on('exit', cleanup);
@@ -423,6 +427,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     fs.writeFileSync(path.join(BUFS, id + '.json'), JSON.stringify({ pid: 900000 + i, childPid: k.pid }));
   }
   await new Promise((r) => setTimeout(r, 800));   // let the shells fork
+  for (const k of groupKids) groupMembers.set(k, ident.readChildPids(k.pid));   // B-b403 cure 2: read while the leaders live
   const realChildren = [...webuiSessions.keys()].reduce((n, id) => {
     const meta = JSON.parse(fs.readFileSync(path.join(BUFS, id + '.json'), 'utf8'));
     return n + ident.readChildPids(meta.childPid).length;
@@ -569,6 +574,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     if (wantPids.length === 3 || Date.now() > settleDeadline) break;
     await new Promise((r) => setTimeout(r, 100));
   }
+  for (const k of killKids) groupMembers.set(k, ident.readChildPids(k.pid));   // B-b403 cure 2: a member a §6 shell forked still ends with its group, whatever ends its leader
   ok(wantPids.length === 3,
     `POSITIVE CONTROL: the fixture really carries the needle in 3 live command lines (${JSON.stringify(wantPids)}) — without them every count below would be a zero from doing no work`);
 
@@ -715,8 +721,20 @@ console.log('\n§11 a fixture ends with its children');
   await until(() => !alive(ctl.pid));
   ok(ctlKids.length === 2 && !alive(ctl.pid) && ctlKids.every(alive), `§11 CONTROL: a forking shell ended by its own pid (the old teardown) leaves its children alive (red: ${ctlKids.filter(alive).length} of ${ctlKids.length})`);
   try { if (ctlKids.some(alive) && Number.isInteger(ctl.pid) && ctl.pid > 1) process.kill(-ctl.pid, 'SIGKILL'); } catch { }   // its members, read alive, hold the group id
+  // B-b403 cure 2 (主开发 06:13Z): a fixture whose leader was REAPED while a member lives — the member, read alive, holds the
+  // group id, so the teardown still ends that group (the leg after cleanup() is red under the leader-only teardown)
+  const lone = spawn('/bin/sh', ['-c', 'sleep 300 & read x'], { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+  kids.push(lone); groupKids.add(lone);
+  await until(() => ident.readChildPids(lone.pid).length === 1);
+  groupMembers.set(lone, ident.readChildPids(lone.pid));
+  const loneKids = groupMembers.get(lone);
+  lone.kill('SIGKILL');
+  await until(() => lone.exitCode !== null || lone.signalCode !== null);
+  const leaderOnly = (k) => k.exitCode === null && k.signalCode === null;
+  ok(loneKids.length === 1 && !leaderOnly(lone) && loneKids.every(alive), `§11 SETUP (cure 2): its leader is reaped while its member lives — the leader-only condition is false for this group (${loneKids.filter(alive).length} of ${loneKids.length} alive)`);
   cleanup();
-  const gone = await until(() => !grand.some(alive) && !ctlKids.some(alive));
+  const gone = await until(() => !grand.some(alive) && !ctlKids.some(alive) && !loneKids.some(alive));
+  ok(!loneKids.some(alive), `§11 cure 2: a group whose leader was reaped is still ended through the member read alive in it (${loneKids.filter(alive).length} alive)`);
   ok(grand.length >= Number(process.env.VS_WEBUI_N || 20) * 2 && gone, `§11 the teardown ends every forking fixture's group: ${grand.length} children of ${shells} shells gone (${grand.filter(alive).length} alive), the control's 2 by its group`);
 }
 

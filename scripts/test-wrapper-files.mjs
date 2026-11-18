@@ -36,9 +36,10 @@ try {
   fs.writeFileSync(decoyPath, '#!/bin/bash\nsleep 15\n'); fs.chmodSync(decoyPath, 0o755);
   const decoy = spawn(decoyPath, ['-c', sock, 'x', 'node', 'chat-wrapper.js', buf, buf.replace(/\.buf$/, '.json')], { stdio: 'ignore', detached: true });
   // B-b403: the decoy leads its own group, so it is ended ONCE through it — below, else at exit, else on a signal (raised again after)
-  let decoyEnded = false;
+  let decoyEnded = false, decoyMembers = [];   // B-b403 cure 2: its members, read while it lived (they hold the group past a reaped leader)
   // …and only while its leader is not reaped (the handle: a live or zombie leader holds the group id — never a stranger's group)
-  const endDecoy = () => { if (decoyEnded) return; decoyEnded = true; try { if (decoy.exitCode === null && decoy.signalCode === null && Number.isInteger(decoy.pid) && decoy.pid > 1) process.kill(-decoy.pid, 'SIGKILL'); } catch { } };
+  const memberAlive = (p) => { try { const st = fs.readFileSync(`/proc/${p}/stat`, 'utf8'), f = st.slice(st.lastIndexOf(')') + 2).split(' '); return f[0] !== 'Z' && f[0] !== 'X' && Number(f[2]) === decoy.pid; } catch { return false; } };   // alive AND still in its group
+  const endDecoy = () => { if (decoyEnded) return; decoyEnded = true; try { if (((decoy.exitCode === null && decoy.signalCode === null) || decoyMembers.some(memberAlive)) && Number.isInteger(decoy.pid) && decoy.pid > 1) process.kill(-decoy.pid, 'SIGKILL'); } catch { } };
   process.once('exit', endDecoy);
   for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { endDecoy(); process.kill(process.pid, sig); });
   await new Promise((r) => setTimeout(r, 300));
@@ -47,7 +48,7 @@ try {
   // script left the sleep behind every run; the decoy leads its own group (detached) and the GROUP ends
   const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
   { const end = Date.now() + 5000; while (!childrenOf(decoy.pid).length && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); }   // the condition, not a clock
-  const decoyKids = childrenOf(decoy.pid);
+  const decoyKids = childrenOf(decoy.pid); decoyMembers = decoyKids;
   endDecoy();
   const aliveW = (p) => { try { return !/^\d+ \([^)]*\) [ZX]/.test(fs.readFileSync(`/proc/${p}/stat`, 'utf8')); } catch { return false; } };
   { const end = Date.now() + 5000; while (decoyKids.some(aliveW) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); }
