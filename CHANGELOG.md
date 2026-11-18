@@ -112,6 +112,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A locked conversation that you started with the 1M context keeps it after a resume or a model fallback, instead of silently dropping to the standard context.
 - When the API stops taking the effort per turn, the conversation says so: changing the effort then costs a fresh prompt-cache write.
 - Starting a conversation with your own --settings file no longer drops it silently: VibeSpace's own values step aside, and you are told which.
+- A chat row that opens search results no longer just says a draft is awaiting your approval; it says where the draft waits.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
