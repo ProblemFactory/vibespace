@@ -279,6 +279,16 @@ class ExitProxyManager {
     const keys = this.ctxFor(session, sessionId).sessionKeys;
     return this._runs({ sessionKeys: keys, machine, limit, agent: true });
   }
+  /** B-a31a THE ROW'S NEW FACT: a RECORDED command (a run, its failed link, a refusal on the device's road, a run allowed then
+   *  refused by cmd.exe — B-f169) reaches every open page
+   *  as ITS machine's row patch — `host-last-run` {hostId, lastRun} — never the bare `hosts-updated` that made every page
+   *  refetch the whole hosts list (and the Remote panel redraw whole) per command. `hosts-updated` stays for a real change
+   *  of a host record (its access lists, its pairing, its policy). The command's own line rides `exit-audit` as before. */
+  _rowRecorded(hostId) {
+    let lastRun = null;
+    try { const h = this.hosts.get(hostId); lastRun = h ? (this.accessOf(h).lastRun || null) : null; } catch { lastRun = null; } // THE ONE READER (§97): the shape GET /api/hosts serves
+    try { this.bcastAll({ type: 'host-last-run', hostId, lastRun }); } catch { }
+  }
   /** What the daemon told us about itself at its hello (capabilities, platform) — a fake device may say nothing. */
   _daemonInfo(dm) {
     try { const st = typeof dm.status === 'function' ? dm.status() : null; return (st && st.info) || {}; } catch { return {}; }
@@ -687,7 +697,7 @@ class ExitProxyManager {
         try { this.hosts.setLastRun?.(h.id, E.runRecord({ cmd, code: null, ms: ms0, by: by0, at: t0, outcome: 'quoting' })); } catch (e2) { this.log(`last run not recorded: ${e2.message}`); }
         this.audit({ hostId: h.id, machine, sessionId, sessionKey: by0.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms: ms0, ok: false, refusal: 'bad_command', argv: 'cmd-exe', ...(asked ? { asked: true } : {}), ...(platform ? { platform } : {}) });
         card({ outcome: 'quoting', cmd });
-        try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+        this._rowRecorded(h.id); // B-a31a: the refused run is recorded — its row's new fact, never a whole-list refetch
         throw e;
       }
       // lane device-allow-flags: the machine's OWN allow list leaves `run` off — refused before it was sent (never "the link
@@ -697,6 +707,7 @@ class ExitProxyManager {
       const outcome = offline ? 'offline' : 'run_failed';
       card({ outcome, cmd });
       this.hosts.setLastRun?.(h.id, E.runRecord({ cmd, code: null, ms: this.now() - t0, by: { key: this.keyOf(session, sessionId), name: session && session.name || '' }, at: t0, outcome }));
+      this._rowRecorded(h.id); // B-a31a: the row's new fact (it was never sent: the row stayed stale)
       throw this._refused(session, sessionId, { code: offline ? 'offline' : 'run_failed', grant: 'run', h, cmd, error: e && e.message });
     }
     const ms = this.now() - t0;
@@ -706,7 +717,7 @@ class ExitProxyManager {
       this.audit({ hostId: h.id, machine, sessionId, sessionKey: by0.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms, ok: false, refusal: 'device_agent_outdated', ...(platform ? { platform } : {}), ...(agentVersion ? { agentVersion } : {}), via: again.via, asked });
       this.log(`${machine}: did not run "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — agent ${agentVersion || '?'} on ${platform} has no run-shell (needs ${XS.RUN_SHELL_SINCE}+)`);
       card({ outcome: 'agent_outdated', cmd, agentVersion });
-      try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+      this._rowRecorded(h.id); // B-a31a: the row's new fact, never a whole-list refetch
       throw namedError('device_agent_outdated', E.refusalText('device_agent_outdated', { machine, cmd, agentVersion }), { grant: 'run', platform, agentVersion, needVersion: XS.RUN_SHELL_SINCE });
     }
     // a revoke DURING the daemon's run cannot stop the command (no cancel op; ≤ 30 s) — it is recorded as such
@@ -721,7 +732,7 @@ class ExitProxyManager {
       this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms, ok: false, refusal: 'spawn_failed', spawnError: sf, interpreter, ...(platform ? { platform } : {}), via: again.via, asked });
       this.log(`${machine}: could not start "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${XS.spawnFailureText(sf, { interpreter })} (${sf.code}, ${ms} ms)`);
       card({ outcome: 'spawn_failed', cmd, spawnError: sf, interpreter, ms, exitRun: E.cardOutput({ cmd, code: null, ms, spawnError: sf, interpreter }) });
-      try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+      this._rowRecorded(h.id); // B-a31a: the row's new fact, never a whole-list refetch
       throw namedError('spawn_failed', E.refusalText('spawn_failed', { machine, cmd, spawnError: sf, interpreter, platform }), { grant: 'run', spawnError: sf, interpreter, platform, exitCode: XS.spawnExitCode(sf) });
     }
     const timedOut = r.timedOut === undefined ? null : !!r.timedOut;
@@ -743,7 +754,7 @@ class ExitProxyManager {
     this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code, ms, ok: true, via: again.via, asked, interpreter, ...(platform ? { platform } : {}), ...(timedOut ? { timedOut: true } : {}), ...(truncated ? { truncated: true } : {}), ...(revokedDuringRun ? { 'revoked-during-run': true } : {}), ...(encoding ? { encoding } : {}), ...(spawnMs != null ? { spawnMs } : {}), stdout: heads.stdout, stderr: heads.stderr, ...(anyCut ? { cut: heads.cut } : {}) });
     this.log(`${machine}: ran "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${timedOut ? 'timed out' : 'exit ' + code}, ${ms} ms (${interpreter})`);
     card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ cmd, code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads, encoding }) });
-    try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+    this._rowRecorded(h.id); // B-a31a: the row's new fact, never a whole-list refetch
     return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, interpreter, platform, ...(encoding ? { encoding } : {}), ...(spawnMs != null ? { spawnMs } : {}), line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
   }
   // ── pull / push (lane exit-transfer, design 013 B) ─────────────────────────
@@ -818,7 +829,7 @@ class ExitProxyManager {
       this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: by.name || null, grant: 'run', verb, cmd: line0(), path: remote, localPath: local, ok: false, refusal: code, ms: this.now() - t0, asked,
         ...(extra.error ? { error: String(extra.error).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200) } : {}), ...(extra.size != null ? { bytes: extra.size } : {}) });
       card({ outcome, ...extra });
-      try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+      // B-a31a: a transfer writes no last run — its row did not change; its line rides exit-audit (no hosts-updated, no row frame)
       return namedError(code, sentence, { grant: 'run', ...(code === 'device_agent_outdated' ? { agentVersion: extra.agentVersion || null, needVersion: E.PUSH_SINCE } : {}) }); // the version push needs, even when the agent names none
     };
     let target = null, dirId = null;
@@ -968,8 +979,7 @@ class ExitProxyManager {
     const ms = this.now() - t0;
     this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: by.name || null, grant: 'run', verb, cmd: line0(), path: remote, localPath: local, bytes, sha256, verified, ms, ok: true, via: again.via, asked, ...(platform ? { platform } : {}) });
     this.log(`${machine}: ${verb === 'pull' ? 'pulled' : 'pushed'} ${remote.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120)} (${bytes} bytes, ${verified}) for ${(session && session.name) || sessionId} — ${ms} ms`);
-    card({ outcome: 'done', bytes, sha256, verified, ms });
-    try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+    card({ outcome: 'done', bytes, sha256, verified, ms }); // B-a31a: no row frame — a transfer writes no last run (its line rides exit-audit)
     return { machine, verb, remote, local, bytes, sha256, verified, ms, asked, line: E.transferCliLine({ verb, remote, local, bytes, sha256, verified, ms }, { machine }) };
   }
   /** The display-only card in the calling chat; `rec.exitRun` (E.cardOutput) rides beside the words so the renderer

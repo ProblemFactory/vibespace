@@ -1144,6 +1144,8 @@ console.log('B-f169 THE ARGV, WORD FOR WORD — the hub quotes the words ONCE fo
   { const al = w.audit().filter((l) => l.verb === 'run' && l.refusal === 'bad_command' && l.argv === 'cmd-exe').at(-1);
     ok(!!al && al.ok === false && al.hostId === 'host-dial-Macbook', '…and ONE audit line for it: ok false, refusal bad_command, argv cmd-exe (the late refusal is in the machine\'s audit too)', al); }
   ok(XS.winArgvLine(['msiexec', '/i', 'x.msi', 'INSTALLDIR=C:\\App\\']).line === 'msiexec /i x.msi INSTALLDIR=C:\\App\\' && XS.winArgvLine(['echo', 'C:\\a b\\']).ok === false, 'a word with , ; = that ENDS in a backslash (no space) passes PLAIN, as it did at the release (a double quote after it would be escaped); with a space it is still refused', XS.winArgvLine(['msiexec', '/i', 'x.msi', 'INSTALLDIR=C:\\App\\']));
+  { const qi = w.bc.map((m) => m.type).lastIndexOf('host-last-run'), q = qi >= 0 ? w.bc[qi] : null;
+    ok(!!q && q.hostId === 'host-dial-Macbook' && !!q.lastRun && q.lastRun.outcome === 'quoting' && !w.bc.slice(qi).some((m) => m.type === 'hosts-updated'), 'B-a31a: the run allowed, then refused (cmd.exe) is RECORDED — its row\'s new fact (host-last-run, outcome quoting), never the whole-list hosts-updated', q); }
   ok(XS.winArgvLine(['del', 'a,b.txt']).line === 'del "a,b.txt"' && XS.winArgvLine(['set', 'A=1']).line === 'set "A=1"' && XS.winArgvLine(['echo', 'a;b']).line === 'echo "a;b"', 'cmd.exe\'s built-ins split a word on , ; = — such a word goes in double quotes (one file, one word)');
   const rp = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['ver'] }));
   ok(!rp.e && w.runs.length === n2 + 1 && lineOf() === 'ver', '…plain words need no quoting and run there as typed', { e: rp.e && rp.e.message, line: lineOf() });
@@ -1153,6 +1155,26 @@ console.log('B-f169 THE ARGV, WORD FOR WORD — the hub quotes the words ONCE fo
   ok(!!rk.e && rk.e.argv === 'cmd-exe' && /which cannot take these words as they are/.test(rk.e.message) && w.runs.length === n3, '…a machine KNOWN to be Windows: words cmd.exe cannot take are refused before anything is asked or sent', rk.e && rk.e.message);
   const rq = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['powershell', '-NoProfile', '-Command', 'Get-ChildItem C:\\x'] }));
   ok(!rq.e && w.runs.length === n3 + 1 && lineOf() === 'powershell -NoProfile -Command "Get-ChildItem C:\\x"', '…and its words in cmd.exe\'s own quoting are the line asked about and run (the manual\'s PowerShell form)', { e: rq.e && rq.e.message, line: lineOf() });
+}
+
+console.log('B-a31a THE ROW\'S NEW FACT — a recorded command reaches the open pages as its machine row\'s patch, never a whole-list signal');
+{
+  const w = world();
+  const A = w.sessions.get('wa');
+  await w.mgr.setAccess('host-dial-Macbook', { use: { mode: 'nobody' }, run: { mode: 'only', who: [{ kind: 'session', id: 'claude:A' }], ask: false }, base: w.mgr.view('host-dial-Macbook').base });
+  const after = async (fn) => { const b0 = w.bc.length; const r = await settle(fn()); return { r, frames: w.bc.slice(b0) }; };
+  const ran = await after(() => w.mgr.run(A, 'wa', 'Macbook', 'echo hi'));
+  const rows = ran.frames.filter((m) => m.type === 'host-last-run');
+  ok(!ran.r.e && rows.length === 1 && rows[0].hostId === 'host-dial-Macbook' && !!rows[0].lastRun && rows[0].lastRun.cmd === 'echo hi' && rows[0].lastRun.outcome === 'ran'
+    && !ran.frames.some((m) => m.type === 'hosts-updated') && ran.frames.filter((m) => m.type === 'exit-audit').length === 1,
+    'ONE recorded run ⇒ ONE row patch (host-last-run: the machine and its new last run) + its exit-audit line — NO hosts-updated (which made every page refetch the whole hosts list and redraw the Remote panel)', ran.frames.map((m) => m.type));
+  w.dm.runCmd = async () => { throw new Error('the link dropped'); };
+  const lost = await after(() => w.mgr.run(A, 'wa', 'Macbook', 'echo lost'));
+  const lr = lost.frames.filter((m) => m.type === 'host-last-run');
+  ok(!!lost.r.e && lr.length === 1 && lr[0].lastRun && lr[0].lastRun.cmd === 'echo lost' && lr[0].lastRun.outcome === 'run_failed' && !lost.frames.some((m) => m.type === 'hosts-updated'),
+    '…a run whose link failed records its row too and sends ITS fact (before, the row stayed stale: nothing was sent)', lost.frames.map((m) => m.type));
+  const acc = await after(() => w.mgr.setAccess('host-dial-Macbook', { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false }, base: w.mgr.view('host-dial-Macbook').base }));
+  ok(acc.frames.some((m) => m.type === 'hosts-updated') && !acc.frames.some((m) => m.type === 'host-last-run'), '…a real change of the host record (its lists) still says hosts-updated', acc.frames.map((m) => m.type));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
