@@ -1356,8 +1356,8 @@ class TaskGroupManager {
         // B-9ac8: a re-pick under the cap can keep NO line (the preamble + other groups' contexts used the room) — the header
         // then says so, how many there are and where they are; «last 0 of 500» was honest and useless
         const head = !picked.length ? `  _(${noneFitWords(totalLog, multi ? `--group ${t.id} ` : '')})_`
-          : picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '';
-        return ['', '## Activity log' + head + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '', ...picked];
+          : picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task ${multi ? `--group ${t.id} ` : ''}show\` prints more)_` : '';   // B-9ac8 follow-up: the partial header names its group as the none-fit one does
+        return ['', '## Activity log' + head + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task ${multi ? `--group ${t.id} ` : ''}show --full\`)_` : ''), '', ...picked];
       };
       let room = Math.max(1200, logBudget - used);
       let log = logOf(room, 3);

@@ -208,6 +208,9 @@ console.log('— the 10 KiB law: tools / rules first, then the table, within the
   // fit, how many, and where (`show` prints the newest; `--group <id>` in a payload of several groups); never «last 0 of N»
   const logHead = (s) => { const i = s.indexOf('## Activity log'); return i < 0 ? '' : s.slice(i, s.indexOf('\n', i)); };
   const tight = m.renderContext(t.id, { cap: 1000 }), roomy = m.renderContext(t.id, {}), tightM = m.renderContext(t.id, { cap: 1000, multi: true });
+  const partialM = m.renderContext(t.id, { multi: true });
+  ok('B-9ac8 follow-up: in a payload of several groups the PARTIAL header names its group too (one renderer, one form)', logHead(partialM).startsWith('## Activity log  _(last ') && logHead(partialM).includes(` of 30 — \`vibespace-task --group ${t.id} show\` prints more)_`), logHead(partialM));
+  ok('B-9ac8 follow-up r2: the «† = has detail» hint names its group too in a payload of several groups (the CLI refuses a bare verb there)', fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/task-groups.js'), 'utf8').includes('_(† = has detail — \\`vibespace-task ${multi ? `--group ${t.id} ` : \'\'}show --full\\`)_'), '');
   ok('B-9ac8: no log line fits under the cap ⇒ «none fit inline — 30 lines; `vibespace-task show` prints the newest», never «last 0 of 30»; in a payload of several groups the door names the group; a roomy render still says «last N of 30»',
     logHead(tight) === '## Activity log  _(none fit inline — 30 lines; `vibespace-task show` prints the newest)_' && !/last 0 of/.test(tight)
     && logHead(tightM) === `## Activity log  _(none fit inline — 30 lines; \`vibespace-task --group ${t.id} show\` prints the newest)_` && /^## Activity log {2}_\(last [1-9]\d* of 30 — /.test(logHead(roomy)), { tight: logHead(tight), tightM: logHead(tightM), roomy: logHead(roomy) });

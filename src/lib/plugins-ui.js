@@ -510,7 +510,7 @@ export function installPluginsUI(App) {
       <label class="plugin-install-row plugin-install-value-row"><span>${escHtml(t('Location'))}</span><input type="text" class="plugin-install-value" spellcheck="false"></label>
       <label class="plugin-install-row plugin-install-file-row hidden"><span>${escHtml(t('File'))}</span><input type="file" class="plugin-install-file" accept=".vsp,.zip"></label>
       <label class="plugin-install-row plugin-install-ref-row hidden"><span>${escHtml(t('Ref'))}</span><input type="text" class="plugin-install-ref" spellcheck="false" placeholder="${escHtml(t('a tag, a branch or a full commit sha (empty = the default branch)'))}"></label>
-      <div class="plugin-install-row plugin-install-cred-row dialog-field-row hidden"><span>${escHtml(t('Credential'))}</span><div class="dialog-field-line"><select class="plugin-install-cred"><option value="">${escHtml(t('None (a public repository)'))}</option><option value="plugin-git">${escHtml(t('Plugin Git credential'))}</option></select><button type="button" class="mounts-btn plugin-install-cred-open">${escHtml(t('Set up…'))}</button></div></div>
+      <div class="plugin-install-row plugin-install-cred-row dialog-field-row hidden"><span>${escHtml(t('Credential'))}</span><div class="dialog-field-line"><select class="plugin-install-cred"><option value="">${escHtml(t('None (a public repository)'))}</option><option value="plugin-git" disabled>${escHtml(t('Plugin Git credential'))}</option></select><button type="button" class="mounts-btn plugin-install-cred-open">${escHtml(t('Set up…'))}</button></div></div>
       <div class="plugin-cfg-hint plugin-install-cred-hint hidden">${escHtml(t('A private repository is read with the Plugin Git credential kept in Integrations (sealed by the vault) — a token is never typed here.'))}</div>
       <div class="plugin-cfg-hint">${escHtml(t('The package is validated before it is placed under data/plugins/<id>/. Plugins that ask for capabilities beyond the sandbox are enabled only after you review them.'))}</div>
       <div class="plugin-detail plugin-cfg-warn plugin-install-error hidden"></div>
@@ -525,15 +525,30 @@ export function installPluginsUI(App) {
       const opt = credSel.querySelector('option[value="plugin-git"]');
       if (!opt) return;
       const st = pluginGitCredOf(c);
+      // B-3b8e follow-up: a READ that failed or was refused is no «not set» — said, and the option and the pick stay as they were
+      // r3: the option starts DISABLED (the markup) until a read says ready — a first read that fails keeps it so; a failed REFETCH
+      // keeps the option and the pick exactly as they were (a focus during a hub restart never greys out a ready one)
+      if (st.state === 'unread') { opt.textContent = t('Plugin Git credential (could not be read — try again)'); return; }
       opt.textContent = st.ready ? t('Plugin Git credential — {host} ({kind})', { host: st.host, kind: st.kind === 'token' ? t('token') : t('deploy key') })
-        : st.locked ? t('Plugin Git credential (the vault is locked — unlock it at the top of the page)') : t('Plugin Git credential (not set — Set up…)');   // B-3b8e: the lock said, never «not set»
+        : st.state === 'locked' ? t('Plugin Git credential (the vault is locked — unlock it at the top of the page)')
+        : st.state === 'undecryptable' ? t('Plugin Git credential (saved, but it cannot be decrypted — enter it again in Integrations)')
+        : st.state === 'store-unreadable' ? t('Plugin Git credential (the integrations store cannot be read — open Integrations)')
+        : t('Plugin Git credential (not set — Set up…)');   // B-3b8e: each state its own words, «not set» only when nothing is saved
       opt.disabled = !st.ready;
-      if (!st.ready && credSel.value === 'plugin-git') credSel.value = '';   // r1: a credential gone unready (the vault locked) is never left picked — Install would post it
+      // r1: a credential gone unready (the vault locked) is never left picked — Install would post it; the follow-up: the pick
+      // the person made COMES BACK once it is ready again (an unlock) — unless the person picked something else meanwhile
+      if (!st.ready && credSel.value === 'plugin-git') { credSel.value = ''; credUnpicked = true; }
+      else if (st.ready && credUnpicked) { credSel.value = 'plugin-git'; credUnpicked = false; }
     };
     // B-3b8e: read when the git source is picked, then LIVE — the store's `integrations-updated` carries `{ integration: view }`
     // (the route's own shape), so a credential saved in Integrations beside the open dialog is seen at once (it was read ONCE
     // per open); a focus of the picker reads again (a vault unlocked meanwhile)
     let credRead = false, credSeq = 0;   // r1: a broadcast bumps credSeq — a fetch answer older than it is never drawn over it
+    let credUnpicked = false;   // the follow-up: the pick a lock took away (restored at the unlock; a pick of the person's own ends it)
+    // r2: ANY act of the person in the dialog ends the claim (a source, a URL, a ref, a pick) — the restore is for a dialog left as
+    // it was; re-picking «None», already shown, fires no change, and a URL typed meanwhile may name another host
+    const endUnpick = () => { credUnpicked = false; };
+    body.addEventListener('input', endUnpick); body.addEventListener('change', endUnpick);
     const refetchCred = () => { const at = credSeq; return fetchJson('/api/integrations/plugin-git').catch(() => null).then((c) => { if (body.isConnected && at === credSeq) drawCred(c); }); };
     const readCred = async () => {
       if (credRead) return; credRead = true;

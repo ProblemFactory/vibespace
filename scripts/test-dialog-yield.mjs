@@ -402,8 +402,8 @@ console.log('\n⑨ the Install plugin… dialog reads the Plugin Git credential 
   const ghost = await importReader('src/zz-no-such-reader.js');
   ok(!!ghost.gone && typeof ghost.PC.pluginGitCredOf === 'function', 'CONTROL: a tree without the reader answers a named red and a stub (the suite goes on)', ghost.gone);
   const view = { id: 'plugin-git', values: { host: 'github.com', username: 'x-access-token' }, set: { host: true, username: true, token: true, deployKey: false }, masked: { token: '••••vpxB' } };
-  ok(J(PC.pluginGitCredOf({ integration: view })) === J({ ready: true, host: 'github.com', kind: 'token', locked: false }), "the route's envelope { integration: view } ⇒ ready · github.com · token", PC.pluginGitCredOf({ integration: view }));
-  ok(J(PC.pluginGitCredOf(view)) === J({ ready: true, host: 'github.com', kind: 'token', locked: false }), 'a bare view ⇒ the same (one shape, one reader)');
+  ok(J(PC.pluginGitCredOf({ integration: view })) === J({ ready: true, host: 'github.com', kind: 'token', locked: false, state: 'ready' }), "the route's envelope { integration: view } ⇒ ready · github.com · token", PC.pluginGitCredOf({ integration: view }));
+  ok(J(PC.pluginGitCredOf(view)) === J({ ready: true, host: 'github.com', kind: 'token', locked: false, state: 'ready' }), 'a bare view ⇒ the same (one shape, one reader)');
   ok(PC.pluginGitCredOf({ integration: { ...view, set: { host: true, token: false, deployKey: true } } }).kind === 'deployKey', 'a deploy key names its kind');
   ok(PC.pluginGitCredOf({ integration: { ...view, set: { host: true } } }).ready === false, 'a host with no sealed secret ⇒ not ready');
   // B-3b8e (3): the MEASURED locked shape (integration-store publicView under a locked vault: values {host:'', username:''},
@@ -411,6 +411,12 @@ console.log('\n⑨ the Install plugin… dialog reads the Plugin Git credential 
   const lockedView = { ...view, values: { host: '', username: '' }, set: { host: false, username: false, token: false, deployKey: false }, masked: { token: null, deployKey: null }, whyCode: 'vault-locked', source: 'none' };
   const lk = PC.pluginGitCredOf({ integration: lockedView });
   ok(lk.ready === false && lk.locked === true && PC.pluginGitCredOf({ integration: { ...view, set: { host: true } } }).locked === false, 'a LOCKED vault (the measured shape) ⇒ not ready, locked — a host with no secret is not «locked»', lk);
+  // the follow-up (主开发's reading of 249f68f34): a FAILED act never looks like something else — each state its own name
+  const stOf = (a) => PC.pluginGitCredOf(a).state;
+  ok(stOf({ integration: { ...lockedView, whyCode: 'constructor' } }) === 'unset' && stOf({ integration: { ...lockedView, whyCode: 'toString' } }) === 'unset', 'r2: a whyCode the table does not hold (even a prototype name) ⇒ unset, never a function as a state');
+  ok(stOf(null) === 'unread' && stOf({ error: 'unauthorized' }) === 'unread' && stOf({ integration: lockedView }) === 'locked' && stOf({ integration: { ...lockedView, whyCode: 'undecryptable' } }) === 'undecryptable'
+    && stOf({ integration: { ...lockedView, whyCode: 'store-unreadable' } }) === 'store-unreadable' && stOf({ integration: { ...view, set: { host: true } } }) === 'unset' && stOf({ integration: view }) === 'ready',
+    'follow-up: the reader names WHY — a failed / refused read «unread» (never «not set»), the lock, «cannot be decrypted», «the store cannot be read», nothing saved, ready');
   const pre368 = (answer) => { const v = answer && answer.integration ? answer.integration : answer; const host = v && v.values ? String(v.values.host || '') : ''; const set = (v && v.set) || {}; const kind = set.token ? 'token' : set.deployKey ? 'deployKey' : null; return { ready: !!(host && kind), host, kind }; };
   const lk0 = pre368({ integration: lockedView });
   ok(!(lk0.ready === false && lk0.locked === true), 'CONTROL: the release\'s reader fails the locked leg above (no lock in its answer — the option said «not set — Set up…» over a saved credential)', lk0);
@@ -423,12 +429,18 @@ console.log('\n⑨ the Install plugin… dialog reads the Plugin Git credential 
   // B-3b8e (2): the pin reads the call's USE — the option is disabled exactly when not ready (a mutant that disables it
   // regardless survived 113 green) — and the lock's words; (4) the credential is LIVE: the broadcast redraws it, a focus
   // reads it again, the listener ends with the dialog
-  ok(/opt\.disabled = !st\.ready;\n\s*if \(!st\.ready && credSel\.value === 'plugin-git'\) credSel\.value = '';/.test(PU9) && /: st\.locked \? t\('Plugin Git credential \(the vault is locked — unlock it at the top of the page\)'\) : t\('Plugin Git credential \(not set — Set up…\)'\)/.test(PU9) && !/opt\.disabled = true/.test(PU9),
+  ok(/opt\.disabled = !st\.ready;\n(?:\s*\/\/[^\n]*\n)*\s*if \(!st\.ready && credSel\.value === 'plugin-git'\) \{ credSel\.value = ''; credUnpicked = true; \}/.test(PU9) && /: st\.state === 'locked' \? t\('Plugin Git credential \(the vault is locked — unlock it at the top of the page\)'\)/.test(PU9) && /: t\('Plugin Git credential \(not set — Set up…\)'\);/.test(PU9) && !/opt\.disabled = true/.test(PU9),
     'WIRING (B-3b8e): opt.disabled = !st.ready (never forced) and an unready credential is never left PICKED; a locked vault is SAID with where to unlock it, «not set» only when nothing is saved');
   ok(/offCred = this\.ws\?\.onGlobal\?\.\(\(msg\) => \{/.test(PU9) && /if \(msg && msg\.type === 'integrations-updated' && msg\.id === 'plugin-git'\) \{ credSeq\+\+; drawCred\(msg\); \}/.test(PU9)
     && /const refetchCred = \(\) => \{ const at = credSeq; return fetchJson\('\/api\/integrations\/plugin-git'\)/.test(PU9) && /if \(body\.isConnected && at === credSeq\) drawCred\(c\);/.test(PU9)
     && /credSel\.addEventListener\('focus', refetchCred\);/.test(PU9) && /await refetchCred\(\);/.test(PU9) && /onClose: \(\) => \{ if \(offCred\) offCred\(\); offCred = null; \}/.test(PU9),
     'WIRING (B-3b8e): LIVE — it SUBSCRIBES (ws onGlobal) and integrations-updated for plugin-git redraws the option (a broadcast newer than a fetch in flight wins: credSeq); the fetch reads the integration\'s own route, at the pick and at every focus; the listener ends at the dialog\'s close');
+  ok(/if \(st\.state === 'unread'\) \{ opt\.textContent = t\('Plugin Git credential \(could not be read — try again\)'\); return; \}/.test(PU9) && /<option value="plugin-git" disabled>/.test(PU9)
+    && /st\.state === 'undecryptable' \? t\('Plugin Git credential \(saved, but it cannot be decrypted — enter it again in Integrations\)'\)/.test(PU9)
+    && /st\.state === 'store-unreadable' \? t\('Plugin Git credential \(the integrations store cannot be read — open Integrations\)'\)/.test(PU9),
+    'WIRING (follow-up): a failed read keeps the option and the pick and says «could not be read — try again»; the two other states have their own words — «not set» only when nothing is saved');
+  ok(/if \(!st\.ready && credSel\.value === 'plugin-git'\) \{ credSel\.value = ''; credUnpicked = true; \}\n\s*else if \(st\.ready && credUnpicked\) \{ credSel\.value = 'plugin-git'; credUnpicked = false; \}/.test(PU9) && /const endUnpick = \(\) => \{ credUnpicked = false; \};\n\s*body\.addEventListener\('input', endUnpick\); body\.addEventListener\('change', endUnpick\);/.test(PU9),
+    'WIRING (follow-up): the pick a lock took away COMES BACK at the unlock; a pick of the person\'s own in between ends it');
   const IS9 = read('src/server/integration-store.js');
   ok(/broadcast\(\{ type: 'integrations-updated', id, why, integration: view \}\)/.test(IS9), 'the store\'s broadcast still carries { integration: view } — the shape drawCred hands the reader (a change here changes the dialog)');
   ok(/res\.json\(\{ integration: store\(\)\.publicView\(req\.params\.id\) \}\)/.test(IR9), 'the route still answers { integration: view } — the shape the reader unwraps (a change here changes the reader)');
