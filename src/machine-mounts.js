@@ -171,7 +171,7 @@ class MachineMounts {
    *  HELD: no mount is listed, NOTHING is written over the file (_save refuses; the legacy ingest — which saves — never runs),
    *  the orphan-token sweep revokes nothing (every push token would read as an orphan), a person's mount / unmount / remount is
    *  refused by name, and the file is read again off the loop; read, the boot's restore runs then */
-  _loadAnswer(a) {
+  _loadAnswer(a, { atLift = false } = {}) {
     if (a.state === 'unreadable') return this._unreadHold(a);
     if (a.state === 'corrupt') {
       let aside = null;
@@ -182,7 +182,10 @@ class MachineMounts {
     }
     this._state = a.state === 'data' ? a.value : { mounts: [] };
     if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
-    if (a.state !== 'data') this._migrateLegacy();
+    // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
+    // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
+    if (a.state !== 'data' && !atLift) this._migrateLegacy();
+    else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores runs at the next start');
   }
   _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
   _unreadHold(a) {
@@ -225,7 +228,7 @@ class MachineMounts {
     }
     const was = this._unread; this._unread = null; this._unreadMissingAt = 0; this._unreadTries = 0; this._unreadSaid = false; this._unreadSaveSaid = false;
     if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
-    this._loadAnswer(a);
+    this._loadAnswer(a, { atLift: true });
     this.log(`machine-mounts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.mounts.length} mount(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the mounts list starts empty` : 'the file is GONE — the mounts list starts empty'}`);
     this._notify();
     this.restore().catch(() => { });   // the boot's heal, which met an empty list while held

@@ -1132,13 +1132,13 @@ app.post('/api/machine-mounts/:hostId', async (req, res) => {
       if (!pub) pub = require('./src/write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }) || null; // the request's own origin: THE one rule
       res.json(await machineMounts.mountPush(req.params.hostId, { folder: b.folder, mode: b.mode, mountpoint: b.mountpoint, publicUrlFallback: pub }));
     }
-  } catch (e) { res.status(400).json(require('./src/mount-error-words.js').errorBody(e)); }
+  } catch (e) { res.status(e && e.code === 'mounts-unread' ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.code === 'mounts-unread' ? { code: e.code } : {}) }); }
 });
 app.delete('/api/machine-mounts/:id', async (req, res) => {
-  try { res.json(await machineMounts.unmount(String(req.params.id))); } catch (e) { res.status(400).json(require('./src/mount-error-words.js').errorBody(e)); }
+  try { res.json(await machineMounts.unmount(String(req.params.id))); } catch (e) { res.status(e && e.code === 'mounts-unread' ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.code === 'mounts-unread' ? { code: e.code } : {}) }); }
 });
 app.post('/api/machine-mounts/:id/remount', async (req, res) => {
-  try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(400).json(require('./src/mount-error-words.js').errorBody(e)); }
+  try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(e && e.code === 'mounts-unread' ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.code === 'mounts-unread' ? { code: e.code } : {}) }); }
 });
 
 // ── Port forwarding (B-0b60, tunnel path): expose a machine's loopback

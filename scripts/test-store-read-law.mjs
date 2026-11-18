@@ -361,6 +361,51 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     await M._unreadRetry();
     ok(heldAfterOne && !M.unreadWords() && M.list().length === 0, 'a «missing» answer right after an unreadable one is READ ONCE MORE (the hold stands); missing again, the list starts empty', { heldAfterOne });
   }
+  // 主开发 23:21Z (the read of the cure): the lift's legacy ingest never reads the data folder SYNCHRONOUSLY on the loop — a lift with no
+  // mounts (the file gone) leaves the legacy stores for the next start; the boot's road ingests them as before
+  const liftIngest = async (Mod, name) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'), LEG = path.join(d, 'host-mounts.json'); plant(F, body);
+    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
+    if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true });
+    fs.writeFileSync(LEG, JSON.stringify({ mounts: [{ id: 'old-0002', hostId: 'h-0003', folder: '/x', mountpoint: '/y' }] }));
+    await M._unreadRetry(); await M._unreadRetry();   // «missing» read once more, then the lift
+    return { lifted: !M.unreadWords(), legacyKept: fs.existsSync(LEG) && !fs.existsSync(LEG + '.migrated'), listed: M.list().length };
+  };
+  const li = await liftIngest(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-lift-ingest');
+  const LIFTA = '    this._loadAnswer(a, { atLift: true });\n';
+  ok(MSRC.split(LIFTA).length === 2, 'control setup: the anchor of the control «the lift ingests nothing» is in machine-mounts.js');
+  const lix = await liftIngest(MJ.load('src/machine-mounts.js', MSRC.replace(LIFTA, '    this._loadAnswer(a);   /* MUTANT: the lift ingests */\n'), 'lift-ingests'), 'mounts-lift-ingest-mut');
+  ok(li.lifted && li.legacyKept && li.listed === 0 && lix.lifted && !lix.legacyKept, 'a lift with no mounts leaves the legacy stores for the next start (no synchronous read of the data folder on the loop); CONTROL (the lift ingests, in a copy): it reads and renames them there', { li, lix });
+  // the SAVE's guard has its own red control (it is what covers the timers' saves and every road that reaches _save)
+  const saveScene = async (Mod, name) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
+    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
+    M._state.mounts.push({ id: 'mm-x', dir: 'push', hostId: 'h-x', folder: '/z', mountpoint: '/w', tokenId: 'tok-x' });
+    M._save();
+    const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
+    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
+    return { kept };
+  };
+  const SAVEG = "    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; this.log('a machine-mounts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }\n";
+  ok(MSRC.split(SAVEG).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in machine-mounts.js');
+  const sv = await saveScene(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-save-guard');
+  const svx = await saveScene(MJ.load('src/machine-mounts.js', MSRC.replace(SAVEG, '    /* MUTANT: no save guard */\n'), 'no-save-guard'), 'mounts-save-guard-mut');
+  ok(sv.kept && (asRoot || !svx.kept), 'the save itself refuses while held (a timer\'s save, any road); CONTROL (only that guard removed, in a copy): the save WRITES OVER the held file', { sv, svx });
+  // the three other refusals (a push mount, a pull mount, a remount) — each by name
+  {
+    const d = path.join(D, 'mounts-refusals'); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
+    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], [])); clearInterval(M._sweep);
+    const codeOf = async (p) => { try { await p(); return 'answered'; } catch (e) { return e && e.code; } };
+    const got = [await codeOf(() => M.mountPush('h-0001', { folder: '/srv' })), await codeOf(() => M.mountPull('h-0001', { remotePath: '/r' })), await codeOf(() => M.remount('mm-0001'))];
+    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
+    ok(got.every((c) => c === 'mounts-unread'), 'a push mount, a pull mount and a remount are each refused BY NAME while held (mounts-unread)', got);
+  }
+  const SVM = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  ok((SVM.match(/catch \(e\) \{ res\.status\(e && e\.code === 'mounts-unread' \? 503 : 400\)\.json\(\{ error: e\.message, \.\.\.\(e && e\.code === 'mounts-unread' \? \{ code: e\.code \} : \{\}\) \}\); \}/g) || []).length === 3,
+    'WIRING (主开发 23:21Z): the mount, unmount and remount routes keep the refusal\'s status (503) and its name');
   // its read r1 (M2): the next try armed FIRST — a try that meets a read in flight arms the next, and the read that then fails leaves it
   const armM = async (Mod, name) => {
     const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
