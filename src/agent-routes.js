@@ -2835,9 +2835,9 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     if (arc) return res.status(400).json({ error: `${arc.id} is archived (${arc.archivedWhy || 'terminal'}) — only rm applies; vibespace-job list --archived` });
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }
-  const selfActs = ['progress', 'ask', 'announce'];
-  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask, or announce' });
-  const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
+  const selfActs = ['progress', 'ask', 'withdraw', 'announce'];   // B-8bd5: a job withdraws ITS OWN panel
+  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask (or withdraw its ask), or announce' });
+  const needsControl = ['stop', 'start', 'restart', 'rm', 'announce', 'withdraw']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
@@ -2851,6 +2851,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     else if (act === 'rm') r = a.jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
     else if (act === 'progress') r = a.jm.progress(job, req.body?.text || '');
     else if (act === 'ask') r = a.jm.ask(job, req.body?.panel);
+    else if (act === 'withdraw') r = a.jm.withdrawAsk(job);   // B-8bd5: the filer closes its own ask once its cause is gone
     else if (act === 'access') {
       for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
       a.jm._touch(job); a.jm._save(); r = { ok: true };

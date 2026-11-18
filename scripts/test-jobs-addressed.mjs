@@ -220,7 +220,7 @@ const CLASS = {
   '_waitFor#1': 'event', '_adoptAndReplay#1': 'event', '_bootNoExit#1': 'alarm', '_bootNoExit#2': 'alarm', '_bootNoExit#3': 'event',
   '_parkForMemory#1': 'alarm', '_finalizeRun#1': 'event', '_finalizeRun#2': 'event', '_finalizeRun#3': 'event', '_finalizeRun#4': 'alarm',
   '_finalizeRun#5': 'end', '_sweepPass#1': 'event', '_sweepPass#2': 'event', '_untilScan#1': 'event', '_cronTick#1': 'alarm',
-  '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event',
+  '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -290,6 +290,7 @@ const DRIVERS = {
   'setMemory#1': async () => { const j = task('drv-memory'); jm.setMemory(j, '2G', { byUser: true }); return j; },
   'ask#1': async () => { const j = task('drv-ask'); j.state = 'up'; jm.ask(j, PANEL); return j; },
   'answerPanel#1': async () => { const j = task('drv-answer'); j.state = 'up'; const r = jm.ask(j, PANEL); jm.answerPanel(j, { version: r.version, c: 'a', button: 'OK' }); return j; },
+  'withdrawAsk#1': async () => { const j = task('drv-withdraw'); j.state = 'up'; jm.ask(j, PANEL); jm.withdrawAsk(j); return j; },   // B-8bd5
 };
 const driven = [];   // {key, site, job, t0, alarm}
 const unaddressed = (c, since) => {   // THE BASE's rendering of what a caller may view (the per-turn lines before this lane)

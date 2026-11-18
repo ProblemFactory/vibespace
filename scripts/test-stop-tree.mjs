@@ -366,7 +366,7 @@ const restartScene = async (Mod, tag, how) => {
   ok(rx.answer && /is already running/.test(rx.answer.error || '') && !rx.restarted, 'B-cac2 CONTROL (the release, in a copy): the start answers «already running» and the service ends DOWN — a second start was needed', rx);
   for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 1, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
-  ok(/const needsControl = \['stop', 'start', 'restart', 'rm', 'announce'\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
+  ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

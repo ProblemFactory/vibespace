@@ -190,7 +190,7 @@ control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibesp
          vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
            the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it;
            the OWNER subscribing to its own job: the filter shapes its auto-notify too)
-in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
+in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m] · vibespace-job withdraw (its cause is gone)
          vibespace-job answers [--wait 100] · vibespace-job announce "what happened" (notify owner+subscribers NOW —
            for watch jobs where exit code ≠ newsworthiness; --notify-ok at create = scheduled successes notify too)
 Pick the right tool: turn-scoped waits → background Bash/Monitor · session continuation → /goal ·
@@ -437,6 +437,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (!ref || !text) { console.error('usage: vibespace-job progress [id] "text"'); process.exit(1); }
       await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/progress`, { text });
       console.log('progress recorded (shown in the Jobs panel and in polls)');
+      break;
+    }
+    case 'withdraw': {   // B-8bd5: the job that filed a panel closes it once its cause is gone — its For-you item resolved
+      const ref = pos[1] && pos[1].startsWith('jb-') ? pos[1] : JOBID;
+      if (!ref) { console.error('usage: vibespace-job withdraw [id]   (inside a job: its own panel)'); process.exit(1); }
+      const w = await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/withdraw`, {});
+      console.log(w.already ? w.already : `panel${Number.isInteger(w.version) ? ' #' + w.version : ''} withdrawn — its For-you item is resolved`);
       break;
     }
     case 'ask': {

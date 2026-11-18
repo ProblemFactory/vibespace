@@ -3359,6 +3359,20 @@ class JobManager {
     this._save();
     return { ok: true, version };
   }
+  /** B-8bd5: the job that FILED a panel may WITHDRAW it once its cause is gone (a monitor's alarm that cleared) — the panel closed,
+   *  its For-you item resolved, a waiting `answers --wait` woken, said in its events; no panel open: answered, nothing changed */
+  withdrawAsk(job) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const p = job.interaction && job.interaction.pending;
+    if (!p) return { ok: true, already: 'no panel of this job is open' };
+    job.interaction.pending = null;
+    if (job.state === 'awaiting-user') job.state = 'up';
+    this._resolveAns(job);
+    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { }
+    this._touch(job, { what: `withdrew its panel #${p.version} (its cause is gone)`, verb: 'answers' });
+    this._save();
+    return { ok: true, version: p.version };
+  }
   answerPanel(job, answers) { // user-side (routes verify user auth)
     const p = job.interaction && job.interaction.pending;
     // r6 D-F5: the answer names its panel — missing or another panel's ⇒ refused by name, nothing recorded
