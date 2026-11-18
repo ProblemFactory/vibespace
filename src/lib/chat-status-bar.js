@@ -839,6 +839,7 @@ export class ChatStatusBar {
 
   render() {
     this._syncServed();
+    this._lay = this._layout();   // THE layout verdict, read ONCE per render (the «后台» face and _arranged read it — one window width read, not three)
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
     // Semantic tier colors — theme vars (CSS vars work in inline styles), never
     // hardcoded hexes; "orange" is the midpoint between the red and yellow tiers.
@@ -880,10 +881,13 @@ export class ChatStatusBar {
           : t('Model not reported by the CLI yet — click to set');
       const lockTip = locked ? ' \u00b7 ' + (declaresModelFacts(this._backend) ? t('LOCKED — retries {model} after any fallback', { model: this._lockedModel || this._statusModel || '?' }) : t('LOCKED by an earlier version — this harness never retries a model; unlock it from the model menu')) : '';   // a harness that never re-pins (round 11): its standing lock says what it is
       const why = refusal ? ` \u00b7 ${escHtml(t('refusal'))}${refusal.category ? ` (${escHtml(refusal.category)})` : ''}` : '';
-      const label = locked
-        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml((target && (this._servedModel || target)) || this._statusModel || '?'))
-        : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(modelLabelFor(this._backend, this._statusModel) || this._statusModel) : t('model: ?')));
-      const rawAttr = label.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;'), faced = modelFace(label);   // the raw spelling: one hover on the label away
+      // ONE construction, two spellings: `f` words a model id BEFORE it is escaped — the face never runs over markup (the lock
+      // icon, the refusal span), only over the id's own text (the cure's readers, 主开发 07:52Z)
+      const labelOf = (f) => (locked
+        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(f(this._servedModel))}${why}` : escHtml(f((target && (this._servedModel || target)) || this._statusModel || '?')))
+        : (mismatch ? `\u26a0 ${escHtml(f(this._servedModel))}${why}` : (known ? escHtml(f(modelLabelFor(this._backend, this._statusModel) || this._statusModel)) : t('model: ?'))));
+      const label = labelOf((x) => x), faced = labelOf((x) => (x == null ? x : modelFace(x)));
+      const rawAttr = label.replace(/<[^>]*>/g, '').replace(/"/g, '&quot;');   // the raw spelling: one hover on the label away
       chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, `<span class="chat-status-model-label" data-raw="${rawAttr}"${faced !== label ? ` title="${rawAttr}"` : ''}>${faced}</span>`);   // the FACE (page §4: «Fable 1M»), the raw label in data-raw, on the label's own hover and in the door's menu (the cure of 644a67ec2, MUST 4)   // the label its own part: the model door also holds the thinking level (lane mask-value-shape)
       // NO effort menu ⇒ NO effort chip (lane effort-menu-per-harness): a harness whose CLI takes no effort
       // (ui.effortLevels null — opencode) shows nothing, never a «?» that opens another harness's ladder.
@@ -1201,7 +1205,7 @@ export class ChatStatusBar {
         const one = n === 1 ? (tasks.length ? (shortWorkflowName(tasks[0].description) || tasks[0].description || '') : String(wfRows[0].name || '')) : '';
         const tip = [...tasks.map((x) => x.description), ...wfRows.map((w) => (w.summary ? `${w.name} — ${w.summary}` : w.name))].filter(Boolean).join('\n');
         const word = `<span class="chat-status-door-word">${escHtml(t('Background work'))}</span>`;
-        const face = one && this._layout().one   // the verdict itself, never the class the last render wrote
+        const face = one && this._lay.one   // the verdict itself (this render's), never the class the last render wrote
           ? `${word}<span class="chat-status-door-sep">:</span> <span class="chat-status-door-title">${escHtml(one)}</span>`
           : `${word} <span class="chat-status-door-count">${num(n)}</span>`;
         chip('tasks', 'chat-status-tasks chat-status-clickable', tip, `${UI_ICONS.refresh} ${face}`, { attrs: { 'data-door': 'background' } });
@@ -1326,7 +1330,7 @@ export class ChatStatusBar {
    *  its door / home is built (never lost on the way). Writes the bar's layout classes (one row / two rows / short forms). */
   _arranged(chips) {
     const bar = this._element;
-    const { w, one } = this._layout();
+    const { w, one, short } = this._lay || this._layout();   // this render's verdict (render() reads it once)
     const rank = (key) => {
       const r = ROW_OF[key];
       if (!r) return [2, 2000];
@@ -1344,7 +1348,7 @@ export class ChatStatusBar {
       if (iSet > 0) ordered.splice(iSet, 0, mark('class-line-iii', 'chat-status-classline'));
       if (firstRow2 > 0 && (iSet < 0 || firstRow2 < iSet)) ordered.splice(firstRow2, 0, mark('class-line-ii', 'chat-status-classline'));
     }
-    const lay = { 'chat-status-one-row': one, 'chat-status-two-rows': !one, 'chat-status-short': this._layout().short };
+    const lay = { 'chat-status-one-row': one, 'chat-status-two-rows': !one, 'chat-status-short': short };
     if (bar.classList) for (const [c, on] of Object.entries(lay)) if (bar.classList.contains(c) !== on) bar.classList[on ? 'add' : 'remove'](c);   // (a host with no classList — a fake DOM — draws the same order)
     this._layoutKey = `${one ? 1 : 2}${lay['chat-status-short'] ? 's' : ''}`;
     return ordered;
