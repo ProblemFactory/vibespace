@@ -5055,8 +5055,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-inherited { margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 6px; }
 .task-inherited-from { font-size: 11px; color: var(--text-dim); }
 .task-inherited-text { margin: 2px 0 0; white-space: pre-wrap; font-size: 11px; color: var(--text); max-height: 160px; overflow: auto; }
-.task-inherited-row { display: flex; gap: 8px; align-items: baseline; font-size: 11px; min-width: 0; }
-.task-inherited-row .ctx-path { overflow-wrap: anywhere; }
+.task-inherited-row { display: flex; flex-wrap: wrap; column-gap: 8px; row-gap: 0; align-items: baseline; font-size: 11px; min-width: 0; }   /* the U5a look: on a phone the note goes under its path, never squeezed beside it */
+.task-inherited-row .ctx-path { overflow-wrap: anywhere; min-width: 0; flex: 0 1 auto; }
 .ctx-tag:disabled { opacity: 0.35; cursor: default; }
 .ctx-tag[data-tag="share"].on, .ctx-tag-ref { border-style: dashed; }
 .ctx-share { margin-left: 2px; }
