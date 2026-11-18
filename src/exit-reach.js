@@ -136,7 +136,10 @@ const RUNS_MAX = 200;
 function whoPrincipal(row) {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
   if (row.kind === 'session') return 'session' in row ? null : GM.fromSessionPrincipal({ kind: 'session', id: row.id });
-  return GM.bareOf(row);
+  // the chain's cure (C): a Task Group row keeps a «仅本组» the dialog SAID (true, or false = switched off) — the ONE writer's
+  // onlyCarried decides (a silent one keeps the stored flag); every other field stays the model's bare principal
+  const b = GM.bareOf(row);
+  return b && b.kind === 'group' && typeof row.only === 'boolean' ? { ...b, only: row.only } : b;
 }
 /** The rows a grant stores: closed kinds, well-formed ids, dedup, ≤ WHO_MAX. An `everyone` row is never a row here
  *  (All agents is the `everyone` MODE — one spelling). */
@@ -268,7 +271,7 @@ function exitStamp(access) {
   for (const [p, g] of [['u', access.use], ['r', access.run]]) {
     lines.push(JSON.stringify([p, 'mode', g.mode]));
     if (p === 'r') lines.push(JSON.stringify([p, 'ask', g.ask ? 1 : 0]));
-    for (const w of g.who) lines.push(JSON.stringify([p, GM.principalKey(w)]));
+    for (const w of g.who) lines.push(JSON.stringify([p, GM.principalKey(w), ...(w.only === true ? ['only'] : [])]));   // the chain's cure (C): a «仅本组» flip is a change of the list (a row without it keeps its bytes)
     for (const w of g.except || []) lines.push(JSON.stringify([p, 'x', GM.principalKey(w)]));   // lane grants-unify: an exception is a fact of the list
   }
   if (access.hub && access.hub.mode && access.hub.mode !== 'default') lines.push(JSON.stringify(['h', 'mode', access.hub.mode])); // lane hub-act-ask

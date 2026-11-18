@@ -72,7 +72,7 @@ function pickerItemsOf(model, { roster = null, app = null } = {}) {
   // ALL AGENTS first (lane everyone-principal): every agent session, now and later — the owner's explicit share
   const all = model.everyone || { checked: false, by: null };
   out.push({ key: 'everyone:*', kind: 'everyone', id: '*', name: t('All agents'), checked: !!all.checked, hint: t('every conversation, now and later'), groupIds: [], groupNames: [], ref: { kind: 'everyone', row: { id: '*', name: null } } });
-  for (const g of model.groups) out.push({ key: `group:${g.id}`, kind: 'group', id: g.id, name: g.name, checked: g.checked, hint: g.checked ? t('every session in it, now or later') : '', groupIds: [], groupNames: [], ref: { kind: 'group', row: g } });
+  for (const g of model.groups) out.push({ key: `group:${g.id}`, kind: 'group', id: g.id, name: g.name, checked: g.checked, hint: g.checked ? t('every session in it and in its child groups, now or later') : '', groupIds: [], groupNames: [], ref: { kind: 'group', row: g } });
   for (const s of model.sessions) {
     const w = live.get(s.id) || {};
     let tgs = [];
@@ -93,7 +93,7 @@ function pickerItemsOf(model, { roster = null, app = null } = {}) {
  * principal picker (chips = who is shared with; a pick shares, a chip's ✕ stops sharing), kept on the
  * container and PATCHED on every call — a repaint never re-creates the box the person is typing in.
  */
-export function renderPicker(container, { model, onToggle, onMode, onExcept = null, busy = false, showMode = true, roster = null, app = null } = {}) {
+export function renderPicker(container, { model, onToggle, onMode, onExcept = null, onOnly = null, busy = false, showMode = true, roster = null, app = null } = {}) {   // the chain's cure (C): + onOnly(row, on)
   container.classList.add('wshare-picker');
   let st = container.__wshare;
   const items = pickerItemsOf(model, { roster, app });
@@ -102,7 +102,7 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
   const exceptExtra = (model.except || []).filter((p) => !items.some((r) => r.key === `${p.kind === 'group' ? 'group' : 'session'}:${p.id}`)).map((p) => ({ key: `${p.kind === 'group' ? 'group' : 'session'}:${p.id}`, kind: p.kind === 'group' ? 'group' : 'agent', id: p.id, name: p.name || String(p.id).slice(0, 8), hint: p.kind === 'group' ? t('not in the list now') : t('not running now'), groupIds: [], groupNames: [], ref: { kind: p.kind === 'group' ? 'group' : 'session', row: { id: p.id, key: p.id, name: p.name } } }));
   if (!st) {
     container.textContent = '';
-    st = { items, sel: [], onToggle: null, onExcept: null, exceptExtra };
+    st = { items, sel: [], onToggle: null, onExcept: null, onOnly: null, exceptExtra, onlyNow: new Set(model.onlyKeys || []) };
     st.picker = principalPicker({
       items: () => st.items, multi: true, everyone: 'roster',   // the rows carry ALL AGENTS (checked from the record)
       placeholder: t('Search agents and Task Groups…'), label: t('Share with agents'),
@@ -116,7 +116,15 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
         const gone = (st.exceptModel || []).filter((p) => !now.has(`${p.kind === 'group' ? 'group' : 'session'}:${p.id}`)).map((p) => (p.kind === 'group' ? `group:${p.id}` : `conversation:${p.id}`));
         st.onExcept?.(keys.map((k) => byKey.get(k)).filter(Boolean).map((r) => (r.ref.kind === 'group' ? { kind: 'group', id: r.ref.row.id } : { kind: 'session', id: r.ref.row.id || r.ref.row.key })), gone);
       } } : null,
+      // the chain's cure (C): «仅本组» on a picked Task Group, where a press can write it (the Share dialog)
+      only: onOnly ? { keys: (model.onlyKeys || []).slice() } : null,
       onChange: (keys) => {
+        if (st.onOnly && typeof st.picker.onlyKeys === 'function') {   // the chain's cure (C): a switch press is ONE call
+          const nowOnly = new Set(st.picker.onlyKeys() || []), byKeyO = new Map(st.items.map((r) => [r.key, r]));
+          for (const k of nowOnly) if (!st.onlyNow.has(k) && byKeyO.get(k)) st.onOnly(byKeyO.get(k).ref.row, true);
+          for (const k of st.onlyNow) if (!nowOnly.has(k) && byKeyO.get(k)) st.onOnly(byKeyO.get(k).ref.row, false);
+          st.onlyNow = nowOnly;
+        }
         const before = new Set(st.sel), after = new Set(keys);
         st.sel = keys.slice();
         const byKey = new Map(st.items.map((r) => [r.key, r]));
@@ -133,6 +141,7 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
   }
   st.items = items;
   st.onToggle = onToggle;
+  st.onOnly = onOnly;   // the chain's cure (C)
   st.onExcept = onExcept;
   st.exceptExtra = exceptExtra;
   st.exceptModel = model.except || [];   // lane held-except-doors: the 除了 as drawn — what a ✕ takes away is named against it
@@ -371,6 +380,15 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
     const model = pickerModel({ ...roster, record: view });
     renderPicker(host, {
       model, busy, roster, app,
+      // the chain's cure (C, U5c): the «仅本组» switch of a shared Task Group — ONE call, the answer redraws
+      onOnly: async (r, on) => {
+        busy = true; draw();
+        const res = await fetchJson(`${base}/only`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ principal: { kind: 'group', id: r.id, name: r.name }, only: on }) });
+        busy = false;
+        if (!res || res.error) showToast(failText(res, t('Could not change «this group only»')), { type: 'error' });
+        else view = res;
+        if (live()) draw();
+      },
       onToggle: async (kind, r, on) => {
         busy = true; draw();
         const principal = kind === 'session' ? { kind, id: r.id || r.key, name: r.name } : { kind, id: r.id, name: r.name }; // a LIVE session by its webui id — the ENGINE spells its durable key (verify r6, lane channel-withdraw: a pending fork's key is its placeholder, never its parent's conversation key; the client's `r.key` was the parent's)

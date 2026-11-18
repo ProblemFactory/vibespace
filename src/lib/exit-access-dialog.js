@@ -165,10 +165,10 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const held = pick.except;
       const items = () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))];
       const pickerWrap = el('div', 'exit-access-picker');
-      const pickNote = el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it — now or later.'));
+      const pickNote = el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it and in its child groups — now or later; switch a group to «this group only» to leave its child groups out.'));   // the chain's cure (C)
       pickerWrap.appendChild(pickNote);
       const picker = principalPicker({ items, app, multi: true, selected, placeholder: t('Search sessions and groups…'), label: grant === 'use' ? t('Borrow its network') : t('Run commands on it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, onChange: () => { refuseLine.textContent = ''; syncCount(); },
-        except: { selected: pick.except, extra } });   // «除了» — members left out of a picked Task Group / All agents
+        except: { selected: pick.except, extra }, only: { keys: pick.only || [] } });   // «除了» — members left out of a picked Task Group / All agents · the chain's cure (C): the «仅本组» switch
       pickerWrap.appendChild(picker.el);
       // verify r1 T2 ④: with ALL AGENTS picked the sentence says what that IS — every conversation, the ones started
       // later included, as you — per grant; the run sentence follows "Ask me each time"
@@ -229,7 +229,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         allLine.style.display = allOn ? '' : 'none';
       };
       if (askBox) askBox.onchange = () => syncCount();
-      sections[grant] = { get mode() { return mode; }, picker, askBox, syncSec, radioEls, held, extra, storedKey: pick.storedKey };
+      sections[grant] = { get mode() { return mode; }, picker, askBox, syncSec, radioEls, held, extra, storedKey: pick.storedKey, onlyWas: (pick.only || []).slice() };
     }
     // lane hub-act-ask: THE THIRD LIST — never vibespace-exit (the two lists above decide it), never your own clicks
     const hubInfo = d.hub || null;
@@ -284,7 +284,8 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         // a stored one not running now as the key it has; a Task Group by its id
         const rowOfKey = (k) => rows.find((x) => x.key === k) || s.picker.knownRows().find((x) => x.key === k);
         const wire = (k) => {
-          if (k.startsWith('group:')) return { kind: 'group', id: k.slice('group:'.length) };
+          // the chain's cure (C): a group switched to «仅本组» says only:true; one stored that way and switched back says only:false
+          if (k.startsWith('group:')) { const sw = typeof s.picker.onlyKeys === 'function' ? s.picker.onlyKeys() : null; return { kind: 'group', id: k.slice('group:'.length), ...(!Array.isArray(sw) ? {} : sw.includes(k) ? { only: true } : s.onlyWas.includes(k) ? { only: false } : {}) }; }   // a switch it cannot read: says nothing (kept)
           const r = rowOfKey(k);
           if (r && r.webuiId) return { kind: 'session', session: String(r.webuiId), name: r.name };
           const x = s.extra.find((e) => e.key === k);
@@ -297,7 +298,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         // dialog was open was refused 410 «not running any more», naming a conversation the owner could not see under Nobody);
         // the route re-keys a fork's `webui:` one to its own id, by name
         const kept = (k) => { const m = /^(group|conversation):(.+)$/.exec(s.storedKey[k] || ''); return m ? (m[1] === 'group' ? { kind: 'group', id: m[2] } : { kind: 'conversation', key: m[2] }) : wire(k); };
-        const wireEx = (k) => (s.held.includes(k) ? kept(k) : wire(k));
+        const wireEx = (k) => { const w = s.held.includes(k) ? kept(k) : wire(k); return w && w.kind === 'group' ? { kind: 'group', id: w.id } : w; };   // the chain's cure (C): an exception never carries «仅本组» (rule ③)
         if (s.mode === 'only') {
           const all = s.picker.selected().includes(EVERYONE_KEY);
           const keys = s.picker.selected().filter((k) => k !== EVERYONE_KEY);

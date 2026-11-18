@@ -621,6 +621,27 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const caSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8'), chCli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf-8');
     ok(/const viaParent = r\.principal\.kind === 'group' && !\(Array\.isArray\(ctx && ctx\.groups\) \? ctx\.groups : \[\]\)\.map\(String\)\.includes\(String\(r\.principal\.id\)\);/.test(caSrc) && /\.\.\.\(viaParent \? \{ inherited: true \} : \{\}\), as: \{ kind: r\.principal\.kind/.test(caSrc) && /a\.inherited \? ` \(through its parent Task Group \$\{a\.as\.name \|\| a\.as\.id\}\)` : ` \(as a member of group/.test(chCli), 'channels (the cure (B)): an access row reached through the lineage is marked, and the status line says «through its parent Task Group», never «as a member»');
   }
+  // the chain's cure (C, U5c is part of the row): the «仅本组» switch on the exit and window dialogs, each write carrying it to the ONE writer
+  {
+    const EXR = require('../src/exit-reach.js'), WRR = require('../src/window-reach.js');
+    // exit: the dialog's group row says only:true / only:false; the write path keeps it to the stored row; the list's stamp sees a flip
+    const wp = [EXR.whoPrincipal({ kind: 'group', id: 'tg-p', only: true }), EXR.whoPrincipal({ kind: 'group', id: 'tg-p', only: false }), EXR.whoPrincipal({ kind: 'group', id: 'tg-p' }), EXR.whoPrincipal({ kind: 'group', id: 'tg-p', only: 'yes' })];
+    const pv = EXR.patchVerdict(null, { use: { mode: 'only', who: [{ kind: 'group', id: 'tg-p', only: true }] }, run: { mode: 'nobody' } });
+    const acc1 = pv.ok ? pv.access : null;
+    const rows1 = acc1 && acc1.use ? EXR.exitRows(acc1, 'h1') : [];
+    const stampOn = acc1 && acc1.use ? EXR.exitStamp(acc1) : '', stampOff = acc1 && acc1.use ? EXR.exitStamp({ ...acc1, use: { ...acc1.use, who: acc1.use.who.map((w) => ({ kind: w.kind, id: w.id })) } }) : '';
+    ok(wp[0].only === true && wp[1].only === false && !('only' in wp[2]) && !('only' in wp[3]) && pv.ok && rows1.length && rows1[0].to[0].only === true && stampOn !== stampOff, 'exit (the cure (C)): the dialog\'s «仅本组» (true / switched off false) rides whoPrincipal → the stored row; the list\'s stamp sees a flip', { wp, pv: pv.ok, to: rows1[0] && rows1[0].to, same: stampOn === stampOff });
+    // window: ONE verb switches the shared group's entry; on narrows, off widens; not a group / not shared refuses by name
+    const rec0 = WRR.recordOfRows('w1', 'reach', [{ door: 'window', resource: 'w1', to: [P], except: [] }]);
+    const on = WRR.setOnly(rec0, { kind: 'group', id: 'tg-p' }, true), off = WRR.setOnly(on.record, { kind: 'group', id: 'tg-p' }, false);
+    const kidW = { sessionKeys: ['claude:k1'], conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: ['tg-p'] };
+    ok(on.ok && on.changed && WRR.reachFor(on.record, kidW).level === 'hidden' && off.ok && off.changed && WRR.reachFor(off.record, kidW).level === 'exposed' && !WRR.setOnly(rec0, { kind: 'group', id: 'tg-z' }, true).ok && !WRR.setOnly(rec0, { kind: 'everyone', id: '*' }, true).ok && JSON.stringify(WRR.pickerModel({ record: on.record }).onlyKeys) === '["group:tg-p"]', 'window (the cure (C)): setOnly on narrows the shared group to itself (the child is hidden), off includes its child groups again; a group not shared / not a group refuses; the picker model answers the switch\'s stored state');
+    const exD = fs.readFileSync(path.join(REPO, 'src/lib/exit-access-dialog.js'), 'utf-8'), wsD = fs.readFileSync(path.join(REPO, 'src/lib/window-share.js'), 'utf-8'), wte = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8'), dar = fs.readFileSync(path.join(REPO, 'src/routes/desktop-apps.js'), 'utf-8');
+    ok(/only: \{ keys: pick\.only \|\| \[\] \} \}\);/.test(exD) && /\.\.\.\(on \? \{ only: true \} : s\.onlyWas\.includes\(k\) \? \{ only: false \} : \{\}\)/.test(exD) && /return w && w\.kind === 'group' \? \{ kind: 'group', id: w\.id \} : w;/.test(exD)
+      && /only: onOnly \? \{ keys: \(model\.onlyKeys \|\| \[\]\)\.slice\(\) \} : null,/.test(wsD) && /fetchJson\(`\$\{base\}\/only`, \{ method: 'PUT'/.test(wsD)
+      && /const to = widenGroup \? row\.to\.map\(\(e\) => \(e\.kind === 'group' && e\.id === widenGroup \? \{ \.\.\.e, only: false \} : e\)\) : row\.to;/.test(wte) && /putReach\(rec\.id, s\.record, 'user', \[\], on === true \? null : p\.id\);/.test(wte)
+      && /router\.put\('\/api\/desktop\/apps\/:id\/reach\/only'/.test(dar), 'the exit and window dialogs offer the switch and carry it: exit\'s Save (only:true / only:false, never on an exception), window\'s ONE verb (off said explicitly to the writer)');
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",

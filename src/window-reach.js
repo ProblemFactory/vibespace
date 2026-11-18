@@ -245,6 +245,19 @@ function setExcept(record, list) {
   return { ok: true, record: rec, changed };
 }
 /** Grant one principal. ONE row per principal: an existing row is kept as it is (widen-only; its origin stays). */
+/** the chain's cure (C, U5c): the «仅本组» switch of ONE shared Task Group — on narrows the entry to the group itself, off includes
+ *  its child groups again (rule ②). → `{ok, record, changed, row}` | a refusal (not a Task Group, or not in this share). */
+function setOnly(record, principal, on) {
+  const rec = normRecord(record);
+  const p = normPrincipal(principal);
+  if (!p || p.kind !== 'group') return { ...refuse('bad_principal', '«this group only» is a switch of a shared Task Group'), record: rec, changed: false };
+  const cur = rec.rows.find((r) => principalKey(r.principal) === principalKey(p));
+  if (!cur) return { ...refuse('bad_principal', 'that Task Group is not in this window\'s share — share it first'), record: rec, changed: false };
+  const was = cur.principal.only === true;
+  const { only: _was, ...bare } = cur.principal;
+  cur.principal = on ? { ...bare, only: true } : bare;
+  return { ok: true, record: rec, changed: was !== !!on, row: cur };
+}
 function grant(record, principal, { by = 'user', at = 0 } = {}) {
   const rec = normRecord(record);
   const p = normPrincipal(principal);
@@ -531,6 +544,7 @@ function pickerModel({ sessions = [], groups = [], record = null, principals = n
     out.groups.push({ id: String(g.id), name: cleanName(g.title || g.name) || String(g.id), checked: !!row, by: row ? row.by : null });
   }
   for (const [k, r] of chosen) if (!seen.has(k)) out.others.push({ principal: { ...r.principal }, by: r.by, checked: true });
+  out.onlyKeys = rec.rows.filter((r) => r.principal.kind === 'group' && r.principal.only === true).map((r) => `group:${r.principal.id}`);   // the chain's cure (C): the switch's stored state
   return out;
 }
 
@@ -645,7 +659,7 @@ module.exports = {
   unshownFrames, windowOfNode, // lane window-dialog-member
   LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, EXCEPTED_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey, sessionKeyNow,
-  emptyRecord, normRecord, recordOfRows, rowOfRecord, setExcept, grant, revoke, setMode, openerGrant, reachFor, lineageOfReach, isExposed,
+  emptyRecord, normRecord, recordOfRows, rowOfRecord, setExcept, setOnly, grant, revoke, setMode, openerGrant, reachFor, lineageOfReach, isExposed,
   usableNodes, resolveMode, REASON_MAX, verbGate, launchModeVerdict,
   pixelPlan, visibilityVerdict, mapPoint,
   requestText, viewOf, shareSummary, pickerModel, proposalOf, setProposal, launchShare, launchSummary, principalsNow, rememberedCount, normShare,

@@ -278,10 +278,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  the row), its mode into window-reach.json — then the broadcast. A refused grants write throws by name (nothing changed). */
   // lane held-except-doors: `named` = the exceptions this write takes away BY NAME (principal keys) — a principal shared with by
   // name (its grant lifts it), the person's own ✕ in the share's «除了» row; one left out unnamed ⇒ the ONE writer's except_unnamed
-  function putReach(h, record, by = 'user', named = []) {
+  function putReach(h, record, by = 'user', named = [], widenGroup = null) {
     const g = grantsOf();
     const row = R.rowOfRecord({ ...record, windowId: String(h) });
-    if (g) { const w = g.set('window', String(h), { to: row.to, except: row.except, removeExcept: named }, by); if (!w.ok) throw namedError(w.code, (w.error || w.code)); }
+    // the chain's cure (C): a Task Group switched OFF «仅本组» is said explicitly (only:false) — the ONE writer widens only then
+    const to = widenGroup ? row.to.map((e) => (e.kind === 'group' && e.id === widenGroup ? { ...e, only: false } : e)) : row.to;
+    if (g) { const w = g.set('window', String(h), { to, except: row.except, removeExcept: named }, by); if (!w.ok) throw namedError(w.code, (w.error || w.code)); }
     else if (row.to.length || row.except.length) throw namedError('not_written', 'the grants store is not available — the share was not saved');
     reach.set(String(h), { ...(reach.get(String(h)) || {}), windowId: String(h), mode: R.MODES.includes(record.mode) ? record.mode : 'auto' });
     commitReach();
@@ -1580,6 +1582,18 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     audit({ handle: rec.id, verb: 'reach-grant', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, grantOrigin: by, changed: g.changed }); // `origin` stays the WINDOW class (§6.6)
     return { ...reachOf(rec.id), granted: { principal: g.row.principal, by: g.row.by, changed: g.changed } };
   }
+  /** the chain's cure (C, U5c): the «仅本组» switch of a shared Task Group (the Share dialog's chip) — on narrows at once (a child
+   *  conversation's lease goes), off includes the child groups again. */
+  function setReachOnly(handle, principal, on) {
+    const rec = requireWindow(handle);
+    const p = resolvePrincipal(principal);
+    const s = R.setOnly(reachRecord(rec.id), p, on === true);
+    if (!s.ok) throw namedError(s.code, s.why);
+    putReach(rec.id, s.record, 'user', [], on === true ? null : p.id);
+    audit({ handle: rec.id, verb: 'reach-only', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, only: on === true, changed: s.changed });
+    if (on === true) dropUnreached(rec, 'shared with this Task Group only by the user');
+    return { ...reachOf(rec.id), only: { principal: { kind: 'group', id: p.id }, on: on === true, changed: s.changed } };
+  }
   function revokeReach(handle, principal) {
     const rec = requireWindow(handle);
     const p = resolvePrincipal(principal);
@@ -1666,7 +1680,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   return { factsForToken, mayUseFor, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
-    reachOf, reachViews, grantReach, revokeReach, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
+    reachOf, reachViews, grantReach, revokeReach, setReachOnly, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
     leases: () => allViews(), auditFile: path.join(dataDir, AUDIT_FILE), leaseFile, ORIGIN,
     // P10: the other class

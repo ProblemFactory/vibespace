@@ -1031,6 +1031,11 @@ router.put('/api/desktop/apps/:id/reach/except', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
   try { res.json(engine.setReachExcept(req.params.id, req.body && req.body.except, req.body && req.body.removeExcept)); } catch (e) { fail(res, e); }   // lane held-except-doors: + the ✕ named
 });
+// the chain's cure (C, U5c): the «仅本组» switch of one shared Task Group (the Share dialog's chip)
+router.put('/api/desktop/apps/:id/reach/only', (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  try { res.json(engine.setReachOnly(req.params.id, req.body && req.body.principal, !!(req.body && req.body.only === true))); } catch (e) { fail(res, e); }
+});
 router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
   try { res.json(engine.setShareMode(req.params.id, req.body && req.body.mode)); } catch (e) { fail(res, e); }
