@@ -9,6 +9,8 @@
 // Run: node scripts/test-desktop-record-pins.mjs
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);   // acorn (the capture census) and the PURE CJS record model
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const J = JSON.stringify;
@@ -261,6 +263,42 @@ console.log('— §7 the TEXT-ONLY controls of §5 / §6 (patched source strings
     const bad = census(sources({ 'src/lib/desktop-manager.js': mut })).filter((s) => !s.ok);
     ok(bad.length === 1 && bad[0].kind === 'windows-assign' && /st\.windows = st\.windows\.filter/.test(bad[0].line), 'control raw-writer: a new raw write of a held record is RED under §5, and only it', J(bad));
   }
+}
+
+/** Every key layout.js's capture writes into a record (acorn — comments / strings never count): captureWin's entry and
+ *  its assignments ('tabChain.<key>' for the chain's), captureChrome's and captureState's returned fields. */
+function captureKeys(text) {
+  const ast = require('acorn').parse(text, { ecmaVersion: 'latest', sourceType: 'module' });
+  const keys = new Set();
+  const propKeys = (o) => o.properties.filter((p) => p.type === 'Property' && !p.computed).map((p) => (p.key.type === 'Identifier' ? p.key.name : String(p.key.value)));
+  const pathOf = (m) => { const st = []; while (m.type === 'MemberExpression' && !m.computed) { st.unshift(m.property.name); m = m.object; } return m.type === 'Identifier' ? [m.name, ...st] : null; };
+  const visit = (node, meth) => {
+    if (!node || typeof node.type !== 'string') return;
+    if (node.type === 'MethodDefinition' && node.key) meth = node.key.name;
+    if (meth === 'captureWin' && node.type === 'VariableDeclarator' && node.id.name === 'winState' && node.init && node.init.type === 'ObjectExpression') propKeys(node.init).forEach((k) => keys.add(k));
+    if (meth === 'captureWin' && node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression') {
+      const p = pathOf(node.left);
+      if (p && p[0] === 'winState' && p.length > 1) { const f = p.slice(1).join('.'); keys.add(f); if (p.length === 2 && node.right.type === 'ObjectExpression') propKeys(node.right).forEach((k) => keys.add(f + '.' + k)); }
+    }
+    if ((meth === 'captureChrome' || meth === 'captureState') && node.type === 'ReturnStatement' && node.argument && node.argument.type === 'ObjectExpression') propKeys(node.argument).forEach((k) => keys.add(k));
+    for (const k of Object.keys(node)) { const c = node[k]; if (Array.isArray(c)) c.forEach((x) => visit(x, meth)); else if (c && typeof c.type === 'string') visit(c, meth); }
+  };
+  visit(ast, null);
+  return [...keys];
+}
+
+console.log('— §8 THE CAPTURE CENSUS over src/lib/layout.js (COPIED VERBATIM from the heavy scripts/test-desktop-record.mjs layerLegs — lane gmail-connect-wall,\n'
+  + '  B-94d3 remainder: the heavy keeps its copy, which its LAYER LAW controls re-run on patched models; this copy runs over the real model in every lane\'s gate)');
+{
+  const { layerOf } = require(path.join(REPO, 'src/lib/desktop-record.js'));
+  const leg = ok;
+  const LT = read('src/lib/layout.js');
+  const cap = captureKeys(LT);
+  const capBad = cap.filter((k) => layerOf(k) == null);
+  leg(cap.length >= 35 && !capBad.length, `§8 THE CAPTURE CENSUS (acorn over layout.js captureWin / captureChrome / captureState): every key a page writes into a record (${cap.length}) has a layer`, J({ capBad, cap }));
+  const SNAP = '      if (win._isSnapped) { winState.isSnapped = true;';
+  leg(LT.includes(SNAP) && J(captureKeys(LT.replace(SNAP, '      winState.dockSide = win._dock;\n' + SNAP)).filter((k) => layerOf(k) == null)) === J(['dockSide']), '§8 RED control: a capture writing a field no layer names (winState.dockSide) is RED, by name');
+  leg(!captureKeys(LT.replace('  captureWin(win, id = win?.id) {', "  // winState.dockSide = win._dock; 'winState.sidebarWidth = 1'\n  captureWin(win, id = win?.id) {")).filter((k) => layerOf(k) == null).length, '§8 control: the same assignment in a comment and a string captures nothing (acorn reads code only)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
