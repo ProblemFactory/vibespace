@@ -41,7 +41,7 @@ const PIN_RUNGS = Object.freeze(['D', 'C']);
 const MANAGED_RUNGS = Object.freeze(['D', 'C', 'N']);
 /** How long a "its profile was deleted — pin cleared" notice rides the fact (then the fact is just "no pin"). */
 const PIN_CLEARED_MS = 24 * 3600 * 1000;
-const KEPT_KINDS = Object.freeze(['full', 'fenced', 'tabs-only']); // mirrored from src/browser-kept.js keptKindOf (this module imports nothing)
+const KEPT_KINDS = Object.freeze(['full', 'fenced', 'tabs-only', 'checking']); // mirrored from src/browser-kept.js keptKindOf (this module imports nothing)
 const DIFFERS = Object.freeze(['pin_gone', 'pin_cleared', 'pin_failed', 'pin_pending', 'agent_elsewhere', 'other_attached', 'pin_unsupported']);
 const USING_STATES = Object.freeze(['running', 'starting', 'stopped', 'failed', 'not-started']);
 
@@ -278,6 +278,7 @@ function keptLineWords(fact, tIn) {
   const k = fact && fact.own && fact.own.kept;
   if (!k) return '';
   const n = k.tabs || 0;
+  if (k.kind === 'checking') return t('checking…'); // B-7a30: its folder not checked since the hub started — the check's landing redraws it
   if (k.kind === 'fenced') return t('Stopped — its {n} tab(s) are kept (not its logins: this browser is fenced to allowed domains). Resume reopens them', { n });
   if (k.kind === 'tabs-only') return t('Stopped — its {n} tab(s) are kept (not its logins). Resume reopens them', { n });
   if (!n) return t('Stopped — its logins are kept. Resume starts it again; the agent’s next command also does');

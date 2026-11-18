@@ -245,7 +245,7 @@ const ROWS = [
   ["src/server/browser-keeper.js", "create > pairsHoldDialogs", 1, "local-only", "AGENT_BROWSER_CONFIG of the hub-made spawn pairs = <dataDir>/browser-env/<key>.json"],
   ["src/server/browser-keeper.js", "create > pairsAutomationFlag", 1, "local-only", "AGENT_BROWSER_CONFIG of the hub-made spawn pairs = <dataDir>/browser-env/<key>.json"],
   ["src/server/browser-keeper.js", "create > holdsDialogsFor", 1, "local-only", "AGENT_BROWSER_CONFIG of an ephemeral record's hub-made pairs = <dataDir>/browser-env/<key>.json"],
-  ["src/server/browser-kept.js", "*", 5, "local-only", "<dataDir>/browser-kept.json (+ .corrupt aside) and <dataDir>/browser-profiles/<key> (dirOf)"],
+  ["src/server/browser-kept.js", "*", 4, "local-only", "<dataDir>/browser-kept.json (+ .corrupt aside); B-7a30: the browser-profiles/<key> presence is a kept bit checked off the loop (fs.promises.stat) — no read stats"],
   ["src/server/browser-logins.js", "create > loadRemindedDigests", 1, "local-only", "lane vault-login: <dataDir>/browser-login-reminders.json (mounts-plugins-wiring vault.dataDir; DEK-keyed 7-day pending reminder marks outside vault.json)"],
   ["src/server/browser-logins.js", "create > saveRemindedDigests", 1, "local-only", "lane vault-login: mkdirSync(path.dirname(remindFile)) before writeJsonAtomic(<dataDir>/browser-login-reminders.json, 0600)"],
   ["src/server/browser-trace.js", "*", 33, "local-only", "traceRoot/recRoot/forgotten ledger under <checkout>/data (mounts-plugins-wiring rootDir); scope = bp-hex|ephemeral; profile dirs + orphans = top-level dirs under ~/.agent-browser"],

@@ -145,8 +145,9 @@ function mergeTabs(relayTabs, cdpTargets) {
   return rows;
 }
 
-/** 'full' (logins + tabs) · 'fenced' (tabs only: a fence refuses a profile) · 'tabs-only' (rung N / the setting was off). */
-function keptKindOf(entry) { return entry && entry.hasDir ? 'full' : (entry && entry.fenced ? 'fenced' : 'tabs-only'); }
+/** 'full' (logins + tabs) · 'fenced' (tabs only: a fence refuses a profile) · 'tabs-only' (rung N / the setting was off) ·
+ *  'checking' (B-7a30: its folder not checked since the hub started — a view says «checking…», never «its logins»). */
+function keptKindOf(entry) { return entry && entry.checking ? 'checking' : (entry && entry.hasDir ? 'full' : (entry && entry.fenced ? 'fenced' : 'tabs-only')); }
 
 const num0 = (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; };
 const numOrNull = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : null; };

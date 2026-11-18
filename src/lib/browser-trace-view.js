@@ -1013,7 +1013,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
     stop.disabled = !e.live;
     // lane browser-resume (§3.9): what a stop keeps is said from the kept fact (its logins + tabs, tabs only, or nothing)
-    stop.title = !e.live ? t('Not running') : (e.kept && e.kept.kind === 'full' ? t('Stop this browser now — its logins and tabs are kept; the conversation\'s next command starts it again') : (e.kept ? t('Stop this browser now — its tabs are kept, a login in it is not; the conversation\'s next command starts it again') : t('Stop this browser now — the conversation\'s next command starts it again (a login in it is gone)')));
+    stop.title = !e.live ? t('Not running') : e.kept && e.kept.kind === 'checking' ? t('checking…') /* B-7a30: its folder not checked yet — never a claim either way */ : (e.kept && e.kept.kind === 'full' ? t('Stop this browser now — its logins and tabs are kept; the conversation\'s next command starts it again') : (e.kept ? t('Stop this browser now — its tabs are kept, a login in it is not; the conversation\'s next command starts it again') : t('Stop this browser now — the conversation\'s next command starts it again (a login in it is gone)')));
     stop.onclick = async () => { stop.disabled = true; const r = await act(`/api/browser/profiles/${encodeURIComponent(String(e.profileId || ''))}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (r) showToast(t('Stopped {label}', { label: String(e.label || '') }), { duration: 4000 }); load(); };
     row.appendChild(stop);
     return row;
@@ -1028,7 +1028,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     row.dataset.browserKey = String(k.browserKey || '');
     const ident = el('div', 'bprof-ident');
     ident.appendChild(el('span', 'bprof-label', String(k.label || k.browserKey || '')));
-    if (k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
+    if (k.kind === 'checking') ident.appendChild(el('span', 'bprof-chip', t('checking…'))); // B-7a30: its folder not checked since the hub started — redrawn when the check lands
+    else if (k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
     ident.title = String(k.browserKey || '');
     row.appendChild(ident);
     const tabs = Array.isArray(k.tabs) ? k.tabs : [];

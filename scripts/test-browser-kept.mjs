@@ -21,6 +21,8 @@
 //      while running, a registered profile's directory left in place), a corrupt store set aside, the sweep: ends by
 //      D1 (bound / carried / grace), trims a stopped directory's caches, removes the least recently used over the total,
 //      never a running one — and a 100-conversation leg on real scratch directories (a fake `du`) holding the bound.
+//      B-7a30: a kept folder's presence is a KEPT FACT — a second instance says «checking» until its first check lands; a folder
+//      removed out of band is seen at the act's door at once (and by the tick within its 10 s), never at a read.
 //   ⑤ the REAL keeper over a fake `agent-browser` (a daemon that is a real `sleep`) and a REAL browser-env: the record's
 //      directory is the kept one; the relay's tabs reach the store; a stop reads the tabs over CDP (injected) and writes
 //      the entry (why, restore); the daemon's idle-out; the agent's own `close` (its audit line); a detach; the fresh-key
@@ -39,7 +41,9 @@
 //      user's Resume (no verb stamps, a restore the agent's next command is told once); a failing tab named, the rest go
 //      on; the refusals (a helper, nothing kept, a directory adopted into a profile); the hand-back: a takeover ends with
 //      cause `continue`, the announcer files ONE stash entry + ONE card and NEVER delivers (no turn, no notice), a hostile
-//      note is inert in the frame, a failed stash puts the note on the next command instead.
+//      note is inert in the frame, a failed stash puts the note on the next command instead. B-7a30: a stall PLACED in the
+//      store's folder check — the agent's reopen of its waiting tabs and the user's Resume are refused `kept_unconfirmed` past
+//      the acts' bound, nothing run.
 //   ⑩ the routes in-process: the session Resume (agent token 403, `restored`), the panel's key Resume (the live session
 //      resolved server-side; none ⇒ no_live_session), the hand-back route, the resolve answer's `restored` / `kept` /
 //      `resumed`, the agent's `resume` (a helper / a named profile refused by name).
@@ -343,7 +347,12 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   ok(e && e.stoppedWhy === 'turn-idle' && e.restore && e.restore.mode === 'auto' && /^bres-[0-9a-f]{8}$/.test(e.restore.id) && e.tabs[1].active && (st.mode & 0o777) === 0o600 && disk.entries[KEY_A].conversationId === 'conv-' + KEY_A && !JSON.stringify(disk).includes('"dir"'), 'a turn-idle stop: the tabs kept (current one marked), restore AUTO (D2), the file 0600, the conversation named, no directory written', { e, mode: (st.mode & 0o777).toString(8) });
   ok(!CR.carriesFrame(JSON.stringify(disk)) && !/‮/.test(JSON.stringify(disk)), 'no live frame / bidi override ever reaches the file (a page chose that title)');
   const s2 = mk();
-  ok(s2.get(KEY_A) && s2.get(KEY_A).tabs.length === 2 && s2.get(KEY_A).dir === dirA && s2.get(KEY_A).kind === 'full', 'a second instance (a restart) reads the same entry back — its directory derived again');
+  // B-7a30 (主开发's law 2): a VIEW never shows «present» for a folder not checked since the boot — it says «checking…» until the
+  // first check lands (the tick's first pass; the boot runs it at once)
+  const g2 = s2.get(KEY_A), b2 = s2.brief(KEY_A), l2 = s2.list().find((x) => x.browserKey === KEY_A);
+  ok(g2 && g2.kind === 'checking' && g2.dir === null && b2.kind === 'checking' && l2 && l2.kind === 'checking' && l2.hasDir === null, 'B-7a30: a second instance (a restart) has not checked the folder yet — get / brief / list say «checking» (no directory, hasDir unknown), never «its logins»', { g2, b2, l2 });
+  await s2.recheckAll();
+  ok(s2.get(KEY_A) && s2.get(KEY_A).tabs.length === 2 && s2.get(KEY_A).dir === dirA && s2.get(KEY_A).kind === 'full', 'a second instance (a restart) reads the same entry back — its directory derived again (once its first check landed)');
   // a user stop: kept, not reopened
   s1.noteStart(KEY_A, { hasDir: true, label: 'Research', sessionId: 'sess-1' });
   s1.noteTabs(KEY_A, [{ url: 'https://a.test/', active: true }]);
@@ -496,18 +505,22 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   s7.shutdown();
   const after = JSON.parse(fs.readFileSync(s7.file, 'utf8')).entries[KEY_B].tabs.length;
   ok(before === 0 && after === 1, 'a running browser\'s tab list is written at most every 30 s — and flushed at shutdown (the crash path this exists for)', { before, after });
-  // verify r2 (Y1c): the directory gone out of band ⇒ every read says tabs only (never "its logins are kept" over nothing), once in the journal
+  // verify r2 (Y1c), MOVED TO THE LAW by B-7a30 (主开发's ruling: a VIEW reads what the last check found, an ACT awaits a fresh check
+  // through one door): the directory gone out of band ⇒ the views say tabs only once a check has seen it — at the act's door at
+  // once, or the tick's next check (THERE_FRESH_MS, 10 s) — never "its logins are kept" over nothing past that; once in the journal
   const s8 = mk();
   const KG = 'bk-0000c0de';
   fs.mkdirSync(path.join(s8.dirOf(KG), 'Default'), { recursive: true }); fs.writeFileSync(path.join(s8.dirOf(KG), 'Default', 'Cookies'), 'login');
   s8.noteStop(KG, { why: 'turn-idle', hasDir: true, tabs: [{ url: 'https://gone.test/' }] });
   const gFull = s8.get(KG).kind;
   fs.rmSync(s8.dirOf(KG), { recursive: true, force: true });
+  const gWithin = s8.get(KG).kind; // within its bound: the bit the stop set (no read touches the disk)
   const n8 = lines.length;
+  const gDoor = await s8.checkThere(KG); // THE ACT'S DOOR: a fresh check
   const gGet = s8.get(KG), gBrief = s8.brief(KG), gList = s8.list().find((x) => x.browserKey === KG);
   s8.get(KG); s8.brief(KG);
   const said = lines.slice(n8).filter((l) => l.includes(KG) && /is gone — read as tabs only/.test(l)).length;
-  ok(gFull === 'full' && gGet.kind === 'tabs-only' && gGet.hasDir === false && gGet.dir === null && gBrief.kind === 'tabs-only' && gList.kind === 'tabs-only' && gList.hasDir === false && said === 1 && JSON.parse(fs.readFileSync(s8.file, 'utf8')).entries[KG].hasDir === true, 'the kept directory removed out of band: get / brief / list answer TABS ONLY (the words say "not its logins"), said once in the journal — the file untouched (its next start makes a fresh directory)', { gFull, get: gGet.kind, brief: gBrief.kind, list: gList.kind, said });
+  ok(gFull === 'full' && gWithin === 'full' && gDoor === false && gGet.kind === 'tabs-only' && gGet.hasDir === false && gGet.dir === null && gBrief.kind === 'tabs-only' && gList.kind === 'tabs-only' && gList.hasDir === false && said === 1 && JSON.parse(fs.readFileSync(s8.file, 'utf8')).entries[KG].hasDir === true, 'the kept directory removed out of band: get / brief / list answer TABS ONLY (the words say "not its logins"), said once in the journal — the file untouched (its next start makes a fresh directory)', { gFull, get: gGet.kind, brief: gBrief.kind, list: gList.kind, said });
   ok(KB.resumeVerdict({ entry: s8.get(KG) }).ok && KB.resumeVerdict({ entry: { ...s8.get(KG), tabs: [] } }).code === 'not_kept', '…a Resume over it reopens the tabs as tabs-only; with no tabs it is not_kept by name — never "resumed" over nothing');
 }
 
@@ -726,6 +739,8 @@ const K2 = path.join(ROOT, 'k2-data'); fs.mkdirSync(K2, { recursive: true });
 const HB = require('../src/server/browser-handback.js');
 const Sx = require('../src/browser-stream.js');
 let keeperB = null, keptB = null, beB = null, envR = null;
+let stallB = false; const stalledB = []; const STALL_ACT_MS = 300; // B-7a30: the acts' bound in this world (5 s in the product)
+const releaseStalls = () => { stallB = false; for (const f of stalledB.splice(0)) f(); };
 const nsR = 'vs-' + KR;
 const liveB = new Set([KR, KS2]);
 const stashed = [], cards = [], notices = [];
@@ -742,7 +757,9 @@ let announcer = null;
   const rtEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_FAIL_URL: 'fail.invalid' };
   // the CDP read the stop / the hand-back make: the fake browser's own tabs (its state file), by the ns its cdp url names
   const readTargetsB = async (url) => { const m = /fake-(vs-[^/]+)$/.exec(String(url)); const tabs = m ? fakeTabs(m[1]) : []; return tabs.length ? { ok: true, targets: tabs.map((t) => ({ targetId: t.targetId, type: 'page', url: t.url, title: 'T ' + t.url })) } : { ok: false, error: 'no tabs' }; };
-  keptB = KS.create({ dataDir: K2, keeper: () => keeperB, liveKeys: () => liveB, serverSetting: (k) => settings[k], log: quiet, sweepEveryMs: 0 });
+  // B-7a30: a stall PLACED in the store's folder check (never load): while `stallB` is on, a check waits until released
+  keptB = KS.create({ dataDir: K2, keeper: () => keeperB, liveKeys: () => liveB, serverSetting: (k) => settings[k], log: quiet, sweepEveryMs: 0, thereActMs: STALL_ACT_MS,
+    checkDir: (p) => (stallB ? new Promise((r) => { stalledB.push(() => r(fs.existsSync(p))); }) : fs.promises.stat(p).then((st) => st.isDirectory(), () => false)) });
   keeperB = K.create({ dataDir: K2, homeDir: HOME, env: () => rtEnv, serverSetting: (k) => settings[k], liveKeys: () => liveB, runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }),
     limits: { ...LIMITS, CONCURRENT_CAP: 6 }, log: quiet, tickMs: 3600e3, install: false, kept: keptB, readTargets: readTargetsB });
   keepers.push(keeperB);
@@ -778,6 +795,15 @@ let announcer = null;
   const r2 = await ensure();
   ok(r2.kept && r2.kept.kind === 'kept' && r2.kept.tabs === 3 && after(n0).join('|') === 'open about:blank', 'a DELIBERATE stop (the user\'s): the next start reopens NOTHING by itself and is told `kept` (3 tabs)', { kept: r2.kept, seq: after(n0) });
   ok(keptB.get(KR).waiting && keptB.get(KR).waiting.tabs.length === 3 && keptB.get(KR).tabs.length === 0, '…its tabs WAIT (the fresh browser\'s about:blank never overwrote them)', keptB.get(KR));
+  // B-7a30 (主开发's law 1): THE ACT'S DOOR IS BOUNDED AND NEVER ANSWERS WHAT IT DID NOT CHECK — a stall PLACED in the folder check:
+  // the agent's reopen of its waiting tabs is refused by name past the bound (kept_unconfirmed), nothing reopened, the tabs still wait
+  {
+    stallB = true; const t0 = Date.now(); const tabs0 = fakeTabs(nsR).length; const c0 = cmds(nsR).length;
+    const su = await threw(() => keeperB.resumeFor({ browserKey: KR, sessionId: 'sess-r', envPairs: envR.pairs, sessionName: 'Resume', variant: envR.variant, by: 'agent' }));
+    const took = Date.now() - t0;
+    releaseStalls(); await keptB.recheckAll();
+    ok(su && su.code === 'kept_unconfirmed' && took >= STALL_ACT_MS - 30 && fakeTabs(nsR).length === tabs0 && cmds(nsR).length === c0 && keptB.get(KR).waiting && keptB.get(KR).waiting.tabs.length === 3, `B-7a30: a stall placed in the folder check — the agent's reopen of its waiting tabs is refused by name past the bound (${took} ms, bound ${STALL_ACT_MS} ms), no command ran, the three tabs still wait`, { code: su && su.code, took, tabs: fakeTabs(nsR).length });
+  }
   // the agent's `resume` on the RUNNING browser: the waiting tabs as NEW tabs
   n0 = cmds(nsR).length;
   // two `resume`s at once: ONE reopens the waiting tabs, the other is refused by name (never the tabs twice)
@@ -797,6 +823,15 @@ let announcer = null;
   await keeperB.stop(pidR(), { why: 'user' });
   const verbAt0 = keeperB.profile(pidR()).lastVerbAt;
   n0 = cmds(nsR).length;
+  // B-7a30 (law 1): the USER's Resume of a stopped browser over a stalled folder check — refused by name past the bound, never
+  // «resumed»: nothing starts (no command, the browser still stopped)
+  {
+    stallB = true; const t0 = Date.now();
+    const su = await threw(() => keeperB.resumeFor({ browserKey: KR, sessionId: 'sess-r', envPairs: envR.pairs, sessionName: 'Resume', variant: envR.variant, by: 'user' }));
+    const took = Date.now() - t0;
+    releaseStalls(); await keptB.recheckAll();
+    ok(su && su.code === 'kept_unconfirmed' && /did not answer within/.test(su.message) && took >= STALL_ACT_MS - 30 && cmds(nsR).length === n0 && !keeperB.ephemeralFor(KR).live, `B-7a30: the user's Resume over a stalled folder check is refused by name past the bound (${took} ms) — nothing started, never «resumed» over a folder nobody confirmed`, { code: su && su.code, took, live: keeperB.ephemeralFor(KR).live });
+  }
   const r4 = await keeperB.resumeFor({ browserKey: KR, sessionId: 'sess-r', envPairs: envR.pairs, sessionName: 'Resume', variant: envR.variant, by: 'user' });
   ok(!r4.already && r4.kept && r4.kept.kind === 'restored' && r4.kept.skipped.length === 1 && /fail\.invalid/.test(r4.kept.skipped[0].url) && /ERR_NAME_NOT_RESOLVED/.test(r4.kept.skipped[0].why) && r4.kept.opened === keptB.get(KR).restore.tabs.length, 'the USER\'s Resume of a stopped browser: started, its tabs reopened — the one that failed NAMED (its url + the browser\'s reason), the others opened', r4.kept);
   ok(keeperB.profile(pidR()).lastVerbAt === verbAt0, '…a Resume is NOT a command: no verb stamp (the fact never says the agent used its browser now)');
@@ -1153,13 +1188,14 @@ console.log('— ⑬ verify r2: each fix\'s leg catches its broken copy');
   an3.shutdown();
   // (b) the store reading `hasDir` off the file alone: a gone directory still reads "its logins are kept"
   const ksSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-kept.js'), 'utf8');
-  const judge = '    if (!e || !e.hasDir) return e;\n    if (dirThere(e.browserKey))';
-  ok(ksSrc.includes(judge), 'control setup: the store\'s on-disk judgement is where the control cuts');
-  const KSm = M.load('src/server/browser-kept.js', ksSrc.replace(judge, '    return e;\n    if (dirThere(e.browserKey))'), 'fileonly');
+  const judge = '    if (!e || !e.hasDir) return e;\n    const v = presenceFor(e.browserKey);';
+  ok(ksSrc.includes(judge), 'control setup: the store\'s judgement of its kept folder is where the control cuts');
+  const KSm = M.load('src/server/browser-kept.js', ksSrc.replace(judge, '    return e;\n    const v = presenceFor(e.browserKey);'), 'fileonly');
   const D13 = path.join(ROOT, 'k13-data'); fs.mkdirSync(D13, { recursive: true });
   const s13 = KSm.create({ dataDir: D13, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(), log: quiet, sweepEveryMs: 0 });
   fs.mkdirSync(s13.dirOf(KEY_C), { recursive: true }); s13.noteStop(KEY_C, { why: 'turn-idle', hasDir: true, tabs: [{ url: 'https://x.test/' }] }); fs.rmSync(s13.dirOf(KEY_C), { recursive: true, force: true });
-  ok(s13.get(KEY_C).kind === 'full', 'CONTROL: a store that reads hasDir off the file alone says "its logins are kept" over a gone directory — the ④ leg catches it', s13.get(KEY_C).kind);
+  await s13.checkThere(KEY_C); // even after the act's fresh check (B-7a30)
+  ok(s13.get(KEY_C).kind === 'full', 'CONTROL: a store that reads hasDir off the file alone says "its logins are kept" over a gone directory, even after the act\'s fresh check — the ④ leg catches it', s13.get(KEY_C).kind);
   // (c) verify r2 (Y1e): a paired machine's profile whose directory TEXT equals a local directory never answers for a local adopt
   {
     const R = require('../src/routes/browser.js');

@@ -277,6 +277,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   not_your_tab: 403, stop_failed: 502, close_failed: 502, no_loop: 409, tab_answers: 409, close_pending: 409 /* lane browser-shared-profile-freeze */, no_picture: 409, host_not_current: 409, 'bad-host': 400, shared_profile: 409, clear_failed: 502,
   // lane browser-resume (§3.9): a Forget of nothing kept / of a browser that runs / that could not remove its directory
   not_kept: 404, kept_live: 409, forget_failed: 500,
+  kept_unconfirmed: 503, // B-7a30 r2: an act's fresh check of its kept folder got no answer within its bound (nothing was done)
   // lane browser-resume B (ruling 2): a Resume's refusals (a helper's browser is never kept; its directory became a named
   // profile; the conversation is not running) and the hand-back's (a browser this conversation does not hold; the stash)
   child_not_kept: 409, resume_adopted: 409, no_live_session: 409, not_yours: 403, stash_refused: 503,

@@ -27,6 +27,9 @@ const K = require('../browser-kept.js');
 
 const FILE_MODE = 0o600;
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
+const THERE_FRESH_MS = 10 * 1000; // B-7a30: a kept folder's presence bit is checked again (off the loop) when a read finds it this old
+const THERE_ACT_MS = 5 * 1000; // B-7a30 r2: an act's fresh check waits at most this long — past it the act is refused by name
+const UNANSWERED = Symbol('unanswered');
 const PERSIST_TABS_MS = 30 * 1000;
 const DU_TIMEOUT_MS = 120 * 1000;
 const BROADCAST_DEBOUNCE_MS = 250;
@@ -51,6 +54,8 @@ function writeJsonAtomic(file, obj) {
  */
 function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings = null, serverSetting = () => undefined, broadcast = null, log = console, now = Date.now,
   execFileImpl = execFile, sweepEveryMs = SWEEP_EVERY_MS, endsAtTerminate = false, graceMs = K.KEPT_END_GRACE_MS,
+  // B-7a30: the folder check (injectable: the gate PLACES a stall in it) and the acts' bound / the tick's period
+  checkDir = null, thereActMs = THERE_ACT_MS, thereEveryMs = THERE_FRESH_MS,
   // lane B: the browser FACT carries what is kept (the live view's Resume) — a change here re-computes the facts (debounced)
   onChange = null } = {}) {
   if (!dataDir) throw new Error('browser-kept: dataDir is required');
@@ -67,7 +72,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   let store = null;                // the judged store (lazily loaded)
   const latest = new Map();        // bk → { tabs: [{targetId, url, title, active, type}], at, source } — the live list
   const deliberate = new Map();    // bk → { why: 'user'|'agent', at } — a stop the user / the agent asked for
-  let flushTimer = null, bcTimer = null, sweepTimer = null, sweeping = null, lastSweep = null;
+  let flushTimer = null, bcTimer = null, sweepTimer = null, sweeping = null, lastSweep = null, thereTimer = null;
 
   function load() {
     if (store) return store;
@@ -126,6 +131,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     const s = load();
     const prev = s.entries[bk] || null;
     const t = now();
+    if (hasDir) setThere(bk, true); // B-7a30: the keeper starts it ON its folder — the kept bit is that fact
     // lane B (D2): the STOPPED browser's kept tabs are moved aside as `waiting` — the live list starts empty (a fresh
     // browser's about:blank must never overwrite them); a reopen consumes them (`afterReopen`), `vibespace-browser
     // resume` / the user's Resume reopen them later, the next stop keeps them when the run opened nothing
@@ -187,6 +193,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     // lane B: a run that opened no web page keeps the tabs still WAITING from the stop before it (nothing is lost to an empty start)
     if (!kept.length && prev && prev.stoppedAt == null && prev.waiting && prev.waiting.tabs.length) kept = prev.waiting.tabs.map((x) => ({ ...x }));
     const dirKept = hasDir !== undefined ? !!hasDir : !!(prev && prev.hasDir);
+    if (dirKept) setThere(bk, true); // B-7a30: it ran on its folder until now — the kept bit is that fact
     if (!prev && !dirKept && !kept.length) { latest.delete(bk); return null; }
     const auto = K.restoreKindFor(w) === 'auto' && kept.length > 0;
     // lane B: a restore the USER wrote (a Resume, "Hand back and continue") is STICKY until the agent's next command is told
@@ -205,18 +212,95 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // ── reads ──
   const has = (bk) => !!load().entries[String(bk || '')];
   const keys = () => new Set(Object.keys(load().entries));
-  /** verify r2 (Y1c): the directory's EXISTENCE is read off the disk at every read — an entry that says `hasDir` over a
-   *  directory that is gone (removed out of band) answers tabs-only (its words: "not its logins"), so no surface says
-   *  "its logins are kept" over nothing and a Resume never answers "resumed" as if they were. Said once per key. */
+  /** verify r2 (Y1c): an entry that says `hasDir` over a directory that is gone (removed out of band) answers tabs-only (its
+   *  words: "not its logins"), so no surface says "its logins are kept" over nothing and a Resume never answers "resumed" as if
+   *  they were. Said once per key.
+   *  B-7a30 (the owner's hub witness: 17.2 s held in 13 holds — a statSync per ephemeral profile on every active-sessions
+   *  broadcast): the directory's PRESENCE is a KEPT FACT, no longer read off the disk at every read (Y1c's «every read» is reversed,
+   *  its bound said). The store's own acts set it (noteStart / noteStop — the keeper hands the fact); the tick checks every kept
+   *  folder again OFF the loop each THERE_FRESH_MS (10 s). A VIEW reads what the last check found — «checking…» for one never
+   *  checked since the boot — and a check that moves it notifies once; an ACT (Resume, the waiting tabs' reopen, forget) asks the
+   *  folder fresh through checkThere, bounded at THERE_ACT_MS (5 s), and is refused by name past it. A read never touches the disk. */
   const saidGone = new Set();
-  const dirThere = (bk) => { try { return fs.statSync(dirOf(bk)).isDirectory(); } catch { return false; } };
+  const there = new Map(); // bk → {ok, at, seq} — the kept bit; pruned with its entry (removeEntry / adopted)
+  const checking = new Map(); // bk → the check in flight {p, since, seq} (the newest; an act's fresh check replaces the tick's)
+  const told = new Map(); // bk → the answer the last read gave (true / false / null = checking): a check notifies only when it moves it
+  let checkSeq = 0;
+  const statDir = typeof checkDir === 'function' ? checkDir : (p) => fs.promises.stat(p).then((st) => st.isDirectory(), () => false);
+  const setThere = (bk, ok) => { there.set(String(bk), { ok: !!ok, at: now(), seq: ++checkSeq }); };
+  // a check's age is REAL time (a hang is a wall-clock fact; the store's own `now` may be a gate's stepped clock)
+  const hung = (c) => !!c && (c.hung || Date.now() - c.since >= thereActMs); // `hung`: an act already waited it out
+  const hungCheck = () => { for (const c of checking.values()) if (hung(c)) return c; return null; };
+  /** ONE check of a key's folder, off the loop. A newer answer is never overwritten by an older check that lands after it. → the
+   *  check's record ({p: the promise of the presence}). */
+  function startCheck(k) {
+    const rec = { p: null, since: Date.now(), seq: ++checkSeq };
+    rec.p = Promise.resolve().then(() => statDir(dirOf(k))).then((ok) => !!ok, () => false).then((ok) => {
+      if (checking.get(k) === rec) checking.delete(k);
+      if (!load().entries[k]) return ok; // forgotten / adopted meanwhile: never re-added
+      const t = there.get(k);
+      if (!t || t.seq < rec.seq) there.set(k, { ok, at: now(), seq: rec.seq });
+      const v = there.get(k).ok;
+      if (told.has(k) && told.get(k) !== v) { told.set(k, v); changed(); } // it moved what a view drew: said once (debounced)
+      return ok;
+    }).catch((e) => { if (checking.get(k) === rec) checking.delete(k); log.warn?.(`[browser-kept] ${k}: its folder check failed: ${e && e.message}`); return false; });
+    checking.set(k, rec);
+    return rec;
+  }
+  /** THE TICK (B-7a30): every kept folder checked again OFF the loop, ONE at a time (a hung mount holds one thread, never the pool);
+   *  a tick still waiting on a check starts no other. → the promise of the pass (the boot's first pass; the gate awaits it). */
+  let thereTick = null;
+  function recheckAll() {
+    if (thereTick) return thereTick;
+    thereTick = (async () => {
+      for (const k of Object.keys(load().entries)) {
+        const e = load().entries[k];
+        if (!e || !e.hasDir) continue;
+        const c = checking.get(k);
+        await (c ? c.p : startCheck(k).p); // a check already in flight is the pass's own (never a second stat of one folder)
+      }
+    })().finally(() => { thereTick = null; });
+    return thereTick;
+  }
+  /** WHAT A VIEW READS for a key's folder (B-7a30, 主开发's ruling: a VIEW reads what the last check found): true / false, or null =
+   *  STILL CHECKING — never checked since the boot, a check of it unanswered past THERE_ACT_MS, or the disk not answering (a check
+   *  hangs) while its bit is past THERE_FRESH_MS: a hung mount is never read as «present». A read never touches the disk; a read of
+   *  a key never checked (or past its bound) starts ONE check off the loop — none while a check hangs (no stack of stuck threads) —
+   *  and the tick checks every kept folder each THERE_FRESH_MS. */
+  function presenceFor(bk) {
+    const k = String(bk); const t = there.get(k);
+    const old = !t || now() - t.at >= THERE_FRESH_MS;
+    const stuck = hungCheck();
+    if (old && !checking.has(k) && !stuck) startCheck(k);
+    const v = !t || hung(checking.get(k)) || (stuck && old) ? null : t.ok;
+    told.set(k, v);
+    return v;
+  }
+  /** THE ACTS' DOOR (B-7a30 r2): a Resume, the reopen of waiting tabs, a forget ask the folder FRESH — a new check, never one already
+   *  in flight that may predate a removal — and wait at most THERE_ACT_MS (5 s). Past the bound, or while a folder check already
+   *  hangs past it (no second one is stacked on a hung disk), the act is REFUSED by name `kept_unconfirmed`: never «resumed» over a
+   *  folder nobody confirmed. → the presence (true / false). */
+  async function checkThere(bk) {
+    const k = String(bk || '');
+    if (!k || !load().entries[k]) return false;
+    const unconfirmed = () => { log.warn?.(`[browser-kept] ${k}: its kept folder did not answer within ${thereActMs} ms — the act is refused (kept_unconfirmed)`); return namedError('kept_unconfirmed', `its kept folder did not answer within ${thereActMs >= 1000 ? Math.round(thereActMs / 1000) + ' s' : thereActMs + ' ms'} — nothing was done; try again in a moment`); };
+    if (hungCheck()) throw unconfirmed();
+    let timer = null;
+    const rec = startCheck(k);
+    const r = await Promise.race([rec.p, new Promise((res) => { timer = setTimeout(() => res(UNANSWERED), thereActMs); if (timer.unref) timer.unref(); })]);
+    clearTimeout(timer);
+    if (r === UNANSWERED) { rec.hung = true; throw unconfirmed(); }
+    return r;
+  }
   function judged(e) {
     if (!e || !e.hasDir) return e;
-    if (dirThere(e.browserKey)) { saidGone.delete(e.browserKey); return e; }
+    const v = presenceFor(e.browserKey);
+    if (v === null) return { ...e, checking: true }; // B-7a30: never «its logins» over a folder not checked since the boot
+    if (v) { saidGone.delete(e.browserKey); return e; }
     if (!saidGone.has(e.browserKey)) { saidGone.add(e.browserKey); log.log?.(`[browser-kept] ${e.browserKey} "${e.label}": its entry says its logins are kept, but ${dirOf(e.browserKey)} is gone — read as tabs only (${e.tabs.length} tab(s)); its next start makes a fresh directory`); }
     return { ...e, hasDir: false };
   }
-  function get(bk) { const e = judged(load().entries[String(bk || '')]); return e ? { ...e, dir: e.hasDir ? dirOf(e.browserKey) : null, kind: K.keptKindOf(e) } : null; }
+  function get(bk) { const e = judged(load().entries[String(bk || '')]); return e ? { ...e, dir: e.hasDir && !e.checking ? dirOf(e.browserKey) : null, kind: K.keptKindOf(e) } : null; }
   /** The one-line fact a keeper row / the browser fact carries. */
   function brief(bk) { const e = judged(load().entries[String(bk || '')]); return e ? { tabs: e.tabs.length, kind: K.keptKindOf(e), fenced: e.fenced, stoppedAt: e.stoppedAt, stoppedWhy: e.stoppedWhy, restore: !!e.restore, restoreBy: e.restore ? e.restore.by : null, handedBack: !!(e.restore && e.restore.handedBack), waiting: e.waiting ? e.waiting.tabs.length : 0 } : null; }
   // ── lane B (§3.9, ruling 2): the restore record + the waiting tabs (the keeper's calls) ──
@@ -252,7 +336,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     const s = load();
     let carried = new Set(); try { const v = liveKeys(); carried = v instanceof Set ? v : new Set(v || []); } catch { carried = new Set(); }
     return Object.values(s.entries).sort((a, b) => b.lastUsedAt - a.lastUsedAt || (a.browserKey < b.browserKey ? -1 : 1)).map(judged).map((e) => ({
-      browserKey: e.browserKey, label: e.label, kind: K.keptKindOf(e), hasDir: e.hasDir, fenced: e.fenced, tabs: e.tabs.map((t) => ({ ...t })), tabsAt: e.tabsAt,
+      browserKey: e.browserKey, label: e.label, kind: K.keptKindOf(e), hasDir: e.checking ? null : e.hasDir, fenced: e.fenced, tabs: e.tabs.map((t) => ({ ...t })), tabsAt: e.tabsAt,
       startedAt: e.startedAt, stoppedAt: e.stoppedAt, stoppedWhy: e.stoppedWhy, restore: e.restore ? { mode: e.restore.mode, by: e.restore.by, at: e.restore.at } : null, waiting: e.waiting ? e.waiting.tabs.length : 0,
       lastUsedAt: e.lastUsedAt, bytes: e.bytes, cacheBytes: e.cacheBytes, bytesAt: e.bytesAt, trimmedAt: e.trimmedAt,
       live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId,
@@ -288,7 +372,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     }
     // re-read after the await: a start that began meanwhile keeps its entry (it will write it again at its stop)
     if (liveOf(bk)) { log.log?.(`[browser-kept] ${bk}: its browser started while it was being removed (${why}) — its entry is kept`); return { removed: false, why: 'its browser started meanwhile' }; }
-    delete s.entries[bk];
+    delete s.entries[bk]; there.delete(String(bk)); told.delete(String(bk)); // B-7a30 r2: the bit goes with its entry
     latest.delete(bk); deliberate.delete(bk);
     save(); changed();
     log.log?.(`[browser-kept] ${bk} "${e.label}": removed (${why})${dirGone ? ` — ${d} deleted` : ''}${dirKept ? ` — its directory: ${dirKept}` : ''}`);
@@ -299,6 +383,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     const key = String(bk || '');
     if (!K.isParentKey(key) || !load().entries[key]) throw namedError('not_kept', 'nothing is kept for that browser');
     if (liveOf(key)) throw namedError('kept_live', 'this browser is running — stop it first, then forget it');
+    await checkThere(key); // B-7a30 r2: the act's door — its folder asked fresh (5 s), refused by name past it, never a removal on an unanswered disk
     const r = await removeEntry(key, why);
     if (!r.removed) throw namedError(/runs|started/.test(r.why) ? 'kept_live' : 'forget_failed', `the browser was not forgotten: ${r.why}`);
     return { ok: true, browserKey: key, dirGone: !!r.dirGone, dirKept: r.dirKept || null };
@@ -306,7 +391,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   /** An adopt MOVED the directory into a named profile: the entry ends (the directory is the profile's now). */
   function adopted(bk) {
     const s = load(); if (!s.entries[bk]) return false;
-    delete s.entries[bk]; latest.delete(bk); deliberate.delete(bk);
+    delete s.entries[bk]; latest.delete(bk); deliberate.delete(bk); there.delete(String(bk)); told.delete(String(bk)); // B-7a30 r2: the bit goes with its entry
     save(); changed();
     log.log?.(`[browser-kept] ${bk}: its directory became a named profile (adopted) — no longer kept here`);
     return true;
@@ -411,16 +496,20 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     load();
     const first = sweep().catch((e) => { log.warn?.(`[browser-kept] boot sweep failed: ${e && e.message}`); return null; });
     if (!sweepTimer && sweepEveryMs > 0) { sweepTimer = setInterval(() => { sweep().catch((e) => log.warn?.(`[browser-kept] sweep failed: ${e && e.message}`)); }, sweepEveryMs); if (sweepTimer.unref) sweepTimer.unref(); }
+    // B-7a30: every kept folder's presence checked at once (off the loop; the views say «checking…» until it lands), then on its tick
+    recheckAll().catch(() => {});
+    if (!thereTimer && thereEveryMs > 0) { thereTimer = setInterval(() => { recheckAll().catch(() => {}); }, thereEveryMs); if (thereTimer.unref) thereTimer.unref(); }
     return first;
   }
   /** SIGINT / SIGTERM: a throttled tab list is written now (the crash path this feature exists for). */
   function shutdown() {
     if (sweepTimer) clearInterval(sweepTimer); sweepTimer = null;
+    if (thereTimer) clearInterval(thereTimer); thereTimer = null;
     if (bcTimer) { clearTimeout(bcTimer); bcTimer = null; }
     if (flushTimer) save();
   }
 
-  return { noteStart, noteTabs, noteStop, noteDeliberate, latestOf, has, keys, get, brief, list, limits, forget, adopted, sweep, boot, shutdown, dirOf, file, lastSweep: () => lastSweep, _load: load, _measure: measure,
+  return { noteStart, noteTabs, noteStop, noteDeliberate, latestOf, has, keys, get, brief, list, limits, forget, adopted, sweep, checkThere /* B-7a30 r2: the acts' door */, recheckAll /* B-7a30 r2: the tick's pass */, boot, shutdown, dirOf, file, lastSweep: () => lastSweep, _load: load, _measure: measure,
     setRestore, consumeRestore, afterReopen }; // lane B
 }
 

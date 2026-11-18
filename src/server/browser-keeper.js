@@ -823,7 +823,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  the digest; never listed as a profile. */
   function ephemerals() {
     ensureLoaded();
-    return reg.profiles.filter(isEph).map((p) => {
+    return reg.profiles.filter(isEph).map(ephRow);
+  }
+  /** B-7a30: ONE ephemeral profile's row — ephemeralFor(bk) builds only its own (it built all of ephemerals() to find one: a
+   *  kept-folder read per ephemeral profile for each lookup, on every active-sessions broadcast). */
+  function ephRow(p) {
       const b = reg.browsers[p.id] || null;
       const l = reg.leases.find((x) => x.profileId === p.id) || null;
       return { profileId: p.id, label: p.label, browserKey: p.owner.id, child: B.isChildKey(p.owner.id), sessionId: l ? l.sessionId || null : null, leased: !!l, dir: p.dir || null,
@@ -831,9 +835,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         adopted: !!(b && b.adoptedAt), usage: live.get(p.id) ? { ...live.get(p.id) } : null, createdAt: p.createdAt || 0,
         display: b && b.display ? b.display : null, // lane headless-fallback: the launch's display fact (headless instead of a window, and why)
         kept: B.isBrowserKey(p.owner.id) && keptStore() ? keptStore().brief(p.owner.id) : null }; // lane browser-resume: what its conversation keeps when it stops
-    });
   }
-  function ephemeralFor(browserKey) { const k = String(browserKey || ''); return ephemerals().find((e) => e.browserKey === k) || null; }
+  function ephemeralFor(browserKey) { ensureLoaded(); const k = String(browserKey || ''); const p = reg.profiles.find((x) => isEph(x) && x.owner && String(x.owner.id) === k); return p ? ephRow(p) : null; } // B-7a30: one key's lookup computes one key
   function list() {
     ensureLoaded();
     const browsers = {};
@@ -3265,6 +3268,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (B.isChildKey(bk)) { const v = KB.resumeVerdict({ child: true }); throw namedError(v.code, v.error); }
     if (!B.isBrowserKey(bk)) throw namedError('bad-request', 'a resume needs the conversation\'s browser key');
     const ks = keptStore();
+    // B-7a30 r2: an ACT reads its kept folder through the store's door — asked fresh, bounded (5 s), refused by name
+    // (`kept_unconfirmed`) past the bound: never «resumed» over a folder nobody confirmed. A user's Resume of a browser that RUNS
+    // only reconnects the view (no folder is read), so it is not asked; the agent's reopen of its waiting tabs is.
+    const e00 = ephemeralFor(bk);
+    const reconnect = who === 'user' && !!(e00 && (e00.live || starting.has(e00.profileId)));
+    if (ks && !reconnect && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);
     let entry0 = null; try { entry0 = ks ? ks.get(bk) : null; } catch { entry0 = null; }
     const e0 = ephemeralFor(bk);
     const running = !!(e0 && (e0.live || starting.has(e0.profileId)));
