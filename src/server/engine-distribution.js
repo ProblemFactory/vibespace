@@ -719,10 +719,10 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
    *  it does (onPlace: the landing; landDir: the first rename). → null | WHICH, in words (n5 — the staging's line says it). */
   async function placeBusy(sid, plan) {
     const g = gateOf(sid), t0 = g.taken;
-    if (g.holds > 0) return heldWords(g);
     // B-4d35 (the lane's adversarial read): a put-back in flight renames the place — a landing never starts beside it (it would await
     // the shared rename unbounded: a start's landNext once the first asker stepped aside, the fleet's landNext)
     if (restoring.has(sid)) return 'its previous kernel is being put back in its place';
+    if (g.holds > 0) return heldWords(g);
     if (await inUse(sid, plan)) return 'a browser runs the current kernel';
     return g.holds > 0 ? heldWords(g) : g.taken !== t0 ? `${g.lastAsker || 'a browser start'} took the current kernel while it was checked` : null;
   }

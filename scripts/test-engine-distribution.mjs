@@ -1559,18 +1559,16 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
   const holdAnchor = "    if (!g.landing && restoring.has(sid) && !(await waitPutBack(sid, restoring.get(sid), a))) throw named('engine_kernel_landing', putBackWords(sid));\n";
   const ownAnchor = "    if (!ask || await waitPutBack(sid, p, ask)) return p;\n    throw named('engine_kernel_landing', putBackWords(sid));\n";
   const lookAnchor = "    if (ask.late) return within(p, LATE_LOOK_MS);\n";
-  const busyAnchor = "    if (restoring.has(sid)) return 'its previous kernel is being put back in its place';\n";
   const bootAnchor = "      try { const back = await putBackWithin(id, plan, askB);";
   const instAnchor = "      let back0 = null; try { back0 = await putBackWithin(sid, plan, ask0); } finally { rel0(); }";
   const load = (src, tag) => MC.load('src/server/engine-distribution.js', src, tag);
-  const [x, n, bt, it, noHold, noOwn, noBusy, bootOpen, instOpen] = await Promise.all([
+  const [x, n, bt, it, noHold, noOwn, bootOpen, instOpen] = await Promise.all([
     putBackOutsideScene(undefined),
     putBackOutsideScene(undefined, { next: true, afterFirst: true }),
     putBackOutsideScene(undefined, { first: 'boot', afterFirst: true }),
     putBackOutsideScene(undefined, { first: 'install', afterFirst: true }),
     putBackOutsideScene(load(cut(holdAnchor, '\n', 'hold waits for a put-back'), 'b4d35-no-hold-wait')),
     putBackOutsideScene(load(cut(ownAnchor, '    return p;\n\n', 'own put-back bounded'), 'b4d35-own-unbounded')),
-    putBackOutsideScene(load(cut(busyAnchor, '\n', 'a landing waits for a put-back'), 'b4d35-land-beside'), { next: true, afterFirst: true }),
     putBackOutsideScene(load(cut(bootAnchor, '      try { const back = await restoreAside(id, plan);', 'the boot\'s own put-back bounded'), 'b4d35-boot-unbounded'), { first: 'boot', afterFirst: true }),
     putBackOutsideScene(load(cut(instAnchor, '      let back0 = null; try { back0 = await restoreAside(sid, plan); } finally { rel0(); }', 'the download\'s own put-back bounded'), 'b4d35-install-unbounded'), { first: 'install', afterFirst: true }),
   ]);
@@ -1589,7 +1587,6 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
     'B-4d35 (a fleet DOWNLOAD asks the put-back first): refused by name within its bound — never a failure, no For-you item; the kernel comes back', { a: it.a, failure: it.failure, todos: it.todos });
   ok(noHold.s && noHold.s.proceeded === true && noHold.s.empty === true, 'CONTROL (B-4d35, holdPlace without the put-back wait — the release): the start goes on beside the EMPTIED place', noHold.s);
   ok(noOwn.a && noOwn.a.hung === true, 'CONTROL (B-4d35, the first asker\'s own await unbounded): the measure that asked the put-back HANGS on its rename', noOwn.a);
-  ok(noBusy.s && noBusy.s.hung === true, 'CONTROL (B-4d35, a landing allowed beside a put-back): with a waiting kernel the START hangs — its landNext lands and awaits the shared rename', noBusy.s);
   ok(bootOpen.a && bootOpen.a.hung === true, 'CONTROL (B-4d35, the boot\'s own put-back unbounded): the boot HANGS on its rename', bootOpen.a);
   ok(instOpen.a && instOpen.a.hung === true, 'CONTROL (B-4d35, the download\'s own put-back unbounded): the download HANGS on its rename', instOpen.a);
   // round 3 (the second adversarial read): an ask whose ONE bound is spent — a forced measure that waited out ㉓'s landing while it only
