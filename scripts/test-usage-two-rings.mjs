@@ -48,7 +48,21 @@ globalThis.window ??= { addEventListener() { }, removeEventListener() { }, match
 globalThis.requestAnimationFrame ??= () => 0;
 
 const US = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-source.js')).href);
+// B-7b56: ONE CLOCK for the whole suite — the fixtures, every render and every expected word read ONE instant: Date.now AND
+// `new Date()` (usage-meter's fmtReset reads the latter) are held from here. The suite built its words at load and the product
+// rendered later, each on its own read of the clock; any word the clock decides — a date before a time, Today / Tomorrow — could
+// differ between two renders the CONTROL legs compare byte for byte. NOT PROVEN: the row's midnight shape does not fit the two
+// sightings' hours (02:3x PT, 18:44 PT); this holds every clock read either way.
+const RealDate = Date, NOW = RealDate.now();
+globalThis.Date = class HeldDate extends RealDate { constructor(...a) { super(...(a.length ? a : [NOW])); } static now() { return NOW; } };
 const nowS = Math.floor(Date.now() / 1000), H = 3600, D = 86400, MIN = 60e3;
+// …the premise, at a boundary built on purpose: the same instant read at 23:56 and at 00:06 local is two different words — a word
+// the clock decides; the held clock (both its doors) is what keeps two renders of the legs below byte-identical
+{
+  const T = new Date(2026, 10, 9, 23, 55, 0, 0).getTime();
+  const before = US.resetInstantText ? US.resetInstantText(T, T + MIN) : '', after = US.resetInstantText ? US.resetInstantText(T, T + 11 * MIN) : '';
+  ok(`B-7b56 PREMISE: one instant read at 23:56 «${before}» and at 00:06 «${after}» — a word the clock decides; and the held clock holds both doors (Date.now ${Date.now() === NOW}, new Date() ${new Date().getTime() === NOW})`, !!before && !!after && before !== after && Date.now() === NOW && new Date().getTime() === NOW, `${before} / ${after}`);
+}
 const LIFTED_AT = Date.now() - 6 * D * 1000; // the tombstone: the instant the vendor's answer first named no 5h window
 const WEEK = { utilization: 0.37, resetsAt: nowS + 3 * D };
 const FABLE = { name: 'Fable', utilization: 0.42, resetsAt: nowS + 2 * D + 5 * H };
