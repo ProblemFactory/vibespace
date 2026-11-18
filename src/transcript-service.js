@@ -135,9 +135,12 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
    *  after a restart processLive fills it with partial buffer data first, and
    *  serving that truncated history/search/turnmap to a handful of buffer
    *  messages) — else rebuild from the merged JSONL+buffer view. */
-  /** The harness's pre-read hook (S3 store.warmTranscript) for `r` — the live session when there is one. Never throws. */
-  async function warmOf(r, live) {
-    try { const warm = harnessOf(r.backend || 'claude').store?.warmTranscript; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host, ...(live ? { session: live } : {}) }); } catch { }
+  /** The task-state and status roads warm ONLY what they read (the agy chain's cure): the harness's own TASK-STATE warm
+   *  (store.warmTaskState — claude's task-tool scan; only claude declares it), never its transcript warm — codex's walks the
+   *  whole sessions store with a synchronous listing to find a rollout and may start a codex app-server for a thread this
+   *  machine does not hold, at every Properties refetch. A harness with none warms nothing. Never throws. */
+  async function taskWarmOf(r) {
+    try { const warm = harnessOf(r.backend || 'claude').store?.warmTaskState; if (warm) await warm(r.sessionId, r.cwd, { remote: !!r.host }); } catch { }
   }
   async function view(ref) {
     const r = norm(ref);
@@ -211,7 +214,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       if (session?._permissionMode && viaDev.chatStatus && !viaDev.chatStatus.permissionMode) viaDev.chatStatus.permissionMode = session._permissionMode;
       return viaDev;
     }
-    await warmOf(r, session); // B-299b A2: the task-tool scan (claude) is read off the loop before taskState answers
+    await taskWarmOf(r); // B-299b A2: the task-tool scan (claude) is read off the loop before taskState answers
     const sm = createSessionMessages(sessionShape(r, session));
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     const chatStatus = sm.chatStatus();
@@ -223,12 +226,16 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
 
   async function taskState(ref) {
     const r = norm(ref);
-    const viaDev = await tryDevice(r, 'taskState', {});
+    // the cure's read (S1): the machine is asked only for a harness whose task state READS ITS TRANSCRIPT (the descriptor's
+    // warmTaskState — claude's task scan); another's state is the wrapper's side file, read here as the release did — never a
+    // device op or a remote find + copy at each Properties refetch for an answer that cannot differ (the route hands every
+    // harness its machine; the descriptor decides what it is asked for)
+    let fromTranscript = false; try { fromTranscript = !!harnessOf(r.backend || 'claude').store?.warmTaskState; } catch { }
+    const viaDev = fromTranscript ? await tryDevice(r, 'taskState', {}) : undefined;
     if (viaDev) return viaDev;
-    await refreshRemote(r);
-    const live = liveSession(r);
-    await warmOf(r, live); // B-299b A2: GET /api/session-todos (a Properties window re-asks at every broadcast) — the scan off the loop
-    const sm = createSessionMessages(sessionShape(r, live));
+    if (fromTranscript) await refreshRemote(r);
+    await taskWarmOf(r); // B-299b A2: GET /api/session-todos (a Properties window re-asks at every broadcast) — the scan off the loop
+    const sm = createSessionMessages(sessionShape(r, liveSession(r)));
     if (typeof sm.prepare === 'function') await sm.prepare(); // S9: a serve-backed reader (opencode stopped conversation) loads here — LOUD on failure, a user opened it
     return sm.taskState() || {};
   }

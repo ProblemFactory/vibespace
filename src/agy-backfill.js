@@ -196,7 +196,9 @@ function keptSpawns(e, conv) {
  *  there when it does, for a row ≥ LIVE_AFTER_MS old (the turn end's rule: never two writers of one card), and a call that
  *  failed is asked ONCE more CARDS_RETRY_MS later; a reader with no live road (View History, the history page) waits up to
  *  `viewWaitMs` (CARDS_VIEW_WAIT_MS — its one draw is all it gets; the wait holds no loop). A live conversation whose history is
- *  drawn already is the turn end's (afterTurn). `waitMs` overrides both. Never throws. */
+ *  drawn already is the turn end's (afterTurn). `waitMs` overrides both. An ATTACH with no late road (the descriptor hands it the
+ *  live bound for `viewWaitMs`) draws a card that lands later at its next rebuild (a resume, View History) — never in the open
+ *  window. Never throws. */
 async function warmCards(session, { waitMs = null, liveWaitMs = CARDS_WAIT_MS, viewWaitMs = CARDS_VIEW_WAIT_MS, retryMs = CARDS_RETRY_MS, ...opts } = {}) {
   try {
     if (!session || session._historyLoaded) return;

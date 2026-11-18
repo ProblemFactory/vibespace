@@ -16,7 +16,7 @@
   "src/machine-probes.js": 1,
   "src/opencode-serve.js": 1,
   "src/reading-repair.js": 1,
-  "src/routes/sessions.js": 2,
+  "src/routes/sessions.js": 1,
   "src/server/backend-status-route.js": 3,
   "src/server/boot-restore.js": 3,
   "src/server/jobs-wiring.js": 1,

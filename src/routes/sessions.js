@@ -739,7 +739,9 @@ function setup(ctx) {
       // Remote session: pull the transcript into the data/remote-jsonl cache
       // first (same pattern as /api/session-messages) — without it the Steps
       // list only worked if a chat attach had already warmed the cache.
-      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: b === 'claude' ? host : null });
+      // the machine for EVERY harness (hostId is a parameter, never a branch): a codex conversation on another machine is read
+      // there (the device op, else its fetched copy) — never as a local thread this machine does not hold (the agy chain's cure)
+      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: host || null });
       res.json({ todos: st.todos || [] });
     } catch (e) { res.json({ todos: [] }); }
   });

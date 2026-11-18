@@ -563,8 +563,14 @@ function _jsonlCachePut(id, entry) {
   const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: JSONL_LIVE_MAX_BYTES, now: Date.now(), sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e) });
   _jsonlResident = r.bytes; _jsonlLive = r.live; _jsonlLiveEvicted += r.liveEvicted;
 }
-/** The census row (tail bytes ≈ the parsed messages' share of the heap). */
-function jsonlCacheCensus() { return cacheRow('transcript tails', { bytes: _jsonlResident, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive }); }
+/** The census row (tail bytes ≈ the parsed messages' share of the heap) + the position indexes their merges keep (the agy
+ *  chain's cure: that memory was out of sight) — an index lives beside its tail's array, so the row counts it with them. */
+function jsonlCacheCensus() {
+  const ix = jsonlPosCensus();
+  const row = cacheRow('transcript tails', { bytes: _jsonlResident + ix.bytes, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes + their position indexes (${ix.keys} keys, ${ix.ords} ordinals ≈ ${Math.round(ix.bytes / 1024)} KB, estimated at ${POS_KEY_BYTES} B a key + ${POS_ORD_BYTES} B an ordinal) (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive });
+  row.over = !!(JSONL_CACHE_MAX_BYTES && _jsonlResident > JSONL_CACHE_MAX_BYTES);   // its read (S3): OVER is judged on what the bound counts (the tails), never on the index estimate
+  return row;
+}
 function _stampJsonlParse(bytes, ms) {
   global.__vsMetric?.('srv-jsonl-parse-bytes', bytes);
   global.__vsMetric?.('srv-jsonl-parse-ms', Math.round(ms * 10) / 10);
@@ -870,7 +876,7 @@ const _mergeCounts = { posBuilt: 0, posExtended: 0, posIndexed: 0, linesParsed: 
  *  ordinal, ascending; `base` = the ordinal of the array's first record. idx(key, last) answers an index INTO the array — the
  *  LAST record of a uuid (the release's map: a later one overwrote) or the FIRST of a message.id (the release kept the first). */
 function makePos() {
-  return { at: new Map(), base: 0, userTs: null, userTsAll: true, userTsStale: false,
+  return { at: new Map(), n: 0, base: 0, userTs: null, userTsAll: true, userTsStale: false,   // n = the ordinals it holds (the census counts them)
     idx(k, last) {
       const v = this.at.get(k); if (!v || !v.length) return undefined;
       const o = last ? v[v.length - 1] : v[0];
@@ -880,9 +886,9 @@ function makePos() {
 function posIndex(pos, m, o) {
   _mergeCounts.posIndexed++;
   if (!m) return;
-  if (m.uuid) { const k = 'u:' + m.uuid, v = pos.at.get(k); if (v) v.push(o); else pos.at.set(k, [o]); }
+  if (m.uuid) { const k = 'u:' + m.uuid, v = pos.at.get(k); if (v) v.push(o); else pos.at.set(k, [o]); pos.n++; }
   const mid = m.message?.id;
-  if (mid) { const k = 'm:' + mid, v = pos.at.get(k); if (v) v.push(o); else pos.at.set(k, [o]); }
+  if (mid) { const k = 'm:' + mid, v = pos.at.get(k); if (v) v.push(o); else pos.at.set(k, [o]); pos.n++; }
   if (m.type === 'user') {   // the greatest user stamp (r2, S4): the webui-record check below asks it, not a scan per record
     const t = m.timestamp;
     if (typeof t === 'string') { if (pos.userTs === null || t > pos.userTs) pos.userTs = t; } else if (t != null) pos.userTsAll = false;
@@ -894,7 +900,7 @@ function posUnindex(pos, m, o) {
     if (!k) continue;
     const v = pos.at.get(k); if (!v) continue;
     const i = v[0] === o ? 0 : v.lastIndexOf(o);   // a slid head is the front, a replaced last line the end
-    if (i >= 0) v.splice(i, 1);
+    if (i >= 0) { v.splice(i, 1); pos.n--; }
     if (!v.length) pos.at.delete(k);
   }
   if (m.type === 'user' && typeof m.timestamp === 'string' && pos.userTs !== null && m.timestamp >= pos.userTs) pos.userTsStale = true;   // the greatest left: asked again
@@ -918,6 +924,21 @@ function extendPos(last, B) {
   for (let i = c; i < B.length; i++) posIndex(pos, B[i], pos.base + i);
   _jsonlPosMemo.delete(A);
   return pos;
+}
+/** THE INDEX'S MEMORY (the agy chain's cure — the census did not count it): the indexes of the cached tails' arrays and of the
+ *  arrays their entries carry (`_posFrom`), O(entries). A key ≈ its string + a Map slot + a small array (an estimate, stated). */
+const POS_KEY_BYTES = 128, POS_ORD_BYTES = 8;
+function jsonlPosCensus() {
+  let keys = 0, ords = 0;
+  const seen = new Set();
+  for (const e of _jsonlCache.values()) {
+    for (const a of [e && e.messages, e && e._posFrom]) {
+      const p = a && _jsonlPosMemo.get(a);
+      if (!p || seen.has(p)) continue;
+      seen.add(p); keys += p.at.size; ords += p.n || 0;
+    }
+  }
+  return { keys, ords, bytes: keys * POS_KEY_BYTES + ords * POS_ORD_BYTES };
 }
 /** r4 (its delta read): the array an appended one was built from is CARRIED BY ITS PARSE-CACHE ENTRY (`_posFrom`: the newest
  *  array the merge indexed — its predecessor, or the one that predecessor carried) until a read indexes it — never held by a map
@@ -1692,7 +1713,7 @@ function dedupWebuiSockets(entries) {
 
 module.exports = { claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
-  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter,
+  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,

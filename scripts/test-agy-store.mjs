@@ -387,7 +387,7 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
     { step_index: 10, source: 'SYSTEM', type: 'GENERIC', status: 'DONE', created_at: '2026-10-21T14:33:02Z', content: `Created the following subagent:\n{\n  "conversationId": "${S2}"\n}\n` },
   ].map((x) => JSON.stringify(x)).join('\n') + '\n');
   const synthetic = () => ({ backend: 'antigravity', backendSessionId: P, claudeSessionId: P, agentKind: 'primary', cwd: '', buffer: '' }); // what ws-handler / transcript-service build per request
-  const dsrc = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity.js'), 'utf8'), DW = "if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' });";
+  const dsrc = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity.js'), 'utf8'), DW = "if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' }, o.attach ? { viewWaitMs: AGY_BACKFILL.CARDS_WAIT_MS } : {});";
   const preH = process.env.HOME; process.env.HOME = hv;
   let viaView = [], viewRed = [], scanSame = false, scanN = -1;
   try {
@@ -408,8 +408,23 @@ console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
     'every road a reader is built on draws THE CARD: the descriptor\'s warm with the live session, and a FRESH reader with no session (View History; the history page of a stopped conversation — its spawn found in the kept transcript); RED: the A1 descriptor (cards warmed only for a live session) ⇒ none', { desc: viaDesc.length, view: viaView.length, red: viewRed.length });
   ok(scanSame && scanN === 2, `the warm's spawn scan (no records built): the same rows as the history's records — the kept steps alone (${scanN}: a planner step with two calls, the spawn the SECOND) and with the ring`);
   const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
-  ok(wsSrc.includes('await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session })') && tsSrc.includes('{ remote: !!r.host, ...(live ? { session: live } : {}) }'),
+  ok(wsSrc.includes('await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true })') && tsSrc.includes('{ remote: !!r.host, ...(live ? { session: live } : {}) }'),
     'the callers hand the warm the session it reads the cards for: ws-handler\'s attach its live session, transcript-service\'s history read the live one when there is one');
+  // the cure (the chain's read, small): an ATTACH of a conversation with no late road (no acp-events pipeline — a restored one)
+  // waits the LIVE bound for its cards before its first answer, never the history page's; RED: cadb07780's descriptor (no attach)
+  {
+    const boundOf = async (D, o) => {
+      const realWC = BF.warmCards; let got = null;
+      BF.warmCards = async (s, opts) => { got = { late: typeof s._acpLate === 'function', ...(opts || {}) }; };
+      try { await D.store.warmTranscript(P, '', o); } finally { BF.warmCards = realWC; }
+      return !got ? null : got.waitMs != null ? got.waitMs : got.late ? (got.liveWaitMs != null ? got.liveWaitMs : BF.CARDS_WAIT_MS) : (got.viewWaitMs != null ? got.viewWaitMs : BF.CARDS_VIEW_WAIT_MS);
+    };
+    const DA = mutantCopies('agy-desc-no-attach', REPO).load('src/harnesses/antigravity.js', dsrc.replace(DW, () => "if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' });"), 'no-attach');   // stale-pins: kept (cadb07780's descriptor line, planted back as the RED control)
+    fresh();
+    const atAttach = await boundOf(H8, { session: withData(sess()), attach: true }), atView = await boundOf(H8, { session: withData(sess()) }), atRed = await boundOf(DA, { session: withData(sess()), attach: true });
+    ok(atAttach === BF.CARDS_WAIT_MS && BF.CARDS_WAIT_MS < BF.CARDS_VIEW_WAIT_MS && atView === BF.CARDS_VIEW_WAIT_MS && atRed === BF.CARDS_VIEW_WAIT_MS,
+      `an attach with no late road waits the live bound for its cards (${atAttach / 1000} s), a history page its one draw (${atView / 1000} s); RED (cadb07780's descriptor): the attach waits ${atRed / 1000} s before its first answer`);
+  }
   // 3. THE QUEUE (M3): CARD_CHUNK rows a call, a row being read JOINED, the first answer kept while the rest wait; the bound + the late road
   const fake = (asks, o = {}) => asks.map((a) => ({ toolCallId: a.toolCallId, snap: { subId: S, card: { toolCallId: a.toolCallId, subId: S, status: 'completed', role: 'r' }, subs: [{ subId: S, toolCallId: a.toolCallId, rec: { type: 'x' } }], final: true, ...o }, sig: 'L#', clean: true }));
   const many = Array.from({ length: 20 }, (_, i) => ({ toolCallId: `${P}:${100 + i}`, parentId: P, step: 100 + i, ts: null }));
