@@ -78,13 +78,24 @@ function resumeIdOf(meta) {
 /** Why a kept meta is stopped — the one producer (a dead socket found by a boot or its re-probe); the client words it
  *  «its process ended while the server was down». A `.json.stopped` written by 2.369.365 carries no reason: the same one. */
 const STOP_DEAD_SOCKET = 'dead-socket-at-boot';
+/** A session on a PAIRED machine (an ssh or dial session: spawn/ssh.js and spawn/dial.js set `host` to the machine's id; a dial
+ *  session also `_dialDeviceId`). A kept copy is THIS machine's dead socket and its address (backend:id) names no machine — such a
+ *  session consumes none, at a turn end or in the sweep. PURE. */
+const pairedSession = (s) => !!(s && ((s.host && s.host !== 'local') || s._dialDeviceId));
+/** a kept copy's unlink that failed for a reason other than «already gone» is SAID by name — the file stays, the next boot reads
+ *  it again; never with nobody told why (主开发's first should on 9efcf735c — every unlink of a kept copy, one sentence) */
+function saidUnlinkFailure(sockFile, err) {
+  if (err && err.code !== 'ENOENT') console.warn(`[kept] ${sockFile}: its stopped copy could not be removed (${err.code || err.message}) — it stays on disk and the next boot reads it again`);
+}
 /** B-a5a4 (2) — PURE: did a turn end WELL, so that it proves the resume loaded its conversation? Not a claude `result` that is an
  *  error — a resume the CLI cannot load answers `{type:'result', subtype:'error_during_execution', is_error:true, errors:['No
  *  conversation found with session ID: …']}` on stdout and exits 1 (scripts/test-resume-breaker.mjs's stub, the record the exit
- *  classifier scans); an interrupted or capped turn is not counted either — not an ACP prompt that ended in 'error' or
+ *  classifier scans); a claude turn that ended capped or interrupted is not counted either (its subtype is no success) — an ACP
+ *  max_tokens / refusal end DID answer, so it ran — not an ACP prompt that ended in 'error' or
  *  'cancelled' (acp-events stamps `session._promptStopReason`; a wrapper whose agent died mid-prompt ends it 'error', and agy can
- *  end one 'cancelled' before its agent answered anything). codex's one turn-end call is `task_complete` (codex-events), no record.
- *  Anything not proven keeps the copy for the sweep's road. */
+ *  end one 'cancelled' before its agent answered anything). An ACP end that names NO stop reason counts as ran, on purpose: only a
+ *  named failure proves the resume did not load. codex's one turn-end call is `task_complete` (codex-events; its record carries
+ *  no failure). Anything not proven keeps the copy for the sweep's road. */
 function turnRan(rec, session) {
   if (rec && typeof rec === 'object' && (rec.is_error === true || (typeof rec.subtype === 'string' && rec.subtype !== 'success'))) return false;
   const stop = session && session._promptStopReason;
@@ -357,8 +368,8 @@ const newerStop = (a, b) => (msOf(a.stoppedAt) - msOf(b.stoppedAt) || msOf(a.cre
 function keepStopped(sockFile, meta, id) {
   const k = keptKey(sockFile, meta, id), was = keptStopped.get(k);
   if (was && was.sockFile !== sockFile) {
-    if (newerStop(was.meta, meta)) { fs.unlink(keptFile(sockFile), () => { }); return sockFile; }
-    fs.unlink(keptFile(was.sockFile), () => { });
+    if (newerStop(was.meta, meta)) { fs.unlink(keptFile(sockFile), (err) => saidUnlinkFailure(sockFile, err)); return sockFile; }
+    fs.unlink(keptFile(was.sockFile), (err) => saidUnlinkFailure(was.sockFile, err));
     keptStopped.set(k, { sockFile, meta, id });
     return was.sockFile;
   }
@@ -377,7 +388,7 @@ function loadKept() {
       try { m = JSON.parse(await fs.promises.readFile(path.join(META_DIR, f), 'utf-8')); } catch { continue; }
       // B-a5a4 (9): a PENDING FORK's copy an earlier boot kept is swept — its own id never arrived, so nothing can ever resume
       // it (its id is its parent's) and nothing consumed it (keyed by its socket): kept and listed for the boot that made it
-      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }
+      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch((err) => saidUnlinkFailure(sockFile, err)); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }
       const id = resumeIdOf(m);
       if (id) keepStopped(sockFile, m, id);
     }
@@ -389,10 +400,10 @@ function loadKept() {
 async function stoppedSessions() {
   await loadKept();
   const live = new Set(); // the conversations live sessions ADDRESS (addressableId: a pending fork addresses none — r2)
-  for (const s of activeSessions.values()) { const id = addressableId(s); if (id) live.add(`${(s && s.backend) || 'claude'}:${id}`); }
+  for (const s of activeSessions.values()) { const id = pairedSession(s) ? null : addressableId(s); if (id) live.add(`${(s && s.backend) || 'claude'}:${id}`); } // a paired machine's session addresses no copy of this machine's
   const rows = [];
   for (const [k, e] of [...keptStopped]) {
-    if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), () => { }); continue; } // resumed: the live session is the record now
+    if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), (err) => saidUnlinkFailure(e.sockFile, err)); continue; } // resumed: the live session is the record now
     const m = e.meta;
     rows.push({ backend: m.backend || 'claude', sessionId: e.id, backendSessionId: e.id, cwd: m.cwd || '', name: m.name || '', mode: m.mode || 'terminal', status: 'stopped',
       startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || (accountBoundOf(m.backend) ? 'subscription' : null), kept: e.sockFile,
@@ -406,16 +417,18 @@ async function stoppedSessions() {
  *  ended with no page asking in between left the copy: a «its process ended while the server was down» row with the old time, and
  *  the old account its next resume went to. Never at registration, never on a turn that FAILED (`turnRan`): r1 of B-a5a4 consumed at
  *  registration and lost a failed resume's copy. A pending fork addresses nothing (addressableId), so it consumes nothing.
- *  `rec` = the turn-end record the entry was handed (claude's `result`; none for codex / ACP). → the consumed sockFile | null */
+ *  `rec` = the turn-end record the entry was handed (claude's `result`, codex's `task_complete`, ACP's `prompt_end`). → the consumed
+ *  sockFile | null */
 async function consumeKeptOf(session, rec = null) {
   if (!turnRan(rec, session)) return null;
+  if (pairedSession(session)) return null;   // a kept copy is THIS machine's socket; the address names no machine
   const id = session ? addressableId(session) : null;
   if (!id) return null;
   await loadKept();
   const k = `${session.backend || 'claude'}:${id}`, e = keptStopped.get(k);
   if (!e) return null;
   keptStopped.delete(k);
-  await new Promise((r) => fs.unlink(keptFile(e.sockFile), () => r()));
+  await new Promise((r) => fs.unlink(keptFile(e.sockFile), (err) => { saidUnlinkFailure(e.sockFile, err); r(); }));   // forgotten here; a refused unlink is said
   return e.sockFile;
 }
 // THE FACTS LINE (the boot trace's notes, ⚙ Diagnostics): what the dead sockets of a restore / a re-probe pass became —
@@ -446,7 +459,7 @@ function settleStopped(sockFile, file, meta, id) {
     if (found !== false) return found;
     const k = keptKey(sockFile, meta, id);
     if (keptStopped.get(k)?.sockFile === sockFile) keptStopped.delete(k);
-    await new Promise((r) => fs.unlink(file, () => r()));
+    await new Promise((r) => fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); r(); }));
     console.log(`    ↳ ${sockFile}: no transcript — its stopped meta deleted`);
     return false;
   })();
@@ -1077,4 +1090,4 @@ async function readoptOrphanKeeperSessions() {
     stoppedSessions, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

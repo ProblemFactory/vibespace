@@ -48,6 +48,37 @@ let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+/** server.js's turn-end entry (`const noteTurnEnd = …` at its top level) as a function over STAND-INS: its own source, cut out by
+ *  acorn and run in a scope where the pool engine, the delivery ladder, the consume and console are recorders, and any other
+ *  name it reaches is a recorder too (another unit may add a step: the law still reads). → ({consume, deliverThrows}) → {calls,
+ *  warns, threw, S, M} | null (no such declaration) */
+function serverTopOf(src) {
+  try { return require('acorn').parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true }).body; } catch { return null; }
+}
+function turnEndEntryOf(src) {
+  const body = serverTopOf(src);
+  if (!body) return null;
+  const inits = [];
+  for (const n of body) if (n.type === 'VariableDeclaration') for (const d of n.declarations) if (d.id && d.id.name === 'noteTurnEnd' && d.init) inits.push(d.init);
+  return inits.length === 1 ? entryRunner(src.slice(inits[0].start, inits[0].end)) : null;   // declared ONCE at the top level, or no law to read
+}
+/** the runner over an entry's TEXT (server.js's own, or a planted one — the law's red control) */
+function entryRunner(text) {
+  return ({ consume = () => Promise.resolve(null), deliverThrows = false } = {}) => {
+    const calls = [], warns = [], S = { id: 'turn-end-stand-in' }, M = { type: 'result', subtype: 'success' };
+    const stubs = {
+      noteTurnEndEngine: (...a) => { calls.push(['engine', ...a]); },
+      deliver: { noteTurnEnd: (...a) => { calls.push(['deliver', ...a]); if (deliverThrows) throw new Error('deliver down'); } },
+      consumeKeptOf: (...a) => { calls.push(['consume', ...a]); const r = consume(); if (r && typeof r.catch === 'function') r.catch(() => { }); return r; },   // handled here first: an entry that dropped its own .catch fails by name, never as an unhandled rejection
+      console: { warn: (...a) => { warns.push(a.map(String).join(' ')); }, log() { }, error() { } },
+    };
+    const scope = new Proxy(stubs, { has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)), get: (t, k) => (typeof k !== 'string' ? undefined : k in t ? t[k] : (...a) => { calls.push(['other:' + k, ...a]); }) });
+    const fn = new Function('scope', 'with (scope) { return (' + text + '); }')(scope);
+    let threw = null;
+    try { fn(S, M); } catch (e) { threw = e; }
+    return { calls, warns, threw, S, M };
+  };
+}
 const REAL = { log: console.log, warn: console.warn };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 
@@ -470,17 +501,97 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
     ok(BRm.turnRan(RAN, claudeS) && !BRm.turnRan(FAILED, claudeS) && !BRm.turnRan({ type: 'result', subtype: 'error_max_turns', is_error: false }, claudeS) && BRm.turnRan(null, { backend: 'codex' })
         && !BRm.turnRan(null, agyS('error')) && !BRm.turnRan(null, agyS('cancelled')) && BRm.turnRan(null, agyS('end_turn')) && BRm.turnRan(undefined, null),
       '§10 (2) turnRan (PURE): a claude result proves the resume only as a success; an ACP prompt only when it ended neither in \'error\' nor \'cancelled\' (agy can cancel before its agent answered); codex\'s task_complete (no record) does');
-    // the WIRING, each road as its consumer spells it (fragments — test-notify-retry pins the entry's head)
-    const SV = read('server.js'), CJ = read('src/server/stdout/claude-stream-json.js'), AE = read('src/server/stdout/acp-events.js'), CE = read('src/server/stdout/codex-events.js');
-    ok(SV.includes("try { consumeKeptOf(s, m).catch((x) => console.warn('[kept] turn-end consume failed:', x && x.message)); } catch (e) { console.warn('[kept] turn-end consume failed:', e && e.message); } };") && /probeFacts, stoppedSessions, consumeKeptOf, \/\/ /.test(SV)
-        && CJ.includes("if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }")
-        && AE.includes("            session._promptStopReason = msg.stopReason || null;   // B-a5a4 (2): how the turn ENDED — an 'error' / 'cancelled' end proves no resume (boot-restore turnRan)\n            try { noteTurnEnd?.(session); } catch {}")
-        && /if \(msg\.type === 'event_msg' && msg\.payload\?\.type === 'task_complete'\) \{\n\s+try \{ noteTurnEnd\?\.\(session\); \} catch \{\}/.test(CE)
-        && read('scripts/test-resume-breaker.mjs').includes("process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [msg] }) + '\\\\n');"),
-      '§10 (2) WIRING: server.js\'s one turn-end entry hands its record to the consume (a failure is said, never swallowed); claude forwards its result, ACP stamps how its prompt ended, codex calls at task_complete only; the failed-resume record above is the stub\'s own');
+    // the WIRING, as the LAWS it holds — by behaviour, never one line's text (another unit rewrites these lines around them:
+    // the .411 block's third checkpoint went red on an exact pin of codex's call)
+    // (a) server.js's ONE turn-end entry — ITS OWN SOURCE, read out of server.js and run over stand-ins: the delivery steps
+    //     first and unchanged (the pool engine gets the session and the record, the ladder the session), the consume LAST with
+    //     the record; a consume that throws or rejects is warned by name and skips nothing before it; a ladder that throws
+    //     skips the consume no more than before
+    const entry = turnEndEntryOf(read('server.js'));
+    ok(typeof entry === 'function', '§10 (2) ANCHOR: server.js declares its turn-end entry `noteTurnEnd` once, at the top level (the law below runs its own source)');
+    if (typeof entry === 'function') {
+      const e1 = entry(), e2 = entry({ consume: () => { throw new Error('consume down'); } }), e3 = entry({ consume: () => Promise.reject(new Error('consume rejected')) }), e4 = entry({ deliverThrows: true });
+      await tick(0);
+      const kinds = (e) => e.calls.map((c) => c[0]);
+      // the delivery steps (whatever their order — test-notify-retry pins that) ran with their arguments as before; the consume is LAST
+      const steps = (e) => { const c = e.calls; const en = c.find((x) => x[0] === 'engine'), dl = c.find((x) => x[0] === 'deliver'), co = c[c.length - 1];
+        return !!en && en[1] === e.S && en[2] === e.M && !!dl && dl[1] === e.S && !!co && co[0] === 'consume' && co[1] === e.S && co[2] === e.M && c.filter((x) => x[0] === 'consume').length === 1; };
+      ok(steps(e1) && !e1.threw && !e1.warns.length, '§10 (2) LAW: the turn-end entry runs the pool engine (session, record) and the delivery ladder (session), and the kept-copy consume LAST with the record', kinds(e1));
+      ok(steps(e2) && !e2.threw && e2.warns.some((w) => w.includes('[kept] turn-end consume failed: consume down')) && steps(e3) && !e3.threw && e3.warns.some((w) => w.includes('[kept] turn-end consume failed: consume rejected')),
+        '§10 (2) LAW: a consume that THROWS or REJECTS is warned by name and skips nothing before it — the engine and the ladder ran, nothing escapes the entry', { e2: [kinds(e2), e2.warns], e3: e3.warns });
+      ok(steps(e4) && !e4.threw && e4.warns.some((w) => w.includes('deliver down')), '§10 (2) LAW: a ladder that throws is warned and the consume still runs last (it skips nothing after it either)', [kinds(e4), e4.warns]);
+      // RED CONTROL (rule (b)): the same runner over a PLANTED entry that consumes first and guards nothing — the law sees both
+      const bad = entryRunner('(s, m) => { consumeKeptOf(s, m); noteTurnEndEngine(s, m); deliver.noteTurnEnd(s); }');
+      const b1 = bad(), b2 = bad({ consume: () => { throw new Error('consume down'); } });
+      ok(!steps(b1) && !!b2.threw && !b2.calls.some((x) => x[0] === 'engine'), '§10 (2) LAW RED CONTROL: a planted entry that consumes FIRST fails the order, and its unguarded throw skips the engine and escapes', [kinds(b1), kinds(b2), String(b2.threw)]);
+    }
+    // the consume the entry calls IS boot-restore's: server.js destructures consumeKeptOf from boot-restore's create, at its top level
+    const TOP = serverTopOf(read('server.js')) || [], SVsrc = read('server.js');
+    const wired = TOP.some((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id && d.id.type === 'ObjectPattern' && d.id.properties.some((p) => p.key && p.key.name === 'consumeKeptOf' && p.value && p.value.name === 'consumeKeptOf')
+      && d.init && /^require\('\.\/src\/server\/boot-restore\.js'\)\.create\(/.test(SVsrc.slice(d.init.start, d.init.end))));
+    ok(wired, '§10 (2) WIRING: server.js takes consumeKeptOf from boot-restore\'s own create (a merge that drops it leaves every turn end a caught ReferenceError — nothing consumed, said only as a warning)');
+    // (b) the consumers hand each turn end as their harness ends it — driven, records in, the engine stand-in's view out
+    const sinks = () => ({ feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
+    const seenA = [], sA = { backend: 'opencode', backendSessionId: 'ses_a5a4', buffer: '', clients: new Map() };
+    let feedA = null;
+    require(path.join(REPO, 'src/server/stdout/acp-events.js')).create({ engine: { noteTurnEnd: (s) => seenA.push(s._promptStopReason) } }).attach(sA, 'pA', { onData: (cb) => { feedA = cb; } }, sinks());
+    const ACP_ENDS = ['error', 'end_turn', 'cancelled', 'max_tokens', 'refusal'];
+    for (const stop of ACP_ENDS) feedA(J({ type: 'acp', kind: 'prompt_end', stopReason: stop, ts: new Date().toISOString() }) + '\n');
+    ok(J(seenA) === J(ACP_ENDS) && J(ACP_ENDS.map((x) => BRm.turnRan(null, { _promptStopReason: x }))) === J([false, true, false, true, true]) && BRm.turnRan(null, { _promptStopReason: null }),
+      '§10 (2) ACP: each prompt_end is a turn end whose stop is STAMPED on the session before the entry sees it — error and cancelled prove no resume, end_turn / max_tokens / refusal ran (the conversation answered), an end naming none counts as ran', seenA);
+    const seenC = [], sC = { backend: 'codex', backendSessionId: 'thr-a5a4', buffer: '', clients: new Map(), mode: 'chat' };
+    let feedC = null;
+    let endsC = 0;
+    require(path.join(REPO, 'src/server/stdout/codex-events.js')).create({ engine: { noteTurnEnd: () => { endsC++; } } }).attach(sC, 'pC', { onData: (cb) => { feedC = cb; } }, sinks());
+    for (const t of ['task_started', 'turn_aborted', 'task_failed', 'task_complete']) { feedC(J({ type: 'event_msg', payload: { type: t } }) + '\n'); seenC.push(endsC); }
+    ok(J(seenC) === J([0, 0, 0, 1]) && BRm.turnRan({ type: 'event_msg', payload: { type: 'task_complete' } }, sC) && BRm.turnRan(undefined, sC),
+      '§10 (2) codex: only task_complete is a turn end (its record proves the turn ran); an aborted or failed turn calls nothing — the copy stays', seenC);
+    const seenL = [], stub = () => { };
+    const CL = require(path.join(REPO, 'src/server/stdout/claude-stream-json.js')).create({
+      activeSessions: new Map(), CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: '/nonexistent', checkClaudeGoalStatus: stub,
+      noteModelSeen: stub, sbSeenFirst: () => true, hosts: null, usageHistory: null,
+      engine: new Proxy({ _vsuPending: new Map(), armWorkflowUsageWatcher: stub, kickPoolEval: stub, markLimitBanner: stub, maybeRepinLockedModel: stub, maybeStopOnFallback: stub, notePoolAuthFailure: stub, modelsMatch: () => false,
+        noteServedModel: stub, noteModelFallback: stub, noteSessionProduced: stub, noteTurnEnd: (s, r) => seenL.push(r), recordRateLimitEvent: stub, resolveUsageKey: () => '__g__', usageEstimator: { noteLive: stub } },
+        { get: (t, k) => (k in t ? t[k] : typeof k === 'string' ? stub : undefined) }),
+    });
+    const ptyL = { data: null, onData(cb) { ptyL.data = cb; }, onExit: stub };
+    const sL = { mode: 'chat', backend: 'claude', cwd: '/srv/u/two', sockName: 'cw-a5a4-l', buffer: '', createdAt: Date.now(), _normalizer: { processLive: stub, listeners: [] } };
+    await quiet(async () => {
+      CL.attach(sL, 'pL', ptyL, { feedLive: stub, broadcastActiveSessions: stub, readSessionMeta: () => ({}), writeSessionMeta: stub, updateSessionTodos: stub, applyTaskToolUpdate: stub, emitTaskListTodos: stub, broadcastToSession: stub });
+      ptyL.data(J(FAILED) + '\n'); ptyL.data(J(RAN) + '\n');
+    });
+    ok(seenL.length === 2 && seenL[0] && seenL[0].is_error === true && J(seenL[0].errors) === J(FAILED.errors) && seenL[1] && seenL[1].subtype === 'success' && !BRm.turnRan(seenL[0], sL) && BRm.turnRan(seenL[1], sL),
+      '§10 (2) claude: every result is a turn end that hands its OWN record — a failed resume\'s error result reaches the entry as such (turnRan refuses it), a success proves the resume', seenL.map((r) => r && [r.subtype, r.is_error]));
+    ok(read('scripts/test-resume-breaker.mjs').includes("process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [msg] }) + '\\\\n');"),
+      '§10 (2) the failed-resume record above is the stub\'s own (test-resume-breaker: what the CLI answers to a resume it cannot load)');
+    // (c) the consume's own failure is SAID (主开发's first should): an unlink refused for a reason other than «already gone» is warned
+    //     by name — the copy forgotten here, the file left, the next boot lists it again; a copy already gone is no news
+    put(6, { claudeSessionId: CID(6) }); put(7, { claudeSessionId: CID(5) }); put(8, { claudeSessionId: CID(3) });
+    const A6 = api(WC);
+    // a session on a PAIRED machine ends a turn well: its address names no machine, the copy is this machine's — nothing consumed;
+    // the same conversation run HERE consumes it
+    const SSH = { backend: 'claude', claudeSessionId: CID(3), host: 'gpu-box-1' }, DIAL = { backend: 'claude', claudeSessionId: CID(3), host: 'h-dial-1', _dialDeviceId: 'dev-1' };
+    const gPaired = [await A6.consumeKeptOf(SSH, RAN), await A6.consumeKeptOf(DIAL, RAN)];
+    const swept = await api(WC, { active: new Map([['sess-ssh', SSH], ['sess-dial', DIAL]]) }).stoppedSessions();   // the SWEEP road, the same predicate
+    const keptPaired = kept(8) && swept.some((x) => x.backendSessionId === CID(3));
+    const gHere = await A6.consumeKeptOf({ backend: 'claude', claudeSessionId: CID(3), host: 'local' }, RAN);
+    ok(J(gPaired) === J([null, null]) && keptPaired && gHere === 'cw-2-8' && !kept(8) && BRm.pairedSession(SSH) && BRm.pairedSession(DIAL) && !BRm.pairedSession({ host: 'local' }) && !BRm.pairedSession({ backend: 'claude' }),
+      '§10 (2) a session on a PAIRED machine (an ssh session\'s host, a dial session\'s host + device) consumes nothing — at a turn end OR in the sweep: the kept copy is this machine\'s socket and the address names no machine; the same conversation run here (host local) consumes it', { gPaired, gHere });
+    await A6.stoppedSessions();
+    fs.unlinkSync(path.join(WC.META, 'cw-2-7.json.stopped'));   // gone before its consume: ENOENT
+    const realUnlink = fs.unlink;
+    fs.unlink = (f, cb) => (String(f).endsWith('cw-2-6.json.stopped') ? cb(Object.assign(new Error('resource busy'), { code: 'EBUSY' })) : realUnlink(f, cb));
+    let g6 = null, g7 = null;
+    let said = [];
+    try { said = await quiet(async () => { g6 = await A6.consumeKeptOf({ backend: 'claude', claudeSessionId: CID(6) }, RAN); g7 = await A6.consumeKeptOf({ backend: 'claude', claudeSessionId: CID(5) }, RAN); }); } finally { fs.unlink = realUnlink; }
+    const next6 = await nextBoot();
+    ok(g6 === 'cw-2-6' && g7 === 'cw-2-7' && kept(6) && said.some((l) => l.includes('[kept] cw-2-6: its stopped copy could not be removed (EBUSY) — it stays on disk and the next boot reads it again')) && !said.some((l) => l.includes('cw-2-7'))
+        && next6.some((x) => x.backendSessionId === CID(6)),
+      '§10 (2) an unlink the disk refuses (EBUSY) is WARNED by name — the copy forgotten, the file left, the next boot lists it again; a copy already gone (ENOENT) says nothing', { g6, g7, said });
+    fs.rmSync(path.join(WC.META, 'cw-2-6.json.stopped'), { force: true });
     // MUTANTS RED — each plant proven first: the guard, spelled once; the consume, spelled once
     const BS2 = read('src/server/boot-restore.js'), GUARD = '  if (!turnRan(rec, session)) return null;\n';
-    const TAKE = '  keptStopped.delete(k);\n  await new Promise((r) => fs.unlink(keptFile(e.sockFile), () => r()));\n  return e.sockFile;\n';
+    const TAKE = '  keptStopped.delete(k);\n';
     ok(BS2.split(GUARD).length === 2 && BS2.split(TAKE).length === 2, '§10 (2) ANCHORS: the turn-end guard and the consume, each spelled once (the controls below plant there)');
     if (BS2.split(GUARD).length === 2 && BS2.split(TAKE).length === 2) {
       const MM = mutantCopies('dead-socket-a5a4-2', REPO);
@@ -510,7 +621,7 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
   ok(!rows9.some((x) => x.name === 'Fork never named') && rows9.some((x) => x.name === 'Its parent') && !fs.existsSync(path.join(W.META, 'cw-9-1.json.stopped')) && fs.existsSync(path.join(W.META, 'cw-9-2.json.stopped')) && notes.some((l) => /^kept copies: a pending fork's copy swept \(nothing to resume: cw-9-1\)/.test(l)) && !notes.some((l) => /^dead sockets: /.test(l)),
     '§10 (9) the NEXT boot sweeps a pending fork\'s kept copy (its own id never arrived — nothing resumes it, nothing consumed it), says so; its parent\'s copy stays', { rows: rows9.map((x) => x.name), notes });
   const BSRC = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  const SWEEP = "      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }\n";
+  const SWEEP = "      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch((err) => saidUnlinkFailure(sockFile, err)); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }\n";
   ok(BSRC.split(SWEEP).length === 2, '§10 (9) ANCHOR: the sweep, spelled once');
   try { fs.rmSync(W.d, { recursive: true, force: true }); } catch { }
 });
