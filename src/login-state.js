@@ -28,6 +28,7 @@
 // sweep exists to kill.
 const fs = require('fs');
 const path = require('path');
+const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 
 /** Every state a credential file can be in. `usable` = the CLI could make a
  *  request with it right now (or refresh into one); everything else is a
@@ -41,7 +42,6 @@ const STATES = ['live', 'expired', 'wiped', 'missing', 'unreadable'];
  *  the suite asserts the two are the same number. */
 const OAT_TTL_MS = 31536000 * 1000;
 
-function _stat(p) { try { return fs.statSync(p); } catch { return null; } }
 // mtimeMs is FRACTIONAL on ext4/NFS; a marker instant that everything else
 // compares against must be a whole millisecond or `since` never equals itself.
 const _mtime = (st) => Math.round(st.mtimeMs);
@@ -89,10 +89,15 @@ function codexState(raw, mtimeMs) {
 function loginState(credsPath, { now = Date.now(), backend = null } = {}) {
   const base = { path: credsPath || null, expiresAt: null, refreshExpiresAt: null };
   if (!credsPath) return { ...base, state: 'missing', usable: false, since: null };
-  const st = _stat(credsPath);
-  if (!st) return { ...base, state: 'missing', usable: false, since: null };
-  let raw = null;
-  try { raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8')); } catch {
+  // B-403e: the file's stat and text in the run's ONE ask (RR.facts) — the same three answers as the stat-then-read it replaces:
+  // no file ⇒ missing; a file that cannot be read or parsed ⇒ unreadable, written at its mtime; else its state
+  let fx = null, raw = null;
+  try { fx = RR.facts(credsPath); } catch (e) {
+    if (e && e.code !== 'ENOENT' && Number.isFinite(e.mtimeMs)) return { ...base, state: 'unreadable', usable: false, since: _mtime(e) };
+    return { ...base, state: 'missing', usable: false, since: null };
+  }
+  const st = { mtimeMs: fx.mtimeMs };
+  try { raw = JSON.parse(fx.text); } catch {
     return { ...base, state: 'unreadable', usable: false, since: _mtime(st) };
   }
   const be = backend || (path.basename(credsPath) === 'auth.json' ? 'codex' : 'claude');

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.409 — 2026-11-18
+
+### Fixed
+- A pool deciding where its conversations run no longer stalls the workspace: each decision reads an account's files once, not dozens of times.
+
 ## 2.369.408 — 2026-11-17
 
 ### Fixed

@@ -86,7 +86,7 @@ const OWNERS = Object.freeze([
       lead('webhook|gmail-sync|mail-frame|oauth-loopback|oauth-doors|consent-road|roster-pass|api-call-words'), name('api-call-words\\.generated'),
       name('peer-text')] },   // cure r3: the channel record's belt — it requires src/channel-record.js and runs its frame rule at every call
   { id: 'money', words: 'accounts and money: the pool, usage and readings, the spend guard, auto-resume, the delivery ladder (stash, retry, wakes)',
-    rules: [name('account-(?:pool-auto|usage-routes|models)'), but('usage-', 'walker'),
+    rules: [name('account-(?:pool-auto|usage-routes|models)|run-reads'), but('usage-', 'walker'),   // run-reads (B-403e): the pass's one asker of the mount
       lead('quota|spend|auto-resume|auto-cli|reset-credit|reading|ledger|stash|provider|model-providers|model-family|wait|park-step|record-lateness|slot-transitions|sealed-orders|window-stamp|weekly-lanes-unfold|plan-names|claude-plan-catalog|login-expiry|cost-segments|catalog-pricing|rate-limit-capture|otel-truth|stream-wall|queued-wakes|conversation-deliver|refresh-note|fixture-ledger-purge|agy-turn-usage|cli-usage-door'),
       name(`codex-(?:${CODEX_MONEY})|oat-(?:file-sync|identity|identity-model|shape-routes)`), new RegExp(`^src/harnesses/(?:${QUOTA_HARNESS})\\.js$`)] },
   { id: 'workspace', words: 'the workspace: tasks, agent groups, For you, grants, automation, artifact rows, the design and doc registries, the decision engine, voice, feedback',

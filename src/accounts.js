@@ -15,6 +15,7 @@
  * how the CLI's own trust list (customApiKeyResponses) fingerprints keys.
  */
 const fs = require('fs');
+const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
 const os = require('os');
@@ -100,6 +101,9 @@ class AccountManager {
     // shared sessions dir (unified discovery), settings stay shared. Verified vs
     // codex 0.142.5 (symlinks survive a run; rollout written to shared dir).
     this._codexSubsDir = path.join(dataDir, 'codex-subs');
+    // B-403e: the folders whose files a pool pass, a record and a broadcast ask — one ask per file per synchronous run (a
+    // write this process makes under them drops the run's answers whole)
+    for (const d of [this._subsDir, this._codexSubsDir, path.join(dataDir, 'pool-links')]) RR.watch(d);
     this._onChange = onChange || (() => {});
     this._onSessionLinks = onSessionLinks || (() => {}); // a per-session link moved (see _notifyLinks)
     this.slotTransitions = new SlotTransitions({ dataDir });
@@ -1733,7 +1737,7 @@ class AccountManager {
     if (!(row && typeof row === 'object' && row.member)) return null;
     let placed = false;
     if (sessKey == null) placed = !!this.poolCurrent(poolId);
-    else { try { fs.lstatSync(this.sessionPoolLinkPath(poolId, sessKey)); placed = true; } catch { } }
+    else { try { placed = RR.entryExists(this.sessionPoolLinkPath(poolId, sessKey)); } catch { } }
     if (placed) { if (this._clearUnplaced(poolId, sessKey)) this._save(); return null; }
     return row;
   }
@@ -1955,7 +1959,7 @@ class AccountManager {
   poolCurrent(id) {
     try {
       const a = this.get(id);
-      const t = fs.readlinkSync(this._poolLinkDir(a || { id }));
+      const t = RR.readlink(this._poolLinkDir(a || { id }));
       const sub = path.basename(t);
       return this.get(sub) ? sub : null;
     } catch { return null; }
@@ -2040,7 +2044,7 @@ class AccountManager {
     const answer = (id) => (withProvider ? (id ? { memberId: id, provider: this._providerBrief(this.memberProviderOf(id)) } : null) : id);
     if (sessKey) {
       try {
-        const sub = path.basename(fs.readlinkSync(this.sessionPoolLinkPath(poolId, sessKey)));
+        const sub = path.basename(RR.readlink(this.sessionPoolLinkPath(poolId, sessKey)));
         if (this.get(sub)) return answer(sub);
       } catch { if (this.unplacedOf(poolId, sessKey)) return answer(null); } // (q-055 M2) UNPLACED: it bills nobody — never "the default"
     }
@@ -2135,7 +2139,7 @@ class AccountManager {
    *  keep matching only the default link — reduced coverage, never a wrong
    *  re-point). */
   sessionPoolLinks(poolId) {
-    try { return fs.readdirSync(this.poolLinksDir(poolId)).map((k) => ({ sessKey: k, path: this.sessionPoolLinkPath(poolId, k) })); } catch { return []; }
+    try { return RR.readdir(this.poolLinksDir(poolId)).map((k) => ({ sessKey: k, path: this.sessionPoolLinkPath(poolId, k) })); } catch { return []; }
   }
 
   // Atomically re-point the pool at `subId`. symlink-to-temp + rename so a

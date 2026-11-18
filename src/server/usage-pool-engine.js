@@ -11,6 +11,7 @@ const os = require('os');
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const fs = require('fs');
 const path = require('path');
+const RR = require('../run-reads.js'); // B-403e: one ask per file of the mount per synchronous run (the pool pass, a record, a broadcast)
 const crypto = require('crypto');
 
 const { mk } = require('./lazy.js');
@@ -260,7 +261,7 @@ const READING_ARCHIVE = path.join(rootDir, 'data', 'archive', 'readings-window-m
 function usageIdentityGroups() {
   const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
-  try { files = fs.readdirSync(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
+  try { files = RR.readdir(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
   const roster = accounts.list().accounts || [];
   for (const fn of files) {
     try {
@@ -268,7 +269,7 @@ function usageIdentityGroups() {
       // ChatGPT login) — roster-less by design, never a "deleted account".
       const gOwner = globalKeyOwner(fn.slice(0, -5)); // a harness's own machine login ('__global_<id>__')
       const accountId = (fn === '__global__.json' || gOwner) ? null : fn.slice(0, -5);
-      const cache = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
+      const cache = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, fn)));
       if (!cache?.fetchedAt) continue;
       const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
       // A DELETED account's cache file is a zombie (nothing removes the file
@@ -411,7 +412,7 @@ async function pushSealedOrders(poolId) {
   // only onto a member of the provider it points at NOW (a conversation the owner allowed onto another provider is never
   // re-pointed back by the reflex); `linkPaths` — all an OLDER daemon reads — holds only the links of the ranked list's
   // provider, so an older daemon can never match, and never re-point, a conversation of another provider.
-  const linkRows = (() => { try { return accounts.sessionPoolLinks(poolId).map((l) => { let member = null; try { member = path.basename(fs.readlinkSync(l.path)); } catch { } return { path: l.path, member }; }); } catch { return []; } })();
+  const linkRows = (() => { try { return accounts.sessionPoolLinks(poolId).map((l) => { let member = null; try { member = path.basename(RR.readlink(l.path)); } catch { } return { path: l.path, member }; }); } catch { return []; } })();
   const pf = orderProviderFields({ ranked, links: linkRows, memberIds: members.map((m) => m.id), defaultMember: defMember, providerKeyOf: (id) => providerKey(pv(id)) });
   const orders = { poolId, linkPath: accounts.subDir(poolId), ranked: pf.ranked, currentId: accounts.poolCurrent(poolId) || null,
     // Plan C: per-session links are additional MATCH+ACT targets — the daemon
@@ -580,7 +581,7 @@ function withBareDoor(fn) { const was = _bareDoor; _bareDoor = true; try { retur
 function poolReadReading({ group = true } = {}) {
   return (id) => {
     let raw = null;
-    try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
+    try { raw = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, id + '.json'))); } catch { }
     if (group) try {
       for (const [, g] of usageIdentityGroupsCached()) {
         if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
@@ -752,7 +753,7 @@ function reserveFloorPct() {
  *  is a fact a producer STATED; an estimate may not authorize an irreversible
  *  act (P7), and it may not bar one either. */
 function readRawUsageCache(id) {
-  try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), 'utf-8')); }
+  try { return JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'))); }
   catch { return null; }
 }
 function overageMemberIds(members) {
@@ -1764,7 +1765,7 @@ function memberLoginState(id) {
     fp = accounts.subCredsPath(id);
   } catch { return null; }
   let sig = 'none';
-  try { const st = fs.statSync(fp); sig = `${st.mtimeMs}:${st.size}`; } catch { }
+  try { const st = RR.facts(fp); sig = `${st.mtimeMs}:${st.size}`; } catch { }   // B-403e: the run's ONE ask of the file (its read rides it)
   const hit = _loginStateMemo.get(id);
   if (hit && hit.sig === sig) return hit.st;
   let st = null;
@@ -2059,7 +2060,7 @@ function readingSlotFor(session, at = Date.now(), opts = {}) {
  *  open). */
 /** Does this conversation have its OWN pool link (then its own ledger rows decide for it, never the pool default)? The ONE
  *  reader of that fact for lastRepointRow and requestSlotFor (lane readings-attribution-2). */
-function sessionHasOwnLink(poolId, sid) { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } }
+function sessionHasOwnLink(poolId, sid) { try { if (!RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid))) throw new Error('none'); return true; } catch { return false; } }
 function recentRepointRow(session, at = Date.now()) { return lastRepointRow(session, { at, minAt: at - readingLag.SHADOW_MS }); }
 /** The newest re-point of THIS conversation at or before `at` and not older
  *  than `minAt`, or null. The witness eligibility test asks it with `minAt` =
@@ -3227,7 +3228,7 @@ function demoteWalledAccount(session, sigs) {
     const label = b.kind === 'scoped' ? b.scopedName : unknownWindow ? null : BUCKET_LABEL[b.kind] || b.kind;
     let until = 0;
     try {
-      const c = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, String(dest.id).replace(/[^\w.-]/g, '_') + '.json'), 'utf-8'));
+      const c = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, String(dest.id).replace(/[^\w.-]/g, '_') + '.json')));
       const bk = b.kind === 'scoped' ? (c.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === b.scopedName) : c[b.kind];
       until = (Number(bk?.resetsAt) || 0) * 1000;
     } catch { }
@@ -6115,7 +6116,7 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
     if (!memberId || typeof memberId !== 'string') { out.reason = 'no-member'; return out; }
     try { memberServeLapsed(memberId); } catch { } // a fresh reading of its own window IS the evidence that re-admits a lapsed member — at once
     let snap = null;
-    try { snap = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'), 'utf-8')); } catch { }
+    try { snap = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'))); } catch { }
     // PLACEABLE (lane cli-self-measure, acceptance r1 law G3): the member's READING did not change — its ELIGIBILITY did (the hub's own
     // check of a new Claude Code passed; it was held for minutes or hours). The freshness gate is skipped: half ① re-decides on the
     // last reading the pool already uses, half ② fires only a conversation that lands on it and only when that reading says usable —
@@ -6480,7 +6481,7 @@ usageWrite.onWindowChange(noteWindowChange);
 // never a token refresh.
 function ownReading(id) {
   let c = null;
-  try { c = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), 'utf-8')); } catch { c = null; }
+  try { c = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'))); } catch { c = null; }
   return { at: Number(c && c.fetchedAt) || 0, source: (c && c.source) || null, fp: readingFingerprint(c) };
 }
 function memberServeLapsed(id, { verified = false } = {}) {
@@ -6766,7 +6767,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
     const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
-    const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
+    const hasOwnLink = (() => { try { return RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid)); } catch { return false; } })();
     if (hasOwnLink) accounts.ensureSessionPoolLink(poolId, sid, to, { why: 'auth-failure' });
     const defaultMoved = accounts.poolCurrent(poolId) === memberId;
     if (defaultMoved) accounts.setPoolTarget(poolId, to, { why: 'auth-failure' });
@@ -6787,7 +6788,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
       if (defaultMoved) {
         for (const [sid2, s2] of activeSessions) {
           if (sid2 === sid || s2._accountId !== poolId || s2.host) continue;
-          const own = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid2)); return true; } catch { return false; } })();
+          const own = (() => { try { return RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid2)); } catch { return false; } })();
           if (!own) affected.push(pack(sid2, s2));
         }
       }
@@ -6800,7 +6801,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
 // moves exactly the ones that do not — the warm-cache hold and the default
 // switch's `affected` list ask the SAME question through this one predicate.
 function hasOwnPoolLink(poolId, sid) {
-  try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { }
+  try { if (RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid))) return true; } catch { }
   // (lane pool-provider-latents, q-055 M2) an UNPLACED conversation (its member deleted, nobody of its provider left) has
   // its own placement — none: it is never a follower the default's moves restart or carry onto another provider
   try { return !!accounts.unplacedOf(poolId, sid); } catch { return false; }
@@ -7641,12 +7642,15 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     if (!a || a.type !== 'pooled' || !a.auto) return;
     if (_wholeLedger.holds()) return; // lane ledger-dedup-law r2: the estimate + dark-host pessimism below would read half the ledger — decided again at the warm's end
     const now = nowIn != null ? nowIn : Date.now(); // the pre-fire gate's ONE clock when it asks (pool-silent-members R4)
-    // `force` is the new-member wake (onMemberReadingFresh, and its login half
-    // when the login's read did not answer) and NOTHING else:
-    // this gate throttles per-RECORD kicks, and a member's first reading is not
-    // a kick — it is the fact the whole decision was missing. The 180s dwell
-    // belt below is deliberately NOT forced, so an evaluation forced here can
-    // no more oscillate than any other one.
+    // `force` passes this gate, which throttles per-RECORD kicks only. Six callers force it, each by design (B-403e's
+    // first line, read at 2.369.408): the new-member wake (onMemberReadingFresh) and its login half
+    // (onMemberLoginSuccess); a stop outside a turn (maybePoolAutoSwitch {stop} — noteTurnEnd and noteTurnStopped: the
+    // move owed at the first stop is decided in THAT call); a released reset hold (releaseResetHold); a basis flip found by
+    // another reader (redecideOnBasis); the pre-fire gate's re-decision on its fresh probe (beforeAutoResumeFire). None is a
+    // kick: each is a fact the decision was missing. The 180s dwell belt below is deliberately NOT forced, so an
+    // evaluation forced here can no more oscillate than any other one. (The gate's stamp is set only after a default
+    // switch — `_poolAutoLast` was born a switch floor and renamed «last DECISION» in 2.266.1 with its setter left where
+    // it was; filed as its own row, not changed here.)
     if (!force && (now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
     // (lane pool-provider-latents, q-055 M2) a default a deletion left UNPLACED decides FROM its deleted member: its own
     // provider only (the default never crosses one) — and the per-session pass below still runs for every conversation

@@ -45,6 +45,7 @@ const { loginState, oatFileOf } = require('../login-expiry'); // PURE: refreshTo
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file object over the table's `files` entry
 const fs = require('fs');
+const RR = require('../run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const os = require('os');
 const path = require('path');
 
@@ -53,7 +54,7 @@ const path = require('path');
  *  identity + the access token IF currently valid (for the usage poll). */
 function parseClaudeAuth(dir) {
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(dir, '.credentials.json'), 'utf-8'));
+    const raw = JSON.parse(RR.facts(path.join(dir, '.credentials.json')).text);   // B-403e: the run's ONE ask of the file
     const o = raw?.claudeAiOauth;
     if (!o?.accessToken) return { loggedIn: false };
     const valid = !o.expiresAt || Date.now() < o.expiresAt - 60000;
@@ -62,7 +63,7 @@ function parseClaudeAuth(dir) {
     let email = o.email || o.emailAddress || null, org = null;
     if (!email) {
       try {
-        const cfg = JSON.parse(fs.readFileSync(path.join(dir, '.claude.json'), 'utf-8'));
+        const cfg = JSON.parse(RR.readText(path.join(dir, '.claude.json')));
         email = cfg?.oauthAccount?.emailAddress || null;
         org = cfg?.oauthAccount?.organizationName || null;
       } catch { }
@@ -100,7 +101,8 @@ function claudeLoginState(dir, now = Date.now()) {
   let raw = null;
   // a MISSING file is said apart from an unreadable one (lane pool-silent-members R1): `absent` lets the row's long-lived
   // token answer for it (login-expiry withOat) — never «not logged in» for a member whose token file was taken back
-  try { raw = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { return e && e.code === 'ENOENT' ? { ...loginState(null, now), absent: true } : loginState(null, now); }
+  let fx = null;   // B-403e: the file's text and its write time in the run's ONE ask
+  try { fx = RR.facts(fp); raw = JSON.parse(fx.text); } catch (e) { return e && e.code === 'ENOENT' ? { ...loginState(null, now), absent: true } : loginState(null, now); }
   // `writtenAt` = the file's last write. It is the ONLY on-disk clock that
   // says anything about when this login session STARTED, but it is NOT the
   // login time: every access-token refresh rewrites this file while
@@ -109,7 +111,7 @@ function claudeLoginState(dir, now = Date.now()) {
   // it as the session length on its own — the watch only uses it at a moment
   // it WITNESSED the deadline change (login-expiry-watch.measureLoginSpan).
   let writtenAt = null;
-  try { writtenAt = fs.statSync(fp).mtimeMs; } catch { }
+  writtenAt = fx && Number.isFinite(fx.mtimeMs) ? fx.mtimeMs : null;
   return { ...loginState(raw, now), writtenAt };
 }
 

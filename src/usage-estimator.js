@@ -22,6 +22,7 @@
 // rate per local dollar — external share is absorbed automatically as long
 // as it stays roughly stable. Pod-exclusive accounts converge to 1/full.
 const fs = require('fs');
+const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const path = require('path');
 const { resetLanded, withOwnAbsence } = require('./quota-model.js');
 const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES } = require('./cache-bounds.js'); // PURE (B-9428)
@@ -562,6 +563,7 @@ function predictCalib(prevAnchor, newBuckets, rates, costSince, spanSec = 0) {
 class UsageEstimator {
   constructor({ anchorsDir, usageHistory, resolveIdentity, priorsFor, lagS }) {
     this.dir = anchorsDir;
+    RR.watch(anchorsDir);   // B-403e: an anchor file's stat is asked once per synchronous run (each estimate asks it)
     // May be the object OR a () => object thunk — server.js constructs this
     // estimator far above usageHistory's declaration (TDZ), so it passes a
     // lazy ref; everything here only dereferences at call time.
@@ -654,7 +656,7 @@ class UsageEstimator {
   _file(key) { return path.join(this.dir, 'anchors-' + String(key).replace(/[^\w.@-]/g, '_').slice(0, 80) + '.ndjson'); }
   lines(identityKey) {
     const fp = this._file(identityKey);
-    let st; try { st = fs.statSync(fp); } catch { this._lastRead = { key: identityKey, sig: 'absent' }; if (this._meta) this._meta.delete(identityKey); return []; }
+    let st; try { st = RR.stat(fp); } catch { this._lastRead = { key: identityKey, sig: 'absent' }; if (this._meta) this._meta.delete(identityKey); return []; }
     const c = this._lineCache.get(identityKey);
     if (c && c.sig === sigOf(st)) { this._lineCache.delete(identityKey); this._lineCache.set(identityKey, c); c.usedAt = Date.now(); this._readDone(identityKey, st, c.lines, c.wins, c.endsNl); return c.lines; }
     const parse = (l) => { try { return JSON.parse(l); } catch { return null; } }, byAt = (a, b) => (a.fetchedAt || 0) - (b.fetchedAt || 0);
@@ -716,7 +718,7 @@ class UsageEstimator {
   }
   /** The identity's meta now: by its file's signature (one stat), else one read of its lines. */
   _metaOf(key) {
-    let st = null; try { st = fs.statSync(this._file(key)); } catch { }
+    let st = null; try { st = RR.stat(this._file(key)); } catch { }
     const m = this._meta && this._meta.get(key);
     if (m && m.sig === sigOf(st)) return m;
     if (!st) return null;
@@ -843,7 +845,7 @@ class UsageEstimator {
       // learn-time LIVE cost recomputation (see extractPairs) — the frozen costSince snapshots under-count fast burns whose ledger
       // events land after the sweep; the live ledger heals them retroactively (while loading: the frozen ones only)
       f.steps = _extractPairsSteps(lines, { costFn: loading ? null : this._costFn(f.ids) }, RELEARN_CHUNK_LINES);
-      if ((this.wholeReads || 0) !== w0) { let sz = 0; try { sz = fs.statSync(this._file(identityKey)).size; } catch { } this._coldSpent(sz); } // this turn's cold reads (a budget of COLD_READ_TURN_BYTES)
+      if ((this.wholeReads || 0) !== w0) { let sz = 0; try { sz = RR.stat(this._file(identityKey)).size; } catch { } this._coldSpent(sz); } // this turn's cold reads (a budget of COLD_READ_TURN_BYTES)
     };
     f.late = () => { // round 3 (small 1): a row of its accounts that ARRIVED mid-fold with a ts inside its anchors' span (the hub's own session rows bring no invalidation) — the landing is a mix of two ledger states: stale at once
       if (f.loading || f.seq0 == null || !uh || typeof uh.arrivalsFor !== 'function') return false;
@@ -936,11 +938,11 @@ class UsageEstimator {
    *  cold read, bound by the turn's budget (round 5, small: the 4 MB stop did not bind a cached identity's open after a rewrite). */
   _readsNoFile(key) {
     const e = this._lineCache.get(key); if (!e) return false;
-    let st = null; try { st = fs.statSync(this._file(key)); } catch { return false; }
+    let st = null; try { st = RR.stat(this._file(key)); } catch { return false; }
     return e.sig === sigOf(st) || (e.ino === st.ino && (e.btime || 0) === (st.birthtimeMs || 0) && st.size > e.size && e.endsNl);
   }
   /** The identity's anchor file's signature now (one stat). */
-  _sigNow(key) { let st = null; try { st = fs.statSync(this._file(key)); } catch { } return sigOf(st); }
+  _sigNow(key) { let st = null; try { st = RR.stat(this._file(key)); } catch { } return sigOf(st); }
   /** The rates of `key` landed: its version moves — an estimate memoized on an older version (or on none) is never served again. */
   _ratesLanded(key) { if (!this._ratesVer) this._ratesVer = new Map(); this._ratesVer.set(key, (this._ratesVer.get(key) || 0) + 1); this.basisGen = (this.basisGen || 0) + 1; } // basisGen (lane account-reset-door K1): the pools' basis is decided again at its next read
   _ratesVerOf(key) { return (this._ratesVer && this._ratesVer.get(key)) || 0; }
