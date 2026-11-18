@@ -15,7 +15,7 @@
 //      browser reaped by identity), every record removed. CONTROL: a record whose daemon RUNS (a process of this test, its
 //      start time recorded) is still closed by the CLI — one start — and ended. MUTANT: the gone-daemon judgment removed ⇒
 //      one start per record, RED.
-//   ③ L4 PROGRESS PERSISTS: the registry file on disk loses a PIECE per write (F5); a keeper booted over a copy taken at a
+//   ③ L4 PROGRESS PERSISTS: the registry hands on a PIECE per write (F5 — lane lg-store-writes U5b: the keeper's hand-offs to the store writer); a keeper booted over a copy taken at a
 //      write mid-walk (a restart there) retires exactly the records that were left.
 //   ⑦ F4 THE WHOLE TURN THE CONVERSATION ENDS IN: a conversation with N leases, N child handles and N records ends at run time
 //      (the tick, past the grace): the one turn that drops its leases and reaps its handles is COUNTED — in-memory acts only
@@ -185,7 +185,7 @@ console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI chi
   }
 }
 
-console.log('— ③ L4: progress persists — the file loses a PIECE per write; a restart mid-walk resumes with exactly the records left');
+console.log('— ③ L4: progress persists — the registry hands on a PIECE per write; a restart mid-walk resumes with exactly the records left');
 {
   const dataDir = registry(120);
   const mid = path.join(ROOT, 'mid'); fs.mkdirSync(mid, { recursive: true });
@@ -193,7 +193,7 @@ console.log('— ③ L4: progress persists — the file loses a PIECE per write;
   // the copy taken at a write = the bytes that write hands on (lane lg-store-writes U5b: the registry as it stands once that write lands)
   const s = await sweep(K, dataDir, { stallMs: 5, onWrite: (n, w) => { if (copied === null && w.left > 0) { copied = w.left; fs.writeFileSync(path.join(mid, 'browser-profiles.json'), w.bytes); } } });
   const lefts = s.writeLog.map((w) => w.left);
-  ok(s.removed === 120 && s.left === 0 && s.writes >= 2 && s.writes < 120 && lefts.every((x, i) => i === 0 || x < lefts[i - 1]) && lefts[lefts.length - 1] === 0, `the registry file loses a PIECE per write — ${s.writes} writes for 120 removals, the records left after each: ${lefts.join(' → ')}`, { writes: s.writes, lefts });
+  ok(s.removed === 120 && s.left === 0 && s.writes >= 2 && s.writes < 120 && lefts.every((x, i) => i === 0 || x < lefts[i - 1]) && lefts[lefts.length - 1] === 0, `the registry hands on a PIECE per write (the keeper's hand-offs to the store writer — that each lands is the writer's own suites') — ${s.writes} writes for 120 removals, the records left after each: ${lefts.join(' → ')}`, { writes: s.writes, lefts });
   const left = copied == null ? -1 : onDisk(mid);
   const r = copied == null ? { removed: -1, left: -1 } : await sweep(K, mid, { how: 'boot', stallMs: 0 });
   ok(copied > 0 && left === copied && r.removed === left && r.left === 0, `a keeper booted over the registry as it stood at a write mid-walk (a restart there): ${left} records left, and its boot sweep retires exactly those ${r.removed}`, { copied, left, removed: r.removed });

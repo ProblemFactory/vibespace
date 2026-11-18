@@ -747,6 +747,29 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   const r = await scene(SyncK, 'red');
   ok(r.writtenAtChange && !r.owed, 'U5b CONTROL: the old synchronous save ⇒ browser-profiles.json is written on the main thread at the change — the first check above would be red', { written: r.writtenAtChange });
   try { a.k5.shutdown(); r.k5.shutdown(); } catch { }
+  // the U5b cure (keeper reader 3's should): «WRITTEN BEFORE THE MOVE», behaviourally — a lineage moved through moveDirLineage is
+  // ON DISK when the call returns (nothing owed for the registry, the file names the new key, not the old); RED: the move's
+  // saveNow() back to save() (a mutant copy) leaves it owed — an in-process restart could not see that (the next keeper's load
+  // lands what the writer owes), so the leg asks the writer and the file at the move's return
+  const moveLeg = async (Kmod, tag) => {
+    const { k5 } = await scene(Kmod, 'mv-' + tag);
+    SWb.storeWriter().flushSync([path.resolve(k5.storeFile)]);   // the scene's own create landed: only the move is owed below
+    const from = path.join(ROOT, 'u5b-lineage-' + tag), to = from + '.forgotten-1';
+    k5._reg().dirHosts = { ...(k5._reg().dirHosts || {}), [from]: { hosts: ['host-u5b'], at: 1 } };
+    const mv = k5.moveDirLineage(from, to);
+    const owed = SWb.storeWriter().pending(path.resolve(k5.storeFile));
+    let disk = {}; try { disk = JSON.parse(fs.readFileSync(k5.storeFile, 'utf8')).dirHosts || {}; } catch { }
+    try { k5.shutdown(); } catch { }
+    return { mv, owed, onDiskNew: !!(mv && mv.key && disk[mv.key]), onDiskOld: !!disk[from] };
+  };
+  const mvOk = await moveLeg(K, 'moved');
+  ok(mvOk.mv && mvOk.mv.ok && mvOk.mv.moved && !mvOk.owed && mvOk.onDiskNew && !mvOk.onDiskOld, 'U5b «written before the move», behaviourally: moveDirLineage returns with the lineage ON DISK under the new key (nothing owed for the registry)', mvOk);
+  const aMv = 'if (!saveNow()) { reg.dirHosts = before;';
+  ok(kSrc.split(aMv).length === 2, 'U5b ANCHOR: the move waits on saveNow()');
+  const NoWaitK = mutantCopies('browser-pin-u5b-mv', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', kSrc.replace(aMv, 'if (!save()) { reg.dirHosts = before;'), 'move-no-wait');
+  const mvRed = await moveLeg(NoWaitK, 'red');
+  ok(mvRed.mv && mvRed.mv.moved && mvRed.owed && !mvRed.onDiskNew, 'U5b CONTROL: the move\'s saveNow() back to save() ⇒ the lineage is owed, NOT on disk when the move returns — the check above would be red', mvRed);
+  SWb.storeWriter().flushSync();
 }
 
 reapAll();

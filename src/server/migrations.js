@@ -394,6 +394,8 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // later with real deps and reads what this wrote).
         const k = K.create({ dataDir, homeDir, install: false, log: { log() { }, warn() { } } });
         const r = k.adoptDirectory({ label: 'Shared (legacy)', dir, legacy: true, owner: { kind: 'instance', id: null } });
+        // lane lg-store-writes U5b: the registry is the store writer's — on disk before the boot's next migrations read the file
+        if (typeof k.landNow === 'function' && !k.landNow()) throw Object.assign(new Error('browser-profiles.json: the adopted record is in memory and not on disk yet (the storage still holds the write) — not recorded, it runs again at the next boot'), { code: 'EVSNOTONDISK' });
         console.log('[migrate] legacy browser profile:', JSON.stringify({ dir, created: r.created, id: r.profile ? r.profile.id : null, why: r.why || null }));
       },
     },

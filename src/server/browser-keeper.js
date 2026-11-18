@@ -786,7 +786,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // caller that must have it ON DISK before what follows (a directory's lineage before its move) asks saveNow().
     try {
       const W = writerOf();
-      W.dirty(storeKey, { name: 'browser-profiles.write', rank: 0, mode: FILE_MODE, produce: () => JSON.stringify({ ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }, null, 2),
+      W.dirty(storeKey, { name: 'browser-profiles.write', rank: 0, mode: FILE_MODE, makeDir: true, produce: () => JSON.stringify({ ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }, null, 2),
         onWritten: (ok, e) => { if (!ok) log.warn?.(`[browser] could not write ${STORE_FILE}: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } });
       W.durable(storeKey).catch(() => { });
       dirty = false; return true;
@@ -796,8 +796,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  moves) — handed to the writer, then that one file's write waited for (a named wait); false: it did not land */
   function saveNow() { return save() && landNow(); }
   /** the registry's owed write waited for (a named wait): saveNow's, and a MIGRATION's reshape — the boot's next migration may
-   *  read the FILE (2026-10-grants-unify reads browser-profiles.json from disk), so a reshape is on disk before it returns */
-  function landNow() { try { const r = writerOf().flushSync([storeKey]); return !r.left.some((x) => x.file === storeKey); } catch { return false; } }
+   *  read the FILE (2026-10-grants-unify reads browser-profiles.json from disk), so a reshape is on disk before it returns.
+   *  false: it did not land — held past the writer's bound, failed, or DEFERRED by the exit (the exit's flush writes it; until
+   *  then it is not on disk, so a move waiting on it is refused) */
+  function landNow() { try { const r = writerOf().flushSync([storeKey]); return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
+  /** a MIGRATION's reshape that did not land fails that migration BY NAME (not recorded: it runs again next boot — the bytes stay
+   *  in memory and the writer retries); the boot's next migration then never reads the older file as if it were the reshape's */
+  const landedOrThrow = () => { if (!landNow()) throw Object.assign(new Error(`${STORE_FILE}: the reshape is in memory and not on disk yet (the storage still holds the write) — not recorded, it runs again at the next boot`), { code: 'EVSNOTONDISK' }); };
   function notify() {
     try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); }
     // lane S2: every registry change (a start, a failure, a pin, a removal, a label) may move a conversation's
@@ -8545,7 +8550,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _cliNow: () => cliNow() /* B-7a30: the launch's bounded stamp (the gate places a stall in it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
-    reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); landNow(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save — ON DISK before it returns (lane lg-store-writes U5b: the boot's next migration may read the file; one that did not land is the runner's landStores' to say)
+    reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); landedOrThrow(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save — ON DISK before it returns, else it THROWS by name (lane lg-store-writes U5b: the boot's next migration may read the file)
     diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk, // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
@@ -8610,6 +8615,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _proxyCredHeld: (id) => proxyCreds.has(String(id || '')), /* a suite's seam: whether the forwarders' login entry holds this profile (a yes/no — no secret crosses) */ _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
     floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
+    landNow, // lane lg-store-writes U5b: a migration's PRIVATE keeper (the legacy adopt) lands its write before the next migration reads the file
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 
     // lane browser-resume (§3.9): the relay's tab list of a conversation's own browser, the CDP read at a stop, the store

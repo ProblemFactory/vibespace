@@ -38,6 +38,9 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
+// lane lg-store-writes U5b (B-0248): browser-profiles.json is the STORE WRITER's — a direct read or plant of the FILE (or a walk of
+// the data folder) lands what the writer owes first; each runner points this at ITS tree's writer (a mutant tree has its own)
+let landU5b = () => { };
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // lane chrome-157 (the round-32 take-over): NO PLANTED VALUE IN A FAILURE TEXT. Every value this file types is `Xx6!y1`-shaped (or the
@@ -1127,6 +1130,7 @@ export async function runR32DialogLeg({ mods, repoDir, ok }) {
 export async function runR32LoginTable({ repoDir, ok: okRaw }) {
   const ok = scrubbedOk(okRaw);
   const req = createRequire(path.join(repoDir, 'package.json'));
+  landU5b = () => { try { req('./src/store-writer.js').storeWriter().flushSync(); } catch { } };
   const express = req('express');
   const { WebSocket, WebSocketServer } = req('ws');
   const BP = req('./src/browser-profiles.js');
@@ -1303,7 +1307,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       await post('/api/agent/browser/fill-vault', { profile: PID_DROP, target: '#pw', spec: 'r32stash.example.test#alice/password', targetId: tidDrop });
 
       // (a) Check disk JSON directly: 0 login identity fields, no `guards` key, both fenced + guard-only merged into `fences`
-      const diskRaw = JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8'));
+      const diskRaw = JSON.parse((landU5b(), fs).readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8'));
       const diskPid = diskRaw?.loginFences?.[PID];
       const allowedFenceKeys = new Set(['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey', 'hold', 'refs']);   // (the one record kind: its document's id, its hold's word, opaque refs into the names list — no login identity in a row)
       const diskZeroIdentity = Boolean(diskPid)
@@ -1942,7 +1946,7 @@ async function cureVaultReads(mods) {
     // the record names the login whose values the scrub list masks (a value under the mask's floor is never named: one is written,
     // so the restore's re-hydration really reads)
     const recFile = path.join(s.dataDir, 'browser-profiles.json');
-    const doc = JSON.parse(fs.readFileSync(recFile, 'utf8'));
+    const doc = JSON.parse((landU5b(), fs).readFileSync(recFile, 'utf8'));
     doc.loginFences[s.pid].scrubs = [{ name: 'web-login:https://cvlt.example.test#dana', at: s.clk.t - 1000 }];
     fs.writeFileSync(recFile, JSON.stringify(doc));
     const calls = [];
@@ -2036,11 +2040,11 @@ async function produceHolds(s, h, word, tabs) {
 const storeHolds = (s) => {   // (every file of the scene's data folder, grepped for every spelling of the value)
   const hits = [];
   const walkDir = (d) => { for (const n of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, n.name); if (n.isDirectory()) walkDir(p); else { let t = ''; try { t = fs.readFileSync(p, 'latin1'); } catch { continue; } if (valueSpellings(CURE_PW).some((v) => t.includes(v))) hits.push(path.relative(s.dataDir, p)); } } };
-  try { walkDir(s.dataDir); } catch { /* */ }
+  landU5b(); try { walkDir(s.dataDir); } catch { /* */ }
   return hits;
 };
 async function observeHold(s, h, t, exp, word) {
-  const rec = (() => { try { return JSON.parse(fs.readFileSync(path.join(s.dataDir, 'browser-profiles.json'), 'utf8')).loginFences?.[s.pid] || { fences: [] }; } catch { return { fences: [] }; } })();
+  const rec = (() => { try { return JSON.parse((landU5b(), fs).readFileSync(path.join(s.dataDir, 'browser-profiles.json'), 'utf8')).loginFences?.[s.pid] || { fences: [] }; } catch { return { fences: [] }; } })();
   const key = `login-hold:${s.pid}:${t}|`;
   const noticeOpen = s.notices.some((n) => n.key === key && !n.resolved);
   if (exp.state === 'gone') return { ok: !rec.fences.some((f) => f.targetId === t) && !noticeOpen, rowGone: !rec.fences.some((f) => f.targetId === t), noticeOpen };
@@ -2446,6 +2450,7 @@ export async function runR32CureLegs({ mods, ok, only = null }) {
 export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   const ok = scrubbedOk(okRaw);
   const req = createRequire(path.join(repoDir, 'package.json'));
+  landU5b = () => { try { req('./src/store-writer.js').storeWriter().flushSync(); } catch { } };
   const express = req('express');
   const { WebSocket, WebSocketServer } = req('ws');
   const LF = req('./src/server/browser-login-fill.js');
