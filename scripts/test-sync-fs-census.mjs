@@ -170,7 +170,7 @@ const ROWS = [
   ["src/routes/sessions.js", "setup > findWorkflowRunDir", 1, "local-only", "base = ~/.claude/projects/<dir> (the CLI's transcript tree)"],
   ["src/routes/sessions.js", "setup > journalAttempts", 1, "local-only", "runDir from findWorkflowRunDir — under ~/.claude/projects"],
   ["src/routes/sessions.js", "setup > route:GET /api/workflow", 5, "local-only", "fp / runDir from findWorkflowSnapshot / findWorkflowRunDir — under ~/.claude/projects (runId regex-checked)"],
-  ["src/routes/sessions.js", "setup > _runSessionsSweep", 1, "local-only", "BUFFERS_DIR = <checkout>/data/session-buffers (server.js ctx)"],
+  ["src/routes/sessions.js", "setup > _sweepOnce", 1, "local-only", "BUFFERS_DIR = <checkout>/data/session-buffers (server.js ctx) — the sweep's -cure: the sweep is _sweepOnce, _runSessionsSweep only counts its failures"],
   ["src/routes/window-targets.js", "*", 1, "local-only", "r.file = the engine's screenshot under data/window-shots/ (window-targets-engine screenshot())"],
   ["src/run-reads.js", "*", 9, "local-only", "B-403e: THE ONE asker of the pool pass, a record and a broadcast — paths under the folders its owners watch (accounts: <dataDir>/subs, codex-subs, pool-links; the pool engine: <checkout>/data/usage-cache; the estimator: <rootDir>/data/usage-anchors), any other path passed through as asked before — one ask per file per synchronous run; the watch's realpath of each folder once; a failed descriptor stat's path stat (cure +1)"],
   ["src/safe-fs-worker.js", "contextFiles > walk", 2, "via-safefs", "the SafeFs worker's contextFiles op (lane hub-fuse-sync-guard): the Task Group context walk of a row on a storage mount, run in the pool's worker thread"],

@@ -2929,6 +2929,7 @@ export default {
   "Searching {host}…": "正在搜索 {host}…",
   "Server error {code}": "服务器错误 {code}",
   "Server unreachable — nothing was changed": "服务器不可达——未做任何更改",
+  "Session list is out of date — the hub could not rebuild it.": "会话列表已过期——服务器未能重建它。",
   "Session list may be out of date — the server is not responding.": "会话列表可能已过期——服务器无响应。",
   "Session states may have changed since this scan.": "自本次扫描以来，会话状态可能已发生变化。",
   "Setting goal…": "正在设置目标…",

@@ -1132,7 +1132,7 @@ class Sidebar {
       // would skip the reschedule below (poll chain dead for the page's
       // lifetime) and, folded into one catch, would also be miscounted as a
       // server failure and freeze-mark a list that actually arrived fine.
-      let sessions = null, pollErr = '', warmthAnswer = null;
+      let sessions = null, pollErr = '', warmthAnswer = null, hubStale = null;
       try {
         const res = await fetch('/api/sessions');
         const data = await res.json().catch(() => null);
@@ -1150,6 +1150,8 @@ class Sidebar {
           // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth rides THIS answer — the facts, the hub's clock and
           // this device's clock at the moment it arrived (the only device-clock reading the bands ever use)
           warmthAnswer = (data.warmth && typeof data.warmth === 'object' && data.serverNow > 0) ? { map: data.warmth, serverNow: data.serverNow, receivedAt: Date.now() } : null;
+          // the sweep's -cure (B): the hub SERVES its last list while its rebuilds keep failing — it says so (since when, why)
+          hubStale = (data.listStale && typeof data.listStale === 'object' && data.listStale.since > 0) ? { ...data.listStale, at: Date.now() - (Number(data.listStale.ageMs) || 0) } : null;   // its age by the HUB's reading (this device's clock may be off)
         }
       } catch (e) { pollErr = e?.message || 'server unreachable'; }
       try {
@@ -1158,7 +1160,12 @@ class Sidebar {
           this._systemSessions = sessions;
           this._lastPollOkAt = Date.now();
           this._pollFails = 0; this._pollError = '';
+          const staleKey = (x) => (x ? String(x.since) : ''), staleMoved = staleKey(this._hubStale) !== staleKey(hubStale);   // r3 (S2): its presence + since, not its count
+          this._hubStalePolls = hubStale ? (this._hubStalePolls || 0) + 1 : 0;
+          this._hubStale = hubStale;
           this._mergeAndRender();
+          const drawsLine = this._activeTab !== 'mounts' && !PANEL_TABS.includes(this._activeTab);   // the Remote tab / a rail panel draws no list line
+          if (drawsLine && (staleMoved || (hubStale && this._hubStalePolls % 12 === 0))) this._render(); // the hub's own line drawn / cleared even when the list did not change (its digest skips the render); its age moves every 12 polls
           if (wasStale) this._render(); // drop the staleness row now that data is fresh
         } else {
           this._pollFails = (this._pollFails || 0) + 1;
@@ -1175,6 +1182,18 @@ class Sidebar {
     }
     clearTimeout(this._pollTimer);
     this._pollTimer = setTimeout(() => this._poll(), document.hidden ? 30000 : 5000);
+  }
+
+  /** The stale line's door (the sweep's -cure): the hub rebuilds the list NOW (past its 4.5 s cache), then the poll redraws. */
+  async _retryRebuild() {
+    if (this._retrying) return;   // r3 (S1): one press at a time — the line's button says «Retrying…» until it answers
+    this._retrying = true; this._render();
+    const ac = typeof AbortController === 'function' ? new AbortController() : null;
+    const t = ac ? setTimeout(() => ac.abort(), 60000) : null;   // a wedged rebuild never holds the connection past a minute
+    try { await fetch('/api/sessions?rebuild=1', ac ? { signal: ac.signal } : undefined); } catch { }
+    finally { if (t) clearTimeout(t); this._retrying = false; this._render(); }   // r4: the door says «Retry» again at once, answered or not
+    clearTimeout(this._pollTimer);
+    this._poll();
   }
 
   _merge() {
@@ -1412,6 +1431,43 @@ class Sidebar {
     this.listEl.appendChild(row);
   }
 
+  /** THE FROZEN LIST SAYS SO — both lines: the poll failing (the server not answering) and the hub's own (its rebuilds
+   *  failed twice in a row: the sweep's -cure (B)). Drawn again by EVERY render that wipes the list (sidebar-workbench,
+   *  sidebar-column — the Sessions tab on a desktop and on a phone; r3: the line the cure added was wiped there in the same
+   *  render), as _appendStatusHint is. */
+  _appendStaleHint() {
+    if (!this.listEl) return;
+    // Frozen-list disclosure: _poll KEEPS the last good snapshot when the
+    // discovery sweep fails, so without this row the sidebar would render an
+    // out-of-date list that looks exactly like a live one (静默失败零容忍).
+    if ((this._pollFails || 0) >= SESSION_POLL_STALE_AFTER) {
+      const row = document.createElement('div');
+      row.className = 'empty-hint sidebar-poll-stale';
+      const label = document.createElement('span');
+      label.textContent = tr('Session list may be out of date — the server is not responding.') + ' ';
+      row.append(label, hostStateChip('error', {
+        text: this._lastPollOkAt ? tr('as of {ago}', { ago: agoText(this._lastPollOkAt) }) : tr('unreachable'),
+        title: this._pollError || '',
+      }));
+      this.listEl.appendChild(row);
+    } else if (this._hubStale) {
+      // the sweep's -cure (B): the server answers, but with the LAST list it could build — its rebuilds failed twice in a row
+      // (a worker that died, wedged or throws): new conversations would never appear, ended ones stay live. One line, its
+      // age, why (the chip's title), and its door: Retry asks the hub to rebuild now
+      const row = document.createElement('div');
+      row.className = 'empty-hint sidebar-poll-stale sidebar-hub-stale';
+      const label = document.createElement('span');
+      label.textContent = tr('Session list is out of date — the hub could not rebuild it.') + ' ';
+      const retry = document.createElement('button');
+      retry.type = 'button'; retry.className = 'status-quick-tab'; retry.textContent = this._retrying ? tr('Retrying…') : tr('Retry');
+      // one press at a time (r3, S1: a press holds one of the browser's few connections to the hub) — the door stays LIVE and says
+      // so («Retrying…»); a press while one runs is answered by the one running (_retryRebuild returns)
+      retry.onclick = () => this._retryRebuild();
+      row.append(label, hostStateChip('error', { text: tr('as of {ago}', { ago: agoText(this._hubStale.at) }), title: String(this._hubStale.why || '') }), ' ', retry);
+      this.listEl.appendChild(row);
+    }
+  }
+
   /** THE DOOR'S SEARCH SAYS WHAT THE FILTER HIDES (B-54d9 N5 — the layout-stopped-window r4 review: a status filter the person
    *  narrowed hid a conversation of the tile's name without a word): while the «Open the session list» search stands, the matches
    *  the person's status filter leaves out are counted in one line, and the ARCHIVED ones in their own (the default filter hides
@@ -1523,20 +1579,7 @@ class Sidebar {
     // of the mounts panel (real report: "remote 功能直接坏了").
     if (this._activeTab === 'mounts') { this._renderMounts(); return; }
 
-    // Frozen-list disclosure: _poll KEEPS the last good snapshot when the
-    // discovery sweep fails, so without this row the sidebar would render an
-    // out-of-date list that looks exactly like a live one (静默失败零容忍).
-    if ((this._pollFails || 0) >= SESSION_POLL_STALE_AFTER) {
-      const row = document.createElement('div');
-      row.className = 'empty-hint sidebar-poll-stale';
-      const label = document.createElement('span');
-      label.textContent = tr('Session list may be out of date — the server is not responding.') + ' ';
-      row.append(label, hostStateChip('error', {
-        text: this._lastPollOkAt ? tr('as of {ago}', { ago: agoText(this._lastPollOkAt) }) : tr('unreachable'),
-        title: this._pollError || '',
-      }));
-      this.listEl.appendChild(row);
-    }
+    this._appendStaleHint();
 
     // Agent-kind disclosure (2026-09-24) — also drawn by the workbench, which
     // re-wipes the list (sidebar-workbench.js _renderWorkbench)

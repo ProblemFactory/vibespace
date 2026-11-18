@@ -26,17 +26,27 @@ import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skips = 0;
+// the sweep's -cure (D): a leg that cannot run here is COUNTED as a skip, never a pass (the hosted mirror is a depth-one clone)
+const skip = (n) => { skips++; console.log('  - SKIP ' + n); };
 const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped?`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 
 // a HOME of N transcripts in the CLI's own form (the boot shape's records: cwd + user/assistant lines), set BEFORE the
 // stores load (session-store reads ~ at require) and before the pool's worker is built (it copies this env)
 const HOME = scratchHome('sessions-sweep'); process.env.HOME = HOME;
 const PROJ = path.join(HOME, '.claude/projects'), N = 120, T0 = Date.UTC(2026, 10, 1);
+// the sweep's -cure (A): a fake tmux on PATH (its panes from a file ⑧ writes) — set before any worker copies the env
+const FAKE_BIN = path.join(HOME, 'bin'), PANES = path.join(HOME, 'tmux-panes.txt');
+fs.mkdirSync(FAKE_BIN, { recursive: true }); fs.writeFileSync(PANES, '');
+fs.writeFileSync(path.join(FAKE_BIN, 'tmux'), `#!/bin/sh\ncat "${PANES}"\n`, { mode: 0o755 });
+process.env.PATH = FAKE_BIN + path.delimiter + (process.env.PATH || '');
 // the symlinked cwd lives OUTSIDE /tmp/vs-*: discovery's fixture guard ignores a project folder a suite's scratch cwd names
 const REAL = fs.mkdtempSync(path.join(os.tmpdir(), 'blsweep-real-')), LINK = REAL.replace('blsweep-real-', 'blsweep-link-');
 try { fs.rmSync(LINK, { force: true, recursive: true }); } catch { }
 fs.symlinkSync(REAL, LINK);
+// the two fixture folders live outside the scratch helper's /tmp/vs-* (discovery's fixture guard ignores a project folder a
+// scratch cwd names); this suite still ENDS them at exit, a throw or a red included
+process.on('exit', () => { try { fs.rmSync(LINK, { force: true }); fs.rmSync(REAL, { recursive: true, force: true }); } catch { } });
 let seq = 0;
 const hex = (n) => { let s = ''; while (s.length < n) s += ((++seq * 2654435761) >>> 0).toString(16).padStart(8, '0'); return s.slice(0, n); };
 const uuid = () => `${hex(8)}-${hex(4)}-4${hex(3)}-8${hex(3)}-${hex(12)}`;
@@ -147,13 +157,14 @@ console.log('③c the seam merges only the ASKED key\'s kept copies: one row bui
   ok(JSON.stringify(wide3.r) === '{"accountId":"acc-asked"}' && wide3.n >= K, `RED CONTROL (every kept copy merged, the train's seam over the sweep's few rows): the same answer, ${wide3.n} realpaths on this thread — one per copy`, wide3);
 }
 console.log('④ the route\'s wiring');
-const routeOf = (src) => ({ pool: /out = await sweepPool\(\)\.call\('sessionsSweep', payload, \{ timeoutMs: SWEEP_TIMEOUT_MS \}\);/.test(src), others: /if \(h\.store\.discoverInSweep === true && !offLoop\) offLoop = h\.id;\n\s*else others\[h\.id\] = await h\.store\.discover\(\{ activeSessions, webuiPids, devSnap \}\);/.test(src), noRows: !/sessions\.push\(withSessionKey\(entry\)\)/.test(src) });
+const routeOf = (src) => ({ pool: /out = await sweepPool\(\)\.call\('sessionsSweep', payload, \{ timeoutMs: _sweepTest\.timeoutMs \|\| SWEEP_TIMEOUT_MS, waitMs: _sessionsCache \? SWEEP_QUEUE_MS : FIRST_QUEUE_MS \}\);/.test(src), others: /if \(h\.store\.discoverInSweep === true && !offLoop\) offLoop = h\.id;\n\s*else others\[h\.id\] = await h\.store\.discover\(\{ activeSessions, webuiPids, devSnap \}\);/.test(src), noRows: !/sessions\.push\(withSessionKey\(entry\)\)/.test(src) });
 const now = routeOf(fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'));
 ok(now.pool && now.others && now.noRows, 'the route sends the sweep to its pool; every harness but claude discovers here; no row is built here', now);
 let base = '';
 try { base = execFileSync('git', ['-C', REPO, 'show', 'b06f36e90:src/routes/sessions.js'], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { base = ''; }
 const was = routeOf(base);
-ok(!base || (!was.pool && !was.noRows), `control (the release's route, b06f36e90): ${base ? `pool ${was.pool}, rows built on the loop ${!was.noRows}` : 'SKIP — the release b06f36e90 is not in this clone'} ⇒ RED`);
+if (!base) skip('control (the release\'s route, b06f36e90): the release is not in this clone (a depth-one mirror) — ⑧ compares with the release\'s road everywhere');
+else ok(!was.pool && !was.noRows, `control (the release's route, b06f36e90): pool ${was.pool}, rows built on the loop ${!was.noRows} ⇒ RED`);
 
 console.log('⑤ the route itself: its GET answer builds nothing here');
 const routeCtx = () => ({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => { }, createSessionMessages: () => ({}), BUFFERS_DIR: scratch('sessions-sweep-buffers'), PERMISSION_MODES: [], execFileSync, hosts: { device: async () => null }, accounts: null, sessionAuth: () => ({}), serverSetting: () => undefined });
@@ -199,7 +210,7 @@ console.log('⑤b the resume seam over the sweep\'s rows (B-a5a4 follow-up, met)
   ok(was5.r && was5.r.accountId === 'acc-then', `RED CONTROL (the sweep's MERGED rows handed to the seam): the older copy's account wins (${was5.r && was5.r.accountId}) — B-a5a4's own mutant answer`, was5);
 }
 console.log('⑥ today\'s rows: the release\'s route answers the same bytes');
-if (!base) ok(true, 'SKIP — the release b06f36e90 is not in this clone (⑥ needs its route)');
+if (!base) skip('⑥ the release b06f36e90 is not in this clone (its route is needed) — ⑧ needs no other commit');
 else {
   const M6 = mutantCopies('sessions-sweep-release', REPO);
   const Rold = M6.load('src/routes/sessions.js', base, 'release');
@@ -214,7 +225,238 @@ ok(Array.isArray(some) && some.length === nowRows.length && some.every((r) => Ob
 const st = R.sweepStats();
 ok(st && st.road === 'worker' && st.rows === nowRows.length && Number.isFinite(st.ms), `the sweep's own cost is kept: ${st && st.ms} ms for ${st && st.rows} rows, by the ${st && st.road}`);
 
+console.log('⑪ the meta memo: a second warm sweep reads zero transcript heads');
+{
+  const heads = [], HS = ['openSync', 'readFileSync'], realH = {};
+  const counting = async (fn) => { heads.length = 0; for (const k of HS) { realH[k] = fs[k]; fs[k] = function (p, ...a) { if (typeof p === 'string' && p.startsWith(PROJ) && p.endsWith('.jsonl')) heads.push(p); return realH[k].call(this, p, ...a); }; } try { await fn(); } finally { for (const k of HS) fs[k] = realH[k]; } return heads.length; };
+  await SW.sweepInThread(payload);   // this thread's memo (① ran it here once already)
+  const warm = await counting(() => SW.sweepInThread(payload));
+  const one = path.join(PROJ, '-srv-work-p4', sids[4] + '.jsonl'); fs.appendFileSync(one, JSON.stringify({ type: 'user', sessionId: sids[4], uuid: uuid(), timestamp: new Date(T0 + 4 * 6e4 + 9).toISOString(), cwd: '/srv/work/p4', message: { role: 'user', content: [{ type: 'text', text: 'one more' }] } }) + '\n');
+  const at4 = new Date(T0 + 4 * 6e4 + 30); fs.utimesSync(one, at4, at4);
+  const moved = await counting(() => SW.sweepInThread(payload));
+  ok(warm === 0 && moved >= 1 && heads.every((p) => p === one), `a second warm sweep over ${N} transcripts reads ${warm} transcript heads (the memo, keyed by path + mtime + size); one transcript that grew: ${moved} read, only that one (the counter counts)`);
+}
+
+console.log('⑧ the sweep\'s -cure (A): LIVE ROWS — a live, a tmux and an external conversation; the route\'s projection = the full live table');
+const { spawn } = await import('node:child_process');
+const CI = require(path.join(REPO, 'src/cli-identity.js'));
+const kids = ['live', 'tmux', 'ext'].map(() => spawn('sleep', ['300'], { stdio: 'ignore' }));
+process.on('exit', () => { for (const k of kids) { try { k.kill('SIGKILL'); } catch { } } });
+for (let i = 0; i < 300 && kids.some((k) => !CI.procStartTicks(k.pid)); i++) await new Promise((r) => setTimeout(r, 10));
+const [kL, kT, kE] = kids.map((k) => k.pid);
+const LIVE_CWD = '/srv/work/live', TMUX_CWD = '/srv/work/tmux', EXT_CWD = '/srv/work/ext', T8 = T0 + 200 * 6e4;
+const tr8 = (cwd, at) => { const dir = path.join(PROJ, cwd.replace(/[/._]/g, '-')), sid = uuid(); fs.mkdirSync(dir, { recursive: true }); const f = path.join(dir, sid + '.jsonl'); fs.writeFileSync(f, JSON.stringify({ type: 'user', sessionId: sid, uuid: uuid(), timestamp: new Date(at).toISOString(), cwd, message: { role: 'user', content: [{ type: 'text', text: 'hello ' + cwd }] } }) + '\n'); fs.utimesSync(f, new Date(at), new Date(at)); return sid; };
+const sidL = tr8(LIVE_CWD, T8), sidX = tr8(LIVE_CWD, T8 + 6e4), sidT = tr8(TMUX_CWD, T8 + 2 * 6e4), sidE = tr8(EXT_CWD, T8 + 3 * 6e4), sidK = tr8('/srv/work/kept', T8 - 6e4);
+const LOCKS = path.join(HOME, '.claude', 'sessions'); fs.mkdirSync(LOCKS, { recursive: true });
+const lock = (pid, sessionId, cwd) => fs.writeFileSync(path.join(LOCKS, `${pid}.json`), JSON.stringify({ pid, sessionId, cwd, procStart: CI.procStartTicks(pid), startedAt: T8 }));
+lock(kL, uuid(), LIVE_CWD);   // the live conversation's lock names ANOTHER id: only the projection (claude id + child pid) places it
+lock(kT, sidT, TMUX_CWD); lock(kE, sidE, EXT_CWD);
+fs.writeFileSync(PANES, `${kT}||work:0.1\n`);
+const liveTable = new Map([['sess-live', { backend: 'claude', claudeSessionId: sidL, backendSessionId: sidL, _childPid: kL, cwd: LIVE_CWD, name: 'a live one' }]]);
+const keptMeta = [{ backend: 'claude', backendSessionId: sidK, sessionId: sidK, status: 'stopped', name: 'kept by its name', stopReason: 'hub-restart', stoppedAt: T8, kept: true }];
+const routeSrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+const RL = mutantCopies('sessions-sweep-live', REPO).load('src/routes/sessions.js', routeSrc, 'live');   // a fresh route (its own pool, its own cache)
+RL.setup({ ...routeCtx(), activeSessions: liveTable, webuiPids: new Set([kL]), stoppedSessions: async () => keptMeta });
+let sent = null; { const p8 = RL.sweepPool(), c8 = p8.call.bind(p8); p8.call = (op, x, o) => { if (op === 'sessionsSweep') sent = x; return c8(op, x, o); }; }
+const ans8 = await getOf(RL)();
+const SSf = mutantCopies('sessions-sweep-walk', REPO).load('src/session-store.js', fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), 'fresh');   // its own memos (the pane map's 4 s)
+const fullWalk = (table) => SSf.discoverClaudeSessions({ activeSessions: table, webuiPids: new Set([kL]) });
+const bytesOf = (entries, x = sent, Asm = A) => Asm.answerBytes(Asm.assembleSweep({ perHarness: x.order.map((id) => ({ id, entries: id === x.offLoop ? entries : (x.others[id] || []) })), signInPids: x.signInPids, kept: x.kept })).buf;
+const inline8 = sent ? bytesOf(await fullWalk(liveTable)) : Buffer.alloc(0);
+const rows8 = ans8 && ans8.code === 200 ? JSON.parse(ans8.bytes.toString()).sessions : [], row8 = (sid) => rows8.find((r) => r.sessionId === sid) || {};
+ok(sent && sent.active.length === 1 && Object.keys(sent.active[0][1]).sort().join() === '_childPid,claudeSessionId' && Buffer.compare(ans8.bytes, inline8) === 0,
+  `the route's answer (the worker, over the PROJECTED live table: [id, {claudeSessionId, _childPid}]) = the walk over the FULL live table on this thread (the release's road), byte for byte (${ans8 && ans8.bytes.length} B)`);
+ok(row8(sidL).status === 'live' && row8(sidT).status === 'tmux' && row8(sidT).tmuxTarget === 'work:0.1' && row8(sidE).status === 'external' && row8(sidE).pid === kE && row8(sidX).status === 'stopped' && row8(sidK).name === 'kept by its name',
+  'the rows: LIVE (placed by the projection alone — its lock names another id), TMUX (its pane), EXTERNAL (its pid), the other transcript of the live folder stopped, a kept stopped row by its kept name', { L: row8(sidL).status, T: row8(sidT).status, E: row8(sidE).status, X: row8(sidX).status, K: row8(sidK).name });
+{
+  const drop = (k) => new Map([...liveTable].map(([id, s]) => { const o = { ...s }; delete o[k]; return [id, o]; }));
+  const noId = bytesOf(await fullWalk(drop('claudeSessionId'))), noPid = bytesOf(await fullWalk(drop('_childPid')));
+  const noKept = bytesOf(await fullWalk(liveTable), { ...sent, kept: [] });
+  const asm = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8'), SORT = 'sessions.sort((a, b) => b.startedAt - a.startedAt);';
+  const Arev = mutantCopies('sessions-sweep-rev', REPO).load('src/sessions-assemble.js', asm.replace(SORT, 'sessions.sort((a, b) => a.startedAt - b.startedAt);'), 'reversed');
+  const rev = bytesOf(await fullWalk(liveTable), sent, Arev);
+  const diff = [noId, noPid, noKept, rev].map((b) => Buffer.compare(b, ans8.bytes) !== 0);
+  ok(asm.split(SORT).length === 2 && diff.every(Boolean), `RED CONTROLS against the route's bytes — the projection without the claude id ${diff[0]}, without the child pid ${diff[1]}; the kept stopped rows dropped ${diff[2]}; the sort reversed ${diff[3]} ⇒ each differs`);
+}
+RL.closeSweepPool();
+
+console.log('⑨ the sweep\'s -cure (B): the failure roads are driven, and a list that stopped refreshing is SAID');
+const getQ = (mod) => (q = {}) => new Promise((resolve, reject) => {
+  const layer = mod.router.stack.find((l) => l.route && l.route.path === '/api/sessions');
+  let code = 200;
+  const res = { status: (c) => { code = c; return res; }, type: () => res, set: () => res, json: (b) => resolve({ code, bytes: Buffer.from(JSON.stringify(b)) }), send: (b) => resolve({ code, bytes: Buffer.isBuffer(b) ? b : Buffer.from(String(b)) }) };
+  Promise.resolve(layer.route.stack[0].handle({ query: q }, res)).catch(reject);
+});
+const RF = mutantCopies('sessions-sweep-fail', REPO).load('src/routes/sessions.js', routeSrc, 'fail');
+RF.setup(routeCtx());
+const gf = getQ(RF), parse = (a) => { try { return JSON.parse(a.bytes.toString()); } catch { return {}; } };
+const sameList = (a, b) => JSON.stringify(parse(a).sessions) === JSON.stringify(parse(b).sessions);
+const stub = (name, body) => { const f = path.join(HOME, `${name}-worker.js`); fs.writeFileSync(f, body); return f; };
+const HUNG = stub('hung', "const { parentPort } = require('worker_threads'); parentPort.on('message', () => { });");
+const THROWS = stub('throws', "const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (m && m.op) parentPort.postMessage({ id: m.id, ok: false, error: { message: 'the value could not be cloned', code: 'DataCloneError' } }); });");
+const settle = async (fn) => { for (let k = 0; k < 500 && !fn(); k++) await new Promise((r) => setTimeout(r, 10)); return fn(); };
+RF._sweepTestSeam({ pollWaitMs: 150 });   // a poll's bounded wait, short here (the product's POLL_WAIT_MS is said in ⑩)
+const good = await gf();
+// a sweep that THROWS every time (a value that cannot be cloned)
+RF._sweepTestSeam({ workerFile: THROWS });
+const th1 = await gf({ rebuild: '1' }), th2 = await gf({ rebuild: '1' });
+ok(good.code === 200 && sameList(th1, good) && sameList(th2, good) && !parse(th1).listStale && parse(th2).listStale && parse(th2).listStale.fails === 2 && parse(th2).listStale.why === 'DataCloneError' && parse(th2).listStale.since === RF.sweepFails().builtAt,
+  `a sweep that throws every time: the last list stands; the FIRST failure says nothing, from the SECOND every answer carries listStale (fails ${parse(th2).listStale && parse(th2).listStale.fails}, why ${parse(th2).listStale && parse(th2).listStale.why}, since the list's own build)`);
+RF._sweepTestSeam({ workerFile: null });
+const back = await gf({ rebuild: '1' });
+ok(back.code === 200 && !parse(back).listStale && RF.sweepFails().fails === 0, 'the first good sweep clears it');
+// the worker WEDGED (it never answers): its deadline ends the sweep, the list stands
+RF._sweepTestSeam({ workerFile: HUNG, timeoutMs: 200 });
+await gf({ rebuild: '1' }); await settle(() => RF.sweepFails().fails >= 1);
+const w2 = await gf({ rebuild: '1' }); await settle(() => RF.sweepFails().fails >= 2);
+const w3 = await gf();
+ok(sameList(w2, good) && RF.sweepFails().fails >= 2 && parse(w3).listStale && /timed out|not responding/i.test(parse(w3).listStale.why), `a wedged worker: each sweep ends at its deadline, the list stands, and it is said (${parse(w3).listStale && parse(w3).listStale.why})`);
+// the worker KILLED mid-sweep, and the pool CLOSED mid-sweep: each fails that sweep; the next pool / respawn rebuilds
+const midSweep = async (end) => {
+  RF._sweepTestSeam({ workerFile: HUNG, timeoutMs: 60000 });
+  const f0 = RF.sweepFails().fails;
+  const p = gf({ rebuild: '1' });
+  const inside = await settle(() => { const w = RF.sweepPool()._workers[0]; return w && w.inflight && w.inflight.size === 1; });
+  end();
+  await p; await settle(() => RF.sweepFails().fails === f0 + 1);
+  const failed = RF.sweepFails().fails === f0 + 1;
+  RF._sweepTestSeam({ workerFile: null, timeoutMs: null });
+  const at0 = (RF.sweepStats() || {}).at || 0;
+  await gf({ rebuild: '1' }); await settle(() => ((RF.sweepStats() || {}).at || 0) > at0);
+  return { inside, failed, rebuilt: ((RF.sweepStats() || {}).at || 0) > at0 && RF.sweepFails().fails === 0 };
+};
+const killed = await midSweep(() => RF.sweepPool()._workers[0].worker.terminate());
+const closed = await midSweep(() => RF.closeSweepPool());
+ok(killed.inside && killed.failed && killed.rebuilt && closed.inside && closed.failed && closed.rebuilt, 'the worker killed mid-sweep, the pool closed mid-sweep: that sweep fails (counted), the list stands; the respawned worker / the next pool rebuilds it and the count clears', { killed, closed });
+{
+  // the sweep's -cure r3 (its read r2, M1): the line DRAWN, not grepped — the REAL Sidebar prototype over a minimal DOM stand-in
+  // (test-codex-subagents' shape), through the two renders of the Sessions tab that WIPE the list: the workbench (a desktop)
+  // and the column (a phone). RED: the r2 renderers — the line _renderInner drew was wiped by them in the same render
+  const WORDS = 'Session list is out of date — the hub could not rebuild it.';
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(zh.includes(`"${WORDS}":`) && ja.includes(`"${WORDS}":`) && zh.split('"Retrying…":').length === 2 && ja.split('"Retrying…":').length === 2, 'its words in zh and ja (the line; its door while a press runs — the upload row\'s «Retrying…», ONE key in each)');
+  const mkEl = (tag) => {
+    const el = { tagName: tag, children: [], className: '', textContent: '', title: '', type: '', disabled: false, style: { setProperty() { } }, dataset: {},
+      classList: { add: (c) => { el.className = (el.className + ' ' + c).trim(); }, remove() { }, toggle() { }, contains: (c) => el.className.split(/\s+/).includes(c) },
+      setAttribute() { }, append(...c) { el.children.push(...c); }, appendChild(c) { el.children.push(c); return c; }, querySelector: () => null, closest: () => null, remove() { } };
+    Object.defineProperty(el, 'innerHTML', { get: () => el._html || '', set: (v) => { el._html = v; el.children = []; } });
+    return el;
+  };
+  const { Sidebar } = await import(path.join(REPO, 'src/lib/sidebar.js'));   // BEFORE the stand-in: utils.js binds document listeners at load
+  const hadDoc = globalThis.document;
+  globalThis.document = { createElement: mkEl, getElementById: () => null, querySelector: () => null, addEventListener() { }, removeEventListener() { } };
+  try {
+    const lineOf = (el) => el.children.find((c) => c && /sidebar-hub-stale/.test(c.className || '')) || null;
+    const render = (self, mode) => { try { if (mode === 'column') self._renderColumnList([]); else self._renderWorkbench([]); return null; } catch (e) { return String((e && e.message) || e).slice(0, 120); } };
+    const drive = (proto, mode) => {
+      const self = Object.create(proto);
+      Object.assign(self, { listEl: mkEl('div'), _pollFails: 0, _activeTab: 'folders', _regularMode: mode === 'column', _manageMode: false, app: {},
+        _hubStale: { since: Date.now() - 60000, ageMs: 60000, fails: 2, why: 'sweep-pool-down', at: Date.now() - 60000 },
+        _appendKindHint() { }, _appendStatusHint() { }, _renderServiceHintRows() { }, _sortSessions() { }, _buildSessionCard: () => mkEl('div'), isStarred: () => 0 });
+      const threw = render(self, mode), line = lineOf(self.listEl);
+      self._retrying = true; render(self, mode);
+      const btn = (lineOf(self.listEl)?.children || []).find((c) => c && c.tagName === 'button') || null;
+      self._retrying = false; self._hubStale = null; render(self, mode);   // a clean answer
+      return { drawn: !!line, retrying: !!btn && btn.disabled !== true && btn.textContent === 'Retrying…', cleared: !lineOf(self.listEl), threw };   // r6: live, saying so (test-control-says-why)
+    };
+    const wb = drive(Sidebar.prototype, 'workbench'), col = drive(Sidebar.prototype, 'column');
+    ok(wb.drawn && wb.cleared && col.drawn && col.cleared && wb.retrying && col.retrying,
+      'the Sessions tab DRAWS it: the workbench render (a desktop) and the column render (a phone) each wipe the list and the hub\'s line stands after the wipe; its Retry says «Retrying…» while a press runs (the door stays live); a clean answer clears it', { wb, col });
+    const MCs = mutantCopies('sweep-cure-stale-line', REPO), CALL = /\n      this\._appendStaleHint\?\.\(\);[^\n]*/;
+    const wbSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-workbench.js'), 'utf8'), colSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-column.js'), 'utf8');
+    const wbM = await import(MCs.write('src/lib/sidebar-workbench.js', wbSrc.replace(CALL, ''), 'r2-workbench', { esm: true }));
+    const colM = await import(MCs.write('src/lib/sidebar-column.js', colSrc.replace(CALL, ''), 'r2-column', { esm: true }));
+    class R2 extends Sidebar { }
+    wbM.installSidebarWorkbench(R2); colM.installSidebarColumn(R2);
+    const rwb = drive(R2.prototype, 'workbench'), rcol = drive(R2.prototype, 'column');
+    ok(CALL.test(wbSrc) && CALL.test(colSrc) && !rwb.drawn && !rcol.drawn, 'RED CONTROL (the r2 renderers): the line is gone after the wipe — the person on the Sessions tab saw a frozen list with no word', { rwb, rcol });
+    // r4 (its third read, M2): THE POLL'S ROAD — the REAL _poll over a stand-in fetch: the hub's answer → the line's forced render
+    // (the list's digest skips a render: a stale answer is the same list); four answers — clean, stale, stale with one more
+    // failure (the same start), clean again. RED: a copy of the page without the forced render
+    const FORCED = 'if (drawsLine && (staleMoved || (hubStale && this._hubStalePolls % 12 === 0))) this._render();';
+    const sbSrc4 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
+    const pollDrive = async (Proto) => {
+      const self = Object.create(Proto.prototype); let renders = 0;
+      Object.assign(self, { listEl: mkEl('div'), _activeTab: 'folders', app: {}, _mergeAndRender() { }, _render() { renders++; } });
+      const since = Date.now() - 9000, says = [{ sessions: [] }, { sessions: [], listStale: { since, ageMs: 9000, fails: 2, why: 'sweep-pool-down' } }, { sessions: [], listStale: { since, ageMs: 14000, fails: 3, why: 'sweep-pool-down' } }, { sessions: [] }];
+      const hadFetch = globalThis.fetch, out = [];
+      try {
+        for (const d of says) { globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => d }); const r0 = renders; await self._poll(); clearTimeout(self._pollTimer); out.push(renders - r0); }
+      } finally { globalThis.fetch = hadFetch; clearTimeout(self._pollTimer); }
+      return out.join(',');
+    };
+    const pNow = await pollDrive(Sidebar);
+    const { Sidebar: SbNoForce } = await import(MCs.write('src/lib/sidebar.js', sbSrc4.replace(FORCED, '/* no forced render */'), 'r4-no-forced', { esm: true }));
+    const pWas = await pollDrive(SbNoForce);
+    ok(sbSrc4.split(FORCED).length === 2 && pNow === '0,1,0,1' && pWas === '0,0,0,0',
+      `THE POLL'S ROAD: the hub's stale answer forces the line's render when it appears and when it goes, not when only its count moves (${pNow}); RED the page without the forced render (${pWas})`);
+    // r5 (its fourth read's shoulds): the three page cures that had no leg — the phone's task-group view draws the line; the line's
+    // Retry click runs the press («Retrying…» while it runs) and the door redraws when it SETTLES. RED: the r4-less copies
+    const STALE = () => ({ since: Date.now() - 60000, ageMs: 60000, fails: 2, why: 'sweep-pool-down', at: Date.now() - 60000 });
+    const tasksLine = (Proto) => { const self = Object.create(Proto.prototype); Object.assign(self, { listEl: mkEl('div'), _hubStale: STALE(), _pollFails: 0, app: {} }); try { self._renderMobileTaskDetail('A group', [], []); } catch { } return !!lineOf(self.listEl); };
+    const press = async (Proto) => {
+      const self = Object.create(Proto.prototype), seen = []; let fetched = '';
+      Object.assign(self, { listEl: mkEl('div'), _hubStale: STALE(), _pollFails: 0, app: {}, _render() { seen.push(self._retrying ? 'retrying' : 'retry'); }, _poll() { } });
+      self._appendStaleHint();
+      const btn = (lineOf(self.listEl)?.children || []).find((c) => c && c.tagName === 'button');
+      const hadFetch = globalThis.fetch;
+      globalThis.fetch = async (u) => { fetched = String(u); return { ok: true, status: 200, json: async () => ({}) }; };
+      try { if (btn) await btn.onclick(); } finally { globalThis.fetch = hadFetch; clearTimeout(self._pollTimer); }
+      return { fetched, renders: seen.join(','), after: !!self._retrying };
+    };
+    const tNow = tasksLine(Sidebar), pNow5 = await press(Sidebar);
+    const tkSrc = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), TK = /\n    this\._appendStaleHint\?\.\(\);[^\n]*/;
+    const tkM = await import(MCs.write('src/lib/sidebar-tasks.js', tkSrc.replace(TK, ''), 'r5-tasks', { esm: true }));
+    class T4 extends Sidebar { }
+    tkM.installSidebarTasks(T4);
+    const SETTLE = 'this._retrying = false; this._render(); }';
+    const { Sidebar: SbNoSettle } = await import(MCs.write('src/lib/sidebar.js', sbSrc4.replace(SETTLE, 'this._retrying = false; }'), 'r5-no-settle', { esm: true }));
+    const tWas = tasksLine(T4), pWas5 = await press(SbNoSettle);
+    ok(tNow && pNow5.fetched === '/api/sessions?rebuild=1' && pNow5.renders === 'retrying,retry' && !pNow5.after,
+      `the phone's task-group view draws the line; the line's Retry click asks the hub to rebuild now (${pNow5.fetched}) — «Retrying…» while it runs, the door redrawn when it settles (${pNow5.renders})`, { tNow, pNow5 });
+    ok(TK.test(tkSrc) && sbSrc4.split(SETTLE).length === 2 && !tWas && pWas5.renders === 'retrying', `RED CONTROLS: the task-group view without its call (line ${tWas}); the press without its redraw on settling (${pWas5.renders}: «Retrying…» stays)`, { tWas, pWas5 });
+  } finally { if (hadDoc === undefined) delete globalThis.document; else globalThis.document = hadDoc; }
+  const sb = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
+  ok(/const staleKey = \(x\) => \(x \? String\(x\.since\) : ''\)/.test(sb) && sb.includes("await fetch('/api/sessions?rebuild=1', ac ? { signal: ac.signal } : undefined)"),
+    'the page redraws the line on its presence and start, not on every failed count (its read r2, S2); Retry asks the hub to rebuild now (?rebuild=1), one press at a time, never holding the connection past a minute (S1)');
+}
+
+console.log('⑩ the sweep\'s -cure (C): nobody waits out a long sweep with a list in hand; a lookup never kills a sweep');
+{
+  const DONE = path.join(HOME, 'busy-done');
+  // a BUSY sweep (its thread blocked 1.2 s, as a cold walk is — Atomics.wait: blocked, no core spun) — then the real sweep; every other op answered at once
+  const BUSY = stub('busy', `const { parentPort } = require('worker_threads'); const fs = require('fs'); const S = require(${JSON.stringify(path.join(REPO, 'src/sessions-sweep.js'))});
+const ops = { sessionsSweep: (p) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); return S.sweepInThread(p); }, sessionsLookup: (p) => S.lookupInThread(p), sessionsRows: (p) => S.rowsInThread(p) };
+parentPort.on('message', (m) => { if (!m || !m.op || !ops[m.op]) return; Promise.resolve(ops[m.op](m.payload)).then((r) => { if (m.op === 'sessionsSweep') fs.writeFileSync(${JSON.stringify(DONE)}, 'done'); parentPort.postMessage({ id: m.id, ok: true, result: r }); }, (e) => parentPort.postMessage({ id: m.id, ok: false, error: { message: e.message, code: e.code } })); });`);
+  const drive = async (mod, getter) => {
+    try { fs.rmSync(DONE, { force: true }); } catch { }
+    mod._sweepTestSeam({ workerFile: BUSY, timeoutMs: null, lookupMs: 150, pollWaitMs: 200, cacheTtlMs: 0 });
+    const pre = await getter({ rebuild: '1' });   // the busy worker's first sweep: the list in hand
+    try { fs.rmSync(DONE, { force: true }); } catch { }
+    const at0 = (mod.sweepStats() || {}).at || 0, f0 = mod.sweepFails().fails;
+    const a1 = await getter();                                   // a poll past the cache (cacheTtlMs 0): a sweep starts
+    const doneAtAnswer = fs.existsSync(DONE);
+    await settle(() => { const w = mod.sweepPool()._workers[0]; return w && w.inflight && w.inflight.size === 1; });   // the sweep IN the worker before the lookup (r2's S4)
+    const look = await mod.sessionRow(`claude:${sids[3]}`);      // a lookup while the sweep runs
+    await settle(() => fs.existsSync(DONE) || mod.sweepFails().fails > f0);
+    await settle(() => ((mod.sweepStats() || {}).at || 0) > at0 || mod.sweepFails().fails > f0);
+    return { a1, pre, doneAtAnswer, look, finished: fs.existsSync(DONE) && ((mod.sweepStats() || {}).at || 0) > at0, failed: mod.sweepFails().fails > f0 };
+  };
+  const now = await drive(RF, gf);
+  ok(now.a1.code === 200 && sameList(now.a1, now.pre) && !now.doneAtAnswer && now.look === null && now.finished && !now.failed,
+    `with a list in hand a poll got it while a busy 1.2 s sweep still ran (its wait bounded); a lookup behind that sweep ended ITSELF (null) — the sweep finished in the same worker, never killed (the product's bound: POLL_WAIT_MS ${RF.POLL_WAIT_MS} ms, said in the route)`, { look: now.look, finished: now.finished, failed: now.failed });
+  // RED: the release's pool form (no serial lane) — the lookup is sent INTO the busy worker and its deadline terminates it, the sweep with it
+  const SERIAL = "serial: { busy: { message: 'the session list is being rebuilt — try again in a moment', code: 'sweep_busy' } }, ";
+  const RR = mutantCopies('sessions-sweep-noserial', REPO).load('src/routes/sessions.js', routeSrc.replace(SERIAL, ''), 'noserial');
+  RR.setup(routeCtx());
+  const was = await drive(RR, getQ(RR));
+  ok(routeSrc.split(SERIAL).length === 2 && was.failed && !was.finished, `RED CONTROL — the release's pool form (no serial lane): the lookup's 150 ms deadline terminated the worker under the sweep (failed ${was.failed}, finished ${was.finished})`);
+  RR.closeSweepPool();
+  RF._sweepTestSeam({ workerFile: null, lookupMs: null, pollWaitMs: null, cacheTtlMs: null });
+}
+RF.closeSweepPool();
+
 R.closeSweepPool();
 try { fs.rmSync(HOME, { recursive: true, force: true }); fs.rmSync(LINK, { force: true }); fs.rmSync(REAL, { recursive: true, force: true }); } catch { }
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed${skips ? `, ${skips} SKIPPED` : ''})` : `\nALL PASS (${pass})${skips ? ` · ${skips} SKIPPED (counted, never a pass)` : ''}`);
 process.exit(fail ? 1 : 0);

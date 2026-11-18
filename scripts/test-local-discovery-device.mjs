@@ -139,7 +139,7 @@ sessionsMod.setup(ctx);
 // drive the router's GET /api/sessions handler directly
 const call = () => new Promise((resolve, reject) => {
   const layer = sessionsMod.router.stack.find((l) => l.route?.path === '/api/sessions');
-  const req = { query: {} };
+  const req = { query: { rebuild: '1' } };   // the sweep's -cure: every call asks for a FRESH sweep and waits for it (a list in hand is no longer answered after a bounded wait for these parity legs)
   // B-891e: the route sends the sweep's bytes (res.type + res.set + res.send) — read back as JSON; a status() then send is an error
   let code = 200;
   const res = { json: (b) => resolve(b), status: (c) => { code = c; return res; }, type: () => res, set: () => res, send: (b) => { if (code !== 200) return reject(new Error(String(b))); try { resolve(JSON.parse(Buffer.isBuffer(b) ? b.toString('utf8') : String(b))); } catch (e) { reject(e); } } };
@@ -155,9 +155,16 @@ flag = false;
 const local = await call();
 await ttl();
 flag = true;
+const snapMetrics = []; const hadMetric = global.__vsMetric;
+global.__vsMetric = (name, v) => { if (name === 'local-disc-snap-ms') snapMetrics.push(v); try { hadMetric?.(name, v); } catch { } };   // r4: set only when the device's snapshot was taken
 const t0 = Date.now();
 const dev = await call();
+const devUsed = snapMetrics.length;
 const devMs = Date.now() - t0;
+// the sweep's -cure r3 (its read r2, M2): a FRESH sweep built THIS answer — with a list in hand any failed rebuild serves the
+// last list (the local one), so without this the parity below compared the local list with itself
+const fresh = (since) => sessionsMod.sweepFails().fails === 0 && ((sessionsMod.sweepStats() || {}).at || 0) >= since;
+const devFresh = fresh(t0);
 await ttl();
 
 ok(Array.isArray(local.sessions) && local.sessions.length >= 3, `local scan sees the 3 transcripts (${local.sessions?.length})`);
@@ -165,11 +172,29 @@ const L = strip(local.sessions), D = strip(dev.sessions);
 const parity = JSON.stringify(L) === JSON.stringify(D);
 ok(parity, `PARITY: device-facts sweep === local sweep (${L.length} sessions)`);
 if (!parity) console.log('LOCAL:', JSON.stringify(L), '\nDEVICE:', JSON.stringify(D));
-ok(devMs > 0, `the device call actually ran (not served from the sweep cache): ${devMs}ms`);
+ok(devFresh && devUsed >= 1, `the device-facts answer is a FRESH sweep of its own (0 failed sweeps, its stats stamped after the call began) built FROM the device's snapshot (${devUsed} taken) — never the local list served again (${devMs}ms)`);
 const s1 = D.find((x) => x.id === SID1);
 ok(s1 && s1.status !== 'stopped' && s1.pid === child.pid, `the live lock claims its transcript through device facts (${s1?.status})`);
 ok(devMs < 4000, `device-facts sweep latency ${devMs}ms — under the sweep's own cache TTL`);
 
+// RED CONTROL (r3): a device whose snapshot holds a null transcript entry passes the route's shape check and throws in the sweep —
+// the gate (fresh AND the same list) must turn red, where the r2 gate (parity + devMs > 0) stayed green on the local list
+{
+  const real = ctx.hosts.device;
+  ctx.hosts.device = async () => ({ discoverySnapshot: async () => ({ jsonls: [null], locks: [] }) });
+  const t1 = Date.now();
+  const bad = await call();
+  const badFresh = fresh(t1), badSame = JSON.stringify(strip(bad.sessions || [])) === JSON.stringify(L);
+  ctx.hosts.device = real;
+  ok(!badFresh, `RED CONTROL — a device snapshot holding a null entry (it passes the route's shape check, then throws in the sweep): the FRESH half turns the gate red (fresh ${badFresh}, the same list ${badSame}; r2's gate saw only the local list: green)`);
+  ctx.hosts.device = async () => ({ discoverySnapshot: async () => { throw new Error('the daemon could not take its snapshot (a stand-in)'); } });
+  const n0 = snapMetrics.length, t2 = Date.now(); await ttl(); const lost = await call();
+  ctx.hosts.device = real;
+  ok(snapMetrics.length === n0 && fresh(t2) && JSON.stringify(strip(lost.sessions || [])) === JSON.stringify(L), `RED CONTROL — a device whose snapshot fails falls back to the local scan (fresh, the same list): only the USED half (${snapMetrics.length - n0} snapshots taken) turns the gate red`);
+  await ttl();
+}
+
+global.__vsMetric = hadMetric;
 // fallback: kill the daemon → flag-on sweep still answers (local fallback)
 try { await dm.stop?.(); } catch { }
 const fb = await call();

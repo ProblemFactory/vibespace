@@ -44,6 +44,7 @@ export function installSidebarColumn(Sidebar) {
       this.listEl.innerHTML = '';
       this._appendKindHint?.();
       this._appendStatusHint?.(); // what the person's status filter hides of the tile door's search (B-54d9 N5)
+      this._appendStaleHint?.(); // a frozen list says so (the sweep's -cure r3: this wipe erased the line on the phone's Sessions tab)
       this._renderServiceHintRows?.(sessions);
       const isLive = (s) => s.status === 'live' || s.status === 'tmux' || s.status === 'external' || s.status === 'remote-running';
       const live = sessions.filter(isLive);

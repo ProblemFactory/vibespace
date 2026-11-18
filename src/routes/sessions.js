@@ -554,6 +554,10 @@ function setup(ctx) {
   let _sessionsCache = null;
   let _sessionsCacheAt = 0;
   let _sweepInFlight = null; // concurrent polls share ONE async sweep (2.242.0)
+  // the sweep's -cure (B): rebuilds that failed IN A ROW while a list is served — from SWEEP_STALE_SAY_AFTER on, every answer
+  // says so (listStale) and the page draws one line with its door; the first good sweep clears it
+  let _sweepFails = 0, _sweepFailWhy = '', _sessionsBuiltAt = 0;
+  _sweepFailsOf = () => ({ fails: _sweepFails, why: _sweepFailWhy, builtAt: _sessionsBuiltAt });
 
   // The sweep body — ASYNC since 2.242.0. It ran execFileSync end-to-end and a
   // live V8 profile on the busiest fleet pod (22 live sessions, heavy claude
@@ -564,7 +568,17 @@ function setup(ctx) {
   // as long as a client was connected — the "everything is slow while I work,
   // fine when I come back later" class. Subprocess calls are now async and
   // PARALLEL (wall = slowest single command, loop never blocks).
+  // the sweep's -cure r2 (its read's M2): ANY failure of a rebuild while a list is in hand — the pool call, another harness's
+  // discover, the kept metas — is counted and the last list stands; with none yet it throws (a 500, as before)
   const _runSessionsSweep = async () => {
+    try { return await _sweepOnce(); }
+    catch (e) {
+      if (!_sessionsCache) throw e;
+      _sweepFails++; _sweepFailWhy = String((e && (e.code || e.message)) || 'error').slice(0, 120);
+      sweepRoadSaid('stale', _sessionsCache.count, e); _sessionsCacheAt = Date.now(); return _sessionsCache;
+    }
+  };
+  const _sweepOnce = async () => {
     // B-47e2 (R5's local leg, FLAG-GATED default OFF: agentd.localDiscovery):
     // the FS-scan FACTS (lock files, project-dir listing, tail ids) come from
     // device #0's discovery snapshot — computed in a daemon CHILD process, so
@@ -609,7 +623,7 @@ function setup(ctx) {
     // B-891e (the sweep held the loop 1.35 s per poll at 12 543 transcripts): every harness but claude discovers HERE, as
     // before; claude's walk, the merge (the registry's order — the first to name a key wins), the kept metas, the sort and
     // the answer's bytes run in the «sessions-sweep» worker (src/sessions-sweep.js), which gets only what this thread
-    // alone knows. NO ROW OF CLAUDE'S IS BUILT ON THIS THREAD — the pool down ⇒ SafeFs's inline fallback, the old road.
+    // alone knows. NO ROW OF CLAUDE'S IS BUILT ON THIS THREAD while a worker answers — with no worker and no list yet, the old road ONCE (sweepInThread, said).
     const order = [], others = {}, bound = [];
     let offLoop = null;   // the ONE harness whose discover the worker runs (its descriptor's store.discoverInSweep — claude's)
     for (const h of listHarnesses()) {
@@ -628,11 +642,13 @@ function setup(ctx) {
       facts: { roots: SP.snapshot(), blocked: DOOR.snapshot() },
     };
     let out;
-    try { out = await sweepPool().call('sessionsSweep', payload, { timeoutMs: SWEEP_TIMEOUT_MS }); }
+    // a FIRST sweep (no list yet) waits for the serial lane's turn briefly — a worker not running yet means the old road once
+    try { out = await sweepPool().call('sessionsSweep', payload, { timeoutMs: _sweepTest.timeoutMs || SWEEP_TIMEOUT_MS, waitMs: _sessionsCache ? SWEEP_QUEUE_MS : FIRST_QUEUE_MS }); }
     catch (e) {
-      // the worker down (its respawn backing off) or the sweep past its deadline: THE LAST ANSWER STANDS, said — never a
-      // walk on the loop while there is one; with none yet (a first sweep), the old road ONCE, on this thread, said
-      if (_sessionsCache) { sweepRoadSaid('stale', _sessionsCache.count, e); _sessionsCacheAt = Date.now(); return _sessionsCache; }
+      // the worker down (its respawn backing off), wedged past its deadline, throwing, or its pool closed: THE LAST ANSWER
+      // STANDS (the outer catch counts it — the page is told from the second failure in a row: listStale) — never a walk on
+      // the loop while there is one; with none yet (a first sweep), the old road ONCE, on this thread, said
+      if (_sessionsCache) throw e;
       out = await require('../sessions-sweep.js').sweepInThread(payload);
     }
     const buf = Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf.buffer, out.buf.byteOffset, out.buf.byteLength);
@@ -640,7 +656,8 @@ function setup(ctx) {
     _sweepStats = { ms: out.ms, rows: out.count, at: Date.now(), road: out.onLoop ? 'loop' : 'worker' };
     try { global.__vsMetric?.('sessions-sweep-ms', out.ms); } catch { }
     _sessionsCache = { buf, etag: out.etag, count: out.count };
-    _sessionsCacheAt = Date.now();
+    _sessionsCacheAt = _sessionsBuiltAt = Date.now();
+    _sweepFails = 0; _sweepFailWhy = '';
     _heldRows = out.held; // heldAccountOf's rows (ws-create's resume seam; heldAccountOfNow's fallback when the kept copies cannot be read in time): the stopped rows that name an account or an account-bound harness
     // B-a5a4 follow-up r2/r3 met (the seam merges the kept copies NOW into the last sweep's stopped rows AS DISCOVERED): the sweep
     // hands the HELD keys' rows as discovered (out.heldDisc) — every other key's discovered row names no account (a merge only
@@ -653,6 +670,7 @@ function setup(ctx) {
   // page's request — a page that reloads into a fresh server finds it cached (or joins it in flight)
   const discoveryPaused = () => { try { return !!(ctx.paused && ctx.paused('discovery')); } catch { return false; } };
   _keptRead = () => ({ rows: _sessionsCache ? _sessionsCache.sessions : null, paused: discoveryPaused() });
+  _pausedOf = discoveryPaused;
   _warmSweep = () => {
     if (!_sweepInFlight) _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
     return _sweepInFlight;
@@ -666,12 +684,29 @@ function setup(ctx) {
       // lane cache-warmth-tiles: each answer carries the live conversations' prompt-cache facts, built per answer
       // (the sweep's 4.5 s cache never ages them) and only while the person's switch is on — off costs nothing
       // B-360d rank 9: the sweep's answer is SERIALISED ONCE (sendSessions) — every page polling it shares the bytes
-      const answer = (body) => sendSessions(res, body, serverSetting?.('desktop.cacheWarmth') === true ? warmthDiff(activeSessions, ctx.cacheFactsOf) : null);
-      if (_sessionsCache && (Date.now() - _sessionsCacheAt < 4500 || discoveryPaused())) return answer(_sessionsCache);
+      // the sweep's -cure (B): a list served while its rebuilds keep failing SAYS SO (listStale: since when, how many in a row,
+      // why) from the second failure on — the page draws one line with its Retry door
+      const answer = (body) => {
+        const warm = serverSetting?.('desktop.cacheWarmth') === true ? warmthDiff(activeSessions, ctx.cacheFactsOf) : null;
+        const stale = _sweepFails >= SWEEP_STALE_SAY_AFTER && _sessionsBuiltAt ? { listStale: { since: _sessionsBuiltAt, ageMs: Math.max(0, Date.now() - _sessionsBuiltAt), fails: _sweepFails, why: _sweepFailWhy } } : null;   // ageMs: the hub's own reading (a device's clock may be off)
+        return sendSessions(res, body, warm || stale ? { ...(warm || {}), ...(stale || {}) } : null);
+      };
+      // the page's Retry (?rebuild=1): past the 4.5 s cache, now — and it WAITS for that sweep (its answer is the fresh list or
+      // the failure counted); a discovery pause still holds it (a wedged mount is never walked for a Retry)
+      const rebuild = req.query && req.query.rebuild === '1';
+      if (_sessionsCache && (discoveryPaused() || (!rebuild && Date.now() - _sessionsCacheAt < (_sweepTest.cacheTtlMs ?? 4500)))) return answer(_sessionsCache);
       // coalesce: N clients missing the cache together share ONE sweep — the
       // sync handler serialized them for free; the async one must do it itself
       if (!_sweepInFlight) {
         _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
+      }
+      // the sweep's -cure (C): WITH A LIST IN HAND a poll waits at most POLL_WAIT_MS for the fresh one, then gets the list it
+      // has — never a long sweep's whole wait (a cold walk, a wedged worker: up to SWEEP_TIMEOUT_MS)
+      if (_sessionsCache && !rebuild) {
+        let t = null;
+        await Promise.race([_sweepInFlight.catch(() => null), new Promise((r) => { t = setTimeout(r, _sweepTest.pollWaitMs || POLL_WAIT_MS); })]);
+        clearTimeout(t);
+        return answer(_sessionsCache);
       }
       answer(await _sweepInFlight);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -771,8 +806,19 @@ function sendSessions(res, cache, extra = null) {
 /** THE SWEEP'S POOL (B-891e): src/sessions-sweep-worker.js on a pool of one — a sweep never waits behind a transcript
  *  read, nor holds one, and the device daemon's bundle never carries it; a deadline + respawn. */
 const SWEEP_TIMEOUT_MS = 5 * 60e3;   // a cold walk of 12 543 transcripts on a slow home is CPU and reads, not a wedged mount
-let _sweepPool = null, _sweepRoad = 'worker', _sweepStats = null, _warmthTag = 0;
-/** THE FALLBACK IS SAID (主开发 00:18Z): the pool down ⇒ SafeFs runs the sweep inline, on the main loop — the old road
+// the sweep's -cure: the pool is a SERIAL lane (src/safe-fs.js — a call waits for its turn in main on its own clock and runs on
+// another), so a lookup that waited too long ENDS ITSELF and never terminates the worker under a sweep
+const SWEEP_QUEUE_MS = 30e3;         // a sweep's wait for its turn (behind a lookup; the worker's respawn)
+const FIRST_QUEUE_MS = 3e3;          // …a FIRST sweep's (no list yet): a worker that is not there by then ⇒ the old road once
+const LOOKUP_MS = 20e3;              // a lookup's own run, and its wait behind a sweep — then it ends (null), the sweep goes on
+// (C) a poll WITH A LIST IN HAND waits this long for the fresh one: a warm sweep at the owner's shape (12 543 transcripts) took
+// 1.35–1.39 s (the claim's measure) — 2 s lets it through with margin and stays well under the pages' 5 s poll, so a poll
+// never laps the next one
+const POLL_WAIT_MS = 2000;
+const SWEEP_STALE_SAY_AFTER = 2;     // (B) failed rebuilds in a row before every answer says the list is out of date
+const _sweepTest = {};               // the suite's seam: a stand-in worker script (a wedged / throwing / slow one), the sweep's deadline, a lookup's clock, a poll's wait, the cache's 4.5 s
+let _sweepPool = null, _sweepRoad = 'worker', _sweepStats = null, _warmthTag = 0, _sweepFailsOf = null;
+/** THE FALLBACK IS SAID (主开发 00:18Z): no worker and no list yet ⇒ the route runs the sweep ONCE on the main loop (sweepInThread) — the old road
  *  (about a second a poll at the owner's 12 543 transcripts). Said ONCE per outage where the owner looks (the journal,
  *  the telemetry event Diagnostics counts; a hold it makes is named by its own frames in the [loop-hold] line), and its
  *  end said once too — never a silent return to the loop. */
@@ -791,15 +837,18 @@ function sweepPool() {
   if (_sweepPool) return _sweepPool;
   const { SafeFs } = require('../safe-fs');
   const { runOp } = require('../sessions-sweep-worker');
-  // no worker alive ⇒ a SWEEP is refused here (the route serves the last list, or runs the old road once when it has none) —
-  // never SafeFs's inline walk on the loop at every poll of a respawn's backoff; a lookup of the kept rows runs inline
+  // the serial lane never runs a job inline (a job with no live worker waits for one, then fails at its own wait) — this is
+  // the belt: a SWEEP is refused here (the route serves the last list, or runs the old road once when it has none), never
+  // SafeFs's inline walk on the loop at every poll of a respawn's backoff
   const inlineRun = (op, payload) => { if (op === 'sessionsSweep') throw Object.assign(new Error('the sessions sweep worker is not running'), { code: 'sweep-pool-down' }); return runOp(op, payload); };
-  _sweepPool = new SafeFs({ workerPath: path.join(__dirname, '..', 'sessions-sweep-worker.js'), name: 'sessions-sweep', poolSize: 1, inlineRun, timeouts: { default: SWEEP_TIMEOUT_MS } });
+  _sweepPool = new SafeFs({ workerPath: path.join(__dirname, '..', 'sessions-sweep-worker.js'), name: 'sessions-sweep', poolSize: 1, inlineRun, timeouts: { default: SWEEP_TIMEOUT_MS },
+    serial: { busy: { message: 'the session list is being rebuilt — try again in a moment', code: 'sweep_busy' } }, ...(_sweepTest.workerFile ? { workerPath: _sweepTest.workerFile } : {}) });
   return _sweepPool;
 }
 
 let _warmSweep = null;
 let _keptRead = null;   // unit what-it-may-use (cure r1, SHOULD a): the rows the last sweep KEPT, and whether discovery is paused — read, never a new sweep
+let _pausedOf = null;   // the route's discoveryPaused (a wedged mount: no sweep starts)
 let _heldRows = null;
 let _sweptStopped = null;   // B-a5a4 follow-up r2: the last sweep's stopped rows AS DISCOVERED (heldAccountOfNow merges the kept copies into them)
 /** B-a5a4 follow-up r3: the sweep's merge AND what it hands the seam — the stopped rows AS DISCOVERED (copies), then the kept
@@ -824,8 +873,15 @@ const ACCT_GONE_BOUND = 'the account this conversation lived in was deleted — 
 async function askRows(op, payload) {
   if (!_warmSweep) return null;
   try {
-    let r = await sweepPool().call(op, payload, { timeoutMs: 20000 });
-    if (r && r.none) { await _warmSweep(); r = await sweepPool().call(op, payload, { timeoutMs: 20000 }); }
+    const lk = _sweepTest.lookupMs || LOOKUP_MS;
+    let r = await sweepPool().call(op, payload, { timeoutMs: lk, waitMs: lk });   // ends ITSELF: never the sweep's worker
+    if (r && r.none) {   // a worker that holds no sweep yet (a respawn): ONE sweep, waited for at most LOOKUP_MS (r3, S5) — never while
+      if (_pausedOf && _pausedOf()) return null;   // discovery is paused (a wedged mount is never walked for a lookup)
+      let t = null;
+      await Promise.race([Promise.resolve(_warmSweep()).catch(() => null), new Promise((done) => { t = setTimeout(done, lk); })]);
+      if (t) clearTimeout(t);
+      r = await sweepPool().call(op, payload, { timeoutMs: lk, waitMs: lk });
+    }
     return r && !r.none ? r : null;
   } catch { return null; }
 }
@@ -901,4 +957,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

@@ -1131,6 +1131,7 @@ export function installSidebarTasks(SidebarClass) {
 
   proto._renderMobileTaskDetail = function(title, taskSessions, allSessions) {
     this.listEl.innerHTML = '';
+    this._appendStaleHint?.(); // a frozen list says so here too (the sweep's -cure r4: the phone's task-group view wiped it)
     const back = document.createElement('div'); back.className = 'mobile-folder-back';
     back.innerHTML = `<span class="mobile-folder-back-arrow">‹</span> <span>${tr('All Task Groups')}</span>`;
     back.onclick = () => { this._mobileDrilldown = null; this._render(); }; // full re-render restores the sub-tab bar

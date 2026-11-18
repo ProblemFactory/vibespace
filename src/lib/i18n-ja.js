@@ -2929,6 +2929,7 @@ export default {
   "Searching {host}…": "{host} を検索中…",
   "Server error {code}": "サーバーエラー {code}",
   "Server unreachable — nothing was changed": "サーバーに到達できません——何も変更されていません",
+  "Session list is out of date — the hub could not rebuild it.": "セッション一覧が古くなっています——サーバーが一覧を作り直せませんでした。",
   "Session list may be out of date — the server is not responding.": "セッション一覧が古い可能性があります——サーバーが応答していません。",
   "Session states may have changed since this scan.": "このスキャン以降、セッションの状態が変化している可能性があります。",
   "Setting goal…": "目標を設定中…",
