@@ -2198,7 +2198,8 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
   };
   const OL = require(path.join(REPO, 'src/oauth-loopback.js'));
   const saved = presetsHolder.list;
-  const SEAL = { seal: (v) => 'sealed:' + Buffer.from(String(v)).toString('base64'), open: (v) => Buffer.from(String(v).slice(7), 'base64').toString() };
+  // the box refuses a value it did not seal (as the account's secret-box does: the batch-14 cure's «could not be opened» road)
+  const SEAL = { seal: (v) => 'sealed:' + Buffer.from(String(v)).toString('base64'), open: (v) => { if (!String(v).startsWith('sealed:')) throw new Error('the box cannot open this'); return Buffer.from(String(v).slice(7), 'base64').toString(); } };
   async function account(mod, { legacy = false, seal = true } = {}) {
     presetsHolder.list = [OLD];
     const g = google();
@@ -2252,6 +2253,77 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
     N.reseal();
     const r7 = await N.refresh();
     ok(!r7.e && SEAL.open(N.tok.st.token.client.secretEnc || 'sealed:') === OLD.clientSecret, '…and the account\'s own adapter seals it at the first refresh, so a later swap is survived', J({ e: r7.e && r7.e.message }));
+    // ── the batch-14 CURE (the verdict, 08:39Z): (A) every surface says the true cause, (B) a refusal the CLIENT caused is
+    //    never a permanent death; the three roads that had no leg; the sealed copy follows a rotated secret
+    const CAPS7 = require(path.join(REPO, 'src/channel-caps.js'));
+    const CLIENT_WORDS = 'the OAuth client under its name was replaced after this sign-in';
+    // (A1) a legacy token stamped «the client changed»: the account's OWN state names that cause, never «refresh refused»
+    const S1 = await account(gmail, { legacy: true });
+    presetsHolder.list = [NEW];
+    await S1.refresh();
+    const ss1 = await S1.a.auth.state();
+    ok(ss1.state === 'needs-reauth' && ss1.why === 'client-changed' && CAPS7.authWhyText(ss1.why) === CLIENT_WORDS && S1.tok.st.token.refusedClient === NEW.clientId, '(A) the account\'s own state after a client refusal: needs-reauth, why client-changed — its words the client sentence, never «the vendor refused to refresh»; the stamp names the client tried', J({ ss1, refusedClient: S1.tok.st.token.refusedClient }));
+    // THE NEXT PASS reads the stamp's cause (no vendor call): its error names the client
+    const before = S1.g.calls.length;
+    const nx = await S1.refresh();
+    ok(nx.e && nx.e.detail && nx.e.detail.cause === 'client-changed' && /the client under this account's key changed since its sign-in/.test(nx.e.message) && !S1.g.calls.slice(before).some((c) => c.form && c.form.grant_type === 'refresh_token'), 'the NEXT pass reads the stamp\'s cause: «the client under this account\'s key changed» — and asks Google nothing', J({ e: nx.e && nx.e.message }));
+    // (B) the owner puts the first preset back: the stamp no longer holds — one more try, honoured, the stamp cleared
+    presetsHolder.list = [OLD];
+    const back = await S1.refresh();
+    const ss2 = await S1.a.auth.state();
+    ok(!back.e && back.form && back.form.client_id === OLD.clientId && !S1.tok.st.token.invalidGrantAt && !S1.tok.st.token.refusedCause && !S1.tok.st.token.refusedClient && ss2.state === 'connected', '(B) the first preset put back: the client-caused stamp stops holding, ONE more try with that client is honoured, the stamp is cleared and the account is connected again', J({ e: back.e && back.e.message, form: back.form && back.form.client_id, ss2 }));
+    // …while a DEAD refresh grant (invalid_grant) stays stamped whatever the preset says
+    const D1 = await account(gmail);
+    D1.g.issued.clear();   // Google forgot every refresh token it issued: invalid_grant
+    await D1.refresh();
+    presetsHolder.list = [NEW]; presetsHolder.list = [OLD];
+    const dd = await D1.refresh();
+    ok(dd.e && dd.e.detail && dd.e.detail.cause === 'refresh-refused' && D1.tok.st.token.invalidGrantAt && (await D1.a.auth.state()).why === 'refresh-refused', '…a dead refresh grant (invalid_grant) stays a stamp whatever the preset under the key: refresh-refused on every surface', J({ e: dd.e && dd.e.message }));
+    // (A2) the minted client's sealed value MISSING: its next refresh is certain to be refused — the state says so now
+    const M1 = await account(gmail);
+    delete M1.tok.st.token.client.secretEnc;
+    presetsHolder.list = [NEW];
+    const sm = await M1.a.auth.state();
+    const rm = await M1.refresh();
+    ok(sm.state === 'needs-reauth' && sm.why === 'client-changed' && rm.e && /its secret was not kept/.test(rm.e.message) && !M1.g.calls.some((c) => c.form && c.form.grant_type === 'refresh_token' && c.form.client_id === NEW.clientId), '(A) a swapped account whose minted client has no sealed secret reads needs-reauth (client changed) BEFORE its first pass fails; the refresh says the secret was not kept and sends nothing', J({ sm, e: rm.e && rm.e.message }));   // stale-pins: kept (the RENDERED words — the source builds them with a template now)
+    // …an UNREADABLE sealed copy is not «not kept»
+    const U1 = await account(gmail);
+    U1.tok.st.token.client.secretEnc = 'not-a-sealed-value';
+    presetsHolder.list = [NEW];
+    const ru = await U1.refresh();
+    ok(ru.e && /could not be opened/.test(ru.e.message) && !/was not kept/.test(ru.e.message), '…a sealed copy that does not OPEN is said as such («could not be opened»), never «was not kept»', J({ e: ru.e && ru.e.message }));
+    // ROAD: the swapped account answered «invalid client» — the minted client itself refused
+    const V1 = await account(gmail);
+    V1.tok.st.token.client.secretEnc = SEAL.seal('a-wrong-secret');
+    presetsHolder.list = [NEW];
+    const rv = await V1.refresh();
+    ok(rv.e && rv.e.code === 'auth-expired' && rv.e.detail && rv.e.detail.cause === 'client-changed' && /was refused \(invalid_client\)/.test(rv.e.message) && V1.tok.st.token.refusedClient === OLD.clientId, 'a swapped account whose MINTED client is refused (invalid_client): said as that client refused (cause client-changed), the stamp names the minted client — never «re-enter the secret»', J({ e: rv.e && rv.e.message, refusedClient: V1.tok.st.token.refusedClient }));
+    // the sealed copy FOLLOWS a secret rotated under the same id
+    const R1 = await account(gmail);
+    presetsHolder.list = [{ ...OLD, clientSecret: ROT }];
+    const rr = await R1.refresh();
+    ok(!rr.e && SEAL.open(R1.tok.st.token.client.secretEnc) === ROT, 'the same client with a ROTATED secret: the sealed copy follows it (a later swap sends the live secret, never the stale one)', J({ e: rr.e && rr.e.message }));
+    // CONTROLS of the cure
+    const GS2 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+    const MS2 = mutantCopies('chan-gmail-cure', REPO);
+    const STATE = "why: token.refusedCause === 'client-changed' ? 'client-changed' : 'refresh-refused', credentialSource: cred.source, credentialKey };";
+    const HOLDS = "  if (token.refusedCause !== 'client-changed' || !token.refusedClient) return true;\n";
+    const ADOPT = "!use.minted.secretEnc || keptSecret !== String(use.clientSecret))";
+    ok(GS2.split(STATE).length === 2 && GS2.split(HOLDS).length === 2 && GS2.split(ADOPT).length === 2, 'control setup: the state\'s cause, the stamp\'s hold and the re-seal are present once each');
+    const cA = await account(MS2.load('src/channels/gmail.js', GS2.replace(STATE, "why: 'refresh-refused', credentialSource: cred.source, credentialKey };"), 'old-state'), { legacy: true });   // stale-pins: kept (the release's state line, restored by the red control)
+    presetsHolder.list = [NEW]; await cA.refresh();
+    ok((await cA.a.auth.state()).why === 'refresh-refused', 'RED CONTROL (A): the release\'s state line says «refresh refused» for a client-changed stamp', '');
+    const gB = MS2.load('src/channels/gmail.js', GS2.replace(HOLDS, '  return true;\n'), 'stamp-forever');
+    const cB = await account(gB, { legacy: true });
+    presetsHolder.list = [NEW]; await cB.refresh();
+    presetsHolder.list = [OLD];
+    const cb = await cB.refresh();
+    ok(cb.e && cB.tok.st.token.invalidGrantAt, 'RED CONTROL (B): a stamp that always holds keeps the account dead after the first preset is put back (the vendor would honour it)', J({ e: cb.e && cb.e.message }));
+    const cR = await account(MS2.load('src/channels/gmail.js', GS2.replace(ADOPT, '!use.minted.secretEnc)'), 'no-reseal'));   // stale-pins: kept (the release's adoption test, restored by the red control)
+    presetsHolder.list = [{ ...OLD, clientSecret: ROT }];
+    await cR.refresh();
+    ok(SEAL.open(cR.tok.st.token.client.secretEnc) === OLD.clientSecret, 'RED CONTROL: without the re-seal the sealed copy keeps the OLD secret after a rotation', '');
+    for (const x of copiesCensus(MS2.files, MS2.dir, REPO, { minCopies: 3, label: '㉖ cure ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
     // CONTROL: the release's refresh line — the preset's client whatever it is ⇒ the swap refuses the refresh (the outage)
     const GS = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
     const FORM = "form: { grant_type: 'refresh_token', client_id: use.clientId, client_secret: use.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {";

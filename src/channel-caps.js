@@ -1161,6 +1161,7 @@ function authWhyText(why, { t = defaultT } = {}) {
     case 'token-expired': return t('the login expired');
     case 'refresh-token-expired': return t('the refresh token expired');
     case 'refresh-refused': return t('the vendor refused to refresh the login');
+    case 'client-changed': return t('the OAuth client under its name was replaced after this sign-in');   // B-166e cure: the stamp's own cause (signinCauseText's words)
     case 'no-refresh-token': return t('no refresh token was granted');
     case 'last-pass-refused': return t('the last pass was refused as expired');
     case 'needs-reauth': return t('the vendor asks for a new consent');

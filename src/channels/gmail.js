@@ -898,8 +898,18 @@ function refreshClientOf(token, values, open = () => null) {
   if (!m || m.id === String(v.clientId || '')) return { clientId: v.clientId, clientSecret: v.clientSecret, swapped: false, minted: m };
   // its secret rides SEALED (`secretEnc`, the account's secret-box) — the token JSON a Vault reveal shows carries ciphertext
   const sec = typeof m.secretEnc === 'string' && m.secretEnc ? open(m.secretEnc) : null;
-  if (typeof sec !== 'string' || !sec) return { clientId: null, clientSecret: null, swapped: true, minted: m, secretless: true };
+  if (typeof sec !== 'string' || !sec) return { clientId: null, clientSecret: null, swapped: true, minted: m, secretless: true, ...(typeof m.secretEnc === 'string' && m.secretEnc ? { unreadable: true } : {}) };
   return { clientId: m.id, clientSecret: sec, swapped: true, minted: m };
+}
+/** B-166e cure (the verdict, B): a refusal caused by the CLIENT is never a permanent death — its stamp names the client
+ *  that was tried, and holds only while that client is still the one a refresh would send (the owner put the first preset
+ *  back ⇒ one more try, then the truth). A dead refresh grant (any other cause, or a stamp from before the rule) holds. */
+function stampHolds(token, values, open = () => null) {
+  if (!token || !token.invalidGrantAt) return false;
+  if (token.refusedCause !== 'client-changed' || !token.refusedClient) return true;
+  const use = refreshClientOf(token, values, open);
+  const would = use.secretless ? (use.minted && use.minted.id) : use.clientId;
+  return String(would || '') === String(token.refusedClient);
 }
 function typedFailure(status, body, what, retryAfterSec = null) {
   const err = body && body.error;
@@ -1045,7 +1055,7 @@ function create(record = {}, deps = {}) {
     const { token, why } = readToken();
     if (!token) throw notConnectedError('Gmail', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
     // B-166e: a refusal stamped for the WRONG client keeps saying so (the next pass used to read it as «refresh refused»)
-    if (token.invalidGrantAt) throw new ChannelError('auth-expired', token.refusedCause === 'client-changed' ? 'Gmail refresh was refused: the client under this account\'s key changed since its sign-in — re-authorize' : 'Gmail refresh token was refused — re-authorize', { retryable: false, detail: { cause: token.refusedCause === 'client-changed' ? 'client-changed' : 'refresh-refused' } });
+    if (token.invalidGrantAt && stampHolds(token, cred.values, openSecret)) throw new ChannelError('auth-expired', token.refusedCause === 'client-changed' ? 'Gmail refresh was refused: the client under this account\'s key changed since its sign-in — re-authorize' : 'Gmail refresh token was refused — re-authorize', { retryable: false, detail: { cause: token.refusedCause === 'client-changed' ? 'client-changed' : 'refresh-refused' } });
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Gmail access token expired and no refresh token is held — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
@@ -1092,7 +1102,7 @@ function create(record = {}, deps = {}) {
   const openSecret = (enc) => { try { return deps.secrets && typeof deps.secrets.open === 'function' ? String(deps.secrets.open(enc)) : null; } catch { return null; } };
   async function refreshAccessToken(cred, token) {
     const use = refreshClientOf(token, cred.values, openSecret);
-    if (use.secretless) throw new ChannelError('auth-expired', `gmail token refresh: the Google client this account signed in with (${use.minted.id}) is no longer the one under its key, and its secret was not kept — re-authorize (the new client signs in from now on)`, { retryable: false, detail: { cause: 'client-changed' } });
+    if (use.secretless) throw new ChannelError('auth-expired', `gmail token refresh: the Google client this account signed in with (${use.minted.id}) is no longer the one under its key, and its secret ${use.unreadable ? 'could not be opened (its sealed copy did not open)' : 'was not kept'} — re-authorize (the new client signs in from now on)`, { retryable: false, detail: { cause: 'client-changed' } });
     if (use.swapped && swapSaid !== `${use.minted.id}>${cred.values.clientId}`) {
       swapSaid = `${use.minted.id}>${cred.values.clientId}`;
       log.warn && log.warn(`[channels] gmail: this account refreshes with the client it signed in with (${use.minted.id}) — the client under its key${cred.credentialKey ? ` ${cred.credentialKey}` : ''} is now ${cred.values.clientId}; a re-authorize moves it to the new one`);
@@ -1117,15 +1127,20 @@ function create(record = {}, deps = {}) {
         // verify r5: a refusal for a token the store has since REPLACED (a re-authorize, a sibling entry's rotation
         // that landed first) is superseded, not a fact about the account — the caller re-reads the store
         if (cur && !cur.invalidGrantAt && String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
-        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now(), ...(e.detail && e.detail.cause === 'client-changed' ? { refusedCause: 'client-changed' } : {}) }, { expiresAt: null, scopes: cur.scopes || [], user: cur.email || null, supersedes: String(cur.refresh_token || '') });
+        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now(), ...(e.detail && e.detail.cause === 'client-changed' ? { refusedCause: 'client-changed', refusedClient: String(use.clientId || (use.minted && use.minted.id) || '') } : {}) }, { expiresAt: null, scopes: cur.scopes || [], user: cur.email || null, supersedes: String(cur.refresh_token || '') });
       }
       throw e;
     }
     // verify r4 F1: an answer without an access token is not a token — nothing stored, the request not sent (it used to be stored as '' and refreshed again for ever)
     if (!d || typeof d.access_token !== 'string' || !d.access_token) throw new ChannelError('vendor-error', `gmail token refresh: the vendor's answer carried no access_token — nothing was stored; re-authorize if it persists`, { retryable: true, detail: { noAccessToken: true } });
     const next = { ...token, access_token: String(d.access_token || ''), expiresAt: now() + Number(d.expires_in || 3600) * 1000, refresh_token: String(d.refresh_token || token.refresh_token) };
-    // B-166e: a token minted before the rule (or by a sign-in that could not seal) adopts the client that just refreshed it
-    if (!use.swapped && (!use.minted || !use.minted.secretEnc)) { const sealed = sealSecret(use.clientSecret); if (!use.minted || sealed.secretEnc) next.client = { id: String(use.clientId), key: cred.credentialKey || null, ...sealed }; }
+    // B-166e cure: a refresh that WORKED after a client-caused stamp stopped holding (the first preset put back) clears it
+    delete next.invalidGrantAt; delete next.refusedCause; delete next.refusedClient;
+    // B-166e: a token minted before the rule (or by a sign-in that could not seal) adopts the client that just refreshed it;
+    // cure: the sealed copy FOLLOWS a secret rotated under the same id (a later swap sends the minted client with its live
+    // secret, never a stale one). A lazy field on the ordinary refresh write — a token without it stays a valid read.
+    const keptSecret = !use.swapped && use.minted && use.minted.secretEnc ? openSecret(use.minted.secretEnc) : null;
+    if (!use.swapped && (!use.minted || !use.minted.secretEnc || keptSecret !== String(use.clientSecret))) { const sealed = sealSecret(use.clientSecret); if (!use.minted || sealed.secretEnc) next.client = { id: String(use.clientId), key: cred.credentialKey || null, ...sealed }; }
     // verify r5: the store is written ONLY while it still holds the token this refresh tried. A disconnect (cleared)
     // or a re-authorize (a different token) that landed while the POST was in flight is never overwritten by this
     // late write — measured before: 25 of 50 trials reverted a re-authorize to the old refresh token, a disconnected
@@ -1348,12 +1363,15 @@ function create(record = {}, deps = {}) {
         if (!cred.values) return { state: 'needs-credentials', expiresAt: null, scopes: [], why: cred.why, whyCode: cred.whyCode || null, whyParams: cred.whyParams || null, missing: cred.missing.slice(), credentialSource: cred.source || 'none', credentialKey };
         const { token, why } = readToken();
         if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: cred.source, credentialKey };
-        if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source, credentialKey };
+        // B-166e cure (the verdict, A): the state's cause follows the stamp's cause — «the client changed» is never «refresh refused»
+        if (token.invalidGrantAt && stampHolds(token, cred.values, openSecret)) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: token.refusedCause === 'client-changed' ? 'client-changed' : 'refresh-refused', credentialSource: cred.source, credentialKey };
         if (!token.refresh_token) return { state: 'needs-reauth', expiresAt: Number(token.expiresAt) || null, scopes: token.scopes || [], why: 'no-refresh-token', credentialSource: cred.source, credentialKey };
         // A Google refresh token carries no stated lifetime (a Testing
         // client's 7-day one is a policy, not a field), so the countdown is
         // null and the honest signal is the vendor's `invalid_grant`.
         const sw = refreshClientOf(token, cred.values, openSecret);   // B-166e: the client under the key changed since this sign-in (it refreshes with its own)
+        // cure (A): the minted client with no secret to send — its next refresh is CERTAIN to be refused: say it now, not at the first failed pass
+        if (sw.secretless) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: 'client-changed', credentialSource: cred.source, credentialKey, user: token.email || null, clientSwapped: true };
         return { state: 'connected', expiresAt: null, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, credentialKey, user: token.email || null, ...(sw.swapped ? { clientSwapped: true } : {}) };
       },
       /** The EPHEMERAL-mode loopback flow (§12.4): gmail-sync's own consent
