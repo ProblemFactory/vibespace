@@ -2522,12 +2522,6 @@ export const FAST_RERUNS = 'data/ci-fast/reruns.jsonl';
 export const FAST_NO_RETRY = Object.freeze([
   { name: 'test-chat-e2e', why: 'the one real turn: a retry would bill a second one (§ban-safety)' },
 ]);
-/** PURE: why a red fast suite is NOT retried, or '' (retry it). A suite that died of a signal this runner did not send
- *  (killedFromOutside — the run is being torn down) is not a flake to look at twice; a suite that HUNG to its budget
- *  already cost the push gate its whole budget (300 s) and left a hang report naming its threads — a second hang would
- *  cost as much again, so it is red at once; so is one its OWN watchdog ended (suite-watchdog.mjs: exit 1 just under the
- *  budget, the report kept — `r.hangReport`), and one that ran > 80 % of its budget (batch 24's reader). B-3f38 is about legs
- *  that read a clock under load, not about hangs. */
 /** THE FAST TIER'S CLOSING (B-d24c (3)'s follow-up) — PURE: the lines a run that ended prints and its exit code. Every red is
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
@@ -2543,6 +2537,12 @@ export function fastClosing({ reds = [], flaky = [], skippedLegs = [], keepGoing
   if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; } // (B-4829: the verdict line carries the skip count)
   return { out, code: null };
 }
+/** PURE: why a red fast suite is NOT retried, or '' (retry it). A suite that died of a signal this runner did not send
+ *  (killedFromOutside — the run is being torn down) is not a flake to look at twice; a suite that HUNG to its budget
+ *  already cost the push gate its whole budget (300 s) and left a hang report naming its threads — a second hang would
+ *  cost as much again, so it is red at once; so is one its OWN watchdog ended (suite-watchdog.mjs: exit 1 just under the
+ *  budget, the report kept — `r.hangReport`), and one that ran > 80 % of its budget (batch 24's reader). B-3f38 is about legs
+ *  that read a clock under load, not about hangs. */
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;

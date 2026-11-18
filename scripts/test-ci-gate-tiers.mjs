@@ -749,8 +749,34 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
     'a planted red is EXIT 1 with --keep-going (on the runner and on a box) AND without — a part that ran to its end is never a green; no red, no exit code from the closing');
   ok(annOf(kgR).length === 1 && annOf(kgR)[0] === '::error title=fast 1/2::2 red: test-kg-red1, test-kg-red2' && !annOf(ffR).length && !annOf(kgBox).length && !annOf(kgG).length,
     'on the hosted runner ONE ::error line names every red on the run page (GITHUB_ACTIONS only; none on a box, none for a green)', annOf(kgR));
-  ok(/const closing = fastClosing\(\{ reds, flaky, keepGoing, [^\n]*\n\s*for \(const \[w, l\] of closing\.out\)[^\n]*\n\s*if \(closing\.code === 1\) return 1;/.test(src),
-    'WIRING: fastGate prints fastClosing\'s lines and returns its 1 (one closing road for every part)');
+  // THE WIRING, from the lanes' end to the process's exit code (the adversarial read: the closing's three lines alone let an early
+  // `return 0` before them, a dropped `env`/`part`, or main()'s `.then` swallowing a part's 1 stay green): fastGate hands EVERY
+  // fact to fastClosing, nothing returns between the lanes' end and it, its 1 is returned, and main() exits with fastGate's code
+  const wiredClosing = (x) => {
+    const a = x.indexOf('} = await runFastLanes(plan, {'), b = x.indexOf('const closing = fastClosing(', a);
+    return a > 0 && b > a && !/\breturn\b/.test(x.slice(a, b))
+      && /\n\s*const closing = fastClosing\(\{ reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
+      && /\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)\n\s*\.then\(\(code\) => exitFlushed\(code\), /.test(x);
+  };
+  ok(wiredClosing(src), 'WIRING: fastGate hands every fact to fastClosing (env and part included), nothing returns between the lanes\' end and it, its 1 is returned, and main() exits with fastGate\'s code');
+  // CONTROLS of the wiring pin — each mutant's anchor fails BY NAME when it is not in the source, and each mutant is refused
+  const wiringMutants = [
+    ['the exit on the flag', 'if (closing.code === 1) return 1;', 'if (closing.code === 1 && !keepGoing) return 1;'],
+    ['an early return before the closing', '    const closing = fastClosing(', '    if (keepGoing) return 0;\n    const closing = fastClosing('],
+    ['the annotation\'s env dropped', 'hangDir, part, env: process.env });', 'hangDir, part, env: {} });'],
+    ['the part dropped', 'hangDir, part, env: process.env });', 'hangDir, part: null, env: process.env });'],
+    ['the skipped legs dropped (B-4829 meets the closing here)', 'fastClosing({ reds, flaky, skippedLegs, keepGoing,', 'fastClosing({ reds, flaky, keepGoing,'],
+    ['main() swallowing a part\'s 1', "part })\n    .then((code) => exitFlushed(code), ", "part })\n    .then((code) => exitFlushed(part ? 0 : code), "],
+  ];
+  for (const [what, from, to] of wiringMutants) {
+    const there = src.split(from).length - 1 === 1;
+    ok(there, `WIRING control «${what}»: its anchor is in scripts/ci.mjs once`, there ? undefined : 'the anchor of the control «' + what + '» is not in the source');
+    ok(there && !wiredClosing(src.replace(from, to)), `WIRING control «${what}»: the mutant is refused by the pin`);
+  }
+  // the annotation's message escapes %, CR and LF (GitHub's workflow-command rule); control: the unescaped line is not what it prints
+  const escR = fastClosing({ reds: ['a%b\nc\rd'], env: { GITHUB_ACTIONS: 'true' } });
+  ok(annOf(escR).length === 1 && annOf(escR)[0] === '::error title=fast::1 red: a%25b%0Ac%0Dd' && annOf(escR)[0] !== '::error title=fast::1 red: a%b\nc\rd',
+    'the ::error message escapes % → %25, LF → %0A, CR → %0D (a name can never break the workflow command)', annOf(escR));
 }
 
 // ── §8f A RED FAST SUITE IS RUN ONCE MORE, AND THE RETRY IS COUNTED (B-3f38) ──
@@ -986,7 +1012,13 @@ console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named
   ok(!!b && !rowOf(b, 'test-sk-mid').includes('SKIP') && / — ALL PASS \(2\)$/.test(rowOf(b, 'test-sk-mid')) && !b.skippedLegs.length && !b.fails.some((f) => f.includes('.skip.')),
     `CONTROL: a copy of ci.mjs on today's last-line rule prints the mid-output skipper as a plain green (${b ? rowOf(b, 'test-sk-mid') : gone}) and names and keeps nothing — the legs above are red without the change`);
   // WIRING: both tiers' closing lines carry the count; the heavy tier records every green that skipped (try 1 or the retry)
-  ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src) && /if \(skippedLegs\.length\) console\.log\(`\\n\$\{skippedLegsSaid\('ci', skippedLegs\)/.test(src)
+  // (the fast closing's two skip lines live in fastClosing since the keep-going cure moved onto 2.369.411 — read by behaviour:
+  // a planted green with a skipped leg prints its SKIPPED LEG(S) line and no exit code; a planted red carries the count)
+  const skSaid = ci.fastClosing({ skippedLegs: [{ name: 'test-sk-mid', n: 2, first: 'the real road', file: '' }], env: {} });
+  const skRed = ci.fastClosing({ reds: ['test-sk-red'], skippedLegs: [{ name: 'test-sk-mid', n: 2, first: 'the real road', file: '' }], env: {} });
+  ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src)
+    && skSaid.code === null && skSaid.out.some(([w, l]) => w === 'log' && l === '\n[ci] SKIPPED LEG(S) test-sk-mid (2): the real road')
+    && skRed.code === 1 && skRed.out.some(([w, l]) => w === 'err' && l === '\n✗ test-sk-red — release gate is RED, do not push · SKIP 2 leg(s) in 1 suite(s): test-sk-mid (2)\n')
     && /release gate is RED, do not push\$\{skipCount\(skippedLegs\)\}/.test(src)
     && /failed: \$\{failed\.join\(', '\)\}\$\{skipCount\(skippedLegs\)\}`/.test(src) && /not present at that commit` : ''\}\)\$\{skipCount\(skippedLegs\)\}`;/.test(src)
     && /if \(r\.ok && r\.skips\) skippedLegs\.push\(\{ name: s\.name, n: r\.skips\.n, first: r\.skips\.first, file: keepSkipLog\(s, r, tried\) \}\);/.test(src)

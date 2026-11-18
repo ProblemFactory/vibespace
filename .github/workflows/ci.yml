@@ -3,7 +3,7 @@
 # caught in minutes. Self-hosters see the badge state before pulling an update.
 #
 # TWO TIERS since the fast/heavy split (2026-09-07; the fast tier runs as two parts since B-7353): `fast` is the tier of quick
-# suites — each part runs to its end and names EVERY red, in its log and on the run page (B-d24c (3)) — THE TIER RULE in scripts/ci.mjs (B-f4cb, 2026-09-27):
+# suites — each part runs to its end and names EVERY red suite, in its log and on the run page (B-d24c (3)) — THE TIER RULE in scripts/ci.mjs (B-f4cb, 2026-09-27):
 # build + PURE / in-process suites under 10 s + the named LAW pins + the one
 # real haiku turn — and `heavy` is everything that boots a scratch server,
 # drives a browser, runs a real agent CLI / X server / dtach / the opencode
@@ -121,7 +121,7 @@ jobs:
       # ≈ 566 s tier at a 1.0× runner (part 1 a little more: it holds the serial group; ≈ 4.7 min, ≈ 7 min at 1.48×) plus each
       # red's one retry, i.e. up to ≈ 5–7 runner-minutes more per red part than a red that stopped at once; a HUNG suite costs
       # up to its 300 s budget on its lane (never retried), and the job's 25 minutes bound the worst (a cancel at that limit
-      # skips the fail-log upload). A green run costs the same as before. The summary is the step log's last lines.
+      # skips the fail-log upload). A green run costs the same as before. The summary is the step log's last lines; on the hosted runner ONE `::error` line names every red suite on the run page (a build or secret-scan red is the step's own failure).
       # A RED FAST SUITE IS READ, NOT GUESSED AT (lane ci-mirror-hygiene, 2.369.362): 2.369.361's fast job said
       # «test-pool-auto 4 FAILED (667 passed)» and named no leg — its ✗ lines sat above the 40 lines a row keeps, and
       # this job uploaded nothing. ci.mjs now prints every ✗ line of a red suite before its tail and keeps the suite's
