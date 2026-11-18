@@ -381,23 +381,8 @@ function roleProblems(viewers, files) {
   ok(roleProblems(FA.VIEWERS, elsewhere).some((x) => /outside the one place/.test(x)), 'RED COPY: a second place answering the role is named');
 }
 
-// ── ⑥ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-console.log('⑥ ONE RENDERER, NEVER STORED TWICE — the card is derived from the For-you item on every pass');
-function cardStoreProblems(src) {
-  const out = [];
-  for (const [re, what] of [[/\blocalStorage\b|\bsessionStorage\b|indexedDB/, 'browser storage'], [/\bfetch(Json)?\(/, 'a route of its own'], [/userState|user-state/, 'the user state'], [/method:\s*'(POST|PUT|PATCH|DELETE)'/, 'a write']]) if (re.test(src)) out.push(`chat-needs-card.js: ${what}`);
-  if (!/this\.app\.foryouRows\?\.wire\(card/.test(src)) out.push('chat-needs-card.js: the verbs are no longer the panel\'s rows (foryouRows.wire)');
-  return out;
-}
-{
-  const src = SRC_FILES['src/lib/chat-needs-card.js'];
-  ok(cardStoreProblems(src).length === 0, 'src/lib/chat-needs-card.js keeps no copy (no storage, no user state) and calls no route of its own — its Approve / Deny are the tray row\'s (foryouRows.wire → the panel\'s one route)', cardStoreProblems(src));
-  ok(cardStoreProblems(src + "\nlocalStorage.setItem('cn-cards', JSON.stringify([]));\n").some((x) => /browser storage/.test(x)), 'RED COPY: a card stored in the browser is named');
-  ok(cardStoreProblems(src + "\nfetchJson('/api/channels/reach-requests/x/approve', { method: 'POST' });\n").some((x) => /a route of its own/.test(x)), 'RED COPY: a second decision road from the card is named');
-  // the stamp is ONE spelling on both doors: the tray row words a resolved item through decidedStamp, as the card does
-  const row = SRC_FILES['src/lib/user-todos-row.js'];
-  ok(/const stamp = item \? decidedStamp\(item, \{ t \}\) : null;\s*if \(stamp\) return stamp\.text;/.test(row) && /const stamp = decidedStamp\(e\.item, \{ t \}\);/.test(src), 'the tray row (resolvedByText — the tray, the mini inbox, the For-you window) and the chat card both say decidedStamp\'s words');
-}
+// ── ⑥ ── (ONE RENDERER, NEVER STORED TWICE — the card-store census over src/lib/chat-needs-card.js with its two RED copies, and the tray row's
+// decidedStamp pin of src/lib/user-todos-row.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── ⑦ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑦ A DECISION ROW HAS TWO VERBS — the store: no generic closer, «Mark all seen» passes it by, a decision is final');
@@ -480,8 +465,7 @@ console.log('⑧ …AND EVERY DOOR DRAWS THEM — the tray row (the tray, the mi
   const w1 = L.itemView(wr(), ictx(wr())).actions, w2 = L.itemView(decided, ictx(decided)).actions, w3 = L.itemView(plain, ictx(plain)).actions;
   ok(JSON.stringify(w1) === '["proposal-approve","proposal-reject","copy"]' && JSON.stringify(w2) === '["copy"]', `the For-you window: an open wake request's verbs ${JSON.stringify(w1)} (no Mark done / Dismiss), its decided record ${JSON.stringify(w2)} (no Reopen)`, { w1, w2 });
   ok(JSON.stringify(w3) === '["done","dismiss","copy"]', 'CONTROL: any other item\'s verbs in the window are as before', w3);
-  const IW = read('src/lib/inbox-window.js');
-  ok(/'proposal-reject': \(it\) => \(isDecisionRow\(it\) \? actBtn\('proposal-reject', UI_ICONS\.close, t\('Deny'\)/.test(IW) && /closers: closersOf\(it, /.test(IW), 'the window asks THE registry: its second verb says «Deny» on a decision row (Approve / Deny on every door), and its closers are closersOf\'s (r3)');
+  // (the For-you window's registry pin of src/lib/inbox-window.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // RED CONTROL: the base's verbs (no closers flag asked) — Mark done / Dismiss beside Approve / Reject, Reopen on the decided record
   const b1 = L.itemView(wr(), { ...ictx(wr()), closers: undefined }).actions, b2 = L.itemView(decided, { ...ictx(decided), closers: undefined }).actions;
   ok(b1.includes('done') && b1.includes('dismiss') && b2.includes('reopen'), `RED CONTROL: the base's window — ${JSON.stringify(b1)} on the open request, ${JSON.stringify(b2)} on the decided one`, { b1, b2 });
@@ -989,8 +973,7 @@ try {
   const hiddenRq = rq({ status: 'dismissed', resolvedBy: 'hidden', resolvedAt: NOW });
   const wv = { open: L.itemView(rq(), ictx(rq())).actions, hidden: L.itemView(hiddenRq, ictx(hiddenRq)).actions, status: L.itemView(hiddenRq, ictx(hiddenRq)).meta.find((x) => x.kind === 'status').text };
   ok(J(wv) === J({ open: ['hide', 'copy'], hidden: ['copy'], status: 'hidden — nothing was decided' }), 'the For-you window: «Hide» in place of Mark done / Dismiss, nothing once hidden, its status «hidden — nothing was decided»', wv);
-  const UA = read('src/lib/user-todos-actions.js');
-  ok(/const hide = isPointer\(byId\(id\)\);/.test(UA) && /if \(ok && hide\) \{ showToast\(t\('Hidden — nothing was decided; it comes back while it is still open'\), \{ duration: 6000 \}\); return ok; \}/.test(UA), 'the press says it — «Hidden — nothing was decided; it comes back while it is still open» — with NO Undo (it comes back by itself)');
+  // (⑩'s Hide press pin of src/lib/user-todos-actions.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } catch (e) { ok(false, '⑩ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
 
 // ── ⑪ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1020,8 +1003,7 @@ try {
   ok(J(rows) === J({ 'vault-run-ask': { chat: true, card: 'row', decide: 'person', scope: 'conversation', stamp: 'allow' }, 'secret-request': { chat: true, card: 'row', decide: 'person', scope: 'conversation', stamp: 'store' }, 'hub-act-ask': { chat: true, card: 'row', decide: 'person', scope: 'about', stamp: 'allow' } }), 'THE registry rows: each a card in the chat (one renderer), decided by a person only; the run ask and the paste request filed under the asking conversation\'s own key, the hub-act ask `about` it', rows);
   const drawn = FA.needsOf(Object.values(askOf), ME).map((e) => e.item.action.type);
   ok(J(drawn) === J(['vault-run-ask', 'secret-request', 'hub-act-ask']), 'the asking chat draws all three where their producers file them (the hub-act ask by its `about`) — never the tray only', drawn);
-  const HA = read('src/server/hub-act-ask.js');
-  ok(/let about = null; try \{ about = P\.byKindOf\(by\) === 'agent' \? aboutOf\(by\) : null; \} catch \{ \}/.test(HA) && /\.\.\.\(about \? \{ about \} : \{\}\),/.test(HA) && /aboutOf: \(by\) => \{/.test(HA), 'src/server/hub-act-ask.js files an AGENT\'s act `about` the conversation that asked (wire()\'s aboutOf — test-hub-act-ask drives it on the real asker)');
+  // (⑪'s hub-act-ask about pin of src/server/hub-act-ask.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const mark = { decidedBy: 'person', decidedAt: NOW - 60e3 };
   const st = (it, by, fact = mark) => (FA.decidedStamp({ ...it, status: 'done', resolvedBy: by, resolvedAt: NOW, resolvedFact: fact }, { now: NOW }) || {}).text || null;
   const stamps = { once: st(askOf.runAsk, 'allowed'), always: st(askOf.runAsk, 'always'), deny: st(askOf.hubAct, 'denied'), hubOnce: st(askOf.hubAct, 'allowed'), stored: st(askOf.paste, 'stored'), refused: st(askOf.paste, 'denied'), expired: st(askOf.runAsk, 'ask-expired'), noMark: st(askOf.runAsk, 'allowed', null) };
@@ -1046,8 +1028,7 @@ try {
   const cls = (it) => { globalThis.document.createElement = boxEl; let h; try { h = ROW3.renderRow({ item: it, resolved: false, band: 1 }, rctx3).innerHTML; } finally { globalThis.document.createElement = docCE; } return { closers: [...h.matchAll(/class="ut-act (ut-done|ut-dismiss|ut-reopen)/g)].map((x) => x[1]), own: [...h.matchAll(/data-answer="(\w+)"/g)].map((x) => x[1]) }; };
   const drawnV = { runAsk: cls(askOf.runAsk), paste: cls(askOf.paste), hubAct: cls(askOf.hubAct) };
   ok(drawnV.runAsk.closers.length === 0 && drawnV.paste.closers.length === 0 && drawnV.hubAct.closers.length === 0 && drawnV.runAsk.own.length >= 2 && drawnV.hubAct.own.length >= 2, 'the row (the tray, the chat card): the held asks draw their own Allow once / Always / Deny and NO ✓ / ✕; the paste request its box and NO ✓ / ✕', drawnV);
-  const VBX = read('src/lib/vault-paste-box.js');
-  ok(/const note = mk\('div', 'ut-secret-note', t\('Wrong name or kind\? Refuse — the agent can ask again with the right one\.'\)\);/.test(VBX) && /box\.append\(row, note, state\);/.test(VBX), 'the paste box (the tray row and the chat card — one box) says «Wrong name or kind? Refuse — the agent can ask again with the right one.»');
+  // (⑪'s paste-box note pin of src/lib/vault-paste-box.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const base = registryFrom(read('src/foryou-actions.js').replace(/(\{ type: '(?:vault-run-ask|hub-act-ask|secret-request)'[^\n]*?), decide: 'person', ends: \[[^\]]*\], stamp: '\w+' \}/g, '$1 }').replace("chat: true, kind: 'approval', scope: 'about' }", "chat: true, kind: 'approval', scope: 'group' }"));
   const baseHub = { ...askOf.hubAct }; delete baseHub.about;   // the base's hub-act ask: filed under Machines, naming no conversation
   const rb = law(base);
@@ -1070,13 +1051,7 @@ try {
   const MAP = " || code === 'expired' || code === 'placement-not-offered' ? 409";
   const e0 = REAL_SRC.split(MAP).length === 2 ? await pressExpired(routerFrom(REAL_SRC.replace(MAP, " || code === 'placement-not-offered' ? 409"))) : null;
   ok(e0 && e0.status === 500, 'RED CONTROL: answer3 without the mapping (bec3e3f8) — the same press ⇒ HTTP 500', e0);
-  // (b) the page words it in the owner's language, from its end
-  const ACT = read('src/lib/user-todos-actions.js');
-  ok(/\(r && r\.code === 'expired'\) \? t\('This request expired on \{date\} — the agent can ask again', \{ date: clockWords\(r\.expiredAt\) \}\)/.test(ACT), 'the page (the chat card and the tray — one press road) toasts «This request expired on {date} — the agent can ask again», its date from `expiredAt` (THE registry\'s clockWords)');
-  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
-  const KEYS = ['This request expired on {date} — the agent can ask again', 'allowed once by you', 'allowed by you for 8 h', 'allowed for 8 hours', 'allowed once'];
-  const missing = KEYS.filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':'));
-  ok(!missing.length, `the new words are in zh and ja (${KEYS.length} keys)`, missing);
+  // (⑫ (b)'s source pin of src/lib/user-todos-actions.js and the new words' zh / ja rows: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // (c) vault-grant-ask: THE third vault card in the same chat (Allow once / For 8 hours / Deny) is a DECISION ROW
   const grant = { id: 'ut-grt0000001', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', detail: 'Secret: bucket — vault://mounts/m1/secretKey', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'c'.repeat(32) }, createdAt: NOW - 30e3 };
   const row = FA.ROW_OF['vault-grant-ask'];
@@ -1127,35 +1102,7 @@ try {
   ok(J(r14a) === J({ live: [['agent-1'], ['agent-1'], []], off: [[], ['agent-1'], ['agent-1']], fired: ['pattern:agent-1'] }), 'THE ONE READER (F.grainAsFired): the rule read WITH the account\'s access — Worker\'s wake in effect (and effectiveGrants fires it, through the same reader); the account\'s access taken away — the row stays STORED, inert', r14a);
   ok(J(ids(F14.grainOf(rule).watchers)) === '[]', 'RED CONTROL: round 4\'s read of the rule (`F.grainOf(pa)` — no inherited access) drops the live wake: «not held»', ids(F14.grainOf(rule).watchers));
 } catch (e) { ok(false, '⑭ (a) threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
-try {
-  // (b) THE ONE-READER CENSUS over the engine's source: every road that asks «held», writes a grain or draws its lists reads it
-  // through readGrainHolder (→ F.grainAsFired); none reads a holder through the narrower F.grainOf; «held» counts the STORED rows
-  // r6: + the rows BELOW a grain (wakesBelow), a write's before / after (wakeRowsNow), the agent's watch list (agentWatchesFor)
-  // and the engine's three boot censuses (orphanWatchers, capZeroDigests, deprecatedReceiptWakes — through eachRowInEffect)
-  const ROADS = ['convGrainOf', 'readGrainHolder', 'grainReadAt', 'ownWakes', 'wakesBelow', 'wakeRowsNow', 'wakeNamesFilter', 'setGrain', 'grainView', 'storedWatcherFor', 'removePattern', 'setScopeAssignment', 'agentWatchesFor', 'orphanWatchers', 'eachRowInEffect', 'capZeroDigests', 'deprecatedReceiptWakes'];
-  const oneReader = (E, FS, G = read('src/server/channels-engine.js')) => {
-    const fns = fnsOf(E + '\n' + G), byName = Object.fromEntries(fns.map((f) => [f.name, f.body]));
-    const bad = [];
-    for (const n of ROADS) {
-      const b = byName[n];
-      if (b === undefined) { bad.push(`${n}: missing`); continue; }
-      if (/\bF\.grainOf\(/.test(b)) bad.push(`${n}: reads a grain through F.grainOf (a narrower view)`);
-      if (n !== 'readGrainHolder' && !/(?<![\w.])(readGrainHolder|grainReadAt|heldRead|eachRowInEffect)\(/.test(b)) bad.push(`${n}: never reaches the one reader`);
-    }
-    if (!/F\.grainAsFired\(/.test(byName.readGrainHolder || '')) bad.push('readGrainHolder: does not read through F.grainAsFired');
-    if (!/wakesIn\(g\.stored\)/.test(byName.ownWakes || '')) bad.push('ownWakes: does not count every STORED wake row');
-    if (!/(?<![\w.])ownWakes\(/.test(byName.wakeHeldAt || '') || !/(?<![\w.])wakesBelow\(/.test(byName.wakeHeldAt || '')) bad.push('wakeHeldAt: does not ask its own rows AND the rows below it');
-    const eff = (/function effectiveGrants\([\s\S]*?\n\}\n/.exec(FS) || [''])[0];
-    if ((eff.match(/grainAsFired\('(account|pattern|conversation)'/g) || []).length !== 3 || /\bgrainOf\(/.test(eff)) bad.push('effectiveGrants: its three grains are not read through grainAsFired');
-    return bad;
-  };
-  const E14 = read('src/server/channels-access.js'), FS14 = read('src/channel-filter.js');
-  const b14 = oneReader(E14, FS14);
-  ok(!b14.length, `THE ONE-READER CENSUS: ${ROADS.length} roads of the engine (${ROADS.join(', ')}) read a grain through readGrainHolder → F.grainAsFired — the reader effectiveGrants fires with; «held» counts every stored wake row`, b14);
-  const narrowSet = oneReader(E14.replace('    const rd = readGrainHolder(adapterId, kind, site.holder);\n', '    const rd = site.holder ? { ...F.grainOf(site.holder), inert: [] } : null;\n'), FS14);
-  const activeOnly = oneReader(E14.replace('const own = wakesIn(g.stored);', 'const own = wakesIn(g.watchers);'), FS14);
-  ok(narrowSet.some((x) => /^setGrain: reads a grain through F\.grainOf/.test(x)) && activeOnly.some((x) => /^ownWakes: does not count every STORED/.test(x)), 'RED COPIES: a writer reading the holder through F.grainOf (round 4\'s setGrain), a «held» counting only the rows in effect (round 4\'s — an inert wake read «not held») — each named', { narrowSet, activeOnly });
-} catch (e) { ok(false, '⑭ (b) threw on this tree: ' + ((e && e.message) || e)); }
+// (⑭ (b) THE ONE-READER CENSUS over src/server/channels-access.js, src/server/channels-engine.js, src/channel-filter.js with its RED copies: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 try {
   // (c) A RECORD SAYS ONLY WHAT WAS DECIDED: an old `granted` (Allow once and For 8 hours both wrote it before .360) ⇒ «allowed»;
   // r6: the record STAYS `granted` (every reader knows it) with its facts — `grantedFor` names the duration
@@ -1165,10 +1112,7 @@ try {
   const words = (it) => [FA.settledWords(it, tI), ROW3.resolvedByText(it.resolvedBy, tI, it)];
   const r14c = { old: [...words(old), FA.decisionCard(old, { now: NOW }).stamp], h8: words(withFor('8h')), once: words(withFor('once')) };
   ok(J(r14c) === J({ old: ['allowed', 'allowed', 'allowed'], h8: ['allowed for 8 hours', 'allowed for 8 hours'], once: ['allowed once', 'allowed once'] }), 'a stored {resolvedBy: \'granted\'} with no duration (before .360 — either verb) reads «allowed» on the card, the tray and the For-you window; a record carrying `grantedFor` says «allowed for 8 hours» / «allowed once»', r14c);
-  const ZH14 = read('src/lib/i18n-zh.js');
-  ok(/\n {2}"allowed": "已允许",/.test(ZH14), 'zh: «allowed» = «已允许»');
-  const DOOR = read('src/server/vault-run-door.js');
-  ok(/const grantedFor = a === 'once' \? 'once' : '8h';\n {4}settleRequest\(q, 'granted', 'answered', \{ \.\.\.\(mark\(\) \|\| \{\}\), grantedFor, until \}\);\n {4}return \{ ok: true, outcome: a === 'once' \? 'granted-once' : 'granted', grantedFor, until \};/.test(DOOR) && !/'granted-8h'/.test(DOOR), 'r6: the door writes `granted` (the value every reader names) + `grantedFor` / `until` on the record, and answers the outcome the production client toasts (`granted-once` / `granted`) + the same `grantedFor` — never `granted-8h`');
+  // (⑭'s zh «已允许» and src/server/vault-run-door.js grantedFor pins: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } catch (e) { ok(false, '⑭ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
 function grantItem14() { return { id: 'ut-grt0000002', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', status: 'open', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'd'.repeat(32) }, createdAt: NOW - 30e3 }; }
 
@@ -1397,8 +1341,7 @@ try {
 } catch (e) { ok(false, '⑯ (c) threw on this tree: ' + ((e && e.message) || e)); }
 try {
   // (d) the press: a LATE Allow's answer (r20b's {ok, outcome:'late-allowed'}) is never toasted «denied»
-  const ACT8 = read('src/lib/user-todos-actions.js');
-  ok(/r\.outcome === 'late-allowed' \? t\('let through once · waiting for it to run again'\) : r\.outcome === 'denied' \? t\('denied'\) : `\$\{t\('outcome unknown'\)\} · \$\{String\(r\.outcome \|\| ''\)\}`/.test(ACT8), 'the vault-run press reads a late Allow\'s outcome («已放行 1 次 · 等它重跑»), a Deny as «已拒绝», anything else as «结果未知 · <outcome>» (2a5e9ce8: everything not allowed/always toasted «已拒绝»)');
+  // (⑯ (d)'s source pin of src/lib/user-todos-actions.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } catch (e) { ok(false, '⑯ (d) threw on this tree: ' + ((e && e.message) || e)); }
 
 // ── ⑰ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1451,10 +1394,7 @@ try {
   const deny = { id: 'ut-r9-deny', sessionKey: 'claude:c1', text: 'wake?', status: 'done', kind: 'action', origin: 'channels', createdAt: Date.now() - 9e4, resolvedAt: Date.now() - 6e4, resolvedBy: 'denied', resolvedFact: { decidedBy: 'person', decidedAt: Date.now() - 6e4 }, action: { type: 'channel-watch-request', id: 'wr-9' } };
   const st = FA.decidedStamp(deny, { t: JA });
   ok(st && /^あなたが拒否しました · /.test(st.text), `(c) the ja person stamp of a deny says WHO: «${st && st.text}» (was «拒否済み» — pre-existing from r1)`, st);
-  const FE = read('src/lib/channel-filter-editor.js');
-  const ZH9 = DICT8.zh;
-  ok(/const woke = r\.wakes && Array\.isArray\(r\.wakes\.reactivated\) \? r\.wakes\.reactivated\.length : 0;/.test(FE) && /woke \? t\('Access saved: \{list\} — this re-activated \{n\} wake\(s\) \(a billed turn each time one fires\)', \{ list: names, n: woke \}\)/.test(FE) && !!ZH9['Access saved: {list} — this re-activated {n} wake(s) (a billed turn each time one fires)'] && !!JA9['Access saved: {list} — this re-activated {n} wake(s) (a billed turn each time one fires)'],
-    '(c) DEFECT 2: the page\'s access toast reads the write\'s own `wakes.reactivated` — «访问权限已保存：… — 这次重新启用了 2 个唤醒…» when it woke rows (the answer\'s words belted: test-channel-agent-watch ⑦ (a)), «…不会唤醒任何人» only when it woke none');
+  // (⑰ (c) DEFECT 2's source pin of src/lib/channel-filter-editor.js + its zh / ja words: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } catch (e) { ok(false, '⑰ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log('⑱ ROUND 10 — a held decision ends only when its rule is gone: the route, the words and the page say which');
@@ -1491,21 +1431,7 @@ try {
     && J(seen.removed) === J(['the rule they were held for was removed — 30 messages discarded', 'the rule they were held for was removed — 30 messages discarded']),
     `(b) an end by a revoked access reads «${seen.en[0]}» / «${seen.zh[0]}» / «${seen.ja[0]}» on the card AND the tray row (8b46c196: «the rule … was removed» — the rule stood); a removed rule keeps «${seen.removed[0]}»`, J(seen));
 } catch (e) { ok(false, '⑱ (b) threw on this tree: ' + ((e && e.stack) || e)); }
-try {
-  // (c) THE PAGE: the press road (the chat card and the tray) toasts both refusals in the owner's language — who, how many, why
-  const UA = read('src/lib/user-todos-actions.js');
-  const KEYS10 = ['{agent} is not running — the {n} messages stay held: Deliver once it runs, or Discard them', '{agent} is not woken by this rule now (not in its group, or left out of it) — the {n} messages stay held: Deliver once it is, or Discard them', 'the access they were held under was removed — {n} messages discarded', 'the rule they were held for was removed — {n} messages discarded'];
-  // r15: r13 put the not-in-effect ternary in parentheses (+ droppedWords) — the pin had gone stale on 3928de8bd. r16 (the r15
-  // acceptance, skep-pin18c.cjs): r15 wrote that note MID-LINE, so the rule-gone half after it was comment text — a pin that could
-  // not fall. Both halves are code again, and each is shown able to fall: its branch deleted from a copy ⇒ the pin is false
-  const branchOf = (src) => /if \(held && r && r\.code === 'not-in-effect'\) \{ showToast\(\(?r\.why === 'not-running' \? t\('\{agent\} is not running/.test(src)
-    && /if \(held && r && r\.code === 'rule-gone'\) \{ showToast\(r\.why === 'access-removed' \? t\('the access they were held under was removed/.test(src);
-  const branch = branchOf(UA);
-  const cutRG = UA.replace("if (held && r && r.code === 'rule-gone') {", 'if (false) {'), cutNE = UA.replace("if (held && r && r.code === 'not-in-effect') {", 'if (false) {');
-  const falls = { ruleGone: cutRG !== UA && !branchOf(cutRG), notInEffect: cutNE !== UA && !branchOf(cutNE) };
-  const missing = KEYS10.filter((k) => !UA.includes(`t('${k}'`) || !(k in DICT8.zh) || !(k in JA9));
-  ok(branch && falls.ruleGone && falls.notInEffect && !missing.length, `(c) the press road toasts \`not-in-effect\` («${Z(KEYS10[0], { agent: 'Worker', n: 30 })}») and \`rule-gone\` in the owner's language — ${KEYS10.length} keys, each with zh + ja; the pin FALLS with either branch deleted (beb0cc795: the rule-gone half sat in a comment)`, J({ branch, falls, missing }));
-} catch (e) { ok(false, '⑱ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+// (⑱ (c) the press road toasts both refusals — the source pins of src/lib/user-todos-actions.js with their text-only falls and zh / ja words: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── ⑲ ROUND 11 ──────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑲ ROUND 11 — ONE producer contract: the run card draws the facts as the producer carries them (the folds whole, whyAgain named, the cut point said, no live name); a rule\'s reach ends its held card by name');
@@ -1584,10 +1510,9 @@ try {
   const f0 = LV['clip-5037'], whole = f0.cmdFull.join('');
   const card = (n, len, cut = null) => FA.runCardOf(runItem({ ...f0, cmdFull: (() => { const x = whole.slice(0, n), o = []; for (let i = 0; i < x.length; i += 2000) o.push(x.slice(i, i + 2000)); return o; })(), ...(len ? { cmdLen: len } : {}), ...(cut ? { cut } : {}) }), { t: tt3 });
   const a = card(3000, 3500), b = card(3000, null), c = card(4096, 5037, ['cmdFull']), d = card(4096, null, ['cmdFull']);
-  const code = read('src/foryou-actions.js').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n');
-  ok(J(a.cut) === J(b.cut) && b.cut.whole === true && b.cut.n === 3000 && J(c.cut) === J(d.cut) && /^The command is over 4096 characters/.test(d.cut.text) && !/cmdLen/.test(code)
-    && !/cut at \{k\}/.test(read('src/foryou-actions.js')) && !/cut at 3000/.test(read('docs/kb-features.md')) && !('The command is {n} characters long — cut at {k}, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.' in DICT8.zh),
-    `(e) r12 — NO cmdLen: a hand-built cmdLen 3 500 over a 3 000 fold reads as the fold says («${a.cut.text.slice(0, 48)}…»), a store-cut fold «${d.cut.text.slice(0, 44)}…» with or without one; no code line reads cmdLen, no «cut at» key or kb example is left (1ad060a82: «3500 characters long — cut at 3000»)`, J({ a: a.cut, d: d.cut }));
+  // (⑲ (e)'s source half — no cmdLen in src/foryou-actions.js, no «cut at» key or kb example: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
+  ok(J(a.cut) === J(b.cut) && b.cut.whole === true && b.cut.n === 3000 && J(c.cut) === J(d.cut) && /^The command is over 4096 characters/.test(d.cut.text),
+    `(e) r12 — NO cmdLen: a hand-built cmdLen 3 500 over a 3 000 fold reads as the fold says («${a.cut.text.slice(0, 48)}…»), a store-cut fold «${d.cut.text.slice(0, 44)}…» with or without one; no code line reads cmdLen, no «cut at» key or kb example is left (1ad060a82: «3500 characters long — cut at 3000») — its source half: the fast …-pins`, J({ a: a.cut, d: d.cut }));
 } catch (e) { ok(false, '⑲ (e) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
   // (f) THE MINOR's words: a held decision the rule no longer covers ended — the card and the tray row in en / zh / ja, and the
@@ -1595,10 +1520,9 @@ try {
   const ended = { id: 'ut-r11-nc', sessionKey: 'channels', text: '30 messages for Worker held since …', status: 'done', kind: 'action', origin: 'channels', createdAt: Date.now() - 9e4, resolvedAt: Date.now() - 6e4, resolvedBy: 'discarded', resolvedFact: { n: 30, why: 'not-covered' }, action: { type: 'channel-held-digest', id: 'wr-r11' } };
   const both = (t) => [FA.settledWords(ended, t), ROW3.resolvedByText(ended.resolvedBy, t, ended)];
   const seen = { en: both(tt3), zh: both(Z), ja: both(JA) };
-  const UA = read('src/lib/user-todos-actions.js');
-  const toast = /r\.why === 'not-covered' \? \(Number\(r\.convs\) > 1 \? t\('the rule no longer covers its \{m\} conversations — \{n\} messages discarded'[^\n]*: t\('the rule no longer covers this conversation — \{n\} messages discarded'/.test(UA);   // r12: a digest's every conversation
-  ok(J(seen.en) === J(['the rule no longer covers this conversation — 30 messages discarded', 'the rule no longer covers this conversation — 30 messages discarded']) && seen.zh[0] === seen.zh[1] && seen.zh[0] === '规则已不再覆盖这个会话 — 已丢弃 30 条消息' && seen.ja[0] === seen.ja[1] && seen.ja[0] === 'ルールがこの会話を対象にしなくなりました — 30 件のメッセージを破棄しました' && toast,
-    `(f) a held decision out of its rule's reach reads «${seen.en[0]}» / «${seen.zh[0]}» / «${seen.ja[0]}» on the card AND the tray row; the press road toasts it (704a0f4c: «settled»)`, J({ seen, toast }));
+  // (⑲ (f)'s source half — the press road's not-covered toast in src/lib/user-todos-actions.js: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
+  ok(J(seen.en) === J(['the rule no longer covers this conversation — 30 messages discarded', 'the rule no longer covers this conversation — 30 messages discarded']) && seen.zh[0] === seen.zh[1] && seen.zh[0] === '规则已不再覆盖这个会话 — 已丢弃 30 条消息' && seen.ja[0] === seen.ja[1] && seen.ja[0] === 'ルールがこの会話を対象にしなくなりました — 30 件のメッセージを破棄しました',
+    `(f) a held decision out of its rule's reach reads «${seen.en[0]}» / «${seen.zh[0]}» / «${seen.ja[0]}» on the card AND the tray row; the press road toasts it (704a0f4c: «settled») — its source half: the fast …-pins`, J({ seen }));
 } catch (e) { ok(false, '⑲ (f) threw on this tree: ' + ((e && e.stack) || e)); }
 
 // ── ⑳ ROUND 12 ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1667,26 +1591,19 @@ try {
   // the card says what part was dropped («… — deliver or discard · the rule no longer covers 1 of 2 conversations — 30 held
   // messages dropped»), the record and the tray row say it after Deliver / Discard, a digest whose every conversation went says
   // «its 2 conversations», the press road toasts it — en / zh / ja, each key with zh + ja
-  const KEYS12 = ['{n} messages for {agent} held since {date} — deliver or discard · the rule no longer covers {k} of {m} conversations — {d} held messages dropped',
-    '{n} messages for {agent} held since {date} — deliver or discard · {k} of {m} conversations no longer wake {agent} — {d} held messages dropped',
-    'the rule no longer covers {k} of {m} conversations — {d} held messages dropped', '{k} of {m} conversations no longer wake {agent} — {d} held messages dropped',
-    'the rule no longer covers its {m} conversations — {n} messages discarded'];
   const drop = { n: 30, k: 1, of: 2, why: 'not-covered', agent: 'Worker' };
   const item = (by, fact) => ({ id: 'ut-r12-' + by, sessionKey: 'channels', text: '30 messages for Worker held since …', status: 'done', kind: 'action', origin: 'channels', createdAt: Date.now() - 9e4, resolvedAt: Date.now() - 6e4, resolvedBy: by, resolvedFact: fact, action: { type: 'channel-held-digest', id: 'wr-r12' } });
   const both = (it, t) => [FA.settledWords(it, t), ROW3.resolvedByText(it.resolvedBy, t, it)];
   const del = item('delivered', { n: 30, dropped: drop }), dis = item('discarded', { n: 30, dropped: { ...drop, why: 'watch-removed' } }), all = item('discarded', { n: 60, why: 'not-covered', convs: 2 });
   const seen = { en: [both(del, tt3), both(dis, tt3), both(all, tt3)], zh: [both(del, Z), both(all, Z)], ja: [both(del, JA)] };
-  const SRVK = read('src/server/channels-access.js'), UA = read('src/lib/user-todos-actions.js');
-  const keyed = KEYS12.filter((k) => !(k in DICT8.zh) || !(k in JA9) || !(SRVK.includes(`i18nKey('${k}')`) || UA.includes(`t('${k}'`) || read('src/foryou-actions.js').includes(`t('${k}'`)));
-  const toast = /const droppedWords = dd \? ' · ' \+ \(r\.dropped\.why === 'not-covered' \? t\('the rule no longer covers \{k\} of \{m\} conversations — \{d\} held messages dropped', dd\) : t\('\{k\} of \{m\} conversations no longer wake \{agent\} — \{d\} held messages dropped', dd\)\)/.test(UA) && /\+ droppedWords \+ (?:pendingWords|stillWords) \+ skippedWords/.test(UA);   // r13: computed once for both toasts; r15: the still-held words in pendingWords' place (the not-in-effect one says it too)
-  const head = Z(KEYS12[0], { n: 30, agent: 'Worker', date: '2026-10-26 17:01 PT', k: 1, m: 2, d: 30 });
+  // (⑳ (d)'s source half — the open card's head words, every key's zh / ja row and t() / i18nKey() site, the press road's dropped-words toast: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(J(seen.en[0]) === J(Array(2).fill('delivered · the rule no longer covers 1 of 2 conversations — 30 held messages dropped'))
     && J(seen.en[1]) === J(Array(2).fill('discarded — nothing was sent · 1 of 2 conversations no longer wake Worker — 30 held messages dropped'))
     && J(seen.en[2]) === J(Array(2).fill('the rule no longer covers its 2 conversations — 60 messages discarded'))
     && J(seen.zh[0]) === J(Array(2).fill('已投递 · 规则已不再覆盖 2 个会话中的 1 个 — 已丢弃 30 条搁置的消息')) && J(seen.zh[1]) === J(Array(2).fill('规则已不再覆盖它的 2 个会话 — 已丢弃 60 条消息'))
     && seen.ja[0][0] === seen.ja[0][1] && seen.ja[0][0] === '配信済み · ルールが 2 件中 1 件の会話を対象にしなくなりました — 保留中のメッセージ 30 件を破棄しました'
-    && head === '30 条给 Worker 的消息自 2026-10-26 17:01 PT 起被搁置 — 投递还是丢弃 · 规则已不再覆盖 2 个会话中的 1 个 — 已丢弃 30 条搁置的消息' && !keyed.length && toast,
-    `(d) PER CONVERSATION, SAID: the open card «${head}»; the record and the tray row «${seen.en[0][0]}» / «${seen.zh[0][0]}» / «${seen.ja[0][0]}»; a digest whose every conversation went «${seen.en[2][0]}»; the press road toasts the part (1ad060a82: «delivered» for 60 with 30 of them dropped unsaid)`, J({ seen, keyed, toast }));
+   ,
+    `(d) PER CONVERSATION, SAID — its source half: the fast …-pins: the record and the tray row «${seen.en[0][0]}» / «${seen.zh[0][0]}» / «${seen.ja[0][0]}»; a digest whose every conversation went «${seen.en[2][0]}»; the press road toasts the part (1ad060a82: «delivered» for 60 with 30 of them dropped unsaid)`, J({ seen }));
 } catch (e) { ok(false, '⑳ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 
 // ── ㉑ ROUND 13 ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1728,31 +1645,12 @@ try {
     '(c) pathTail with no folderFull ⇒ the program path is said cut, the rest not available — never «folder clip + tail» drawn as whole', J(pf));
 } catch (e) { ok(false, '㉑ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
-  // (d) ONE PRESS, ONE TURN, SAID (M2 + the minor; r15 restated): the press road's toast says what stays held on the card after the
-  // one block (r13 said «still wait for its next delivery» for rows r15 keeps in the request) and, on a not-in-effect answer, the part
-  // the same press dropped — each key with zh + ja
-  const UA = read('src/lib/user-todos-actions.js');
-  const KEY = '{n} held messages stay on the card — Deliver again, or Discard them';
-  const stillToast = /const stillWords = still > 0 && r\.delivered \? ' · ' \+ t\('\{n\} held messages stay on the card — Deliver again, or Discard them', \{ n: still \}\) : '';/.test(UA) && /\+ droppedWords \+ stillWords \+ skippedWords/.test(UA) && !/r\.pending/.test(UA);
-  const notInEffect = /Deliver once it is, or Discard them', \{ agent: r\.agent \|\| '', n: Number\(r\.n\) \|\| 0 \}\)\) \+ droppedWords, \{ type: 'error' \}\)/.test(UA);
-  const CARD = read('src/server/channels-access.js');
-  ok(stillToast && notInEffect && (KEY in DICT8.zh) && (KEY in JA9) && Z(KEY, { n: 30 }) === '还有 30 条搁置的消息留在卡片上 — 再次投递，或丢弃它们' && /Deliver sends them to \$\{who\} now, as one block \(a billed turn\)/.test(CARD),
-    `(d) the press road says what stays held on the card after the ONE block («${Z(KEY, { n: 30 })}») and, when its watcher is not woken now, the part the press dropped; the card still promises ONE block (true since r13)`, J({ stillToast, notInEffect }));
+  // (㉑ (d) the press road's words — the source pins of src/lib/user-todos-actions.js, src/server/channels-access.js and their zh / ja words: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } catch (e) { ok(false, '㉑ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 
 // ── ㉒ ROUND 15 ──────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('㉒ ROUND 15 — what a press did not get to the agent stays on its card, said; a conversation one block carries for another road names that road');
-try {
-  // (a) THE PRESS ROAD'S TWO r15 SENTENCES: a delivered press with a part left on the card, and a refused block whose rows came
-  // back to the card (never «they go with its next delivery» for rows the request holds again) — each with zh + ja
-  const UA = read('src/lib/user-todos-actions.js');
-  const K1 = '{n} held messages stay on the card — Deliver again, or Discard them', K2 = 'Not delivered now ({why}) — the {n} messages stay held: Deliver again, or Discard them';
-  const refusedBack = /still > 0 && !r\.stashed \? t\('Not delivered now \(\{why\}\) — the \{n\} messages stay held: Deliver again, or Discard them', \{ why: r\.why \|\| t\('refused'\), n: still \}\)/.test(UA);
-  const words = [K1, K2].every((k) => UA.includes(`t('${k}'`) && (k in DICT8.zh) && (k in JA9));
-  const gone = !('{n} held messages still wait for its next delivery' in DICT8.zh) && !('{n} held messages still wait for its next delivery' in JA9);
-  ok(refusedBack && words && gone && Z(K2, { why: 'x', n: 60 }) === '现在没有投递（x）— 这 60 条消息继续保留：再次投递，或丢弃它们' && JA9[K1] === '保留中のメッセージ {n} 件はカードに残っています — もう一度届けるか、破棄してください',
-    `(a) the press road: «${Z(K1, { n: 30 })}» beside a delivered part, «${Z(K2, { why: '…', n: 60 })}» for a refused block whose rows came back; r13's «still wait for its next delivery» is gone from the dictionaries`, J({ refusedBack, words, gone }));
-} catch (e) { ok(false, '㉒ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+// (㉒ (a) the press road's two r15 sentences — the source pins of src/lib/user-todos-actions.js and their zh / ja words: MOVED to the fast scripts/test-wake-approve-card-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 try {
   // (b) THE ROAD, PURE: renderScopeDigestBlock says `via` under a group's heading — and nothing for a group without one
   const F22 = require(path.join(SRC, 'channel-filter.js'));
