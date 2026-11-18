@@ -388,6 +388,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       mode,
       ...(notes.length ? { notes } : {}),
       ...(settingsNotes.length ? { settingsNotes } : {}),   // B-8dcf item two: the kinds the create SAYS to the person (src/settings-file-words.js)
+      ...(fileGoverns ? { settingsFileGoverns: true } : {}),   // batch 21's cure: the file governs EVERY kind it covers (the create records them all)
     };
   }
 

@@ -6,6 +6,7 @@
 const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a catch-up's pass (batch 21's cure)
 
 function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {}, sessionStatusKey = null }) {
   // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
@@ -297,7 +298,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       for (const [, s] of activeSessions) {
         if (!s.pty || s.mode !== 'chat' || (s.backend || 'claude') !== 'claude' || s.host) continue;
         if (s._csiAccepted) continue;
-        if (require('../settings-file-words.js').fileGoverns(s, 'jobNotices')) continue;   // B-8dcf item two: the person's settings file governs it
+        if (SFW.fileGoverns(s, 'jobNotices')) continue;   // B-8dcf item two: the person's settings file governs it
         try {
           s.pty.write(JSON.stringify({ type: 'control_request', request_id: `vs-csi-${++csiSeq}`, request: { subtype: 'apply_flag_settings', settings: { crossSessionInbound: 'accept' } } }) + '\n');
           s._csiAccepted = true;

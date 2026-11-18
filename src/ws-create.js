@@ -9,6 +9,7 @@
 
 const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
 const LOCKCTX = require('./lock-context.js'); // B-6c55: the context a lock keeps (PURE)
+const SFW = require('./settings-file-words.js'); // B-8dcf item two: a person's own settings file at a start (PURE; loaded with the create, never on a pass)
 const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
 const { capsOf, worktreeRefusal, worktreeSpawnArgs, toolAllowlistArgs } = require('./backend-caps');
@@ -734,10 +735,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           const cmdOf = LOCKCTX.commandOf(data.model, data._lockContext, catalog);
           const commandModel = data._lockContext ? cmdOf.model : data.model;
           data._spawnContext = LOCKCTX.contextOf(commandModel);   // what the spawn COMMANDED (a later Lock on this process reads it)
-          if (cmdOf.refused) {
-            const said = LOCKCTX.NO_LONG_CONTEXT, name = String(data.name || data.sessionName || '').slice(0, 80) || 'This conversation';
-            try { serverNotice?.(`lock-context-${id}`, said.replace(/\{model\}/g, data.model).replace('{name}', name), { level: 2, i18n: { key: said, params: { model: data.model, name } } }); } catch { }
-          }
+          // SAID after the start registered (batch 21's cure: below, beside the settings-file notices) — a resume refused on the way
+          // never «resumed with the standard context»
+          data._contextRefused = cmdOf.refused ? String(data.model || '') : null;
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: commandModel,
@@ -1119,7 +1119,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             _lockedModel: data.modelLock ? (data.lockModel || data.model || null) : null,
             _lockedContext: data._lockContext || null,   // B-6c55: the person's context ask beside the target (the repin sends both)
             _spawnContext: data._spawnContext || null,   // B-6c55: the context the spawn's --model carried
-            _settingsFileGoverns: ((sessionSpec && sessionSpec.settingsNotes) || []).filter((k) => k !== 'billing'),   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it)
+            _settingsFileGoverns: sessionSpec && sessionSpec.settingsFileGoverns ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it)
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -1614,8 +1614,14 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // builds — local and remote alike, nothing reads the file) — SAID by name, once per start, where the person looks, with its door;
           // only a start that got this far is told (a refused one says its refusal)
           for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {
-            const w = require('./settings-file-words.js').SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
-            if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }
+            const w = SFW.SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
+            if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', () => name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }   // a function: a «$&» in a name is words
+          }
+          // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);
+          // an adopted process keeps the context it started with
+          if (data._contextRefused && !data.keeperSid) {
+            const said = LOCKCTX.NO_LONG_CONTEXT, model = data._contextRefused, name = String(data.name || data.sessionName || '').slice(0, 80) || 'This conversation';
+            try { serverNotice?.(`lock-context-${id}`, said.replace(/\{(model|name)\}/g, (m, k) => (k === 'model' ? model : name)), { level: 2, i18n: { key: said, params: { model, name } } }); } catch { }
           }
           // 2.368.0: what this session was spawned with / prefers. undefined on
           // _autoResume means "follow the global default" — the tri-state is

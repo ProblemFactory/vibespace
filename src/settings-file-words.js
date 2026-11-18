@@ -11,8 +11,10 @@
  *     set aside for that start. With no explicit pick the file governs like the three.
  * Each is SAID by name once per conversation start, where the person looks, with its door (the create's notice).
  * SETTINGS_FILE_WORDS[kind] = the person's words (English t() keys, {name} = the conversation; the page words them).
- * The kinds the file GOVERNS (all but billing) ride the session as `_settingsFileGoverns` (meta settingsFileGoverns): the paths
- * that push a value to a RUNNING CLI (the jobs engine's inbound catch-up, the fallback stop, a live settings change) skip it.
+ * The kinds the file GOVERNS ride the session as `_settingsFileGoverns` (meta settingsFileGoverns): the paths that push a value
+ * to a RUNNING CLI (the jobs engine's inbound catch-up, the fallback stop, a live settings change) skip it. A file that governs
+ * governs EVERY kind of GOVERNED_KINDS, not only the ones that stood down at the start (batch 21's cure: a switch turned on
+ * later must not push over the file).
  */
 const SETTINGS_FILE_WORDS = Object.freeze({
   outputStyle: '{name}: your settings file is used as it is — the output style you picked in VibeSpace is not applied; put it into the file, or drop the --settings flag',
@@ -21,8 +23,10 @@ const SETTINGS_FILE_WORDS = Object.freeze({
   billing: '{name} is set to bill through the subscription, so your settings file was set aside for this start, all of it — clear the pick to use the file',
 });
 const SETTINGS_FILE_KINDS = Object.freeze(Object.keys(SETTINGS_FILE_WORDS));
+/** the kinds a governing file covers (the three; billing is a set-aside, never a governing) */
+const GOVERNED_KINDS = Object.freeze(['outputStyle', 'noFallback', 'jobNotices']);
 /** does the person's settings file govern `kind` for this running session? */
 const fileGoverns = (session, kind) => !!(session && Array.isArray(session._settingsFileGoverns) && session._settingsFileGoverns.includes(kind));
 /** the live settings row a kind stands for (harness-config-sync's push) */
 const KIND_OF_ROW = Object.freeze({ disableModelFallback: 'noFallback' });
-module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, fileGoverns, KIND_OF_ROW };
+module.exports = { SETTINGS_FILE_WORDS, SETTINGS_FILE_KINDS, GOVERNED_KINDS, fileGoverns, KIND_OF_ROW };

@@ -20,7 +20,17 @@
    "road": "the [1m] form offered when the installed CLI's own catalog says native_1m / the 1M beta",
    "suite": "test-claude-update-needs-nothing",
    "match": "one-m-suffix",
-   "sites": 6
+   "sites": 5
+  },
+  {
+   "id": "model-core-1m",
+   "file": "src/model-core.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the catalog's own name rule (a model id's core drops the claude- prefix and a [1m] suffix) — no model is named, every id the installed CLI states passes through it (batch 21's cure moved it here from the catalog reader)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 1
   },
   {
    "id": "lock-context-1m",

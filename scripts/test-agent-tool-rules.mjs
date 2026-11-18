@@ -614,10 +614,12 @@ console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own set
   ok(bill.set && bill.set.apiKeyHelper === '' && !bill.notes.length, '⑬b billing, no file: an explicit subscription pick neutralizes the helper, nothing said');
   ok(billFile.flag !== FILE && billFile.set && billFile.set.apiKeyHelper === '' && billFile.set.outputStyle === 'Explanatory' && billFile.flags === 1 && JSON.stringify(billFile.notes) === JSON.stringify(['billing']),
     '⑬b billing WITH the person\'s file: it NEVER stands down — the file is set aside for this start (the helper neutralized; the other values apply as without a file) and the start says «billing» once', { flag: billFile.flag, set: billFile.set, notes: billFile.notes });
-  ok(noPick.flag === FILE && !noPick.notes.length && !(noPick.set && 'apiKeyHelper' in noPick.set), '⑬b no explicit pick + a file: the file governs (no helper neutralization, nothing set aside)');
+  ok(noPick.flag === FILE && !noPick.notes.length && !(noPick.set && 'apiKeyHelper' in noPick.set) && noPick.r.settingsFileGoverns === true, '⑬b no explicit pick + a file: the file governs (no helper neutralization, nothing set aside) — and says it governs, whatever stood down (batch 21\'s cure)');
+  ok(!bill.r.settingsFileGoverns && !billFile.r.settingsFileGoverns && !run(ClaudeCodeAdapter, { extraArgs: ['--settings', '{"a":1}'] }).r.settingsFileGoverns, '⑬b no file, inline JSON, or a file set aside: nothing governs');
   const all = run(ClaudeCodeAdapter, { outputStyle: 'Explanatory', settings: { disableModelFallback: true }, acceptPeerMessages: true, extraArgs: file });
   ok(JSON.stringify(all.notes) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']) && all.flag === FILE, '⑬b all three at once: each said once, in order; the file intact', all.notes);
-  ok(SFW.SETTINGS_FILE_KINDS.every((k) => typeof SFW.SETTINGS_FILE_WORDS[k] === 'string') && JSON.stringify(SFW.SETTINGS_FILE_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices', 'billing']), '⑬b every kind has its words (src/settings-file-words.js)');
+  ok(SFW.SETTINGS_FILE_KINDS.every((k) => typeof SFW.SETTINGS_FILE_WORDS[k] === 'string') && JSON.stringify(SFW.SETTINGS_FILE_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices', 'billing'])
+    && JSON.stringify(SFW.GOVERNED_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']), '⑬b every kind has its words (src/settings-file-words.js); a governing file covers the three');
   // RED controls: the release's adapter overwrote the person's file with the three; a copy where the billing one stands down like the three
   let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/adapters/claude-code.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
   const M13 = mutantCopies('agent-tool-rules-8dcf', REPO);
@@ -625,18 +627,22 @@ console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own set
   else skip('⑬b the release b06f36e90 is not in this clone (a shallow checkout) — its red controls cannot run here');
   const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
   const reg = wc.indexOf('          activeSessions.set(id, session);'), loopAt = wc.indexOf('for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {');
-  ok(reg > 0 && loopAt > reg && /const w = require\('\.\/settings-file-words\.js'\)\.SETTINGS_FILE_WORDS\[k\], name = String\(session\.name \|\| data\.name \|\| ''\)\.slice\(0, 80\) \|\| 'This conversation';\s*if \(w\) \{ try \{ serverNotice\?\.\(`settings-file-\$\{k\}-\$\{id\}`, w\.replace\('\{name\}', name\), \{ level: 1, i18n: \{ key: w, params: \{ name \} \} \}\); \} catch \{ \} \}/.test(wc),
+  ok(reg > 0 && loopAt > reg && /const w = SFW\.SETTINGS_FILE_WORDS\[k\], name = String\(session\.name \|\| data\.name \|\| ''\)\.slice\(0, 80\) \|\| 'This conversation';\s*if \(w\) \{ try \{ serverNotice\?\.\(`settings-file-\$\{k\}-\$\{id\}`, w\.replace\('\{name\}', \(\) => name\), \{ level: 1, i18n: \{ key: w, params: \{ name \} \} \}\); \} catch \{ \} \}/.test(wc)
+    && /^const SFW = require\('\.\/settings-file-words\.js'\);/m.test(wc),
     '⑬b WIRING: the create says each kind by name, once per start (keyed by the new session), AFTER the session is registered (a refused start says only its refusal), as an information notice naming the conversation — the remote road the same (the argv the hub builds)');
-  ok(/_settingsFileGoverns: \(\(sessionSpec && sessionSpec\.settingsNotes\) \|\| \[\]\)\.filter\(\(k\) => k !== 'billing'\),/.test(wc) && /settingsFileGoverns: session\._settingsFileGoverns && session\._settingsFileGoverns\.length \? session\._settingsFileGoverns : undefined,/.test(wc)
+  ok(/_settingsFileGoverns: sessionSpec && sessionSpec\.settingsFileGoverns \? \[\.\.\.SFW\.GOVERNED_KINDS\] : \[\],/.test(wc) && /settingsFileGoverns: session\._settingsFileGoverns && session\._settingsFileGoverns\.length \? session\._settingsFileGoverns : undefined,/.test(wc)
     && (fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8').match(/_settingsFileGoverns: Array\.isArray\(meta\.settingsFileGoverns\)/g) || []).length === 2,
-    '⑬b the kinds the file governs ride the session (meta settingsFileGoverns, restored on both rebuilds)');
+    '⑬b the kinds the file governs ride the session (meta settingsFileGoverns, restored on both rebuilds) — EVERY kind a governing file covers, not only those that stood down at the start (batch 21\'s cure: a switch turned on later never pushes over the file)');
   {
     // the RUNNING-CLI pushes skip what the file governs: the jobs engine's inbound catch-up, the fallback stop, a live settings change
     const jw = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), hc = fs.readFileSync(path.join(REPO, 'src/server/harness-config-sync.js'), 'utf8');
-    ok(/if \(s\._csiAccepted\) continue;\s*if \(require\('\.\.\/settings-file-words\.js'\)\.fileGoverns\(s, 'jobNotices'\)\) continue;/.test(jw)
-      && /if \(require\('\.\.\/settings-file-words\.js'\)\.fileGoverns\(session, 'noFallback'\)\) return;/.test(eng)
-      && /const k = require\('\.\.\/settings-file-words\.js'\)\.KIND_OF_ROW\[row\.key\]; if \(k && require\('\.\.\/settings-file-words\.js'\)\.fileGoverns\(sess, k\)\) continue;/.test(hc),
+    ok(/if \(s\._csiAccepted\) continue;\s*if \(SFW\.fileGoverns\(s, 'jobNotices'\)\) continue;/.test(jw)
+      && /if \(SFW\.fileGoverns\(session, 'noFallback'\)\) return;/.test(eng)
+      && /const k = SFW\.KIND_OF_ROW\[row\.key\]; if \(k && SFW\.fileGoverns\(sess, k\)\) continue;/.test(hc),
       '⑬b the three pushes to a RUNNING CLI skip a value the person\'s file governs (the inbound catch-up after a restart, the fallback stop, a live «Disable model fallback» change)');
+    // batch 21's cure: the words are loaded with each module, never by the first push on a stream's / a catch-up's pass
+    ok([jw, eng, hc].every((t) => /^const SFW = require\('\.\.\/settings-file-words\.js'\);/m.test(t) && !t.includes("require('../settings-file-words.js')."))   // stale-pins: kept — an ABSENCE check: no lazy first read of the words left in the three readers
+      , '⑬b the three readers load the words at their module top (no lazy first read on the stream\'s pass — the repo sits on a network workspace)');
     ok(SFW.fileGoverns({ _settingsFileGoverns: ['jobNotices'] }, 'jobNotices') && !SFW.fileGoverns({ _settingsFileGoverns: ['jobNotices'] }, 'noFallback') && !SFW.fileGoverns({}, 'jobNotices') && SFW.KIND_OF_ROW.disableModelFallback === 'noFallback', '⑬b fileGoverns / KIND_OF_ROW');
   }
   {

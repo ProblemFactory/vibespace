@@ -8,6 +8,7 @@
 // usageHistory, recordUsageAttribution) arrive as lazy getters/lambdas —
 // every use is at RUNTIME, after boot completes. ORCH tier.
 const os = require('os');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the engine, never on the stream's pass (batch 21's cure)
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const fs = require('fs');
 const path = require('path');
@@ -8113,7 +8114,7 @@ function maybeStopOnFallback(session, id, from, to) {
   try {
     if (!harnessDeclares(session.backend, 'disableModelFallback') || harnessSetting(session.backend, 'disableModelFallback') !== true) return; // the session's harness declares the row, or there is nothing to stop on
     if (session._fallbackStopFired || session.mode !== 'chat' || !session.pty) return;
-    if (require('../settings-file-words.js').fileGoverns(session, 'noFallback')) return;   // B-8dcf item two: the person's settings file governs the fallback
+    if (SFW.fileGoverns(session, 'noFallback')) return;   // B-8dcf item two: the person's settings file governs the fallback
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter?.formatInterrupt) return;
     session._fallbackStopFired = true;

@@ -224,7 +224,7 @@ function validateCatalog(raw) {
 
 const oneMForm = (id) => id + '[1m]';
 const fmtWindow = (n) => (n >= 1000000 && n % 100000 === 0 ? `${n / 1000000}M` : n >= 1000 && n % 1000 === 0 ? `${n / 1000}k` : String(n));
-const core = (id) => String(id || '').toLowerCase().replace(/^claude-/, '').replace(/\[1m\]$/i, '');
+const { core } = require('./model-core.js');   // THE name rule (lowercased, no `claude-`, no `[1m]`) — the lock's verdict reads it too
 
 /** THE PICKER's rows for the installed CLI (ruling R4/R5): the seed aliases (and the catalog's own alias names), each labelled
  *  by what it means ON THIS CLI («fable · Fable 5.2 · 1M»); then per family the catalog's latest id + every id the shipped
