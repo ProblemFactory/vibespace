@@ -1458,6 +1458,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // answer kept beside the arm (wfOf, never persisted) and named by the fire only while it is fresh
     if (workflowRunAtWall) {
       for (const k of [...wfOf.keys()]) if (!armed.has(k)) wfOf.delete(k);
+      for (const k of [...wfPending.keys()]) if (!armed.has(k)) { wfPending.delete(k); wfHungSaid.delete(k); }   // a hung read of a GONE arm holds no place in the cap (U3 cure 2 — four of them stopped the naming for everyone)
       for (const [k, t0] of wfPending) if (now - t0 > WF_HUNG_MS && !wfHungSaid.has(k)) { wfHungSaid.add(k); log(`[auto-resume] ${k}: its Workflow-run read has not answered in ${Math.round((now - t0) / 60000)} min — its continue says today's words`); }
       // FAIR ORDER (the read's should): the arm asked longest ago (never ⇒ first) goes first, so the cap never starves the rest
       const due0 = [...armed].filter(([, a]) => a && !a.fired && !a.watch && Number(a.resetsAt) > 0).sort((x, y) => ((wfOf.get(x[0]) || {}).ask || 0) - ((wfOf.get(y[0]) || {}).ask || 0));
@@ -1471,7 +1472,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         if (!s1 || !s1._stoppedBy || s1._stoppedBy.kind !== 'quota') continue;   // a wall's arm only (never a hold's)
         const w = { rec: a, run: w0 && w0.rec === a ? w0.run : null, at: w0 && w0.rec === a ? w0.at : 0, ask: now };
         wfOf.set(id, w); wfPending.set(id, now);
-        const settle = () => { wfPending.delete(id); wfHungSaid.delete(id); };
+        const t0 = now, settle = () => { if (wfPending.get(id) === t0) { wfPending.delete(id); wfHungSaid.delete(id); } };   // only ITS entry (a dropped read answering late never frees a newer one)
         try { Promise.resolve(workflowRunAtWall(id, s1, { fireAt })).then((r) => { settle(); if (wfOf.get(id) !== w || armed.get(id) !== a) return; const had = !!w.run; w.run = r ? { runId: r.runId, unfinished: r.unfinished, resetAt: Number(r.resetAt) || 0 } : null; w.at = Date.now(); if (r && !had) log(`[auto-resume] ${id}: the limit cut a Workflow run short (${r.unfinished} agent(s) unfinished) — its continue names it`); }, settle); } catch { settle(); }
       }
     }

@@ -76,7 +76,7 @@ async function journalHeads(file, max = JOURNAL_MAX) {
       const type = /"type"\s*:\s*"(launched|started|result|failed)"/.exec(h);
       const agent = /"agentId"\s*:\s*"([0-9a-f]{1,64})"/.exec(h);
       if (type && !agent && type[1] !== 'launched') { blind = true; return; }   // an agent's line whose head does not name it: the arithmetic cannot be proven
-      if (!type && h.length >= HEAD) { blind = true; return; }                  // a cut head that shows no type at all: what it is cannot be told
+      if (!type && h.length >= HEAD && !/"type"\s*:/.test(h)) { blind = true; return; }   // a cut head that shows NO type at all: what it is cannot be told (a long line of ANOTHER type — a progress or log line the CLI may add — is not an agent's and is skipped)
       if (!type || !agent) return;
       const key = /"key"\s*:\s*"((?:[^"\\]|\\.){0,200})"/.exec(h);
       out.push(JSON.stringify({ type: type[1], agentId: agent[1], ...(key ? { key: key[1] } : {}) }));
@@ -163,7 +163,7 @@ async function candidates({ home, cwd, sid, runs }) {
   }
   for (const s1 of sids) for (const p of projectDirsFor(cwd)) {
     const root = path.join(projects, p, s1), wfDir = path.join(root, 'subagents', 'workflows');
-    if (!(await isRealDir(root)) || !(await isRealDir(path.join(root, 'subagents'))) || !(await isRealDir(wfDir))) continue;
+    if (!(await isRealDir(path.join(projects, p))) || !(await isRealDir(root)) || !(await isRealDir(path.join(root, 'subagents'))) || !(await isRealDir(wfDir))) continue;   // the project folder too (U3 cure 2)
     for (const n of await listBounded(wfDir)) if (RUN_ID_RE.test(n)) out.add(path.join(wfDir, n));
   }
   return [...out];
@@ -188,7 +188,7 @@ async function runAtWall({ cwd, sid, wallAt, wallResetAt = 0, fireAt = 0, runs =
     const runId = path.basename(runDir);
     const sidDir = path.dirname(path.dirname(path.dirname(runDir)));
     // every folder on the way is a real one (the ack's remembered path is not listed through candidates' checks)
-    if (!RUN_ID_RE.test(runId) || !(await isRealDir(sidDir)) || !(await isRealDir(path.join(sidDir, 'subagents'))) || !(await isRealDir(path.dirname(runDir))) || !(await isRealDir(runDir))) return null;
+    if (!RUN_ID_RE.test(runId) || !(await isRealDir(path.dirname(sidDir))) || !(await isRealDir(sidDir)) || !(await isRealDir(path.join(sidDir, 'subagents'))) || !(await isRealDir(path.dirname(runDir))) || !(await isRealDir(runDir))) return null;
     const j = await journalHeads(path.join(runDir, 'journal.jsonl'), journalMax);
     if (!j) return null;
     let last = j.mtimeMs;

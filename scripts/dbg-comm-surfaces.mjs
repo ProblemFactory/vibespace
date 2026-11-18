@@ -217,7 +217,7 @@ for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP
 // the visible-text scan (every leaf text inside the root with a flag for Latin
 // words ≥3 letters — what an i18n reader at zh/ja would see as English) and
 // the title/placeholder attributes (tooltips are visible text too).
-const MEASURE = `(function (rootSel, probes) {
+const MEASURE = /* stale-pins: kept — this script's own browser snippet, not a pin */ `(function (rootSel, probes) {
   const root = typeof rootSel === 'string' ? document.querySelector(rootSel) : rootSel;
   if (!root) return { missing: rootSel };
   const R = (el) => { const b = el.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }; };

@@ -1946,6 +1946,13 @@ await (async () => {
     const viaReal = await look({ sid: sid2 });
     ok('18. READER: a conversation folder that is a SYMLINK is never followed ⇒ none; CONTROL: the same run in a real folder ⇒ named', viaLink === null && !!viaReal && viaReal.runId === 'wf_lk-2', JSON.stringify({ viaLink, viaReal }));
     fs.rmSync(path.join(proj, sid2), { recursive: true, force: true }); }
+  { const projReal = path.join(home, 'proj-elsewhere'), cwd3 = '/work/linked', proj3 = path.join(projects, cwd3.replace(/[^a-zA-Z0-9]/g, '-'));
+    plant('wf_lp-1', { root: path.join(projReal, sid), mtime: LIM + 1000 }); fs.symlinkSync(projReal, proj3);
+    const viaProjLink = await look({ cwd: cwd3 }); fs.rmSync(proj3, { force: true }); fs.cpSync(projReal, proj3, { recursive: true });
+    for (const f2 of fs.readdirSync(path.join(proj3, sid, 'subagents', 'workflows', 'wf_lp-1'))) fs.utimesSync(path.join(proj3, sid, 'subagents', 'workflows', 'wf_lp-1', f2), (LIM + 1000) / 1000, (LIM + 1000) / 1000);
+    const viaProjReal = await look({ cwd: cwd3 });
+    ok('18. READER: a PROJECT folder that is a symlink is never walked through ⇒ none; CONTROL: the same run in a real project folder ⇒ named', viaProjLink === null && !!viaProjReal && viaProjReal.runId === 'wf_lp-1', JSON.stringify({ viaProjLink, viaProjReal }));
+    fs.rmSync(proj3, { recursive: true, force: true }); }
   { const snapReal = path.join(home, 'snap-elsewhere'); fs.mkdirSync(snapReal, { recursive: true }); fs.writeFileSync(path.join(snapReal, 'wf_new-2.json'), JSON.stringify({ status: 'failed' }));
     plant('wf_new-2', { mtime: LIM + 1000 }); fs.rmSync(path.join(proj, sid, 'workflows'), { recursive: true, force: true }); fs.symlinkSync(snapReal, path.join(proj, sid, 'workflows'));
     const viaLinkSnap = await look(); fs.rmSync(path.join(proj, sid, 'workflows'), { force: true });
@@ -1965,6 +1972,9 @@ await (async () => {
     ok('18. READER: an agent\'s journal line whose head does not name the agent (a big field first) makes the journal BLIND ⇒ none (never a count it cannot prove); CONTROL: the same line agent first ⇒ named with the true count, 1', blind === null && !!seen && seen.unfinished === 1, JSON.stringify({ blind, seen }));
     plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"result":"${'x'.repeat(700)}","type":"result","key":"k3","agentId":"a3"}`), mtime: LIM + 1000 + 4000 });
     ok('18. READER: …and a line whose cut head shows NO type at all (its big field before everything) is blind too ⇒ none', (await look()) === null);
+    plant('wf_new-2', { journal: blindJ.replace(`{"type":"result","key":"k3","result":"${'x'.repeat(700)}","agentId":"a3"}`, `{"type":"result","key":"k3","agentId":"a3","result":"x"}\n{"type":"progress","note":"${'y'.repeat(700)}"}`), mtime: LIM + 1000 + 6000 });
+    const longOther = await look();
+    ok('18. READER: a LONG line of ANOTHER type (a progress line a later CLI may write) is skipped — the journal is not blind ⇒ named with its true count', !!longOther && longOther.unfinished === 1, JSON.stringify(longOther));
     plant('wf_new-2', { mtime: LIM + 1000 }); }
   plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at, { text: banner(at, { reset: false }) }) });
   ok('18. READER: a banner whose reset cannot be read is no proof ⇒ none', (await look()) === null);
@@ -2071,6 +2081,21 @@ await (async () => {
   const mP = mutantAr([['        if (now < fireAt - WF_LEAD_MS || wfPending.has(id)) continue;', '        if (now < fireAt - WF_LEAD_MS) continue;   // PRE-AMEND: no in-flight test']]);
   const soloReal = await solo(real), soloRed = mP.mod ? await solo(mP.mod) : -1;
   ok('18. THE MODULE: ONE arm whose read never settles, ticked a re-read apart ⇒ asked ONCE (never doubled); RED: without the in-flight test it is asked again', soloReal === 1 && mP.hits === 1 && soloRed === 2, mP.err || JSON.stringify({ soloReal, soloRed }));
+  const freed = async (mod) => {
+    const asks = [], sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18g-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: (id) => { asks.push(id); return id === 'z' ? Promise.resolve(null) : new Promise(() => { }); } });   // four reads hang (a stalled mount)
+    const T = Date.now(), r0 = T + 60 * 60000;
+    for (const k of ['h0', 'h1', 'h2', 'h3']) { sessions.set(k, sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled(k, sessions.get(k), r0, 'usage limit'); }
+    ar.tick(r0 - 5 * 60000);
+    for (const k of ['h0', 'h1', 'h2', 'h3']) ar.forget(k);   // their arms are GONE (continued, turned off, the session ended)
+    sessions.set('z', sess({ _stoppedBy: { kind: 'quota', at: T - 3600e3 } })); ar.armIfEnabled('z', sessions.get('z'), r0, 'usage limit');
+    ar.tick(r0 - 5 * 60000 + 1000);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return asks.includes('z');
+  };
+  const mH = mutantAr([["      for (const k of [...wfPending.keys()]) if (!armed.has(k)) { wfPending.delete(k); wfHungSaid.delete(k); }", '      // PRE-CURE 2: a hung read holds its place forever']]);
+  const frReal = await freed(real), frRed = mH.mod ? await freed(mH.mod) : 'no mutant';
+  ok('18. THE MODULE: four reads that hang for arms that are then GONE free the cap — a fifth conversation\'s run is still asked; RED: the cap counting them forever asks nothing more', frReal === true && mH.hits === 1 && frRed === false, mH.err || JSON.stringify({ frReal, frRed }));
   const fair = async (mod) => {
     const asked = new Set(), sessions = new Map(), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18f-'));
     const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: () => true, workflowRunAtWall: async (id) => { asked.add(id); return null; } });
