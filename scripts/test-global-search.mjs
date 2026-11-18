@@ -20,7 +20,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const FIX = path.join(REPO, 'scripts/fixtures/global-search');
 const MUT = mutantCopies('global-search', REPO);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(cond, name, extra?)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const M = require(path.join(REPO, 'src/search-model.js'));
 const SI = require(path.join(REPO, 'src/server/search-index.js'));
@@ -523,15 +523,20 @@ console.log('§11 who wrote a hit (B-19bd): a user row the person never typed ca
     const AS = '0f5e1a00-0000-4000-8000-00000000d0b1', at0 = 2e12 + 7000;
     const pa = path.join(home, '.claude/projects/-w-ar'); fs.mkdirSync(pa, { recursive: true });
     fs.writeFileSync(path.join(pa, AS + '.jsonl'), JSON.stringify({ type: 'user', uuid: 'ar-1', sessionId: AS, timestamp: new Date(at0 + 20000).toISOString(), promptSource: 'sdk', message: { role: 'user', content: CONT } }) + '\n');
-    const label = async (sent) => {
-      const x = SI.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-ar-')), homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9 }); x.start();
+    const label = async (sent, workerFile = null) => {
+      const x = SI.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-ar-')), homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, ...(workerFile ? { workerFile } : {}) }); x.start();
       await x.call('indexConversation', { sid: AS, backend: 'claude', cwd: '/w/ar', sent });
       const h = (await x.search({ q: 'usage limit', scope: 'chats' })).hits.find((y) => y.sid === AS);
       await x.close({ final: true });
       return h ? (h.other || 'person') : 'none';
     };
     const withRows = await label([SP.rowOf(CONT, 'auto-resume', at0)]), noRows = await label(null);
-    ok(`the search backfill, handed the conversation's rows, labels the continue as VibeSpace's (${withRows}); without them as the person's (${noRows})`, withRows === 'auto-resume' && noRows === 'person');
+    ok(withRows === 'auto-resume' && noRows === 'person', `the search backfill, handed the conversation's rows, labels the continue as VibeSpace's (${withRows}); without them as the person's (${noRows})`, { withRows, noRows });
+    // the patched-copy control (主开发's «as if a must»): the backfill without the conversation's rows ⇒ the leg goes RED
+    const WS = read('src/search-index-worker.js'), HAND = 'await SP.withRows(Array.isArray(sent) ? sent : [], () =>';
+    if (WS.split(HAND).length !== 2) ok(false, `the control's anchor is in the worker once: ${HAND}`);
+    const blind = await label([SP.rowOf(CONT, 'auto-resume', at0)], MUT.write('src/search-index-worker.js', WS.replace(HAND, 'await SP.withRows([], () =>'), 'norows'));
+    ok(blind === 'person', `CONTROL (the backfill without the conversation's rows): the continue reads as the person's — the leg goes RED (${blind})`);
   }
   const SWT = read('src/lib/search-window.js');
   ok(/const hitWho = \(h\) => \(h\.role === 'user' \? \(h\.other \? otherWord\(h\.other\) : t\('You'\)\) : t\('Agent'\)\);/.test(SWT) && SWT.includes('${fmtTime(h.ts)} · ${hitWho(h)}'), 'the search window labels a hit by it: You only for the person\'s own words');

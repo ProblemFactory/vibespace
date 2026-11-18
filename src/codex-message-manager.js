@@ -137,14 +137,14 @@ const opensWithServerFrame = (text) => SERVER_PEER_FRAME_RE.test(String(text || 
 // the wrapper records since S3 verify), else the rung that names the DELIVERED
 // text (message-manager peerOriginOf — the vibespace-msg frame ⇒ 'peer', our
 // Background Work frame at the start ⇒ 'notification'), else null.
-function peerRecordOf(item, content) {
+function peerRecordOf(item, content, recorded = null) {   // recorded: the route VibeSpace's own record names ('notification' | 'peer' | null)
   const marker = item.webui_peer && typeof item.webui_peer === 'object' ? item.webui_peer : null;
   const text = content.map((b) => b.text || '').join('\n');
   if (!marker && !SERVER_PEER_FRAME_RE.test(text) && !startsWithNoticeHead(text)) return null;
   const body = marker && typeof marker.body === 'string' && marker.body.trim() ? marker.body : null;
   const inferred = peerOriginOf(null, text);
   const from = marker && marker.name ? String(marker.name) : inferred.name;
-  const via = marker && (marker.kind === 'notification' || marker.kind === 'peer') ? marker.kind : inferred.via;
+  const via = marker && (marker.kind === 'notification' || marker.kind === 'peer') ? marker.kind : (recorded || inferred.via);   // the wrapper's marker, else VibeSpace's own record, else the words (B-9a2e readers)
   // lane group-report-card: the wrapper writes the ladder's `group` into its marker — a group WAKE's card, live and on a rebuild
   const group = marker ? groupCardOf(marker.group) : null;
   const channel = marker ? channelRefOf(marker.channel) : null;   // B-c127: a channel notice's conversation, live and on a rebuild
@@ -187,13 +187,13 @@ function userItemOf(item, ctx = null) {
   // auto-resume ⇒ VibeSpace's continue; peer ⇒ a peer card though its words carry no frame
   const sentKind = webuiMsgId || item.webui_origin || !ctx ? null : SP.kindFor({ conv: ctx.conv, at: ctx.at, text: content.filter((b) => b.type === 'text').map((b) => b.text).join('') });
   // Typed records (webuiMsgId, or VibeSpace's own record says typed) are never peer records, whatever their text looks like.
-  const peer = webuiMsgId || sentKind === 'typed' ? null : peerRecordOf(item, content);
+  const peer = webuiMsgId || sentKind === 'typed' ? null : peerRecordOf(item, content, sentKind === 'notice' ? 'notification' : sentKind === 'peer' ? 'peer' : null);
   if (peer) return { content: peer.content, webuiMsgId, queueMsgId, peer: true, stamps: { originKind: 'peer-message', peerFrom: peer.from,
     ...(peer.via ? { peerVia: peer.via } : {}), // S3 verify F3: never read off the words
     ...(peer.group ? { peerGroup: peer.group } : {}), // lane group-report-card: sender → group
     ...(peer.channel ? { peerChannel: peer.channel } : {}) } }; // B-c127: the channel notice's conversation (its name is the link)
   // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
-  if (sentKind === 'peer') return { content, webuiMsgId, queueMsgId, peer: true, stamps: { originKind: 'peer-message', peerFrom: null, peerVia: 'peer' } };
+  if (sentKind === 'peer' || sentKind === 'notice') return { content, webuiMsgId, queueMsgId, peer: true, stamps: { originKind: 'peer-message', peerFrom: null, peerVia: sentKind === 'notice' ? 'notification' : 'peer' } };   // words with no frame and no head: the record alone names the card
   const stamps = item.webui_origin === 'auto-resume' || sentKind === 'auto-resume' ? { originKind: 'auto-resume', ...(typeof item.webui_origin_note === 'string' && item.webui_origin_note ? { originNote: item.webui_origin_note } : {}) } : {};
   return { content, webuiMsgId, queueMsgId, peer: false, stamps };
 }

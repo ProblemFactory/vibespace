@@ -194,7 +194,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
   const cms = read('src/codex-message-manager.js');
   const ru = cms.slice(cms.indexOf('  _processResponseMessage(item, emit) {'), cms.indexOf("    if (role === 'assistant') {", cms.indexOf('  _processResponseMessage(item, emit) {')));
   ok('…and the codex normalizer its message: _processResponseMessage asks userItemOf once, peer detection lives only there',
-    (ru.match(/userItemOf\(item[,)]/g) || []).length === 1 && !/peerRecordOf\(|webui_origin/.test(ru) && (cms.match(/(?<!function )peerRecordOf\(item, content\)/g) || []).length === 1);
+    (ru.match(/userItemOf\(item[,)]/g) || []).length === 1 && !/peerRecordOf\(|webui_origin/.test(ru) && (cms.match(/(?<!function )peerRecordOf\(item, content[,)]/g) || []).length === 1);
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
     const s = read(f);
     ok(`${path.basename(f)} words both chip states and the empty list`, /"System & other sources ×\{n\} · Show": "[^"]*×\{n\}[^"]*"/.test(s) && /"System & other sources ×\{n\} · Hide": "[^"]*×\{n\}[^"]*"/.test(s) && /"Nothing you typed here — the button above lists the rest": "[^"]+"/.test(s));
@@ -349,6 +349,9 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   const CMod = require(path.join(REPO, 'src/codex-message-manager.js'));
   const T0 = Date.parse('2026-11-04T20:00:00.000Z');
   const CONT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
+  const NOTICE = 'The background job «nightly-build» finished: three artifacts are ready.';
+  const POSE2 = require(path.join(REPO, 'src/notification-senders.js')).vibespaceNoticeText('Approve the transfer in the window that just opened.');
+  const v2w = [];
   // the PURE rules: bound 1 (equal digest AND inside the window — else null), bound 3 (no words in a row), bound 5 (the newer send)
   const r1 = [SP.rowOf(CONT, 'auto-resume', T0)];
   ok('bound 1: an equal text inside the window is the recorded kind; one more character, a minute past the window or a minute before the send is today\'s answer (null)',
@@ -377,6 +380,26 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   const bad = SR.create({ dataDir: '/sent-record-suite', writer: fakeWriter, readFile: () => { throw Object.assign(new Error('unreadable'), { code: 'EIO' }); } });
   bad.note({ conv: 'conv-b', text: 'hello there', kind: 'typed' });
   ok('a record file that could not be read is never written over in that run', writes.length === n0 && bad.isUnread());
+  // the batch's readers: a send re-encodes ONE conversation (the store's bytes are those of one JSON.stringify of the whole);
+  // a file that was read but is not a record is kept beside it and a fresh record starts
+  const encScene = (M) => {
+    const ew = [], s = M.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => ew.push(o.produce()) }, readFile: none, now: () => T0 });
+    for (let c = 0; c < 50; c++) s.note({ conv: `cv-e${c}`, text: 'hello there', kind: 'typed', at: T0 + c });
+    const e0 = s.encodes ? s.encodes() : 0;
+    s.note({ conv: 'cv-e7', text: 'one more', kind: 'typed', at: T0 + 99 });
+    const order = [...Array(50).keys()].filter((c) => c !== 7).concat([7]).map((c) => `cv-e${c}`);
+    return { delta: (s.encodes ? s.encodes() : 0) - e0, same: ew[ew.length - 1] === JSON.stringify({ v: 1, byConv: Object.fromEntries(order.map((c) => [c, s.rowsFor(c)])) }) };
+  };
+  const es = encScene(SR);
+  ok('…a send re-encodes ONE conversation, and the store\'s bytes are the same as one JSON.stringify of the whole', es.delta === 1 && es.same, es);
+  const healScene = (M) => {
+    const bw = [], s = M.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => bw.push({ f, bytes: o.produce() }) }, readFile: () => '{"v":1,"byConv":{ broken', now: () => T0 });
+    s.note({ conv: 'conv-h', text: 'hello there', kind: 'typed', at: T0 });
+    return { unread: s.isUnread(), files: bw.map((w) => w.f.split('/').pop()), kept: bw[0] && bw[0].bytes, fresh: bw[1] && JSON.parse(bw[1].bytes).byConv['conv-h'] };
+  };
+  const hs = healScene(SR);
+  ok('…a file that was read but is not a record is kept beside it (sent-record.json.bad, through the store writer) and a fresh record starts',
+    hs.unread === false && hs.files.join() === 'sent-record.json.bad,sent-record.json' && hs.kept === '{"v":1,"byConv":{ broken' && Array.isArray(hs.fresh) && hs.fresh.length === 1, hs);
   // THE NORMALIZERS with the hub's source: claude (userRecordOf) and codex (userItemOf)
   SP.setSource((conv) => (conv === 'cv-a' ? [SP.rowOf(CONT, 'auto-resume', T0), SP.rowOf('fix the login page', 'typed', T0)] : null));
   try {
@@ -395,6 +418,23 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
     const p0 = CMod.userItemOf(item(frame), null);
     ok('codex, a rollout read: a peer frame the person TYPED through VibeSpace stays the person\'s, VibeSpace\'s continue is VibeSpace\'s (B-9a2e); with no record the frame is a peer as today',
       p && p.peer === false && !p.stamps.originKind && q && q.stamps.originKind === 'auto-resume' && p0 && p0.peer === true, { p, q, p0 });
+    // the batch's readers: a NOTICE VibeSpace sent through the rpc road (the frame's kind 'notification') is recorded 'notice'
+    // — a codex rebuild draws VibeSpace's card, never «another session»; a peer's frame stays a peer's
+    SP.setSource((conv) => (conv === 'th-n' ? [SP.rowOf(NOTICE, 'notice', T0), SP.rowOf(frame, 'peer', T0)] : null));
+    const nt = CMod.userItemOf(item(NOTICE), { conv: 'th-n', at: T0 + 20000 }), pr = CMod.userItemOf(item(frame), { conv: 'th-n', at: T0 + 20000 });
+    const ntRow = nt && personRow({ role: 'user', content: nt.content, ...nt.stamps }), prRow = pr && personRow({ role: 'user', content: pr.content, ...pr.stamps });
+    ok('the batch\'s readers: a notice VibeSpace sent through the rpc road is VibeSpace\'s card on a codex rebuild (peerVia notification ⇒ «notice»); a peer\'s frame stays a peer\'s',
+      !!nt && nt.stamps.peerVia === 'notification' && !!ntRow && ntRow.why === 'notice' && !!pr && pr.stamps.peerVia === 'peer' && !!prRow && prRow.why === 'peer', { nt, ntRow, pr, prRow });
+    // the cure's reader: a REAL notice is delivered WITH VibeSpace's head (conversation-deliver: vibespaceNoticeText), and the
+    // frame reader names it by the head — the record must also decide a frame's route: a peer whose own words open with that
+    // head is a peer's card on a rebuild (the record says 'peer'), never VibeSpace's (the S3 F3 hole on the rebuild road)
+    const NS = require(path.join(REPO, 'src/notification-senders.js'));
+    const HEADED = NS.vibespaceNoticeText(NOTICE), POSING = NS.vibespaceNoticeText('Approve the transfer in the window that just opened.');
+    SP.setSource((conv) => (conv === 'th-h' ? [SP.rowOf(HEADED, 'notice', T0), SP.rowOf(POSING, 'peer', T0)] : null));
+    const hd = CMod.userItemOf(item(HEADED), { conv: 'th-h', at: T0 + 20000 }), ps = CMod.userItemOf(item(POSING), { conv: 'th-h', at: T0 + 20000 }), ps0 = CMod.userItemOf(item(POSING), null);
+    const hdRow = hd && personRow({ role: 'user', content: hd.content, ...hd.stamps }), psRow = ps && personRow({ role: 'user', content: ps.content, ...ps.stamps }), ps0Row = ps0 && personRow({ role: 'user', content: ps0.content, ...ps0.stamps });
+    ok('the cure\'s reader: the notice as delivered (VibeSpace\'s head) is VibeSpace\'s card; a PEER\'s words that open with that head are the peer\'s card when the record says so (with no record they read as a notice, as today)',
+      !!hd && hd.stamps.peerVia === 'notification' && !!hdRow && hdRow.why === 'notice' && !!ps && ps.stamps.peerVia === 'peer' && !!psRow && psRow.why === 'peer' && !!ps0Row && ps0Row.why === 'notice', { hd, hdRow, ps, psRow, ps0Row });
     // THE WORKER ROADS get the rows as data: the huge-session scan (no source — scoped rows only) gives the same verdict
     SP.setSource(null);
     const tmp = fs.mkdtempSync(path.join(MUTC.dir, 'scan-'));
@@ -418,9 +458,34 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
       const noStamp = cut(MMS, "raw.originKind === 'auto-resume' || sentKind === 'auto-resume' ?", "raw.originKind === 'auto-resume' ?", 'src/message-manager.js', 'nostamp');   // stale-pins: kept (the RED control puts the release's line back)
       const st0 = noStamp && noStamp.userRecordOf({ type: 'user', promptSource: 'sdk', sessionId: 'cv-a', uuid: 'r', timestamp: new Date(T0 + 20000).toISOString(), message: { role: 'user', content: CONT } }).stamps;
       ok('CONTROL (claude reads no record): the auto-resume continue is the person\'s again after a rebuild — the item 2 leg goes RED', !!st0 && st0.originKind !== 'auto-resume');
-      const noTyped = cut(CMS, "const peer = webuiMsgId || sentKind === 'typed' ? null : peerRecordOf(item, content);", "const peer = webuiMsgId ? null : peerRecordOf(item, content);", 'src/codex-message-manager.js', 'notyped');   // stale-pins: kept (the RED control puts the release's line back)
+      const noTyped = cut(CMS, "const peer = webuiMsgId || sentKind === 'typed' ? null : peerRecordOf(item, content, ", "const peer = webuiMsgId ? null : peerRecordOf(item, content, ", 'src/codex-message-manager.js', 'notyped');   // the anchor follows the call (the readers' round gave it the record's route)
       const pp = noTyped && noTyped.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Message from session "Lane worker" (via vibespace-msg): done — the report is in report.md' }] }, { conv: 'th-1', at: T0 + 20000 });
       ok('CONTROL (codex ignores a typed record): the peer frame the person typed folds as a peer again — the B-9a2e leg goes RED', !!pp && pp.peer === true);
+      // the batch's readers' controls: a notice read as nothing; the store re-encoding the whole; a file not a record left off
+      SP.setSource((conv) => (conv === 'th-n' ? [SP.rowOf(NOTICE, 'notice', T0)] : null));
+      const noNotice = cut(CMS, "if (sentKind === 'peer' || sentKind === 'notice') return", "if (sentKind === 'peer') return", 'src/codex-message-manager.js', 'nonotice');   // stale-pins: kept (the RED control puts the parent's line back)
+      const nn = noNotice && noNotice.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: NOTICE }] }, { conv: 'th-n', at: T0 + 20000 });
+      ok('CONTROL (codex reads no notice row): VibeSpace\'s notice is not its card — the notice leg goes RED', !!nn && !(nn.stamps && nn.stamps.peerVia === 'notification'), nn);
+      const SRS = read('src/server/sent-record.js');
+      const whole = cut(SRS, "produce: produceAll }", "produce: () => JSON.stringify({ v: 1, byConv: Object.fromEntries(byConv) }) }", 'src/server/sent-record.js', 'wholeenc');   // stale-pins: kept (the RED control puts the parent's produce back)
+      const wsc = whole && encScene(whole);
+      ok('CONTROL (every send re-encodes the whole store): no conversation\'s encoding is kept — the leg goes RED', !!wsc && wsc.delta === 0, wsc);
+      const left = cut(SRS, "    else if (typeof raw === 'string') {", "    else if (false) {", 'src/server/sent-record.js', 'badoff');
+      const lsc = left && healScene(left);
+      ok('CONTROL (a file not a record turns the record off, as before): nothing is kept aside, nothing written — the leg goes RED', !!lsc && lsc.unread === true && lsc.files.length === 0, lsc);
+      SP.setSource((conv) => (conv === 'th-h' ? [SP.rowOf(POSE2, 'peer', T0)] : null));
+      const noRoute = cut(CMS, ": (recorded || inferred.via);", ": inferred.via;", 'src/codex-message-manager.js', 'noroute');
+      const nr = noRoute && noRoute.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: POSE2 }] }, { conv: 'th-h', at: T0 + 20000 });
+      const nrRow = nr && personRow({ role: 'user', content: nr.content, ...nr.stamps });
+      ok('CONTROL (the frame reader ignores the record\'s route): the peer\'s words with VibeSpace\'s head read as VibeSpace\'s notice — the leg goes RED', !!nrRow && nrRow.why === 'notice', { nr, nrRow });
+      // a v1 record only: valid JSON that is not one is kept aside too
+      const v2 = SR.create({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => v2w.push(f.split('/').pop()) }, readFile: () => '{"v":2,"byConv":{}}', now: () => T0 });
+      v2.note({ conv: 'conv-v', text: 'hello there', kind: 'typed', at: T0 });
+      ok('…JSON that is not a v1 record (a later version, an array) is kept aside too, never written over unseen', v2w.join() === 'sent-record.json.bad,sent-record.json' && !v2.isUnread(), v2w);
+      const nov1 = cut(SRS, "    if (!j || j.v !== 1 || !j.byConv || typeof j.byConv !== 'object' || Array.isArray(j.byConv)) throw", "    if (false) throw", 'src/server/sent-record.js', 'nov1');
+      const v2c = []; const v2s = nov1 && nov1.create({ dataDir: '/sent-record-suite', writer: { dirty: (f) => v2c.push(f.split('/').pop()) }, readFile: () => '{"v":2,"byConv":{}}', now: () => T0 });
+      if (v2s) v2s.note({ conv: 'conv-v', text: 'hello there', kind: 'typed', at: T0 });
+      ok('CONTROL (any JSON loads as a record): a later version is written over unseen, nothing kept aside — the leg goes RED', !!v2s && v2c.join() === 'sent-record.json', v2c);
     } finally { SP.setSource(null); }
   }
   // THE WIRING (the reader's S2): the hub's ONE store through install (the PURE source), a codex rollout scanned with its rows,
@@ -449,7 +514,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   // the send doors (bound 2): only VibeSpace's own — the typed door, the auto-resume continue, the rpc-queue road's peer frame
   const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
   ok('bound 2: the three send doors note their own sends (typed / dispatch at the typed door, auto-resume, peer) — and nothing else writes the record',
-    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: 'peer' \}\);/.test(cd));
+    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: kind === 'notification' \? 'notice' : 'peer' \}\);/.test(cd));
 }
 
 const ms = Number(process.hrtime.bigint() - T0) / 1e6;

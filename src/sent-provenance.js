@@ -14,7 +14,7 @@
  * before it for clocks). Never a text shape, never a nearest match. Two equal texts inside the window (bound 5): the NEWER
  * send at or before the record wins — its kind is the answer (a send inside the skew after it counts only when none came before).
  */
-const KINDS = Object.freeze(['typed', 'auto-resume', 'dispatch', 'peer']);
+const KINDS = Object.freeze(['typed', 'auto-resume', 'dispatch', 'peer', 'notice']);   // notice: VibeSpace's own notification frame on the rpc road (the batch's readers)
 const WINDOW_MS = 60 * 60 * 1000;   // a send the CLI takes later (queued behind a running turn) is still its own within an hour
 const SKEW_MS = 5000;               // the transcript's clock may run a little ahead of the hub's
 
