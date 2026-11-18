@@ -22,7 +22,8 @@
 //       the bound across many snapshots is test-channel-store-writer-laws (h)).
 //   (e) close() writes every moved file through the writer; (f) the key-mint check reads the store's live records.
 //   (g) lane lg-store-writes U3 (B-0248): a dispatch-ledger set is an ACT (rank 0, durable() asked — urgent), a wake-pace
-//       set is PACED; RED: a mutant copy without the durable() line.
+//       set is PACED; a handover that THROWS while open is said and asks no durable(); RED: mutant copies without the
+//       durable() line, without `act: true`, without the catch's return.
 // Run: node scripts/test-channel-store-loop-free.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -256,6 +257,31 @@ console.log('(g) the dispatch ledger is an ACT — rank 0 and durable() asked at
   const NoUrgent = mutantCopies('loop-free-g', REPO).load('src/channel-store.js', csSrc.replace(aD, '   '), 'no-urgent');
   const r = legOf(NoUrgent, 'red');
   ok(!r.disp.some((x) => x.k === 'durable') && r.disp.some((x) => x.k === 'dirty'), '(g) CONTROL: the durable() line removed ⇒ the ledger waits for the pace (no durable() asked) — the check above would be red', r);
+  // (g) the HAND-OFF's rank: the ledger handed without `act: true` carries no rank 0 in its dirty() (while the store is open the
+  // durable() that follows raises it in the writer anyway — this control pins the hand-off's own word, the exit order's belt)
+  const NoRank = mutantCopies('loop-free-g-rank', REPO).load('src/channel-store.js', csSrc.replace("owe(dispatchFile, { name: 'channels-dispatch.write', act: true,", "owe(dispatchFile, { name: 'channels-dispatch.write',"), 'no-rank');
+  const nr = legOf(NoRank, 'red-rank');
+  ok(!nr.disp.some((x) => x.k === 'dirty' && x.rank === 0), '(g) CONTROL: the dispatch ledger handed without `act: true` ⇒ its dirty() carries no rank 0 — the check above would be red (the hand-off\'s word, not the writer\'s behaviour)', nr);
+  // (g) a handover that THROWS while the store is open (a stand-in writer whose dirty() throws — the real writer's never does;
+  // after close() writeNow can, and `!closed` already skips durable() there): SAID, and no durable() asked for a file never handed over
+  const throwLeg = (Mod, tag) => {
+    const warns = [], asked = [];
+    const thrower = { ...real, dirty: (f, o) => { if (path.basename(f) === 'dispatch-ledger.json') throw new Error('the writer is stopped'); return real.dirty(f, o); },
+      durable: (f, o) => { asked.push(path.basename(f)); return real.durable(f, o); } };
+    const dir = path.join(ROOT, 'g-throw-' + tag); fs.mkdirSync(dir, { recursive: true });
+    const st = Mod.createChannelStore({ dir, log: { log() { }, warn: (...a) => warns.push(a.join(' ')), error() { } }, writer: thrower });
+    st.dispatch.set({ v: 1, entries: { h: { at: 1 } } });
+    const out = { said: warns.filter((l) => /the writer is stopped/.test(l)).length, asked: asked.filter((f) => f === 'dispatch-ledger.json').length };
+    st.close();
+    return out;
+  };
+  const th = throwLeg(CS, 'moved');
+  ok(th.said === 1 && th.asked === 0, '(g) a dispatch handover that THROWS while the store is open is SAID once, and no durable() is asked for a file never handed over', th);
+  const aR = "warn('[channels]', (e && e.message) || e); return; }   // «dispatch-ledger.json not written";
+  ok(csSrc.split(aR).length === 2, '(g) ANCHOR: the dispatch handover\'s catch returns');
+  const NoReturn = mutantCopies('loop-free-g-ret', REPO).load('src/channel-store.js', csSrc.replace(aR, "warn('[channels]', (e && e.message) || e); }   // «dispatch-ledger.json not written"), 'no-return');
+  const thr = throwLeg(NoReturn, 'red');
+  ok(thr.asked === 1, '(g) CONTROL: the catch without its return ⇒ durable() is asked for the file never handed over — the check above would be red', thr);
   real.stop();
 }
 

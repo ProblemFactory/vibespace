@@ -2145,7 +2145,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function dispatchSet(next) {
     dl = next;
     if (dlLoad.blocked) { dlDirty = true; if (closed) dispatchRefusedSay(); else if (!dlTimer) { dlTimer = setTimeout(dispatchFlush, 100); if (dlTimer.unref) dlTimer.unref(); } return; }
-    try { owe(dispatchFile, { name: 'channels-dispatch.write', act: true, produce: jsonOf(() => dl) }); } catch (e) { warn('[channels]', (e && e.message) || e); }   // «dispatch-ledger.json not written: …»
+    try { owe(dispatchFile, { name: 'channels-dispatch.write', act: true, produce: jsonOf(() => dl) }); } catch (e) { warn('[channels]', (e && e.message) || e); return; }   // «dispatch-ledger.json not written: …» (writeNow after close; or a stand-in writer's dirty — the real one never throws) — never handed over ⇒ no durable() asked for it
     if (!closed) W().durable(dispatchFile).catch(() => { });   // urgent (a failure is the writer's said line)
   }
 

@@ -93,8 +93,10 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // THAT CHANGED IT ANSWERS ONLY ONCE THE COUNTER HOLDING IT IS ON DISK (its own promise waits; the loop never does): an
   // ANSWERED call's cost is on disk. The gap left is «billed, not answered yet» — a kill between the vendor's answer and the
   // counter's landing — the write in flight, at most one paced write (the writer alternates acts and paced stores;
-  // 2K + 1 writes for K acts owed), then its own: ms on a local disk, seconds on the slow mount — forgets that one call;
-  // the release's synchronous write had a window of the same kind. The journal stays a named row.
+  // 2K + 1 writes for K acts owed), then its own: ms on a local disk; on the measured slow mount about 1.5 s with the
+  // writer idle and up to about 5 s behind the channels index's write (renames there took 1.3–2.6 s) — forgets that one
+  // call, and nothing rebuilds the counter after a kill (backlog B-a85f: rebuild a day's counter from the journal at
+  // boot); the release's synchronous write had a window of the same kind. The journal stays a named row.
   const W = () => writer || require('../store-writer.js').storeWriter();
   // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
   // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)
