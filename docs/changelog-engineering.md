@@ -902,6 +902,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - Suite: test-message-origin §5 — the PURE bounds (window, equal digest, the newer send both ways), the store (bounds, one dirty() per change, no words in its bytes, an unreadable file kept), claude + codex through the source, the scan handed its rows, the three doors; RED controls: no window, the older send wins, claude reads no record, codex ignores a typed record.
 
 
+### B-a31a — the Remote panel under a burst of recorded commands (lane bl-machines-b; the owner's incident inc-mwlgtu4o-uosz)
+- CURE 3 (主开发's verdict on the restack, 09:20Z — taken; its shoulds): «once per note» is ONCE PER FAILURE — a failure said again re-arms the re-render's one ask (slowNote resets the note's mark), so the hub back after a second failure is asked (the 15-s self-retry stays once per note: no loop); the render's own probe runs at its END through the on-screen gate (_mountsDotsNow), once its list is on the page — so a first probe's «checking» shows on the row, and a folded sidebar / closed drawer probes nothing; a probe's answer patches the list on the page NOW, never the one it captured (a refresh during a probe left «testing…» for two minutes); the swap function with no caller left goes. Legs: test-exit-runs-dialog §6 (two re-renders over one failure ⇒ one ask, the failure again ⇒ one more; the wiring) + controls (t) once per note, (u) the render probing on its own.
+
 ## 2.369.409 — 2026-11-17
 
 ### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
