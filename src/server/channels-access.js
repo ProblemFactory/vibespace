@@ -1199,6 +1199,7 @@ function create(engineCtx) {
     // r3: an ask past its end is over even before the sweep wrote it — expired now, never approved late
     if (askEndOf(req0) <= t) { await expireWatchRequests(t); return expiredRefusal(req0); }
     if (req0.kind === 'held') return decideHeld(req0, approve, by, { person });   // r6: a held digest — deliver / discard
+    deciding.set(requestId, t);   // lane bl-msg B-ae13 r2: the asker's withdraw waits out a decision in flight (its watcher write awaits below)
     if (approve) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
@@ -1206,10 +1207,11 @@ function create(engineCtx) {
       const g = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] };   // r5: the one reader
       const others = g.watchers.filter((w) => w && pkOf(w.principal) !== pk);
       const w = await setGrain(req0.adapterId, req0.grain, { watchers: [...others, { ...req0.watch }] }, { by });
-      if (!w || !w.ok) return w || { ok: false, code: 'error', error: 'the notification could not be written' };
+      if (!w || !w.ok) { deciding.delete(requestId); return w || { ok: false, code: 'error', error: 'the notification could not be written' }; }
     }
     let applied = false;
     await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by; }, { durable: true });
+    deciding.delete(requestId);
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
@@ -1644,12 +1646,15 @@ function create(engineCtx) {
   /** lane bl-msg B-ae13 (fb-4d94c275a2): THE ASKER TAKES ITS OWN WAKE REQUEST BACK — only the agent that filed it (`watch`, the
    *  principal is that agent), only while it is OPEN; the request ends `withdrawn` (decidedBy 'agent', audited `watch-withdraw`) and
    *  its For-you item ends «withdrawn by the agent» (the row's own end — its approval stays the person's click). → {ok, request} | refusal. */
+  const deciding = new Map();   // request id → when the person's decision started (a decision is seconds, never more)
   async function withdrawWatchRequest({ requestId, by = null, why = null } = {}) {
     const id = String(requestId || '');
+    const busy = deciding.get(id);
+    if (busy && now() - busy < 30e3) return { ok: false, code: 'not-withdrawable', error: `wake request ${id} is being decided by the user right now — read it again in a moment` };
     const mine = (r) => !!(r && r.kind === 'watch' && r.principal && r.principal.kind === 'agent' && by && by.kind === 'agent' && String(r.principal.id) === String(by.id));
     const r0 = (store.index.table('watchRequests') || []).find((r) => r && r.id === id);
     if (!mine(r0)) return { ok: false, code: 'not-found', error: `no wake request of yours with id ${id} — vibespace-channels watch --mode wake files one` };
-    if (r0.status !== 'open') return { ok: false, code: 'bad-state', error: `wake request ${id} is ${r0.status} — only an open one can be withdrawn`, state: r0.status };
+    if (r0.status !== 'open') return { ok: false, code: 'not-withdrawable', error: `wake request ${id} is ${r0.status} — only an open one can be withdrawn`, state: r0.status };
     const t = now();
     let applied = false;
     await store.index.update((ix) => {
@@ -1657,7 +1662,7 @@ function create(engineCtx) {
       if (!mine(r2) || r2.status !== 'open') return;
       applied = true; r2.status = 'withdrawn'; r2.decidedAt = t; r2.decidedBy = 'agent';
     }, { durable: true });
-    if (!applied) return { ok: false, code: 'bad-state', error: `wake request ${id} was decided a moment ago (in another window)` };
+    if (!applied) return { ok: false, code: 'not-withdrawable', error: `wake request ${id} was decided a moment ago (in another window)` };
     try { store.audit({ kind: 'acl', op: 'watch-withdraw', principal: r0.principal, scope: r0.scope, requestId: id, at: t, by: 'agent', ...(typeof why === 'string' && why.trim() ? { why: why.trim().slice(0, 200) } : {}) }); } catch { }
     if (r0.todoId && userTodos && typeof userTodos.resolveAnswered === 'function') { try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { } }
     notify([]);
@@ -1681,6 +1686,12 @@ function create(engineCtx) {
    *  back to the tray. r16: ⓪ first, the held decisions' presses a stop cut short and their cards (reconcilePresses).
    *  → {expired, settled, resurfaced, refiled, presses}. */
   async function reconcileAsks(t = now()) {
+    // lane bl-msg B-ae13 r2: a WITHDRAWN wake request whose For-you card is still open (the stop came inside the tray's save) closes it
+    for (const r of store.index.table('watchRequests') || []) {
+      if (!r || r.status !== 'withdrawn' || !r.todoId || !userTodos || typeof userTodos.get !== 'function' || typeof userTodos.resolveAnswered !== 'function') continue;
+      let it = null; try { it = userTodos.get(r.todoId); } catch { it = null; }
+      if (it && it.status === 'open') { try { userTodos.resolveAnswered([r.todoId], 'agent'); } catch { } }
+    }
     const presses = await reconcilePresses(t);
     const expired = await expireWatchRequests(t);
     let settled = 0, resurfaced = 0, refiled = 0;

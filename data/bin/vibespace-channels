@@ -677,7 +677,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   }
   if (verb === 'withdraw') {
     const id = chText(1);   // lane cli-one-text-arg: a word after the id (a --why whose quote closed early) ⇒ exit 2
-    if (!id || id.startsWith('--')) { console.error('usage: vibespace-channels withdraw <proposalId | wake request wr-…> [--why "…"]'); process.exit(1); }
+    if (!id || id.startsWith('--')) { console.error('usage: vibespace-channels withdraw <proposalId> [--why "…"]   (or YOUR open wake request: its wr- id)'); process.exit(1); }
     const body = {};
     if (flag('--why')) body.why = flag('--why');
     const r = await call('POST', `/api/agent/channels/proposals/${encodeURIComponent(id)}/withdraw`, body);

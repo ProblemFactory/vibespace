@@ -988,7 +988,7 @@ try {
   ok(F7.WATCH_REQUEST_TTL_MS === 7 * DAY && FA.ROW_OF['channel-watch-request'].showsExpiry === true, 'the lifetime is ONE number (src/channel-filter.js WATCH_REQUEST_TTL_MS = 7 days); the row says its end (`showsExpiry`)', F7.WATCH_REQUEST_TTL_MS);
   const html = ROW3.renderRow({ item: wr({ expiresAt: Date.now() + 7 * DAY - 60e3, createdAt: Date.now() - 60e3 }), resolved: false, band: 5 }, rctx3).innerHTML;
   ok(/expires in 7 d/.test(html) && ROW3.expiresText(Date.now() + 7 * DAY - 60e3, tt3) === 'expires in 7 d', 'the tray row (and the chat card — one renderer) says «expires in 7 d»; the For-you window\'s expiry words say days too', (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(html) || [])[1]);
-  const RED = registryFrom(read('src/foryou-actions.js').replace(", ends: ['allowed', 'denied', 'expired'], showsExpiry: true },", ", ends: ['allowed', 'denied', 'expired'] },"));
+  const RED = registryFrom(read('src/foryou-actions.js').replace(", ends: ['allowed', 'denied', 'expired', 'agent'], showsExpiry: true },", ", ends: ['allowed', 'denied', 'expired', 'agent'] },"));   // lane bl-msg B-ae13: the row's ends gained the asker's withdraw
   ok(RED.expiryWords(wr({ expiresAt: NOW + 7 * DAY }), { now: NOW }) === null, 'RED CONTROL: the row without `showsExpiry` (the base) — the card says nothing of its end');
 } catch (e) { ok(false, '⑪ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
 

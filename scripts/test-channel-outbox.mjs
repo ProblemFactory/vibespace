@@ -4462,7 +4462,7 @@ console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — n
   ok(g.wk && g.wk.proposed && g.other && g.other.ok === false && g.other.code === 'not-found', 'another agent cannot withdraw it (the same uniform not-found)', JSON.stringify(g.other));
   ok(g.mine && g.mine.ok && g.after.status === 'withdrawn' && g.after.decidedBy === 'agent' && g.after.item && g.after.item.status !== 'open' && g.after.item.by === 'agent',
     'THE ASKER withdraws its open wake request: the request ends withdrawn (by the agent), its For-you item «withdrawn by the agent»', JSON.stringify(g.after));
-  ok(g.again && g.again.ok === false && g.again.code === 'bad-state' && g.decided && g.decided.ok === false && g.decided.code === 'bad-state', 'twice, or once the person decided it ⇒ refused by name (a decision is final)', JSON.stringify({ again: g.again, decided: g.decided }));
+  ok(g.again && g.again.ok === false && g.again.code === 'not-withdrawable' && g.decided && g.decided.ok === false && g.decided.code === 'not-withdrawable', 'twice, or once the person decided it ⇒ refused by name (a decision is final)', JSON.stringify({ again: g.again, decided: g.decided }));
   // RED CONTROL: the withdraw that never ends the person's item ⇒ the card would sit in For you — the leg above goes red
   const src = engineSource(REPO);
   const RES = "try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { }";
