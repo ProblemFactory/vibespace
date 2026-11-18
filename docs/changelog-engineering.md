@@ -1201,6 +1201,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The restack onto 2.369.410 — three of the release's laws met** (2026-11-18): test-browser-proxy and test-browser-exit take the ONE guarded helper (B-1747, test-ci-gate-tiers §7b: every condition a boolean, written `!!(…)` where it was a value); test-agent-leak-census gets the wiring's `browserProxyLogins` construction as a catalog row (eval, real over the scratch vault); the fast tier's cap rises by arithmetic to 1256 s (the release's 1249.353 s + the two new rows 3.2 s and 2.5 s).
 
 
+
 ## 2.369.410 — 2026-11-18
 
 ### bl-mail B-2f6c — a Gmail re-authorize after a Disconnect never read the mail added to known threads
