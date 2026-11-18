@@ -586,6 +586,43 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     const awaits = (dsSrc.match(/await landExecs\(\);/g) || []).length;
     ok(awaits === 3 && /\n {4}await landExecs\(\);[^\n]*\n {4}const reg = registry\(f\);/.test(dsSrc) && /\n {4}await landExecs\(\);[^\n]*\n {4}return \{ apps: listApps\(\), registry: await lockFacts\(registry\(f\)\)/.test(dsSrc) && typeof DD.landMounts === 'function',
       `§10 desktop-serve (the verdict's shoulds): the catalog, a launch and the witness push await the PATH walk's landing for their bare exec names before judging an app (${awaits} awaits)`);
+    // B-1425's part (3) — the remainder of 2.369.410's close: THE HUB ANSWERS JSON, the list in it. The desktop route
+    // (src/routes/desktop-apps.js) over the hub keeper's road for this machine (src/server/desktop-app-keeper.js list():
+    // machine.list() as it is when no machine is paired), the REAL desktop-serve and desktop-display, the guard armed, PATH's
+    // first dir on the refusing storage mount
+    const express = require('express');
+    const RT = require(path.join(REPO, 'src/routes/desktop-apps.js'));
+    const HN = 'tool-b1425-http';
+    await fs.promises.writeFile(path.join(NB, HN), '#!/bin/sh\n'); await fs.promises.chmod(path.join(NB, HN), 0o755);
+    const appsH = { catalogRows: () => [{ id: 'app.' + HN, label: 'an NFS-only program', exec: HN, args: [], category: 'utility', app: HN }], refreshCatalog: async () => { }, witnessRows: () => [] };
+    const viaRoute = async (display, sub) => {
+      const dsH = DS.install({ dataDir: path.join(S, sub), env: env10, display, registryRows: [], log: quiet10, tickMs: 3600e3, apps: appsH });
+      RT.setup({ keeper: { list: (o) => dsH.list(o), listApps: () => [], facts: () => Promise.resolve() }, access: null, vnc: {} });
+      const appx = express(); appx.use(express.json()); appx.use(RT.router);
+      const srv = await new Promise((r) => { const x = appx.listen(0, '127.0.0.1', () => r(x)); });
+      try {
+        const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/desktop/apps`);
+        const type = (r.headers.get('content-type') || '').split(';')[0], text = await r.text();
+        let body = null; try { body = JSON.parse(text); } catch { }
+        const row = body && Array.isArray(body.registry) ? body.registry.find((x) => x.id === 'app.' + HN) : null;
+        return { status: r.status, type, body, row };
+      } finally { await new Promise((r) => srv.close(r)); try { dsH.shutdown(); } catch { } }
+    };
+    DD.resetBinMemo();
+    const refH = w.counts.refused;
+    const h = await viaRoute(DD, 'ds10h');
+    ok(h.status === 200 && h.type === 'application/json' && h.row && h.row.available === true && h.row.path === path.join(NB, HN) && w.counts.refused === refH,
+      `§10 B-1425 (3): GET /api/desktop/apps with PATH's first dir on the refusing storage mount answers ${h.status} ${h.type} — the NFS-only program listed ${h.row ? `available ${h.row.available}` : '(no row)'}; the guard refused ${w.counts.refused - refH} call(s) on the way`);
+    // CONTROL: the walk with neither its storage skip nor its per-dir catch — the guard's refusal leaves the walk (its plant
+    // proven: the three lines spelled once, and the guard COUNTS the refused stat — the plant was on the road)
+    const WALK = "    if (r && r.kind === 'storage') continue;\n    if (r) { const f = mountFact(dir, name, now); if (!f) { pending = true; continue; } if (f.yes) { found = p; break; } continue; }\n    try { const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) { found = p; break; } } catch { /* not here */ }\n";
+    const bare = ddSrc.replace(WALK, "    const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) { found = p; break; }\n");
+    ok(ddSrc.split(WALK).length === 2 && bare !== ddSrc, 'CONTROL (a refusal that leaves the walk): its plant — the walk\'s three lines — is spelled exactly once');
+    const DDb = M.load('src/desktop-display.js', bare, 'b1425-bare');
+    const refC = w.counts.refused;
+    const hc = await viaRoute(DDb, 'ds10hc');
+    ok(w.counts.refused > refC && hc.type === 'application/json' && !(hc.status === 200 && hc.row && hc.row.available === true),
+      `CONTROL (the refusal leaves the walk; the guard refused ${w.counts.refused - refC}): the route answers ${hc.status} ${hc.type}${hc.body && hc.body.code ? ` «${hc.body.code}»` : ''} — no program listed ⇒ RED (and still JSON: every desktop route ends in fail()'s JSON)`);
   }
   w.stop();
   SP.setRoots([]);
