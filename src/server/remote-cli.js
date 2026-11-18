@@ -15,24 +15,34 @@
  * shows on a host. One instance per HostManager (`remoteCliOf(hosts)`). ORCH tier.
  */
 const LS = require('../login-shell');
-const { REMOTE_PRELUDE } = require('../remote-shell');
+const { buildRemoteShellPrelude } = require('../remote-shell');
 
 const sq = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
 // THE SCRIPT RUNS UNDER sh ON EVERY ROAD: the ssh road hands it to the remote user's LOGIN shell (zsh never word-splits `$T`;
 // fish / tcsh read no sh syntax) — so it is ONE `sh -c '<script>'` word, which every one of them runs as written
 const underSh = (script) => `sh -c ${sq(script)}`;
-// THE FALLBACK RUNG (the row: «the prelude becomes a fallback rung»): what the remote prelude's PATH (+ nvm.sh) holds for the
-// name, asked in the same round trip — a shell holding none while the prelude has one runs the name as before (said once)
+// THE FALLBACK RUNG (the row: «the prelude becomes a fallback rung»): what the remote prelude's PATH holds for the name, asked
+// in the same round trip — a shell holding none while the prelude has one runs the name as before (said once). ONE PRELUDE FOR
+// THE ASK AND THE SPAWN (batch 63's verdict, its second must): the ask is THE spawn's own composition — src/remote-shell.js
+// buildRemoteShellPrelude with the create's integration flag (the node finder and the tools exactly when the spawn has them;
+// src/spawn/dial.js, src/spawn/ssh.js) — never a shorter prelude that misses what the spawn would find
 const R_PRE = '__VS_RPRE__=';
-const preludeAsk = (name) => `printf '\\n${R_PRE}%s\\n' "$( ${REMOTE_PRELUDE} command -v ${name} 2>/dev/null | head -n 1 )"`;
+const askPrelude = (integration) => buildRemoteShellPrelude({ toolsOnPath: !!integration, withNodeFinder: !!integration });
+// …and run as the spawn runs it: a LOGIN sh (`sh -lc` — /etc/profile and ~/.profile read, as every spawn ladder's `sh -lc`),
+// the sentinel printed INSIDE it (a profile may print; the LAST sentinel line is read)
+const preludeAsk = (name, integration) => `sh -lc ${sq(`${askPrelude(integration)}printf '\\n${R_PRE}%s\\n' "$(command -v ${name} 2>/dev/null | head -n 1)"`)} </dev/null 2>/dev/null`;
 const preludeOf = (out) => { const l = String(out || '').split(/\r?\n/).reverse().find((x) => x.startsWith(R_PRE)); const p = l ? l.slice(R_PRE.length).trim() : ''; return p.startsWith('/') ? p : null; };
 // a found path as ONE sh word (a space, a quote or a `$` in it would break a session that had already started)
 const PLAIN_PATH = /^[A-Za-z0-9_@%+=:,./-]+$/;
 const shWord = (p) => (PLAIN_PATH.test(p) ? p : sq(p));
-/** The program line a remote create runs for a found path: the program as one word, its own directory first on PATH (a
- *  `#!/usr/bin/env node` CLI the shell found beside its node runs on THAT node, not the prelude's) — `env` execs the program,
- *  so the process is the CLI itself. */
-const programLine = (p) => `env PATH=${shWord(p.replace(/\/[^/]*$/, '') || '/')}:"$PATH" ${shWord(p)}`;
+/** The program line a remote create runs for a found path: the program as one word, its own directory ahead of the rest of
+ *  PATH (a `#!/usr/bin/env node` CLI the shell found beside its node runs on THAT node, not the prelude's) — `env` execs the
+ *  program, so the process is the CLI itself. THE VIBESPACE TOOLS STAY FIRST (batch 63's verdict, its first must): the
+ *  integrated prelude prepends ~/.vibespace/bin LAST so the agent-browser shim stays ahead of node's own bin dir
+ *  (remote-shell buildRemoteShellPrelude) — with `tools` (the create's integration flag: the same prelude put it there) it
+ *  stays in front of the CLI's directory too; a pristine spawn (integration off) gets none from this line, even when the
+ *  machine's own PATH holds it. */
+const programLine = (p, { tools = false } = {}) => `env PATH=${tools ? '"$HOME/.vibespace/bin":' : ''}${shWord(p.replace(/\/[^/]*$/, '') || '/')}:"$PATH" ${shWord(p)}`;
 
 const RECHECK_MS = 5 * 60 * 1000; // an unanswered ask is kept 5 min: a machine whose rc hangs never taxes every create
 const PATH_KEEP_MS = 10 * 60 * 1000;
@@ -43,18 +53,20 @@ function createRemoteCli({ hostShell, log = (l) => console.log(l), now = Date.no
   const rows = new Map(); // `${hostId}\0${backend}` → { name, answer, at, pending, said }
   const keyOf = (h, backend) => `${h && h.id}\u0000${backend}`;
   const machineOf = (h) => String((h && (h.name || h.id)) || '?');
-  const rowOf = (h, backend, name) => { const k = keyOf(h, backend); let r = rows.get(k); if (!r || r.name !== name) { r = { name, answer: null, at: -Infinity, pending: null, said: null }; rows.set(k, r); } return r; };
+  // a row is one (machine, CLI) under ONE prelude flavor (the integration flag): an answer the other prelude gave is asked again
+  const rowOf = (h, backend, name, integration = false) => { const k = keyOf(h, backend); let r = rows.get(k); if (!r || r.name !== name || r.integration !== !!integration) { r = { name, integration: !!integration, answer: null, at: -Infinity, pending: null, said: null }; rows.set(k, r); } return r; };
   /** ONE ask per (machine, CLI) in flight — creates that land together share it. */
-  function ask(h, backend, name) {
-    const r = rowOf(h, backend, name);
+  function ask(h, backend, name, { integration = false } = {}) {
+    const r = rowOf(h, backend, name, integration);
     if (!r.pending) {
       r.pending = (async () => {
         let a;
-        // a person's create is the consent (never a held Hub-automation ask); bounded HERE too (a road that never answers)
+        // the create is the consent (a person's press — or an agent's / a job's create through the same handler: the ask is fixed
+        // and read-only), never a held Hub-automation ask; bounded HERE too (a road that never answers)
         const shell = (script) => Promise.race([hostShell(h, underSh(script), { timeoutMs: askMs, by: 'system:cli-where', consent: true }),
           new Promise((_, rej) => { const t = setTimeout(() => rej(Object.assign(new Error('timeout'), { code: 'timeout' })), askMs + 2000); if (t.unref) t.unref(); })]);
         let out = '';
-        try { out = String(await shell(`${LS.remoteAskScript(name, { timeoutS: Math.max(1, Math.floor(askMs / 1000) - 2) })}; ${preludeAsk(name)}`)); a = LS.remoteAnswer(out, name); }
+        try { out = String(await shell(`${LS.remoteAskScript(name, { timeoutS: Math.max(1, Math.floor(askMs / 1000) - 2) })}; ${preludeAsk(name, integration)}`)); a = LS.remoteAnswer(out, name); }
         catch (e) { a = { kind: 'unanswered', why: (e && e.code) === 'timeout' ? 'timeout' : `exec:${String((e && (e.code || e.message)) || 'error').slice(0, 60)}`, shell: null, home: null }; }
         const pre = preludeOf(out);
         if (a.kind === 'none' && pre) a = { ...a, prelude: pre };
@@ -63,7 +75,10 @@ function createRemoteCli({ hostShell, log = (l) => console.log(l), now = Date.no
           let x = '';
           // the look always EXITS 0 (`; true`): a missing target prints nothing and its last test fails — an exec that rejects a
           // non-zero exit with no output (ssh; the parity suite's real sh) made that a throw, read below as «could not look»
-          try { x = String(await shell(`[ -f ${sq(a.path)} ] && [ -x ${sq(a.path)} ] && echo VS_X_RUNS; [ -e ${sq(a.path)} ] && echo VS_X_THERE; true`)); } catch { x = 'VS_X_RUNS'; } // could not look: as answered
+          // …and it SAYS it looked (VS_X_ASKED): an exec that came back empty (a dial run that timed out on a hung mount) could not
+          // look — as answered, never «missing»
+          try { x = String(await shell(`[ -f ${sq(a.path)} ] && [ -x ${sq(a.path)} ] && echo VS_X_RUNS; [ -e ${sq(a.path)} ] && echo VS_X_THERE; echo VS_X_ASKED; true`)); } catch { x = 'VS_X_RUNS'; } // could not look: as answered
+          if (!/VS_X_ASKED/.test(x)) x = 'VS_X_RUNS';
           if (!/VS_X_RUNS/.test(x)) a = { ...a, kind: 'none', notExecutable: a.path, dangling: /VS_X_THERE/.test(x) ? 'not-executable' : 'missing' };
         }
         r.answer = { ...a, at: now() }; r.at = now();
@@ -84,11 +99,11 @@ function createRemoteCli({ hostShell, log = (l) => console.log(l), now = Date.no
   const kept = (r) => !!(r && r.answer) && (r.answer.kind === 'path' ? now() - r.at < pathKeepMs : r.answer.kind === 'unanswered' ? now() - r.at < recheckMs : false);
   /** The program a remote create runs for `name` (the CLI's configured NAME) on machine `h`: the absolute path its login shell
    *  found, or `name` (could not be asked: the prelude decides) — or a thrown refusal (code cli-missing) when it holds none. */
-  async function forSpawn(h, backend, name) {
+  async function forSpawn(h, backend, name, { integration = false } = {}) {
     if (!h || !LS.NAME_OK.test(String(name || ''))) return name; // a path / an odd name: as configured
-    const r = rowOf(h, backend, name);
-    const a = kept(r) ? r.answer : await ask(h, backend, name);
-    if (a.kind === 'path') return programLine(a.path);
+    const r = rowOf(h, backend, name, integration);
+    const a = kept(r) ? r.answer : await ask(h, backend, name, { integration });
+    if (a.kind === 'path') return programLine(a.path, { tools: integration });
     if (a.kind === 'none' && a.prelude) return name; // the fallback rung: the prelude's PATH finds it — as before
     if (a.kind === 'none') {
       const sh = a.shell ? LS.shellName(a.shell) : 'sh';
@@ -123,12 +138,12 @@ function remoteCliOf(hosts) {
 }
 /** THE CREATE'S ONE CALL (src/ws-create.js, the remote terminal and chat branches): the program to run for `backend` on `h` —
  *  null when the backend has no registered CLI (a shell) or the CLI is an operator's absolute command (as configured). */
-async function remoteCmdFor({ hosts, h, backend, name }) {
+async function remoteCmdFor({ hosts, h, backend, name, integrationOn = false }) {
   const rc = remoteCliOf(hosts);
   if (!rc || !h || !name || String(name).includes('/')) return null;
-  return rc.forSpawn(h, backend, String(name));
+  return rc.forSpawn(h, backend, String(name), { integration: !!integrationOn }); // the spawn's own prelude flavor (one prelude)
 }
 /** The refusal as the socket carries it (the client draws the cli-missing dialog, the machine named). */
 const remoteRefusal = (e, reqId) => ({ type: 'error', code: 'cli-missing', reqId, backend: e.backend, cli: e.cli, machine: e.machine, hostId: e.hostId, shell: e.shell || null, answer: 'none', wrapper: e.wrapper || null, notExecutable: e.notExecutable || null, dangling: e.dangling || null, remote: true, message: e.message });
 
-module.exports = { createRemoteCli, remoteCliOf, remoteCmdFor, remoteRefusal, programLine, RECHECK_MS, PATH_KEEP_MS, ASK_MS };
+module.exports = { createRemoteCli, remoteCliOf, remoteCmdFor, remoteRefusal, programLine, askPrelude, RECHECK_MS, PATH_KEEP_MS, ASK_MS };

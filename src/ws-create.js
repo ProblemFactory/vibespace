@@ -1427,7 +1427,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // it holds none ⇒ refused by name before anything starts; it could not be asked ⇒ the prelude decides, as before
             let rcmdT = null;
             if (cliCmds?.current?.(backend) != null) {
-              try { rcmdT = await remoteCmdFor({ hosts, h, backend, name: cliCmds.remoteName ? cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd) }); } catch (e) {
+              try { rcmdT = await remoteCmdFor({ hosts, h, backend, name: cliCmds.remoteName ? cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd), integrationOn }); } catch (e) {
                 if (!e || e.code !== 'cli-missing') throw e;
                 global.__vsEvent?.('spawn-cli-missing', `${backend}/remote`);
                 ws.send(JSON.stringify(remoteRefusal(e, data.reqId))); return;
@@ -1467,7 +1467,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // B-69ec THE REMOTE TWIN: the chat runs the program THAT machine's login shell found for the name (none ⇒ refused)
             let rcmdR = rcmd;
             if (cliCmds?.current?.(backend) != null) {
-              try { rcmdR = (await remoteCmdFor({ hosts, h, backend, name: rcmd })) || rcmd; } catch (e) {
+              try { rcmdR = (await remoteCmdFor({ hosts, h, backend, name: rcmd, integrationOn })) || rcmd; } catch (e) {
                 if (!e || e.code !== 'cli-missing') throw e;
                 global.__vsEvent?.('spawn-cli-missing', `${backend}/remote`);
                 ws.send(JSON.stringify(remoteRefusal(e, data.reqId))); return;

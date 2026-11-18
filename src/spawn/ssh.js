@@ -34,7 +34,10 @@ function sshLadder(c) {
             // alone to find node/claude on the host (chat branches re-export
             // inside their inner command), so this part is UNCONDITIONAL even
             // when tool shipping fails below.
-            let prelude = REMOTE_PRELUDE; // ONE definition (src/remote-shell.js) — copies drifted between builders
+            // ONE definition (src/remote-shell.js) — copies drifted between builders. Its FLAVOR follows the integration switch
+            // whatever the ship's outcome (batch 63 cure: the remote CLI ask asks this same composition — src/server/remote-cli.js
+            // — so a ship that failed must not leave the spawn a shorter prelude than the ask; the register runs only after a ship)
+            let prelude = integrationOn ? buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true }) : REMOTE_PRELUDE;
             let tokenAssign = '';
             // ONE ship list, parameterized by the Integration master switch:
             // ON  → all agent tools + hook + keeper + the per-session vsst_
