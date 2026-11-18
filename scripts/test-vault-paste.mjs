@@ -26,6 +26,12 @@
 //      grant row on it goes FIRST (locked ⇒ vault_locked, entry and row kept); what the hub remembers by its id goes with it (the
 //      run door's host passes and late allows, an open words proposal). MUTANTS (⑫): the door without its name check, the route
 //      without person(), the delete without forgetEntry, without settling its words — each RED
+//   ⑧c B-ef1b — the retired job-secrets notice's two buttons (POST /api/vault/job-secrets/:answer, src/server/job-secrets-door.js):
+//      a bearer ⇒ 403; locked ⇒ 423, nothing moved; move ⇒ each text value sealed as a free entry (its name when safe to show,
+//      else «Job secret N»; a pasted value as a name never shown), read back, the file gone, the notice done, ONE audit line (a
+//      count); again ⇒ 404 gone; a refused value ⇒ nothing sealed, the file kept; delete ⇒ the file gone, nothing sealed; a
+//      directory by that name / no text value ⇒ refused by name. MUTANTS (⑫): no undo, every name shown, no undo when the
+//      file cannot be deleted — each RED
 //   ⑨ A RESTART — a NEW door over the same For-you store answers a request the old one filed (the item IS the record)
 //   ⑩ BOUNDS — 4 open per conversation (the 5th ⇒ 429 too_many_requests)
 //   ⑪ THE SWEEP — every answer, every broadcast frame (vault-state, integrations-updated, the For-you snapshots), every log
@@ -129,7 +135,7 @@ const wiredDepsOf = (src) => {
   return pieces.map((p) => (/^\s*([A-Za-z_$][\w$]*)\s*(?::|$)/.exec(p) || [])[1]).filter(Boolean);
 };
 const WIRED_DEPS = wiredDepsOf(WIRING) || [];
-const WORLD_OWN = ['vault', 'activeSessions', 'getJobs', 'contents', 'run', 'paste', 'totp', 'logins', 'callerOf'];
+const WORLD_OWN = ['vault', 'activeSessions', 'getJobs', 'contents', 'run', 'paste', 'totp', 'logins', 'callerOf', 'jobSecrets'];
 const STAND_INS = {
   who: (req) => Auth.signInHandle(req),   // the real one (src/auth.js — the cookie's handle)
   runOf: () => null, grantLive: () => true, subjects: () => ({ sessions: [], groups: [] }),   // no live run, every grant live, no subjects
@@ -166,7 +172,7 @@ const sweepRoads = async (w, s, token, who, roads, { onLast = async () => {} } =
   }
   return out;
 };
-function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) {
+function makeWorld(name, { door = null, routes = null, loginsMod = null, jsDoor = null } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const auth = new Auth(dataDir, {});
   auth.setPassword('signin-' + name);
@@ -185,6 +191,7 @@ function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) 
   const totp = TOTPM.create({ dataDir, vault, log: (m) => LOGS.push(String(m)) });
   const runOf = (cid) => { for (const s of activeSessions.values()) if (s && s.claudeSessionId === cid) return TOTPM.runOfToken(s.agentToken); return null; };
   const paste = DOOR.create({ vault, integrations, userTodos, deliver, vaultRun, logins, totp, runOf, log: (m) => LOGS.push(String(m)) });
+  const jobSecrets = (jsDoor || require(path.join(REPO, 'src/server/job-secrets-door.js'))).create({ dataDir, vault, paste, userTodos, log: (m) => LOGS.push(String(m)) });   // B-ef1b: the retired job-secrets notice's buttons
   const SESSION_TOKEN = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const OTHER_TOKEN = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const activeSessions = new Map([
@@ -199,12 +206,12 @@ function makeWorld(name, { door = null, routes = null, loginsMod = null } = {}) 
   // (WIRED_DEPS — the two-step door, the web-login door, a caller resolver, … — the world's own, else a stand-in), so ⑩c's census
   // reads the hub's real set of agent roads, gated ones included
   const callerOf = (token) => { for (const [k, s] of activeSessions) if (s.agentToken === token) return { conversationId: s.claudeSessionId, conv: s.claudeSessionId, scope: k, name: s.name, groups: [], live: true }; return null; };
-  const own = { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, totp, logins, callerOf };
+  const own = { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, totp, logins, callerOf, jobSecrets };
   if (Object.keys(own).join() !== WORLD_OWN.join()) throw new Error('makeWorld: its own deps drifted from WORLD_OWN');
   const deps = Object.fromEntries([...WIRED_DEPS.map((k) => [k, k in own ? own[k] : STAND_INS[k]]), [EARS[0], (m) => LOGS.push(String(m))]]);
   catchRejections(app);
   (routes || require(path.join(REPO, 'src/routes/vault.js'))).registerVaultRoutes(app, deps);
-  return { dataDir, auth, vault, userTodos, integrations, deliver, vaultRun, paste, app, SESSION_TOKEN, OTHER_TOKEN, activeSessions, grants, logins, totp, TOTPM };
+  return { dataDir, auth, vault, userTodos, integrations, deliver, vaultRun, paste, jobSecrets, app, SESSION_TOKEN, OTHER_TOKEN, activeSessions, grants, logins, totp, TOTPM };
 }
 const ANSWERS = [];
 async function serve(w) {
@@ -473,6 +480,73 @@ async function agentDrop(w, s, name) {
   const d = paste.dropAgentEntry(name);
   ok(add && add.ok && !locked.ok && locked.code === 'vault_locked' && keptLocked.entry && keptLocked.rows === 1, 'a grant row on the agent\'s entry + a LOCKED vault ⇒ refused vault_locked by name — the entry AND its row stay (never an entry gone with its row dangling)', { add, locked, keptLocked });
   ok(d.ok && !useGrants.rowsOf(id).length && !(vault.secretNames() || []).some((x) => x.name === name), 'unlocked ⇒ the row goes first, then the entry', { d, rows: useGrants.rowsOf(id).length });
+}
+
+console.log('⑧c B-ef1b — the retired job-secrets notice has its buttons: move into the vault / delete the file');
+const JS_FILE = 'job-secrets.retired.json', JS_ITEM = '2026-10-job-secrets-retired';
+const jsVals = ['gh', 'npm', 'pasted', 'long'].map((w) => `${w}-${crypto.randomBytes(12).toString('hex')}`);   // values built at runtime
+const JS_PASTED = 'sk-' + crypto.randomBytes(16).toString('hex');   // a VALUE pasted into the name field
+const plantJS = (w, doc) => { fs.writeFileSync(path.join(w.dataDir, JS_FILE), typeof doc === 'string' ? doc : JSON.stringify(doc), { mode: 0o600 }); return w.userTodos.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: JS_ITEM, action: { type: 'job-secrets-retired' }, text: 'A plain file kept secrets for background jobs outside the vault: data/job-secrets.retired.json — put each into the vault, then delete the file.' }); };
+const jsHere = (w) => fs.existsSync(path.join(w.dataDir, JS_FILE));
+const freeNames = (w) => (w.vault.secretNames() || []).filter((x) => /^secret:/.test(x.name));
+const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.open || []), ...(sn.resolved || [])].find((i) => i.sessionKey === 'vault' && i.itemKey === JS_ITEM) || null; };   // open AND resolved (forSession lists the open ones only — the restack's tb run)
+{
+  const f0 = freeNames(W).length, before0 = new Set(freeNames(W).map((x) => x.name));   // the entries this move makes = the ones not there before (the list is sorted by name — never «the last ones»)
+  plantJS(W, { GH_TOKEN: jsVals[0], NPM_TOKEN: jsVals[1], [JS_PASTED]: jsVals[2], EMPTY: '', COUNT: 5 });
+  const viaBearer = await S.hit('/api/vault/job-secrets/move', { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN } });
+  ok(viaBearer.status === 403 && viaBearer.json.code === 'human_only' && jsHere(W) && freeNames(W).length === f0, 'a BEARER ⇒ 403 human_only — the file stays, nothing sealed', viaBearer.json);
+  ok((await S.hit('/api/vault/job-secrets/sideways')).json.code === 'job_secrets_answer', 'an answer other than move / delete ⇒ refused by name');
+  W.vault.lock('test');
+  const lockedR = await S.hit('/api/vault/job-secrets/move');
+  ok(lockedR.status === 423 && lockedR.json.code === 'vault_locked' && jsHere(W), 'LOCKED ⇒ 423 vault_locked — the file stays (the page asks the unlock first)', lockedR.json);
+  await W.vault.unlock(PW);
+  const a0 = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').length;
+  const mv = await S.hit('/api/vault/job-secrets/move');
+  const made = freeNames(W).filter((x) => !before0.has(x.name)), byLabel = new Map(made.map((x) => [x.label, x.name]));
+  const read = (label) => { const g = W.vault.secretGet(byLabel.get(label)); return g && g.ok && g.value ? Buffer.from(g.value).toString('utf8') : null; };
+  ok(mv.status === 200 && mv.json.moved.length === 4 && mv.json.skipped === 1 && read('GH_TOKEN') === jsVals[0] && read('NPM_TOKEN') === jsVals[1] && read('Job secret 3') === jsVals[2] && read('COUNT') === '5',
+    'move ⇒ every value the old engine handed a job sealed as a free entry and read back (GH_TOKEN, NPM_TOKEN by name; the pasted-value name as «Job secret 3»; the NUMBER as its text — the read, r1: it was skipped and lost); only the empty one left out, and said', { status: mv.status, moved: mv.json.moved && mv.json.moved.map((m) => m.label), skipped: mv.json.skipped });
+  const said = JSON.stringify(mv.json) + JSON.stringify(W.userTodos.forSession('vault')) + JSON.stringify(made) + fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').slice(a0) + LOGS.join('\n');
+  ok(!jsHere(W) && itemOf(W) && itemOf(W).status === 'done' && ![...jsVals, JS_PASTED].some((v) => said.includes(v)) && mv.json.moved.every((m) => /^vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret$/.test(m.ref)),
+    '…the file is GONE and the notice DONE; the answer names each entry\'s vault:// reference — no value, and no pasted-value name, in the answer, the item, the rows, the audit or the log', { here: jsHere(W), item: itemOf(W) && itemOf(W).status });
+  const aud = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').slice(a0).split('\n').filter((l) => l.includes('vault-job-secrets-moved'));
+  ok(aud.length === 1 && aud[0].includes('"n":4') && aud[0].includes('"who":') && !aud[0].includes('"who":null') && !aud[0].includes('"who":"sign-in-off"') && !aud[0].includes('GH_TOKEN'), 'ONE audit line: a count and who pressed (the door IS in the paste routes\' scope — the read, r1) — never a name or a value', aud);
+  const again = await S.hit('/api/vault/job-secrets/move');
+  ok(again.status === 404 && again.json.code === 'job_secrets_gone', 'again ⇒ 404 job_secrets_gone (the notice stays settled)', again.json);
+  for (const m of made) W.vault.secretDrop(m.name);
+  // a refused value seals NOTHING — the ones sealed before it go again, the file stays
+  const f1 = freeNames(W).length;
+  plantJS(W, { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) });
+  const tooLong = await S.hit('/api/vault/job-secrets/move');
+  ok(tooLong.status === 400 && tooLong.json.code === 'value_too_long' && tooLong.json.name === 'TOO_LONG' && freeNames(W).length === f1 && jsHere(W) && itemOf(W).status === 'open',
+    'a value the vault refuses (too long) ⇒ refused BY NAME, the one sealed before it dropped again — nothing half-moved, the file and the notice kept', { code: tooLong.json.code, n: freeNames(W).length - f1 });
+  const del = await S.hit('/api/vault/job-secrets/delete');
+  ok(del.status === 200 && !jsHere(W) && freeNames(W).length === f1 && itemOf(W).status === 'done', 'delete ⇒ the file is gone as it was (nothing sealed), the notice done', del.json);
+  fs.mkdirSync(path.join(W.dataDir, JS_FILE));
+  const dir = await S.hit('/api/vault/job-secrets/move');
+  ok(dir.status === 409 && dir.json.code === 'job_secrets_not_a_file' && fs.statSync(path.join(W.dataDir, JS_FILE)).isDirectory(), 'a DIRECTORY by that name ⇒ job_secrets_not_a_file — never followed, never read', dir.json);
+  fs.rmdirSync(path.join(W.dataDir, JS_FILE));
+  plantJS(W, { EMPTY: '', NONE: null });
+  const none = await S.hit('/api/vault/job-secrets/move');
+  ok(none.status === 409 && none.json.code === 'job_secrets_nothing' && jsHere(W), 'a file whose values are all empty ⇒ job_secrets_nothing — the file kept (its «Delete the file» deletes it)', none.json);
+  // the read (r1): a list, an object or text with spaces around it is never moved half — refused BY NAME, nothing sealed, the file kept
+  const f2 = freeNames(W).length, shapes = [];
+  for (const doc of [{ FIRST_ONE: jsVals[0], A_LIST: [1, 2] }, { FIRST_ONE: jsVals[0], AN_OBJECT: { k: 'v' } }, { FIRST_ONE: jsVals[0], SPACED: ' ' + jsVals[1] + ' ' }]) { plantJS(W, doc); const r = await S.hit('/api/vault/job-secrets/move'); shapes.push({ status: r.status, code: r.json.code, name: r.json.name, kept: jsHere(W), sealed: freeNames(W).length - f2 }); }
+  ok(shapes.every((x) => x.status === 422 && x.code === 'job_secrets_value_shape' && x.kept && x.sealed === 0) && shapes.map((x) => x.name).join() === 'A_LIST,AN_OBJECT,SPACED', 'a list / an object / text with spaces around it ⇒ job_secrets_value_shape BY NAME — nothing sealed (FIRST_ONE neither), the file kept', shapes);
+  // the read (r1): Delete removes a regular file of ONE name only — a symlink by that name is refused (the values would stay on disk)
+  const target = path.join(W.dataDir, 'elsewhere.json'); fs.renameSync(path.join(W.dataDir, JS_FILE), target); fs.symlinkSync(target, path.join(W.dataDir, JS_FILE));
+  const viaLink = await S.hit('/api/vault/job-secrets/delete');
+  ok(viaLink.status === 409 && viaLink.json.code === 'job_secrets_not_a_file' && fs.existsSync(target) && fs.lstatSync(path.join(W.dataDir, JS_FILE)).isSymbolicLink(), 'Delete over a SYMLINK by that name ⇒ job_secrets_not_a_file — neither the link nor its target touched', viaLink.json);
+  fs.unlinkSync(path.join(W.dataDir, JS_FILE)); fs.unlinkSync(target);
+  // the read (r1): the file the values came from is the file deleted — one edited while the move ran keeps every byte, nothing sealed
+  plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+  const f3 = freeNames(W).length, jsf = path.join(W.dataDir, JS_FILE);
+  const editing = require(path.join(REPO, 'src/server/job-secrets-door.js')).create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { fs.appendFileSync(jsf, ' '); return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } });
+  const changed = await editing.answer('move');
+  ok(changed.code === 'job_secrets_changed' && freeNames(W).length === f3 && jsHere(W), 'the file EDITED while the move ran (its size moved) ⇒ job_secrets_changed — the values sealed meanwhile dropped again, the file kept', { code: changed.code, sealed: freeNames(W).length - f3 });
+  fs.unlinkSync(jsf);
+  ok(require(path.join(REPO, 'src/server/job-secrets-door.js')).RETIRED === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_RETIRED && require(path.join(REPO, 'src/server/job-secrets-door.js')).ITEM === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_ITEM,
+    'the door\'s file and notice key ARE the migration\'s (one name each)');
 }
 
 console.log('⑨ A RESTART — the item is the record');
@@ -1194,6 +1268,29 @@ async function runRoad(name, { door, routes } = {}) {
   ok(aForget.passKept && !aForget.wordsOpen, 'MUTANT B-3fb5 the delete without the run door\'s forgetEntry ⇒ the owner\'s host pass outlives the entry (RED — a value minted later under the name would go there with no card)', aForget);
   const aWords = await agentRoad('m-agent-words', { door: mutant('src/server/vault-paste-door.js', "    index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');", "    index();") });
   ok(aWords.wordsOpen && !aWords.passKept, 'MUTANT B-3fb5 the delete without settling its words proposal ⇒ the card stays open over a gone entry (RED)', aWords);
+  // B-ef1b: the job-secrets door, each guard taken away
+  async function jsRoad(name, { jsDoor, doc } = {}) {
+    const w = makeWorld(name, { jsDoor });
+    await w.vault.setup(PW);
+    const s = await serve(w);
+    plantJS(w, doc);
+    const r = await s.hit('/api/vault/job-secrets/move');
+    const labels = freeNames(w).map((x) => x.label);
+    s.srv.close();
+    return { status: r.status, code: r.json.code, sealed: freeNames(w).length, labels, here: jsHere(w) };
+  }
+  const JSD = 'src/server/job-secrets-door.js';
+  const jBase = await jsRoad('m-js-base', { doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
+  ok(jBase.code === 'value_too_long' && jBase.sealed === 0 && jBase.here, 'B-ef1b the real door: a refused value seals nothing and keeps the file (the mutants\' baseline)', jBase);
+  const jUndo = await jsRoad('m-js-undo', { jsDoor: mutant(JSD, '        undo();\n        return named(', '        return named('), doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
+  ok(jUndo.code === 'value_too_long' && jUndo.sealed === 1, 'MUTANT B-ef1b no undo on a refused value ⇒ the one sealed before it stays — HALF-MOVED (RED)', jUndo);
+  const JS_HEXNAME = ['x9QzA', '7pLm'].join('-') + '.tok';   // a value-looking string pasted as a NAME that the free entry's words rule takes but the door's safeName hides (no variable's shape) — the restack's tb runs showed an sk- name AND a hex run refused by the words rule itself (name_secret), so the mutant could not show either
+  const jShow = await jsRoad('m-js-show', { jsDoor: mutant(JSD, '      const shown = safeName(name);\n      const r = paste.addEntry(', '      const shown = name;\n      const r = paste.addEntry('), doc: { [JS_HEXNAME]: jsVals[2] } });
+  ok(jShow.labels.includes(JS_HEXNAME), 'MUTANT B-ef1b every name shown ⇒ a pasted VALUE in the name field becomes an entry\'s name in the Vault window (RED — the real door names it «Job secret N»)', jShow.labels.length);
+  const jKept = await jsRoad('m-js-kept', { jsDoor: mutant(JSD, "    try { await fsp.unlink(file); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();", "    try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();"), doc: { FIRST_ONE: jsVals[0] } });
+  ok(jKept.code === 'job_secrets_undeletable' && jKept.sealed === 0 && jKept.here, 'B-ef1b a file that cannot be deleted (a copy whose unlink fails) ⇒ job_secrets_undeletable, NOTHING sealed (undone), the file kept — a second press is the same press', jKept);
+  const jKeptNoUndo = await jsRoad('m-js-kept-noundo', { jsDoor: mutant(JSD, "    try { await fsp.unlink(file); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();", "    try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) {"), doc: { FIRST_ONE: jsVals[0] } });
+  ok(jKeptNoUndo.code === 'job_secrets_undeletable' && jKeptNoUndo.sealed === 1, 'MUTANT B-ef1b no undo when the file cannot be deleted ⇒ the value sealed AND the file kept — a second press would seal it twice (RED)', jKeptNoUndo);
   // lane login-request-card: the login road's own mutants
   const MPW = ['mutant', 'road', 'pw'].join('-');   // built, never a literal the secret scan reads as an assignment
   async function loginRoad(name, { door, loginsMod } = {}) {

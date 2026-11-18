@@ -137,6 +137,15 @@ const ROWS = Object.freeze([
   { type: 'vault-store-refused', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   { type: 'vault-grant-stale', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   { type: 'vault-policy-approved', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'conversation' },
+  // B-ef1b: the retired job-secrets notice (src/server/migrations.js — 2026-10-job-secrets-retired, re-filed by
+  // 2026-11-job-secrets-buttons): its two buttons ARE the step it used to ask for in words — «Move into the vault» seals each value
+  // as a vault entry and then deletes the file, «Delete the file» deletes it as it is (src/server/job-secrets-door.js answers both,
+  // a person's door; src/lib/vault-paste-box.js answerJobSecrets asks the unlock / the confirm first)
+  { type: 'job-secrets-retired', identity: null, producer: 'src/server/migrations.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group',
+    buttons: Object.freeze([
+      Object.freeze({ answer: 'move', label: i18nKey('Move into the vault'), title: i18nKey('Seal each value as a vault entry, then delete the file'), door: 'job-secrets' }),
+      Object.freeze({ answer: 'delete', label: i18nKey('Delete the file'), title: i18nKey('Delete the file and the values in it'), door: 'job-secrets' }),
+    ]) },
   // ── the account pool ──
   { type: 'pool-cross-provider', identity: 'askId', producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'conversation' },
   { type: 'reset-credit', identity: null, producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the limit wall card\'s «Use a reset credit» (design-reset-credits) — src/lib/chat-renderers.js', on: 'the limit card in this conversation', scope: 'conversation' },

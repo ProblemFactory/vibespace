@@ -745,6 +745,7 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:vaultContents': { kind: 'eval', why: 'the Vault window\'s contents, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:vaultRun': { kind: 'eval', why: 'the run door, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:vaultPaste': { kind: 'eval', why: 'the paste door, real over the scratch vault' },
+  'src/server/mounts-plugins-wiring.js:vaultJobSecrets': { kind: 'eval', why: 'B-ef1b: the retired job-secrets notice\'s door, real over the scratch vault + data dir (its route is a person\'s)' },
   'src/server/mounts-plugins-wiring.js:vaultTotp': { kind: 'eval', why: 'the two-step codes, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:browserLogins': { kind: 'eval', why: 'the website logins, real over the scratch vault' },
   'src/server/mounts-plugins-wiring.js:automation': { kind: 'eval', why: 'THE automation keys engine, real over the scratch vault' },

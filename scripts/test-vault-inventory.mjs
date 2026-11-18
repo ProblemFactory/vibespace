@@ -437,6 +437,10 @@ console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q
   ok(b.items.map((x) => x.id).join() === 'b,f,a,g,h' && b.total === 6, 'the band: origin vault only, open, not cleared — urgent first, then newest, at most 5 (the total said)', b);
   ok(VI.bandDoorsOf({ action: { type: 'automation-ask' } }).join() === 'once,always,deny' && VI.bandDoorsOf({ action: { type: 'vault-unlock' } }).join() === 'unlock' && VI.bandDoorsOf({ action: { type: 'vault-rotate' } }).join() === 'renew,ack' && VI.bandDoorsOf({ action: { type: 'vault-use-failed' } }).join() === 'open,ack' && VI.bandDoorsOf({}).join() === 'open,ack',
     'the band\'s doors per card: a held automation call = its three answers · the restart\'s = unlock · rotate = renew + got it · a failed use / any other = open + got it');
+  // B-ef1b (its pictures: the band drew the retired job-secrets notice with «Open the row» / «Got it» — no answer there): a row that
+  // DECLARES its buttons (src/foryou-actions.js) is drawn with THEM + «Got it» — read from the registry, never a branch per type
+  { const FA = require(path.join(REPO, 'src/foryou-actions.js')); const want = (FA.buttonsOf('job-secrets-retired') || []).map((b) => `btn:${b.answer}`).concat('ack').join();
+    ok(want === 'btn:move,btn:delete,ack' && VI.bandDoorsOf({ action: { type: 'job-secrets-retired' } }).join() === want, 'B-ef1b: the retired job-secrets notice\'s band doors = its two declared buttons (move / delete) + got it — answerable in the Vault window as in For you', VI.bandDoorsOf({ action: { type: 'job-secrets-retired' } })); }
   // THE USE-FAILURE HOUR
   const H = VI.USE_FAIL_MERGE_MS;
   const f1 = VI.useFailVerdict(null, { code: 'vault_locked', at: 1000, who: 'Release helper' });

@@ -2498,8 +2498,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const na = notesOf(live), it = na[0] || {};
     ok(na.length === 1 && it.origin === 'vault' && it.kind === 'notice' && it.urgency === 'high' && it.status === 'open' && it.text.includes('data/job-secrets.retired.json') && /put each into the vault, then delete the file/.test(it.text),
       'ONE For-you notice (origin vault, a notice): it names the file and says put each into the vault, then delete it', it);
-    ok(/It holds 3 name\(s\): GH_TOKEN, NPM_TOKEN —/.test(it.detail || '') && /…and 1 more not shown/.test(it.detail || '') && /--vault NAME=vault:\/\/… \(vibespace-docs jobs\)/.test(it.detail || '') && /never deletes it/.test(it.detail || ''),
-      '…its detail: the 3 names it held (the 2 variable names shown, the one shaped like a pasted value COUNTED, never shown) and the recipe (a secret entry in the vault; a job reads --vault)', it.detail);
+    ok(/It holds 3 name\(s\): GH_TOKEN, NPM_TOKEN —/.test(it.detail || '') && /…and 1 more not shown/.test(it.detail || '') && /--vault NAME=vault:\/\/… \(vibespace-docs jobs\)/.test(it.detail || '') && /deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is/.test(it.detail || '') && it.action?.type === 'job-secrets-retired',
+      '…its detail: the 3 names it held (the 2 variable names shown, the one shaped like a pasted value COUNTED, never shown) and the recipe (B-ef1b: the two buttons ARE the step — its action job-secrets-retired; a job reads --vault)', { detail: it.detail, action: it.action });
     ok(it.i18n?.text?.key && Array.isArray(it.i18n?.detail) && it.i18n.detail.length === 3 && it.i18n?.source?.key === 'Vault', '…and its words ride as structure (the client says them in zh / ja — the group\'s name too, r3)', it.i18n);
     const todosText = fs.existsSync(path.join(a.dataDir, 'user-todos.json')) ? fs.readFileSync(path.join(a.dataDir, 'user-todos.json'), 'utf8') : '';
     ok(todosText.includes('job-secrets.retired.json') && leaks(JSON.stringify(na)).length === 0 && leaks(todosText).length === 0,
@@ -2628,6 +2628,43 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const rg2 = boot(g, { userTodos: tg });
     ok(rg2?.status === 'ran' && tg.forSession('migrations').length === 0 && tg.get(sg1[0]?.id)?.status === 'done' && notesOf(tg).length === 1, '…the next boot runs it ⇒ the runner\'s item is RESOLVED and the ONE Vault notice is filed', { status: rg2?.status, item: tg.get(sg1[0]?.id)?.status });
     tg.stop();
+  }
+
+  // ── 2026-11-job-secrets-buttons (B-ef1b): the ONE notice an earlier boot filed (no action — words only) is re-filed WITH its two
+  // buttons while the retired file is still there and the notice still OPEN; one the owner closed stays closed (pruned too); no
+  // file, or a second store beside it ⇒ nothing filed
+  {
+    console.log('2026-11-job-secrets-buttons');
+    const ID = '2026-11-job-secrets-buttons', ITEM = '2026-10-job-secrets-retired', RET = 'job-secrets.retired.json';
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const MJ = require('../src/server/migrations.js');
+    const seed = (name, { store = { GH_TOKEN: 'v-' + crypto.randomBytes(8).toString('hex') }, item = 'open', both = false } = {}) => {
+      const root = path.join(tmp, 'jsb-' + name), dataDir = path.join(root, 'data');
+      fs.mkdirSync(dataDir, { recursive: true });
+      if (store !== null) fs.writeFileSync(path.join(dataDir, RET), JSON.stringify(store), { mode: 0o600 });
+      if (both) fs.writeFileSync(path.join(dataDir, 'job-secrets.json'), '{}', { mode: 0o600 });
+      const live = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+      if (item) {   // the OLD filing: the words, no action (what 2026-10-job-secrets-retired filed before this release)
+        const it = live.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: ITEM, text: 'A plain file kept secrets for background jobs outside the vault: data/job-secrets.retired.json — put each into the vault, then delete the file.' });
+        if (item === 'done') live.setStatus(it.id, 'done', 'user');
+      }
+      return { root, dataDir, live };
+    };
+    const boot = (r) => create({ rootDir: r.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: r.live }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
+    const items = (r) => { const sn = r.live.snapshot() || {}; return [...(sn.open || []), ...(sn.resolved || [])].filter((i) => i.sessionKey === 'vault' && i.itemKey === ITEM); };   // open AND resolved (forSession lists the open ones only)
+    ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID) && MJ.JOB_SECRETS_ACTION === 'job-secrets-retired', `the registry carries ${ID} (append-only, dated); the notice's action is job-secrets-retired`);
+    const a = seed('open'); const ra = boot(a); const ia = items(a);
+    ok(ra?.status === 'ran' && ia.length === 1 && ia[0].status === 'open' && ia[0].action?.type === 'job-secrets-retired' && /deletes it only when you say so/.test(ia[0].detail || '') && /It holds 1 name\(s\): GH_TOKEN/.test(ia[0].detail || ''),
+      'an OPEN notice from an earlier boot + the retired file ⇒ re-filed as the SAME one item, now with its buttons (its action) and the new words', { status: ra?.status, items: ia.map((i) => ({ status: i.status, action: i.action })) });
+    const b = seed('closed', { item: 'done' }); const rb = boot(b); const ib = items(b);
+    ok(rb?.status === 'ran' && ib.length === 1 && ib[0].status === 'done' && !ib[0].action, 'a notice the owner CLOSED stays closed — no buttons pushed back onto it', { status: rb?.status, items: ib.map((i) => ({ status: i.status, action: i.action })) });
+    const c = seed('gone', { store: null }); const rc = boot(c);
+    ok(rc?.status === 'ran' && items(c).length === 1 && !items(c)[0].action && /no retired file/.test(JSON.stringify(rc?.report || '')), 'no retired file ⇒ nothing filed (the old notice untouched)', rc);
+    const d = seed('both', { both: true }); const rd = boot(d);
+    ok(rd?.status === 'ran' && !items(d)[0].action && /two files/.test(JSON.stringify(rd?.report || '')), 'a second store beside it ⇒ nothing filed (2026-10-job-secrets-retired says «Two files…» until the owner chooses)', rd);
+    const e = seed('none', { item: null }); const re2 = boot(e);
+    ok(re2?.status === 'ran' && items(e).length === 0 && /no open notice/.test(JSON.stringify(re2?.report || '')), 'the file there and NO notice at all (closed and pruned from the tray — the read, r1) ⇒ nothing filed: a notice the owner closed never comes back', { report: re2?.report, items: items(e).length });
+    for (const r of [a, b, c, d, e]) r.live.stop();
   }
 
   // ── THE SHARED RUNNER SAYS A FAILURE WHERE THE OWNER LOOKS (lane job-secrets-retire r3, review F2b): the hub runs its registry

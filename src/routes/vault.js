@@ -57,6 +57,7 @@ const STATUS = Object.freeze({
   login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_words: 400, login_password_lines: 400,   // lane login-request-card: a website login asked for (src/server/vault-paste-door.js)
   login_no_entry: 404, login_not_pending: 409, login_pending_exists: 409, card_changed: 409, // lane vault-login r22/r23: human-only Confirm / Discard of pending web-login slots
   login_site_exists: 409, login_sites_full: 409, login_site_first: 400, login_site_absent: 404, login_merge_same: 400, login_merge_clash: 409,   // lane login-request-card: one login, several sites (the person's add / remove, the merge)
+  job_secrets_answer: 400, job_secrets_busy: 409, job_secrets_gone: 404, job_secrets_not_a_file: 409, job_secrets_unreadable: 422, job_secrets_nothing: 409, job_secrets_undeletable: 500, job_secrets_value_shape: 422, job_secrets_changed: 409,   // B-ef1b (src/server/job-secrets-door.js)
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -136,6 +137,13 @@ const WORDS = Object.freeze({
   login_merge_same: 'pick two different logins',
   login_merge_clash: 'a site is on both logins under two names — remove it from one first',
   card_changed: 'that website login changed after it was shown — nothing was changed; read it again',
+  // B-ef1b: the retired job-secrets notice's buttons (src/server/job-secrets-door.js) — the client words them itself (zh / ja)
+  job_secrets_answer: 'the answer is move or delete', job_secrets_busy: 'the file is being moved — try again in a moment',
+  job_secrets_gone: 'the file is not there any more — the notice is settled', job_secrets_not_a_file: 'something other than a file has that name — nothing was read',
+  job_secrets_unreadable: 'the file could not be read as a list of names and values — nothing was moved', job_secrets_nothing: 'the file holds no value to move — delete it instead',
+  job_secrets_undeletable: 'the file could not be deleted — nothing was moved; delete it yourself or try again',
+  job_secrets_value_shape: 'a value is not a plain text, number or true/false (a list, an object, or text with spaces around it) — nothing was moved; the file is kept',
+  job_secrets_changed: 'the file changed while it was being moved — nothing was moved; press again',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
@@ -158,7 +166,7 @@ function slowLineOf(req, ms) {
   return `[vault] ${req.method} ${route} answered in ${Math.round(ms)} ms`;
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null,
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobSecrets = null,
   totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
@@ -420,7 +428,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     }
   });
   if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste });
-  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed
+  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who, jobSecrets });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed; B-ef1b (the read): + jobSecrets — its door is the paste routes'
 }
 
 /**
@@ -448,7 +456,7 @@ function pasteCallerIn(activeSessions, req) {
   }
   return null;
 }
-function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null }) {
+function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null, jobSecrets = null }) {
   const pasteCallerOf = (req) => pasteCallerIn(activeSessions, req);
   const refusal = (res, r) => res.status(paste.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || paste.words(r.code), ...Object.fromEntries(['until', 'fields'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
   const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
@@ -469,6 +477,8 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take, who = (
   app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value, loginPassword, totpLink, totpSeed] = take(req, 'value', 'loginPassword', 'totpLink', 'totpSeed'); const b = req.body || {}; const tw = b.totp && typeof b.totp === 'object' && !Array.isArray(b.totp) ? b.totp : {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, login: { username: b.username, password: loginPassword, totpName: b.totpName, allow: b.allow === true, ...(typeof b.useLogin === 'string' && b.useLogin ? { useLogin: b.useLogin } : {}) }, totp: { uri: totpLink, seed: totpSeed, name: tw.name, digits: tw.digits, period: tw.period, algorithm: tw.algorithm, allow: b.allow === true } }); }));   // totp: lane totp-request-card — the link and the seed taken off the body (never logged, never echoed), the two-step dialog's own fields   // login: lane login-request-card — a website login's fields (the password off the body, as the add door's route takes it)   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
+  // B-ef1b: the retired job-secrets notice's two buttons — move each value into the vault (then the file goes), or delete the file
+  app.post('/api/vault/job-secrets/:answer', person((req) => (jobSecrets ? jobSecrets.answer(String(req.params.answer), { by: 'user', who: (() => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } })(), ip: ipOf(req) }) : { ok: false, code: 'job_secrets_gone' })));
   app.delete('/api/vault/agent-secrets/:entry', person((req) => paste.dropAgentEntry(String(req.params.entry), { by: 'user', who: (() => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } })(), ip: ipOf(req) })));   // B-3fb5: an agent's own entry's 删除 (the whole agent:<scope>/<name>, encoded)
   // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and the owner's own edit of them
   app.post('/api/vault/words-asks/:id/answer', person((req) => { const b = req.body || {}; return paste.answerWords(String(req.params.id), { answer: b.answer, by: 'user', person: true }); }));

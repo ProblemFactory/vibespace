@@ -23,12 +23,13 @@ const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs)
 const JOB_SECRETS_FILE = 'job-secrets.json';
 const JOB_SECRETS_RETIRED = 'job-secrets.retired.json';
 const JOB_SECRETS_ITEM = '2026-10-job-secrets-retired'; // the For-you item's key (one item, re-worded, never a second)
+const JOB_SECRETS_ACTION = 'job-secrets-retired'; // B-ef1b: the notice's action — its two buttons (src/foryou-actions.js; src/server/job-secrets-door.js answers them)
 const JOB_SECRETS_WORDS = Object.freeze({
   text: i18nKey('A plain file kept secrets for background jobs outside the vault: {file} — put each into the vault, then delete the file.'),
   names: i18nKey('It holds {n} name(s): {names} — the values are not shown here.'),
   more: i18nKey('…and {n} more not shown (past the first 20, or shaped like a value rather than a name).'),
   unread: i18nKey('Its names could not be read — open the file to see what it holds.'),
-  recipe: i18nKey('VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).'),
+  recipe: i18nKey('VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).'),   // B-ef1b: the buttons are the step
   both: i18nKey('Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.'),
 });
 // 2026-11-warmth-ramp-derived (lane cache-warmth-ramp r2, q-059 r5): a custom theme saved on .374 froze the five «Cache warmth»
@@ -118,6 +119,41 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
+  // 2026-10-job-secrets-retired + 2026-11-job-secrets-buttons (B-ef1b): the retired store's ONE For-you notice — filed through
+  // the live inbox store (r2/r3) by both; `buttons` = its action (src/foryou-actions.js `job-secrets-retired`: «Move into the vault» /
+  // «Delete the file», src/server/job-secrets-door.js) — the «Two files…» notice carries none (nothing was moved, the owner chooses)
+  const jsFill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+  // ONE For-you item keyed by this migration — THROUGH the live inbox store (it holds data/user-todos.json in memory);
+  // without one a PRIVATE store on the same file, flushed before the runner records the row (a throw fails the run)
+  const jsTell = (head, lines, { buttons = false } = {}) => {
+    const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+    let store = live, priv = false;
+    if (!store || typeof store.add !== 'function') {
+      const { UserTodoManager } = require('../user-todos.js');
+      store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+      priv = true;
+    }
+    try {
+      const it = store.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: JOB_SECRETS_ITEM, ...(buttons ? { action: { type: JOB_SECRETS_ACTION } } : {}), text: jsFill(head), detail: lines.length ? lines.map(jsFill).join('\n') : null, i18n: { text: head, ...(lines.length ? { detail: lines } : {}), source: { key: i18nKey('Vault') } } });
+      store.flush();
+      return { notice: it && it.id ? 'filed' : 'not filed', via: priv ? 'private' : 'live' };
+    } finally { if (priv) { try { store.stop(); } catch { } } }
+  };
+  /** The retired file's NAMES (never a value: parsed here, and only the names leave) → the notice's detail lines. */
+  const jsLines = () => {
+    const retiredFile = path.join(dataDir, JOB_SECRETS_RETIRED);
+    let names = null;
+    try { if (fs.statSync(retiredFile).size <= 1024 * 1024) { const doc = JSON.parse(fs.readFileSync(retiredFile, 'utf-8')); if (doc && typeof doc === 'object' && !Array.isArray(doc)) names = Object.keys(doc); } } catch { names = null; }
+    // a name is SHOWN only when it is shaped like an environment-variable name AND the secret-shapes belt finds nothing in it
+    // (r3, review F1: most tokens fit a variable's shape — ghp_…, npm_…, hf_…, AKIA…, a hex run); anything else — a value
+    // pasted into the name field, the accident class — is counted, never shown
+    const shown = (names || []).filter((n) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(n) && redactSecrets(n, { runs: true }).redacted === 0).slice(0, 20);
+    const lines = names
+      ? [{ key: JOB_SECRETS_WORDS.names, params: { n: names.length, names: shown.join(', ') || '—' } }, ...(names.length > shown.length ? [{ key: JOB_SECRETS_WORDS.more, params: { n: names.length - shown.length } }] : [])]
+      : [{ key: JOB_SECRETS_WORDS.unread }];
+    lines.push({ key: JOB_SECRETS_WORDS.recipe });
+    return { names, lines };
+  };
   const MIGRATIONS = [
     {
       id: '2026-08-collapse-kinds-agent-default',
@@ -888,23 +924,6 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       note: "A SECRET AT REST NAMES ITS VAULT ENTRY — OR THE OWNER IS TOLD (lane job-secrets-retire r2, design-vault-service-secret D10): data/job-secrets.json was a PLAINTEXT store of a job's secrets (the old GET / POST /api/jobs-secrets — no client ever wrote it; the engine read it into a job's env as envFrom). From this release nothing reads it and its routes are gone, so a store an owner once filled by hand would sit in data/ in the clear with no door and nobody told. This one-shot RENAMES it to data/job-secrets.retired.json (0600 — the owner's bytes, KEPT: never deleted by us) and files ONE For-you notice under Vault naming the file, the names it held (names only, never a value) and the recipe (each into the vault as a secret entry, then delete the file; a job reads one with --vault). src/vault.js SECRETS_AT_REST names the retired file until the owner deletes it. No file ⇒ nothing. A run that renamed and then failed to file the notice is not recorded: the next boot finds the retired file and files it (ONE item, keyed by this migration). Both names present ⇒ FAILS by name, nothing moved (never over the owner's bytes) — and the same For-you item says so first (r3: the runner runs before any client connects, so a journal line alone reached nobody). A state with nothing left to tell — no file, a non-file, an empty store — settles that item (r4).",
       run() {
         const from = path.join(dataDir, JOB_SECRETS_FILE), to = path.join(dataDir, JOB_SECRETS_RETIRED);
-        const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
-        // ONE For-you item keyed by this migration — THROUGH the live inbox store (it holds data/user-todos.json in memory);
-        // without one a PRIVATE store on the same file, flushed before the runner records the row (a throw fails the run)
-        const tell = (head, lines) => {
-          const live = typeof userTodos === 'function' ? userTodos() : userTodos;
-          let store = live, priv = false;
-          if (!store || typeof store.add !== 'function') {
-            const { UserTodoManager } = require('../user-todos.js');
-            store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
-            priv = true;
-          }
-          try {
-            const it = store.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: JOB_SECRETS_ITEM, text: fill(head), detail: lines.length ? lines.map(fill).join('\n') : null, i18n: { text: head, ...(lines.length ? { detail: lines } : {}), source: { key: i18nKey('Vault') } } });
-            store.flush();
-            return { notice: it && it.id ? 'filed' : 'not filed', via: priv ? 'private' : 'live' };
-          } finally { if (priv) { try { store.stop(); } catch { } } }
-        };
         // a state with nothing left to tell (no file, a non-file, an empty store) SETTLES the one item an earlier boot filed —
         // «Two files…» never stays open over files the owner already removed (r4, review R3-F2). The LIVE store only (a fresh
         // install still makes no data/user-todos.json), flushed before the runner records the row — the row never runs again
@@ -925,26 +944,17 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
             // r3 (review F2): the runner runs inside hub.listen's callback, before any client connects — the failure is said
             // in For you too, and the error carries `told` so the runner files no second item for it
             let told = false;
-            try { told = tell({ key: JOB_SECRETS_WORDS.both, params: { from: 'data/' + JOB_SECRETS_FILE, to: 'data/' + JOB_SECRETS_RETIRED } }, []).notice === 'filed'; } catch (e) { console.warn(`[migrate] job-secrets-retired: the For-you notice was not filed — ${e && e.message}`); }
+            try { told = jsTell({ key: JOB_SECRETS_WORDS.both, params: { from: 'data/' + JOB_SECRETS_FILE, to: 'data/' + JOB_SECRETS_RETIRED } }, []).notice === 'filed'; } catch (e) { console.warn(`[migrate] job-secrets-retired: the For-you notice was not filed — ${e && e.message}`); }
             throw Object.assign(new Error(`data/${JOB_SECRETS_RETIRED} already exists beside data/${JOB_SECRETS_FILE} — nothing moved (never over the owner's bytes); move one of them aside and restart`), { told });
           }
           fs.renameSync(from, to);
         } else if (!fs.existsSync(to)) return settle({ store: 'absent' });
         if (fs.lstatSync(to).isFile()) fs.chmodSync(to, 0o600);   // a symlink's target is not ours to chmod
         // its NAMES only — the values are parsed to find the names and never leave this function (no log, no ledger, no notice)
-        let names = null;
-        try { if (fs.statSync(to).size <= 1024 * 1024) { const doc = JSON.parse(fs.readFileSync(to, 'utf-8')); if (doc && typeof doc === 'object' && !Array.isArray(doc)) names = Object.keys(doc); } } catch { names = null; }
+        const { names, lines } = jsLines();
         const rep = { store: st ? 'renamed' : 'renamed-earlier', to: 'data/' + JOB_SECRETS_RETIRED, names: names ? names.length : null };
         if (names && !names.length) { console.log('[migrate] job-secrets-retired:', JSON.stringify(rep)); return settle({ ...rep, notice: 'none (it held no name)' }); }
-        // a name is SHOWN only when it is shaped like an environment-variable name AND the secret-shapes belt finds nothing in it
-        // (r3, review F1: most tokens fit a variable's shape — ghp_…, npm_…, hf_…, AKIA…, a hex run); anything else — a value
-        // pasted into the name field, the accident class — is counted, never shown
-        const shown = (names || []).filter((n) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(n) && redactSecrets(n, { runs: true }).redacted === 0).slice(0, 20);
-        const lines = names
-          ? [{ key: JOB_SECRETS_WORDS.names, params: { n: names.length, names: shown.join(', ') || '—' } }, ...(names.length > shown.length ? [{ key: JOB_SECRETS_WORDS.more, params: { n: names.length - shown.length } }] : [])]
-          : [{ key: JOB_SECRETS_WORDS.unread }];
-        lines.push({ key: JOB_SECRETS_WORDS.recipe });
-        Object.assign(rep, tell({ key: JOB_SECRETS_WORDS.text, params: { file: 'data/' + JOB_SECRETS_RETIRED } }, lines));
+        Object.assign(rep, jsTell({ key: JOB_SECRETS_WORDS.text, params: { file: 'data/' + JOB_SECRETS_RETIRED } }, lines, { buttons: true }));
         if (rep.notice !== 'filed') throw new Error('the For-you notice was not filed — retried next boot (the file is renamed and kept)');
         console.log('[migrate] job-secrets-retired:', JSON.stringify(rep));
         return rep;
@@ -986,6 +996,32 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       id: CLOAK_MIGRATION_ID,
       note: "CLOAKBROWSER INSTALLS AS A PLUGIN (lane engine-spi-egress L3 + its acceptance rounds 2 and 3, design-desk cloak-plugin.md §4 + its addendum §3 — the owner 2026-11-01/02: 「把cloakbrowser也做成插件，默认不要包含」「cloakbrowser直接去掉吧」): the core keeps no CloakBrowser of its own, so what this instance holds of it moves to the plugin `vibespace.cloak-browser` ONCE — no shim, no auto-install, nothing deleted. READ first — its own archive, data/browser-profiles.json, data/settings.json, the plugin's seeds.json: a torn or unreadable one FAILS by name before any write (retried at the next boot). VibeSpace's earlier download is carried ONLY when its install proof says so (data/browser-tools/cloak-installed.json names the measured build and the file hashes to it — the hash STREAMED, the row then STEPPED and the keeper's boot waiting for it; never on a retry that already has its verdict); otherwise it is left out, said as unverified. ARCHIVE BEFORE STRIP: the archive is the FIRST write (pending until the notice is out) and holds everything the run displaces; a retry resumes that judgement — the same end state, one notice in the first run's words, its `via` too. Then, each step idempotent: the seeds merged into seeds.json (never over the plugin's own); the program path + the site list into the plugin's rows (never over a value they hold), both old keys stripped; THROUGH the live keeper: every CloakBrowser profile → chromium + the plugin as its build, a defaultBackend of CloakBrowser cleared everywhere, a running one marked endAtBoot (ended by identity before adoption — and a record a failed run leaves is ended by the keeper's unreadable-record rule), the old proxy / seat / major readings dropped, an open proposal re-judged unavailable, a site hint naming it kept as tier 2 (the plugin has a program row) or dropped and archived; ONE For-you notice — only when something moved.",
       run() { return migrateCloakToPlugin(); },
+    },
+    {
+      id: '2026-11-job-secrets-buttons',
+      note: "THE RETIRED JOB-SECRETS NOTICE HAS ITS BUTTONS (B-ef1b — the follow-up of lane job-secrets-retire, int361's seam F reading 2026-10-30: a notice that asks the owner to do something is answerable where it appears): 2026-10-job-secrets-retired filed ONE notice that asked, in words only, to put each value into the vault and delete the file. It now carries two buttons (src/foryou-actions.js job-secrets-retired — «Move into the vault» / «Delete the file», answered by src/server/job-secrets-door.js). This one-shot re-files that ONE notice (the same key: its words the latest, the buttons on it) while data/job-secrets.retired.json is still there and the notice is still OPEN — one the owner closed stays closed (pruned from the tray too: no open notice ⇒ nothing filed); no retired file (or a second store beside it, which the first one-shot still reports) ⇒ nothing filed.",
+      run() {
+        const to = path.join(dataDir, JOB_SECRETS_RETIRED);
+        let st = null;
+        try { st = fs.lstatSync(to); } catch { return { notice: 'none (no retired file)' }; }
+        if (!st.isFile()) return { notice: 'none (not a file)' };
+        if (fs.existsSync(path.join(dataDir, JOB_SECRETS_FILE))) return { notice: 'none (two files — 2026-10-job-secrets-retired says so)' };
+        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        let store = live, priv = false;
+        if (!store || typeof store.idsWhere !== 'function') { const { UserTodoManager } = require('../user-todos.js'); store = new UserTodoManager({ dataDir, expirySweepMs: 0 }); priv = true; }
+        let keyed = [], open = [];
+        try {
+          keyed = store.idsWhere((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM) || [];
+          open = store.idsWhere((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM && i.status === 'open') || [];
+        } finally { if (priv) { try { store.stop(); } catch { } } }
+        if (!open.length) return { notice: keyed.length ? 'kept as the owner left it (closed)' : 'none (no open notice — closed and pruned, or never filed)' };   // THE READ (r1): never a notice the owner closed brought back (a pruned one included)
+        const { names, lines } = jsLines();
+        if (names && !names.length) return { notice: 'none (it holds no name)' };
+        const rep = { names: names ? names.length : null, ...jsTell({ key: JOB_SECRETS_WORDS.text, params: { file: 'data/' + JOB_SECRETS_RETIRED } }, lines, { buttons: true }) };
+        if (rep.notice !== 'filed') throw new Error('the For-you notice was not filed — retried next boot (the file is kept)');
+        console.log('[migrate] job-secrets-buttons:', JSON.stringify(rep));
+        return rep;
+      },
     },
   ];
 
@@ -1561,4 +1597,4 @@ function agyReadsFollowClaudeOff(store) {
   return { changed: true, why: "Claude's row was Off — Antigravity's automatic usage reads are Off too (antigravity.autoUsageReads = off)" };
 }
 
-module.exports = { AGY_READS_MIGRATION_ID, agyReadsFollowClaudeOff, create, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS };
+module.exports = { AGY_READS_MIGRATION_ID, agyReadsFollowClaudeOff, create, beforeBrowserBoot, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_ITEM, JOB_SECRETS_WORDS, CLOAK_PLUGIN_ID, CLOAK_MIGRATION_ID, CLOAK_PLUGIN_WORDS, JOB_SECRETS_ACTION };

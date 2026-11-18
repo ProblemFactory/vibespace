@@ -42,6 +42,7 @@ const i18nKey = (s) => s;
 /** THE KIND REGISTRY (lane vault-totp-add): one row per kind family — the rail's categories and the row → category mapping
  *  below READ it (no second list); scripts/test-vault-kinds-census.mjs checks every surface a family declares. */
 const VK = require('./vault-kinds.js');
+const FA = require('./foryou-actions.js');   // PURE (B-ef1b): a row's DECLARED buttons — the 需要你 band draws them as every surface does
 /** The sealed stores, in the window's order — the ids of src/server/vault-engine.js STORE_KEYS `store` (each one key). */
 const STORES = Object.freeze([
   Object.freeze({ store: 'accounts', label: 'Accounts' }),
@@ -407,6 +408,10 @@ function bandDoorsOf(item) {
   if (type === 'vault-rotate') return ['renew', 'ack'];
   if (type === 'secret-request') return ['paste', 'deny'];
   if (type === 'vault-words-ask') return ['allow', 'deny'];   // lane vault-entry-description: an agent's proposal of an entry's words — 允许 / 拒绝   // lane vault-paste-request: an agent's request for a secret — THE paste box (a dialog here) / refuse
+  // B-ef1b (the pictures: the band drew the retired job-secrets notice with «Open the row» / «Got it» — no way to answer it there):
+  // a row that DECLARES its buttons (src/foryou-actions.js buttonsOf — never a branch per type) draws them, + «Got it»
+  const declared = FA.buttonsOf(type);
+  if (declared) return [...declared.map((b) => `btn:${b.answer}`), 'ack'];
   return ['open', 'ack'];
 }
 

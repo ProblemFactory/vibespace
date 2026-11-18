@@ -164,6 +164,7 @@ const browserLogins = require('./browser-logins.js').create({ vault, grants: () 
 // owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
 // field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
 const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, useGrants: vaultUseGrants, logins: browserLogins, totp: vaultTotp, runOf: totpRunOf, setting: (k) => serverSetting(k), log: (m) => console.log('[vault-paste]', m) });   // useGrants + setting: lane vault-use-grants (a request's default grant)
+const vaultJobSecrets = require('./job-secrets-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, paste: vaultPaste, userTodos, log: (m) => console.log('[vault-job-secrets]', m) });   // B-ef1b: the retired job-secrets notice's two buttons (move into the vault / delete the file)
 // lane chat-attachments-persist (the cut, 主开发 2026-11-13: «the record is the store»): a picture a message showed is READ
 // from the record it came in (the route, through the transcript service: this hub's transcript worker, or a paired
 // machine's agent); the files a person dropped into a temporary folder live with the conversation — the store, its stray
@@ -192,6 +193,7 @@ app.locals.settingHolds = settingHolds;   // the agent's ask route judges a last
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
+  jobSecrets: vaultJobSecrets,   // B-ef1b: the retired job-secrets notice's buttons (a person's door)
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });

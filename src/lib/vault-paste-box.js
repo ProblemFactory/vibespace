@@ -406,6 +406,54 @@ export async function postSecretAnswer(item, answer, { value = null, name, note,
   return false;
 }
 
+/** B-ef1b: THE RETIRED JOB-SECRETS NOTICE'S TWO BUTTONS (src/foryou-actions.js `job-secrets-retired` — a person's press over
+ *  POST /api/vault/job-secrets/:answer, src/server/job-secrets-door.js). «Move into the vault» while the vault is locked asks the
+ *  unlock FIRST and runs at the unlock (unlockThen — a close without one moves nothing); with no vault yet it asks the SETUP
+ *  (the read, r1); «Delete the file» asks a confirm (the values go with the file). The server settles the notice; every refusal
+ *  is said in words (the value it stopped at by its name when the name is safe to show). → true when it was answered. */
+export async function answerJobSecrets(answer) {
+  if (answer === 'delete') {
+    const { showConfirmDialog } = await import('./utils.js');
+    if (!(await showConfirmDialog({ title: t('Delete the file?'), message: t('The file and every value in it are deleted. Nothing is moved into the vault.'), confirmText: t('Delete'), danger: true }))) return false;
+  } else if (vaultFacts()?.state === 'not_set_up') {
+    showSetup();
+    return false;
+  } else if (vaultFacts()?.state !== 'unlocked') {
+    const { unlockThen } = await import('./vault-unlock.js');
+    await new Promise((done) => unlockThen(done));
+    if (vaultFacts()?.state !== 'unlocked') return false;
+  }
+  const r = await fetchJson(`/api/vault/job-secrets/${encodeURIComponent(answer)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (r && r.ok) {
+    const n = (r.moved || []).length, skipped = Number(r.skipped) || 0;
+    showToast(answer === 'move' ? (skipped ? t('{n} secret(s) moved into the vault, {m} empty one(s) left out — the file is deleted', { n, m: skipped }) : t('{n} secret(s) moved into the vault — the file is deleted', { n })) : t('The file is deleted'));
+    return true;
+  }
+  // the vault shut between the press and the answer: its own door opens (never a sentence without the way to it — test-vault-words)
+  if (r && r.code === 'vault_locked') { showUnlock(); return false; }
+  if (r && r.code === 'vault_not_set_up') { showSetup(); return false; }
+  showToast(jobSecretsRefusal(r, answer), { type: 'error' });
+  return false;
+}
+function jobSecretsRefusal(r, answer) {
+  const c = (r && r.code) || '';
+  const which = r && r.name ? `${r.name}: ` : r && r.at ? `${t('Value {n}', { n: r.at })}: ` : '';   // the value it stopped at — by its name when that name is safe to show (the door sends none otherwise)
+  const W = {
+    job_secrets_gone: () => t('The file is not there any more'),
+    job_secrets_not_a_file: () => t('Something other than a plain file has that name — nothing was read or deleted'),
+    job_secrets_unreadable: () => t('The file could not be read as names and values — nothing was moved'),
+    job_secrets_nothing: () => t('The file holds no value to move — delete it instead'),
+    job_secrets_undeletable: () => (answer === 'delete' ? t('The file could not be deleted') : t('The file could not be deleted — nothing was moved')),
+    job_secrets_value_shape: () => which + t('not a plain text, number or true/false (or text with spaces around it) — nothing was moved; the file is kept'),
+    job_secrets_changed: () => t('The file changed while it was being moved — nothing was moved; press again'),
+    job_secrets_busy: () => t('The file is being moved — try again in a moment'),
+    job_secrets_answer: () => t('That answer is not offered'),
+    value_too_long: () => which + t('too long for the vault — nothing was moved; the file is kept'),
+  };
+  if (W[c]) return W[c]();
+  return answer === 'delete' ? t('Could not delete the file — {reason}', { reason: c || t('server unreachable') }) : t('Could not move the secrets — {reason}', { reason: c || t('server unreachable') });
+}
+
 /** THE SAME BOX AS A DIALOG (the For-you window's pane, the Vault window's 「需要你」): the request's words above the box. */
 export function showSecretPasteDialog(model, item, { words = '', detail = '', plan = null, box: kept = null } = {}) {   // box: lane login-request-card — a box moved out of a surface, its typed fields kept · plan: that row's plan (its rendering)
   if (!isSecretAsk(item)) return null;

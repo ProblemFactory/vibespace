@@ -39,7 +39,7 @@ import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «W
 import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the browser-restart item's refusal by its code (PURE words)
 import { humanRefusalText } from '../browser-human.js'; // B-53df: … the person's own browsing words first (PURE)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
-import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { postSecretAnswer, answerJobSecrets } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 import { refusalText as pictureRefusalText } from './image-attach.js'; // B-51dd: a picture the route refused — the picture door's own words
 import { dropSentPictures } from './reply-pictures.js'; // B-51dd: a sent reply removes exactly the pictures it carried, and every box showing the item redraws
 import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
@@ -473,6 +473,7 @@ export function inboxModel(app) {
     // conversation, its only door
     { const btn = rec && rec.action ? (buttonsOf(rec.action.type) || []).find((b) => b.answer === answer) : null;
       if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; }
+      if (btn && btn.door === 'job-secrets') return answerJobSecrets(answer);   // B-ef1b: the retired job-secrets notice's two buttons (move into the vault / delete the file)
       if (btn && btn.door === 'connect') return !!(await app.openChannelConnect(String(rec.action.kind || ''), { flowId: typeof rec.action.flowId === 'string' ? rec.action.flowId : null }));   // B-8edd: the Connect dialog on the item's type, showing ITS sign-in
     }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {

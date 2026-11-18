@@ -40,6 +40,7 @@ import { wideHeaderDoors, loginHeld, showLoginGrantPicker, showAnySiteDialog, sh
 const LOGIN_DOORS = Object.freeze({ held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog });   // handed to each login row (it imports no dialog — the paste box's bundle stays as it is)
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
 import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
+import { buttonsOf } from '../foryou-actions.js'; // B-ef1b: a band item's DECLARED buttons (the registry's words; runAction runs them)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
 import { showSecretAddDialog, showSecretPasteDialog, showWordsEditDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
 
@@ -586,6 +587,15 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // ── 「需要你」 — For you's own open items of origin 'vault' (the same store; answered here = answered there) ──
   const inbox = (() => { try { return inboxModel(app); } catch { return null; } })();
   function bandDoor(item, door) {
+    // B-ef1b: a declared button (src/foryou-actions.js buttonsOf) — its own words, run by THE tray's answer (runAction's declared-buttons door)
+    if (door.startsWith('btn:')) {
+      const answer = door.slice(4), bt = (buttonsOf((item.action && item.action.type) || '') || []).find((x) => x.answer === answer);
+      const b = btnEl(bt ? t(bt.label) : answer, `vw-band-btn${(buttonsOf((item.action && item.action.type) || '') || [])[0] === bt ? ' vw-primary' : ''}`);
+      if (bt && bt.title) b.title = t(bt.title);
+      b.dataset.door = door;
+      b.onclick = async () => { await inbox.runAction(item, answer); };
+      return b;
+    }
     const label = { allow: t('Allow'), once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: t('Paste and save…') }[door];
     const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'allow' || door === 'unlock' || door === 'paste' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
     b.dataset.door = door;

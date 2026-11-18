@@ -685,7 +685,9 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     ]);
     const readers = naming(/job-secrets\.json|\/api\/jobs-secrets/);
     ok(scope.length > 100 && readers.join() === [...KNOWN.keys()].sort().join(), `NO READER LEFT: outside a comment only the two named files name data/job-secrets.json or /api/jobs-secrets (${[...KNOWN].map(([f, why]) => f + ' — ' + why).join('; ')})`, readers);
-    ok(naming(/job-secrets\.retired\.json/).join() === [...KNOWN.keys()].sort().join(), 'the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it — no other file', naming(/job-secrets\.retired\.json/));
+    // B-ef1b: + the notice's own door — a PERSON's press moves each value into the vault (then deletes the file) or deletes it
+    const RETIRED_KNOWN = new Map([...KNOWN, ['src/server/job-secrets-door.js', 'B-ef1b: the notice\'s two buttons — a person\'s press seals each value into the vault, then deletes the file (or deletes it) — never into a job, never a value said']]);
+    ok(naming(/job-secrets\.retired\.json/).join() === [...RETIRED_KNOWN.keys()].sort().join(), 'the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it, the notice\'s door (B-ef1b) moves or deletes it — no other file', naming(/job-secrets\.retired\.json/));
     const row = R('src/vault.js').SECRETS_AT_REST.find((r) => /data\/job-secrets\.retired\.json/.test(r.where || ''));
     ok(!!row && /0600/.test(row.where) && /OWNER/.test(row.exception || '') && /never a value/.test(row.exception || '') && /into the vault/.test(row.exception || ''),
       'SECRETS_AT_REST names data/job-secrets.retired.json (0600) as an EXCEPTION with its reason: the owner\'s bytes, kept until they delete them; the notice names them (never a value) and the recipe', row);
