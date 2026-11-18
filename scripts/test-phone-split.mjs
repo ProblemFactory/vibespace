@@ -162,7 +162,7 @@ if (H) {
     'no dead pair: «Split» beside a minimized window restores it BEFORE the pair is kept; a pane\'s window minimized / closed after it stood / moved away drops the pair at apply() with a toast (a window not built yet is none of these)');
   ok(/addEventListener\('pointerdown', \(e\) => \{ const w = e\.target\.closest\?\.\('\.window\.phone-pane'\); pressedAside = !!w && !w\.classList\.contains\('window-active'\); \}, true\);/.test(mn) && /if \(pressedAside\) \{ pressedAside = false; return; \}/.test(mn),
     'one tap = one act: the press on the pane NOT on show (read in the capture phase, before the press focuses it) only makes it the one on show — the switcher opens from the head of the pane on show');
-  ok(/import \{ headName, nameFits, YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| t\('Window'\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
+  ok(/import \{ headName, nameFits, YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| windowKindWords\(win\.type\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
     && /titleSpan\.dataset\.name = headName\(title\);/.test(w) && /win\.titleSpan\.dataset\.name = headName\(t\);/.test(w)
     && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
     && /registerMenuItem\(\{ menu: 'window', group: '9_bar', order: 10, id: 'window\/bar-gear', when: gearFolded, label: \(\) => t\('Global settings'\), run: \(c\) => c\.app\._pressGlobalSettings\(document\.getElementById\('mobile-nav-more'\)\) \}\);/.test(read('src/lib/trailing-bar.js')),
@@ -223,11 +223,11 @@ console.log('⑧ the release\'s phone bar — no search door: the title paints, 
   const CURE = "    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }\n";
   const PAINT = '    this._paintHead();\n';
   const paint = (updateSrc, ids) => {
-    const Probe = new Function('t', 'headName', 'nameFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle',
+    const Probe = new Function('t', 'headName', 'nameFits', 'YIELD_LADDER', 'navTitleMinText', 'windowTypeIcon', 'document', 'getComputedStyle', 'windowWords', 'windowKindWords',   // + the two window-types names the head reads (lane ui-plain-words closure F13)
       `${MIN_OF}\nreturn class Probe {\n${updateSrc}\n${sliceOf(MN, '_paintHead')}\n${sliceOf(MN, '_titleWin')}\n};`);
     const nav = { dataset: {}, style: {} };
     const doc = { getElementById: (id) => (ids.has(id) ? (id === 'mobile-nav' ? nav : { classList: { toggle() { } }, dataset: {} }) : null), createElement: () => ({ style: {}, getBoundingClientRect: () => ({ width: 10 }), remove() { } }) };
-    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }));
+    const P = Probe((x) => x, H ? H.headName : (x) => x, () => true, ['', 'x'], (x) => x, () => '', doc, () => ({ fontSize: '14px', flexDirection: 'row' }), (w) => String(w.title || ''), () => 'Window');
     const el = { textContent: '', title: '', classList: { toggle() { } }, removeAttribute() { }, setAttribute() { }, appendChild() { }, getBoundingClientRect: () => ({ width: 200 }), scrollWidth: 200 };
     const win = { id: 1, title: 'Fix the login page — /w/demo', element: { classList: { contains: () => false } } };
     const p = Object.assign(Object.create(P.prototype), { _noteShown() { }, _titleEl: el, _shown: {}, bar: null, split: null, updateDesktopsDoor() { },

@@ -1650,12 +1650,12 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     return textOf(P.shell.body);
   };
   const ownT = await dialogText(real, true), ownerT = await dialogText(real, false);
-  ok(/Another host, or a command whose destination cannot be told, is refused/.test(ownT) && /Another conversation sends an agent's value only to the hosts you name here/.test(ownT) && !/--standing/.test(ownT) && /--standing/.test(ownerT) && /\(a shell, a script\), still asks you\./.test(ownerT) && !/still asks you/.test(ownT) && !/destination cannot be told, is refused/.test(ownerT),
-    '(l) r13: an agent\'s OWN entry — its dialog says another host is refused and names no «--standing» ask; an owner\'s entry says another host still asks you and keeps the ask line', { own: ownT.slice(0, 400), owner: /--standing/.test(ownerT) });
+  ok(/Another host, or a command that could go anywhere, is refused/.test(ownT) && /Another conversation sends an agent's value only to the hosts you name here/.test(ownT) && !/Let the agent ask/.test(ownT) && /Let the agent ask/.test(ownerT) && /\(a shell, a script\), still asks you\./.test(ownerT) && !/still asks you/.test(ownT) && !/could go anywhere, is refused/.test(ownerT),   // the -moved2 restack: the hint and the ask line in lane ui-plain-words' words (no command name)
+    '(l) r13: an agent\'s OWN entry — its dialog says another host is refused and shows no «Let the agent ask» line; an owner\'s entry says another host still asks you and keeps the ask line', { own: ownT.slice(0, 400), owner: /Let the agent ask/.test(ownerT) });
   const askPlant = '  if (!u.own) body.append(askAgent);';
   ok(srcVU.split(askPlant).length === 2, 'the RED control\'s plant of (m) is where it claims: the ask line held back on an own entry, once', srcVU.split(askPlant).length - 1);
   const ownR = await dialogText(await bundleVU(swap(askPlant, '  body.append(askAgent);')), true);
-  ok(/--standing/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «let the agent ask --standing» (a road that is refused there)', ownR.slice(0, 200));
+  ok(/Let the agent ask/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «Let the agent ask» (a road that is refused there)', ownR.slice(0, 200));
   globalThis.__hx.real = realWas;
 }
 

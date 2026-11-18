@@ -94,7 +94,7 @@ export async function renderProviderRows(body, backend, { refresh = () => { }, s
       showContextMenu(b.left, b.bottom + 4, [
         { label: t('Test'), action: async () => { if (el.dataset.testing) return; el.dataset.testing = '1'; showToast(t('Testing…')); const x = await send(`/api/providers/${encodeURIComponent(p.id)}/test`, 'POST', { harness: backend }); showToast(testToastWords(x), { type: x && x.ok && x.verdict === 'ok' ? 'info' : 'error' }); delete el.dataset.testing; refresh(); } },
         { label: t('Models…'), action: () => openAccountModelsDialog({ accountId: p.id, name: p.label }) },
-        { label: t('Rename…'), action: async () => { const n = await showInputDialog({ title: t('Rename'), label: t('Name'), value: p.label }); if (n == null) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}`, 'PATCH', { label: n }); if (!x || !x.ok) showToast(words(x), { type: 'error' }); refresh(); } },
+        { label: t('Rename…'), action: async () => { const n = await showInputDialog({ title: t('Rename'), label: t('Name'), value: p.label, confirmText: t('Rename') }); if (n == null) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}`, 'PATCH', { label: n }); if (!x || !x.ok) showToast(words(x), { type: 'error' }); refresh(); } },
         { label: t('New key…'), action: async () => { const k = await askKey(p.id, p.label); if (!k) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}/key`, 'POST', { key: k }); showToast(x && x.ok ? t('The new key is kept in the vault') : words(x), { type: x && x.ok ? 'info' : 'error' }); refresh(); } },
         { separator: true },
         { label: t('Remove…'), action: async () => {

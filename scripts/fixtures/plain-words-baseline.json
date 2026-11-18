@@ -17,7 +17,7 @@
    "The nudge only fires when the session has not updated its board status for this long — and never after a turn that already reported its status or progress (vibespace-status / vibespace-task / vibespace-ask during that turn). Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on every stop of a turn that did not report — at most one bookkeeping mini-turn per turn).",
    "The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf",
    "This read {vendor} directly, not through VibeSpace channels — no channel card, read marker or budget record; vibespace-channels read would have them.",
-   "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).",
+   "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).",
    "What VibeSpace itself, its background jobs and agents' tools may do on a paired machine without your click (run a command, change files, use its keyboard, install an app, update its agent …), for every machine whose \"Who can use it\" dialog does not set Hub automation. Ask me each time = an urgent card in For you, one per machine and kind, refused after 60 s. Your own clicks never ask; vibespace-exit follows its own two lists.",
    "What does not work there until it is updated: running commands (vibespace-exit run) — this agent cannot run them on Windows.",
    "When off, this group's objective / file index is NOT injected into its sessions. They still belong to it — the board, vibespace-task and status keep working.",
@@ -40,8 +40,7 @@
    "Reads the installed claude's strings (it is never run) and writes data/claude-cli-dumps/{v}.json — the dump the next release registers it from",
    "Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.",
    "Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.",
-   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.",
-   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.",
+   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions that bill a subscription account you chose bypass the helper (from their next start); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.",
    "The cluster's repository holds another plugin («{got}»), not {plugin} — {plugin} is not installed from it and there is nothing to consent to; the cluster's admin corrects fleet.json",
    "The personality new Codex chat sessions start with. Blank = leave it to your own ~/.codex/config.toml (this is the default; VibeSpace used to force \"pragmatic\" on every session). Unlike Claude, a running Codex session CAN be re-styled from the chat status bar — it applies from the next turn.",
    "The relay's shared secret. It stays on this instance (data/plugins.json) and is never shown again; empty = the cluster's.",
@@ -98,7 +97,7 @@
    "Starts new Claude sessions with the CLI's agent-to-user channel enabled: the agent gets the SendUserMessage and SendUserFile tools and VibeSpace renders each call as a highlighted \"message for you\" card (files are published to a private link in this instance). Off by default because it changes how the agent writes — with --brief, plain text outside the tool is hidden from the message view. Applies to newly started sessions.",
    "System prompt snapshot (--system-prompt-snapshot)",
    "The update was pushed by {by}. Replaying an old signed release is how a compromised VibeSpace would bring back a hole a newer release closed — check this VibeSpace's build and its log. A rollback on purpose is signed (sign-agentd --allow-downgrade-to). It will not send that update again.",
-   "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).",
+   "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).",
    "When a background job finishes, fails, is parked, or needs input, its owner conversation gets a message through Claude Code’s own cross-session messaging inbox (delivered by the CLI under its inbound rules; an idle session starts a turn, billed like a typed prompt). When the conversation is closed, the notification is stashed and injected the next time it resumes. Per-group override in the Task Group detail window; per-job override at creation (--notify on/off).",
    "the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace",
    "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks"
@@ -133,7 +132,7 @@
    "Blank = any address. Judged on the connecting address; behind a reverse proxy set webhook.trustProxyHops."
   ],
   "id": [
-   "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs)."
+   "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs)."
   ]
  },
  "sites": {
@@ -152,7 +151,7 @@
   "The nudge only fires when the session has not updated its board status for this long — and never after a turn that already reported its status or progress (vibespace-status / vibespace-task / vibespace-ask during that turn). Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on every stop of a turn that did not report — at most one bookkeeping mini-turn per turn).": 2,
   "The page tried to print — closed; the agent saves a PDF with vibespace-browser pdf": 1,
   "This read {vendor} directly, not through VibeSpace channels — no channel card, read marker or budget record; vibespace-channels read would have them.": 1,
-  "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": 1,
+  "VibeSpace no longer reads this file and deletes it only when you say so: «Move into the vault» seals each value as a vault entry and then deletes the file, «Delete the file» deletes it as it is. A job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": 1,
   "What VibeSpace itself, its background jobs and agents' tools may do on a paired machine without your click (run a command, change files, use its keyboard, install an app, update its agent …), for every machine whose \"Who can use it\" dialog does not set Hub automation. Ask me each time = an urgent card in For you, one per machine and kind, refused after 60 s. Your own clicks never ask; vibespace-exit follows its own two lists.": 1,
   "What does not work there until it is updated: running commands (vibespace-exit run) — this agent cannot run them on Windows.": 1,
   "When off, this group's objective / file index is NOT injected into its sessions. They still belong to it — the board, vibespace-task and status keep working.": 1,
@@ -173,8 +172,7 @@
   "Reads the installed claude's strings (it is never run) and writes data/claude-cli-dumps/{v}.json — the dump the next release registers it from": 1,
   "Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.": 1,
   "Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.": 1,
-  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.": 3,
-  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": 3,
+  "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions that bill a subscription account you chose bypass the helper (from their next start); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": 3,
   "The cluster's repository holds another plugin («{got}»), not {plugin} — {plugin} is not installed from it and there is nothing to consent to; the cluster's admin corrects fleet.json": 1,
   "The personality new Codex chat sessions start with. Blank = leave it to your own ~/.codex/config.toml (this is the default; VibeSpace used to force \"pragmatic\" on every session). Unlike Claude, a running Codex session CAN be re-styled from the chat status bar — it applies from the next turn.": 1,
   "The relay's shared secret. It stays on this instance (data/plugins.json) and is never shown again; empty = the cluster's.": 1,

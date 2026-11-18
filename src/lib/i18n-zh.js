@@ -11345,7 +11345,6 @@ export default {
   "a file": "文件", // lane task-group-context
   "Over the injection budget (「{chosen}」 needs {need}, {left} left) — this row is told as 「{level}」": "超出注入预算（「{chosen}」要 {need}，只剩 {left}）—— 这一行退到「{level}」", // lane task-group-context
   "Too big to tell as 「{chosen}」 — this row is told as 「{level}」": "太大，无法按「{chosen}」告诉 —— 这一行退到「{level}」", // lane task-group-context
-  "Injection budget {used} / {budget}": "注入预算 {used} / {budget}", // lane task-group-context
   "({own} set; the tools and the standing instructions leave {room})": "（设定 {own}；工具说明和常驻指令之后还剩 {room}）", // lane task-group-context
   "「{path}」 needs {need} for 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」按「{chosen}」要 {need} → 退到「{level}」（agent 仍然知道它在哪、管什么）", // lane task-group-context
   "{n} in all": "共 {n}", // lane task-group-context

@@ -99,7 +99,7 @@ export function mountMayUse(app, getRef, { onPainted = null } = {}) {   // onPai
     const sessions = { key: 'sessions', cls: 'locked', data: 'data-row="sessions"', icon: ic('lock'), name: t('Sessions'), what: t('Read, message, start new ones'), end: on, badge: on,
       sub: `<div class="ns-pv-via${groups.length ? '' : ' dim'}" data-reach>${escHtml(reachWords)}</div>`,
       sum: f.groupsUnknown ? t('unknown') : groups.length ? t('Joined {names} · {n} session(s)', { names, n: reach.sessions }) : t('No Task Group — only the sessions it starts') };
-    const BUILTIN = [['artifacts', t('Artifacts it makes'), t('The files it writes, shown in this conversation’s Artifacts')], ['feedback', t('Feedback'), t('Tells the maintainers where a tool felt wrong (vibespace-feedback)')], ['pages', t('Page publishing'), t('Publishes a page on this VibeSpace (vibespace pages)')]];
+    const BUILTIN = [['artifacts', t('Artifacts it makes'), t('The files it writes, shown in this conversation’s Artifacts')], ['feedback', t('Feedback'), t('Tells the maintainers where a tool felt wrong')], ['pages', t('Page publishing'), t('Publishes a page on this VibeSpace')]];
     const builtinRows = BUILTIN.map(([k, n, wds]) => provRow({ cls: 'locked', data: `data-builtin="${k}"`, icon: ic('lock'), name: n, what: wds, end: on })).join('');
     const builtin = { key: 'builtin', cls: 'locked', icon: ic('lock'), name: t('{n} built-ins', { n: BUILTIN.length }), sum: t('Artifacts · Feedback · Page publishing — always on'), badge: on, body: `<div class="ns-card ns-builtin">${builtinRows}</div>` };
     if (f.noAgent) {

@@ -640,8 +640,9 @@ export class MobileNav {
     const el = this._titleEl, h = this._head;
     if (!el || !h) return;
     const { win, count } = h, regular = this.app.viewportClass?.() === 'regular', home = !!this.app.phoneHome?.shown?.();
-    const full = win ? (String(win.title || '').split(' — ')[0].trim() || t('Window')) : t('No window');
-    const name = win ? (headName(win.title) || t('Window')) : t('No window');
+    // lane ui-plain-words closure F13, on phone-six's painter: a title-less window is named by its kind's words, never «Window»
+    const full = win ? windowWords(win) : t('No window');
+    const name = win ? (headName(win.title) || windowKindWords(win.type)) : t('No window');
     // the COMPACT class keeps the base's words (the recovery port onto .397: its bar is THE TITLE OWNS THE BAR's — lane
     // phone-titlebar-title folds every chip beside it by measure, so the window's own title + the count stay as they were)
     this._titleEl.textContent = this.app.phoneHome?.shown?.() ? t('For you')

@@ -11344,7 +11344,6 @@ export default {
   "a file": "ファイル", // lane task-group-context
   "Over the injection budget (「{chosen}」 needs {need}, {left} left) — this row is told as 「{level}」": "注入予算を超えています（「{chosen}」には {need} 必要、残り {left}）—— この行は「{level}」で伝えます", // lane task-group-context
   "Too big to tell as 「{chosen}」 — this row is told as 「{level}」": "「{chosen}」で伝えるには大きすぎます —— この行は「{level}」で伝えます", // lane task-group-context
-  "Injection budget {used} / {budget}": "注入予算 {used} / {budget}", // lane task-group-context
   "({own} set; the tools and the standing instructions leave {room})": "（設定は {own}。ツールの説明と常駐指示の後に残るのは {room}）", // lane task-group-context
   "「{path}」 needs {need} for 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」は「{chosen}」に {need} 必要 → 「{level}」で伝えます（エージェントは場所と用途を引き続き知っています）", // lane task-group-context
   "{n} in all": "合計 {n}", // lane task-group-context
