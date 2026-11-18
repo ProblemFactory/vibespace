@@ -538,7 +538,43 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // VIBESPACE_CHANNELS_INDEX_VERIFY=1|<file> (the gates' census): every incremental write is compared with the
   // whole-file serialization; a difference is said (and appended to <file>) and the whole file is written instead
   const verifyTo = String((process.env && process.env.VIBESPACE_CHANNELS_INDEX_VERIFY) || '');
-  const fire = (key) => { for (const h of touchHooks) { try { h(key); } catch (e) { warn('[channels] index touch hook threw:', (e && e.message) || e); } } };
+  // ── EACH ACCOUNT'S ROW KEYS, KEPT (B-dfa4 U2): a walk of ONE account's rows (the recheck, the revisions, the feed's
+  // describe, the due index's build) read the whole flat map — every account's rows — at each turn. Kept off the touch
+  // signal every row write already gives: a touched key moves to its account's set (a birth, a removal, an account that
+  // changed); a whole-map touch drops the sets (rebuilt at the next read). A row whose key does not begin with its own
+  // account (only a damaged act line applied as written) is kept in `oddKeys` and handed to EVERY account — each walk
+  // still judges every key it is handed by its own test, so the kept keys are a superset of what any walk read before.
+  let byAcct = null;              // Map<adapterId, Set<key>> — null = build at the next read (boot, a whole-map touch)
+  const acctOfKey = new Map();    // key → the account whose set holds it ('' = oddKeys)
+  const oddKeys = new Set();
+  const acctStats = { builds: 0, moves: 0 };
+  function acctPlace(key) {
+    const prev = acctOfKey.get(key);
+    const row = hasOwn(ix.conversations, key) ? ix.conversations[key] : null;
+    const a = row && typeof row.adapterId === 'string' ? row.adapterId : null;
+    const next = !row ? undefined : (a !== null && key.startsWith(`${a}/`) ? a : '');
+    if (prev === next) return;
+    if (prev === '') oddKeys.delete(key);
+    else if (prev !== undefined) { const set = byAcct.get(prev); if (set) { set.delete(key); if (!set.size) byAcct.delete(prev); } }
+    acctStats.moves++;
+    if (next === undefined) { acctOfKey.delete(key); return; }
+    acctOfKey.set(key, next);
+    if (next === '') oddKeys.add(key);
+    else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Set())); set.add(key); }
+  }
+  /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array; the caller
+   *  reads each row from `live()` and keeps its own test. Inside an update a row may be born or gone before its touch
+   *  fires, so there it is every key (the walk's old cost, never a missed row). */
+  function keysOf(adapterId) {
+    if (curTouch) return Object.keys(ix.conversations);
+    if (!byAcct) { byAcct = new Map(); acctOfKey.clear(); oddKeys.clear(); acctStats.builds++; for (const k of Object.keys(ix.conversations)) acctPlace(k); }
+    const set = byAcct.get(String(adapterId));
+    return oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
+  }
+  const fire = (key) => {
+    if (byAcct) { if (key === null) byAcct = null; else acctPlace(key); }   // B-dfa4 U2: before the hooks (a hook may walk an account)
+    for (const h of touchHooks) { try { h(key); } catch (e) { warn('[channels] index touch hook threw:', (e && e.message) || e); } }
+  };
   function touchKey(key) {
     dirtyKeys.add(key);
     if (curTouch) { if (curTouch.before && !curTouch.before.has(key)) curTouch.before.set(key, hasOwn(ix.conversations, key) ? JSON.stringify(ix.conversations[key], INDEX_KEYS) : null); curTouch.add(key); }
@@ -2296,6 +2332,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixBlocked || null,
+      // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
+      keysOf, keysStats: () => ({ ...acctStats, kept: !!byAcct, odd: oddKeys.size }),
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),

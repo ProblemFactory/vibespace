@@ -1211,7 +1211,8 @@ function create(deps = {}) {
     const T = tiers();
     const out = [];
     if (all) {
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true);
+      const live = store.index.live();   // B-dfa4 U2: this account's rows only (the store keeps each account's keys)
+      for (const k of store.index.keysOf(rec.id)) { const en = live[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true); }
     } else {
       const ix = dueIndex(rec, t, T);
       const cand = new Set(e.dueNow);
@@ -1305,7 +1306,9 @@ function create(deps = {}) {
     if (!ix || ix.stale || ix.sig !== sig || ix.dirty.size > (ix.at.size >> 3) + 256) {
       const t0 = Date.now();
       ix = { sig, lane, keys: [], at: new Map(), marks: new Set(), dirty: new Set(), stale: false };
-      for (const en of Object.values(store.index.live())) {
+      const live = store.index.live();
+      for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: the build reads this account's rows, never every account's
+        const en = live[k];
         if (!en || en.adapterId !== rec.id) continue;
         const d = dueKeyOf(rec, lane, en, t, T);
         if (d.owed) ix.marks.add(en.key);
@@ -1920,7 +1923,9 @@ function create(deps = {}) {
     const ev = feedOpts().everySec * 1000;
     if (t - (Number(e.feedDescribe.at) || 0) >= ev) e.feedDescribe = { at: t, n: 0 };
     const wanted = born.slice();
-    for (const en of Object.values(store.index.live())) {
+    const live = store.index.live();
+    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account's rows only
+      const en = live[k];
       if (wanted.length >= Feed.DESCRIBE_MAX) break;
       if (en && en.adapterId === rec.id && en.bornBy === 'feed' && !en.title && t - (Number(en.describedAt) || 0) >= 6 * 3600e3 && !wanted.includes(en.id)) wanted.push(en.id);
     }
@@ -2055,7 +2060,9 @@ function create(deps = {}) {
   function recheckDueFor(rec, t = now()) {
     if (threadsRow(registry.capsOf(rec.kind)).listing !== 'separate') return [];
     const rows = [];
-    for (const en of Object.values(store.index.live())) {
+    const live = store.index.live();
+    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account's rows only (13.4 s a day on the owner's map, every account's rows)
+      const en = live[k];
       if (!en || en.adapterId !== rec.id) continue;
       const paused = !!(en.refresh && en.refresh.every === 'paused');
       // verify r1 F4: a conversation the vendor REFUSED the owner (its last read 403d, or gone) is not re-listed — its own
@@ -5846,7 +5853,8 @@ function create(deps = {}) {
     const t = now();
     const ix = store.index.live();
     const items = [], recs = new Map();
-    for (const [k, en] of Object.entries(ix)) {
+    for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 U2: this account's keys only (the test below unchanged)
+      const en = ix[k];
       if (!k.startsWith(`${rec.id}/`) || !en) continue;
       const convId = k.slice(rec.id.length + 1);
       const woke = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];

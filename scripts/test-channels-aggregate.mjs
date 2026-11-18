@@ -2601,7 +2601,7 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
   ec.stop();
   // (b) a scheduler that makes EVERY conversation due each pass
   // lane channel-feed-authority: the due rule is `dueRow` behind the due INDEX — the copy scans every row and makes each due
-  const allDue = esrc.replace('    if (all || named) { out.push(', '    if (true) { out.push(').replace('    if (all) {\n      for (const en of Object.values(store.index.live()))', '    if (true) {\n      for (const en of Object.values(store.index.live()))');
+  const allDue = esrc.replace('    if (all || named) { out.push(', '    if (true) { out.push(').replace('    if (all) {\n      const live = store.index.live();', '    if (true) {\n      const live = store.index.live();');   // B-dfa4 U2: the forced branch reads its account's keys now — the copy still forces it
   ok(allDue !== esrc, 'CONTROL setup: a poll-everything scheduler is reconstructed');
   const E2 = M.load('src/server/channels-engine.js', allDue, 'alldue');
   const Wd = makeWorld(clock, { n: 300, hot: 20, warm: 30 });
@@ -2777,7 +2777,7 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   ok(m90.ms < 2, `90 000 rows, 20 due ⇒ dueList < 2 ms (${m90.ms.toFixed(3)} ms)`);
   ok(m90.ms < 3 * m10.ms + 0.3 && m90d.ms > m90.ms, `the meter is linear in DUE, not rows (9× the rows: ${(m90.ms / m10.ms).toFixed(2)}×; 100× the due: ${(m90d.ms / m90.ms).toFixed(1)}×)`);
   // CONTROL ② the scan restored ⇒ the meter follows the rows
-  const scanEng = Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, '    if (all) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true);', '    if (true) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, all);', 'indexed dueList'), 'due-scan');
+  const scanEng = Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, '    if (all) {\n      const live = store.index.live();   // B-dfa4 U2: this account\'s rows only (the store keeps each account\'s keys)\n      for (const k of store.index.keysOf(rec.id)) { const en = live[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true); }', '    if (true) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, all);', 'indexed dueList'), 'due-scan');
   const s10 = await meter(scanEng, 10000, 20, 'scan'), s90 = await meter(scanEng, 90000, 20, 'scan');
   ok(s90.got === 20 && !(s90.ms < 2 && s90.ms < 3 * s10.ms + 0.3), `CONTROL: the scan restored ⇒ the meter follows the ROWS (90 000 rows · 20 due: ${s90.ms.toFixed(2)} ms, ${(s90.ms / s10.ms).toFixed(1)}× the 10 000-row figure)`);
   for (const r of copiesCensus(Mf.files, Mf.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
