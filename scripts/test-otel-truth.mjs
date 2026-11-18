@@ -332,6 +332,18 @@ const PAYLOAD = (recs) => ({
       const realDurable = SW.durable; SW.durable = () => Promise.resolve(false);   // the writer's queue past the bound
       let g2 = null; try { g2 = await callLogs(oH, dH, 'req_cure_late'); } finally { SW.durable = realDurable; }
       const g3 = await callLogs(oH, dH, 'req_cure_late');                 // the exporter sends it again: a duplicate, its owed line lands, ONE line
+      // its TAKEN verdict: a FAILING storage (the writer's back-off can outlast the exporter's ~10 s of retries) answers 200 — every
+      // record is already held and owed; a QUEUE answers 503. RED: the cure before the split ⇒ a 503 the exporter would drop the batch on
+      const realWhy = SW.whyNotDurable; SW.durable = () => Promise.resolve(false); SW.whyNotDurable = () => ({ why: 'failed', code: 'EIO' });
+      let g4 = null, g4red = null;
+      const SPLIT = "        if (!onDisk && !(why && why.why === 'failed')) return res.status(503)";
+      const srcS = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
+      const RS = mutantCopies('otel-truth-cure-split', REPO).load('src/server/otel-ingest.js', srcS.replace(SPLIT, () => "        if (!onDisk) return res.status(503)"), 'no-split');   // stale-pins: kept (2b202b257's door, planted back as the RED control)
+      const dS = mkDir4('j'), oS = mk4(dS, RS); await oS.replayed;
+      try { g4 = await callLogs(oH, dH, 'req_cure_failing'); g4red = await callLogs(oS, dS, 'req_cure_failing_red'); } finally { SW.durable = realDurable; SW.whyNotDurable = realWhy; }
+      ok(srcS.split(SPLIT).length === 2 && g4 && g4.code === 200 && oH.observedOrgForRid('req_cure_failing') === 'sub-true' && g4red && g4red.code === 503,
+        `a FAILING storage (its back-off past the exporter's retries): the post answered 200, its record held (${g4 && g4.code}); RED (no split): ${g4red && g4red.code} — the exporter would drop a batch the hub already holds`, { g4, g4red });
+      try { await SW.durable(path.join(dS, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(dS, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(dS, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(dS, { recursive: true, force: true });
       const srcC = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8'), WAIT = "      if (stashOwed.length || stashWriting) {\n";
       const RC = mutantCopies('otel-truth-cure', REPO).load('src/server/otel-ingest.js', srcC.replace(WAIT, () => "      if (false) {\n"), 'answer-at-once');
       const dR = mkDir4('i'), oR = mk4(dR, RC); await oR.replayed;

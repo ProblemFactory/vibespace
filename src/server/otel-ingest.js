@@ -295,7 +295,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
           if (uh) {
             const cur = uh.attribAt(rec.sid, rec.ts || Date.now());
             attributed = cur.acct || null;
-            if (attributed !== (acct || null)) { disagreements++; arrivals.labelDiffers++; }
+            if (attributed !== (acct || null)) { disagreements++; if (!dup) arrivals.labelDiffers++; }   // a resent record (a retry after a 503) is the same rid: counted once
           }
         } catch { }
       }
@@ -344,8 +344,14 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       // readers skip those rows), never a 200 for rows a kill could still lose. Its cost, said: a post marks the stash URGENT, so a
       // person's act waits behind up to the urgent stores ahead of it (the writer's alternation) while sessions export
       if (stashOwed.length || stashWriting) {
-        const onDisk = await W().durable(file, { timeoutMs: STASH_DURABLE_MS }).catch(() => false);
-        if (!onDisk) return res.status(503).set('Retry-After', '1').json({ error: 'the usage truth stash is not on disk yet — send the post again' });
+        let onDisk = false, why = null;
+        try { onDisk = await W().durable(file, { timeoutMs: STASH_DURABLE_MS }); if (!onDisk) why = W().whyNotDurable(file); } catch { onDisk = false; }   // a writer that cannot be built: a 503, never a hung post
+        // its TAKEN verdict: the two bounds side by side — the writer's back-off after a FAILED write is 1, 2, 4 … 60 s (store-pace
+        // retryMs), the exporter retries inside its own ~10 s export timeout; from the fifth failure in a row the first outlasts the
+        // second. During a FAILING storage a 503 buys nothing: every record of this post is already held (take() put it in the truth
+        // map and owed its line to the stash) and its line lands with the writer's retry — answered 200 (a kill inside that outage
+        // loses those lines, as the release's failed append did). A QUEUE (the writer healthy, busy) answers 503 «retry».
+        if (!onDisk && !(why && why.why === 'failed')) return res.status(503).set('Retry-After', '1').json({ error: 'the usage truth stash is not on disk yet — send the post again' });
       }
       res.json({ partialSuccess: {} });
     },
