@@ -229,6 +229,19 @@ console.log('② THE MEMO NEVER OUTLIVES ITS SYNCHRONOUS RUN');
   ok(one.asks === 1 && two === 2, `three asks in one run are ONE ask of the mount; two asks with an await between them are TWO (${one.asks}, ${two})`);
 }
 
+console.log('②b THE CACHE MODULE\'S READ KEEPS THE MEMO (lane lg-store-writes U6.2): the pool reads its readings through src/usage-cache-write.js with run-reads as its «via»');
+{
+  const UW = require(path.join(REPO, 'src/usage-cache-write.js'));
+  const w = world({ S: 1, M: 1 });
+  const p = path.join(w.cacheDir, w.ids[0] + '.json');
+  await turn();
+  const viaMemo = countRun(w.root, () => { for (let i = 0; i < 3; i++) { UW.readCacheJson(p, { via: RR }); UW.listCacheDir(w.cacheDir, { via: RR }); } });
+  await turn();
+  const raw = countRun(w.root, () => { for (let i = 0; i < 3; i++) { UW.readCacheJson(p); UW.listCacheDir(w.cacheDir); } });
+  ok(viaMemo.asks === 2 && viaMemo.kinds(path.relative(w.root, p), 'readFileSync') === 1 && raw.asks === 6,
+    `through the cache module with the memo, three reads of one reading and three listings of the folder in one run are ONE read and ONE listing (${viaMemo.asks} asks); CONTROL: the same door without the memo asks every time (${raw.asks})`, { viaMemo: kindsSaid(viaMemo), raw: kindsSaid(raw) });
+}
+
 console.log('③ AN ERROR IS AN ANSWER FOR THE RUN');
 {
   const w = world({ S: 1, M: 1 });

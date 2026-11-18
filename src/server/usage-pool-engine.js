@@ -270,7 +270,7 @@ const READING_ARCHIVE = path.join(rootDir, 'data', 'archive', 'readings-window-m
 function usageIdentityGroups() {
   const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
-  try { files = RR.readdir(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
+  try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: RR }).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
   const roster = accounts.list().accounts || [];
   for (const fn of files) {
     try {
@@ -278,7 +278,7 @@ function usageIdentityGroups() {
       // ChatGPT login) — roster-less by design, never a "deleted account".
       const gOwner = globalKeyOwner(fn.slice(0, -5)); // a harness's own machine login ('__global_<id>__')
       const accountId = (fn === '__global__.json' || gOwner) ? null : fn.slice(0, -5);
-      const cache = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, fn)));
+      const cache = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: RR });
       if (!cache?.fetchedAt) continue;
       const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
       // A DELETED account's cache file is a zombie (nothing removes the file
@@ -593,7 +593,7 @@ function withBareDoor(fn) { const was = _bareDoor; _bareDoor = true; try { retur
 function poolReadReading({ group = true } = {}) {
   return (id) => {
     let raw = null;
-    try { raw = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, id + '.json'))); } catch { }
+    try { raw = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, id + '.json'), { via: RR }); } catch { }
     if (group) try {
       for (const [, g] of usageIdentityGroupsCached()) {
         if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
@@ -765,7 +765,7 @@ function reserveFloorPct() {
  *  is a fact a producer STATED; an estimate may not authorize an irreversible
  *  act (P7), and it may not bar one either. */
 function readRawUsageCache(id) {
-  try { return JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'))); }
+  try { return usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), { via: RR }); }
   catch { return null; }
 }
 function overageMemberIds(members) {
@@ -1159,7 +1159,7 @@ function resolveUsageKey(session) {
 function writeUsageCacheForKey(key, parsed, { producer = null } = {}) {
   try {
     const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
-    let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')) || {}; } catch {}
+    let prev = {}; try { prev = usageWrite.readCacheJson(f) || {}; } catch {}
     const merged = { ...prev, ...parsed };
     // PROVENANCE IS NOT PRESERVED (2026-09-07 r2, reproduced): `corroborated`
     // is a verdict about ONE write — did the OTel observation agree with the
@@ -1378,7 +1378,7 @@ function establishedWindows() {
   if (_ownWin && now - _ownWinAt < OWN_WINDOW_TTL_MS) return _ownWin;
   const out = {};
   let files = [];
-  try { files = fs.readdirSync(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__')); } catch { }
+  try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__')); } catch { }
   for (const fn of files) {
     const key = fn.slice(0, -5);
     try {
@@ -1427,7 +1427,7 @@ const API_WITNESS_K = 3;      // consecutive agreeing candidates before a phase 
 const API_WITNESS_RING = 8;   // candidates the sidecar remembers (≥ K + a few foreign ones to break a run)
 function readApiWitnessFile(key) {
   try {
-    const w = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key))));   // B-403e: once per run
+    const w = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)), { via: RR });   // B-403e: once per run
     return w && typeof w === 'object' ? w : null;
   } catch { return null; }
 }
@@ -3321,7 +3321,7 @@ function demoteWalledAccount(session, sigs) {
     const label = b.kind === 'scoped' ? b.scopedName : unknownWindow ? null : BUCKET_LABEL[b.kind] || b.kind;
     let until = 0;
     try {
-      const c = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, String(dest.id).replace(/[^\w.-]/g, '_') + '.json')));
+      const c = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, String(dest.id).replace(/[^\w.-]/g, '_') + '.json'), { via: RR });
       const bk = b.kind === 'scoped' ? (c.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === b.scopedName) : c[b.kind];
       until = (Number(bk?.resetsAt) || 0) * 1000;
     } catch { }
@@ -5994,7 +5994,7 @@ function markLimitBannerNow(session, text) {
     const ids = usageIdentityAccountIds(key);
     let base = null, baseAt = -1, ownFile = null;
     for (const id of ids) {
-      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch {}
+      try { const c = usageWrite.readCacheJson(fileFor(id)) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch {}
     }
     const cache = applyHit(base ? { ...base } : {}, ownFile); // judged on the file it MARKS (`key`, after a proven re-file)
     // NOTE (r2): this write used to have to rescue `ownWindow` by hand — the
@@ -6019,7 +6019,7 @@ function markLimitBannerNow(session, text) {
     for (const id of ids) {
       if (id === key) continue;
       try {
-        let c2; try { c2 = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || null; } catch { c2 = null; }
+        let c2; try { c2 = usageWrite.readCacheJson(fileFor(id)) || null; } catch { c2 = null; }
         if (!c2) continue; // never CREATE a sibling file here
         applyHit(c2, c2); // fetchedAt deliberately untouched
         delete c2.limits;
@@ -6224,7 +6224,7 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
     if (!memberId || typeof memberId !== 'string') { out.reason = 'no-member'; return out; }
     try { memberServeLapsed(memberId); } catch { } // a fresh reading of its own window IS the evidence that re-admits a lapsed member — at once
     let snap = null;
-    try { snap = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'))); } catch { }
+    try { snap = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'), { via: RR }); } catch { }
     // PLACEABLE (lane cli-self-measure, acceptance r1 law G3): the member's READING did not change — its ELIGIBILITY did (the hub's own
     // check of a new Claude Code passed; it was held for minutes or hours). The freshness gate is skipped: half ① re-decides on the
     // last reading the pool already uses, half ② fires only a conversation that lands on it and only when that reading says usable —
@@ -6596,7 +6596,7 @@ usageWrite.onWindowChange(noteWindowChange);
 // never a token refresh.
 function ownReading(id) {
   let c = null;
-  try { c = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'))); } catch { c = null; }
+  try { c = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), { via: RR }); } catch { c = null; }
   return { at: Number(c && c.fetchedAt) || 0, source: (c && c.source) || null, fp: readingFingerprint(c) };
 }
 function memberServeLapsed(id, { verified = false } = {}) {

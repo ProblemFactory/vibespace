@@ -76,8 +76,10 @@ function readCacheObject(cacheDir, key) {
 /** THE CACHE MODULE'S READERS (lane lg-store-writes, B-0248 U6.1): every hub read of a file in the readings folder goes
  *  through these — so that when the folder's writes move off the main thread (U6.5) ONE place consults the pending copy
  *  first. Each throws exactly as the raw call it replaces did (a caller keeps its own try). */
-function readCacheJson(file) { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
-function listCacheDir(dir) { return fs.readdirSync(dir); }
+// `via` (U6.2): a reader with run-reads' shape — readText(file) / readdir(dir) — the hub's pool passes src/run-reads.js (B-403e:
+// one ask per file per synchronous run); the module never requires it (it is bundled into the device agent)
+function readCacheJson(file, { via = null } = {}) { return JSON.parse(via ? via.readText(file) : fs.readFileSync(file, 'utf-8')); }
+function listCacheDir(dir, { via = null } = {}) { return via ? via.readdir(dir) : fs.readdirSync(dir); }
 
 // ── lifting a stored object into the typed model ────────────────────────────
 

@@ -350,7 +350,7 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
   }
 {
     ok('§16c SOURCE PIN: that IS how the live guard is keyed — the engine reads `.window-<cache file name>`, so an identity with two files needs two sidecars',
-      /files = fs\.readdirSync\(USAGE_CACHE_DIR\)\.filter\(\(f\) => f\.endsWith\('\.json'\) && !f\.startsWith\('__models__'\)\);/.test(read('src/server/usage-pool-engine.js'))
+      /files = usageWrite\.listCacheDir\(USAGE_CACHE_DIR\)\.filter\(\(f\) => f\.endsWith\('\.json'\) && !f\.startsWith\('__models__'\)\);/.test(read('src/server/usage-pool-engine.js'))   // lane lg-store-writes U6.2: the walk lists the folder through the cache module (the pending copies first) — the pin moved with this leg from the heavy test-readings-attribution
       && /const key = fn\.slice\(0, -5\);[\s\S]{0,200}windowStamp\.readWindowStamp\(USAGE_CACHE_DIR, key\)/.test(read('src/server/usage-pool-engine.js')), ''); // the sidecar's ONE reader (lane oat-identity-fix-r3) names it `.window-<key>`
 
     const eng = read('src/server/usage-pool-engine.js');
