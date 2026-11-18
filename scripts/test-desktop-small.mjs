@@ -210,6 +210,31 @@ console.log('§6 the wiring — every door asks its rule');
       && /requestAnimationFrame\(\(\) => \{ strip\._bringIn = \{ id: tl\.id, until: performance\.now\(\) \+ BRING_IN_MS, tries: 3 \}; bringTileIn\(strip\); \}\);/.test(TB)
       && /chip\.setAttribute\('aria-label', chip\.title\);\s*bringTileIn\(strip\);\s*\}/.test(TB) && /strip\.addEventListener\('wheel', \(e\) => \{\s*strip\._bringIn = null;/.test(TB) && /strip\.addEventListener\('pointerdown', \(\) => \{ strip\._bringIn = null; \}, \{ passive: true \}\);/.test(TB),
       'B-b13c a «+N» row brings its tile into the strip WHOLE across a FRACTIONAL strip edge: whole pixels rounded outward, again at the refit its own scroll starts (the chip\'s new count moves the edge after the scroll — 1024×600: tile right 761 vs strip right 760.17), «whole» = stripHidden\'s ±0.5 px; the person\'s own wheel or press ends it (never pulls the strip back)'); }
+  { // B-b13c, the BEHAVIOUR (the reading of 2026-11-18): taskbar.js's own bringTileIn source, run over a fake strip and a fake clock
+    const RAW = read('src/lib/taskbar.js'), a = RAW.indexOf('const BRING_IN_MS = '), b = RAW.indexOf('\n}\n', RAW.indexOf('function bringTileIn(strip) {'));
+    const SRC = a >= 0 && b > a ? RAW.slice(a, b + 2) : '';
+    const mk = (src) => new Function('performance', `${src}\nreturn bringTileIn;`);
+    const rig = (src, { left0, width = 90, sl = 0, max = 10000, now = 0 } = {}) => {
+      const clock = { t: now }, fn = mk(src)({ now: () => clock.t });
+      const strip = { _bringIn: { id: 'w', until: 600, tries: 3 }, _sl: sl, get scrollLeft() { return this._sl; }, set scrollLeft(v) { this._sl = Math.max(0, Math.min(max, Math.round(v))); },
+        getBoundingClientRect: () => ({ left: 266, right: 760.17 }) };
+      const el = { dataset: { winId: 'w' }, getBoundingClientRect: () => ({ left: left0 - strip._sl, right: left0 - strip._sl + width }) };
+      strip.children = [el];
+      return { fn, strip, clock, go: () => { fn(strip); return { sl: strip._sl, left: strip._bringIn && strip._bringIn.tries }; } };
+    };
+    const legs = (src) => { const bad = []; try {
+      { const R = rig(src, { left0: 671 + 883, sl: 883 }); const s1 = R.go(); if (!(s1.sl === 883 + 1 + 4 && s1.left === 2)) bad.push('a tile 0.83 px past the right edge scrolls ceil(0.83) + 4 = 5 px, one try spent ' + JSON.stringify(s1));
+        const s2 = R.go(); if (!(s2.sl === s1.sl && R.strip._bringIn)) bad.push('then whole: no scroll, the bring-in kept for the refit ' + JSON.stringify(s2)); }
+      { const R = rig(src, { left0: 671 + 883 - 0.4, sl: 883 }); const s = R.go(); if (s.sl !== 883) bad.push('0.4 px past = whole by stripHidden\'s ±0.5: no scroll ' + JSON.stringify(s)); }
+      { const R = rig(src, { left0: 264 + 10, sl: 10 }); const s = R.go(); if (s.sl !== 10 - (2 + 4)) bad.push('the left edge: 2 px past scrolls back ceil(2) + 4 ' + JSON.stringify(s)); }
+      { const R = rig(src, { left0: 671 + 883, sl: 883 }); R.clock.t = 601; const s = R.go(); if (!(s.sl === 883 && R.strip._bringIn === null)) bad.push('past BRING_IN_MS: no scroll, the bring-in ends ' + JSON.stringify(s)); }
+      { const R = rig(src, { left0: 671 + 883 + 200, sl: 883, max: 883 }); const seen = []; for (let i = 0; i < 5; i++) seen.push(R.go()); if (!(R.strip._bringIn === null && seen[2].left === 0 && seen[3].left === null)) bad.push('a tile the range cannot reach: three tries, then it ends (never a loop) ' + JSON.stringify(seen)); }
+    } catch (e) { bad.push('threw: ' + String(e && e.message)); } return bad; };
+    const got = SRC ? legs(SRC) : ['bringTileIn not found in taskbar.js'];
+    ok(got.length === 0, 'B-b13c bringTileIn over a fake strip and clock: whole pixels rounded outward, ±0.5 px is whole, both edges, it ends at BRING_IN_MS and after three tries', got);
+    const mut = SRC ? legs(SRC.replace('  want.tries--;\n', '\n')) : [];
+    ok(mut.some((w) => /three tries/.test(w)), 'MUTANT (tries never counted down): the unreachable tile is scrolled at every refit — RED', mut);
+  }
   ok(/if \(form === 'compact'\) \{ this\._renderCompactSwitcher\(container\); return; \}/.test(DM) && /return switcherForm\(\{ n, each: previewW \+ 6, add: 27, bar: bar\.clientWidth, others, stripMin: STRIP_MIN_TILES \* TILE_MIN_PX \}\);/.test(DM) && /if \(digest \+ form === this\._switcherDigest\) return;/.test(DM), 'P2-2 the desktop switcher\'s form is part of its digest and PURE switcherForm decides it');
   const CS = strip(read('src/lib/chat-status-bar.js'));
   ok(/export const NARROW_BAR_PX = 480;/.test(read('src/lib/chat-status-bar.js')) && /export const SHORT_WINDOW_PX = 300;/.test(read('src/lib/chat-status-bar.js')) && /return \(w > 0 && w < NARROW_BAR_PX\) \|\| \(h > 0 && h < SHORT_WINDOW_PX\);/.test(CS) && /if \(view && view\.classList\.contains\('chat-short'\) !== short\) view\.classList\.toggle\('chat-short', short\);/.test(CS), 'P2-4 a desk window narrower than 480 px or shorter than 300 px keeps its bar ONE row; a short one marks its view chat-short');
