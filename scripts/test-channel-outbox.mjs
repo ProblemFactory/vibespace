@@ -3631,7 +3631,7 @@ async function chatReadLegs(ENGmod, name) {
               const behind = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pb' }, { op: 'search', convId: 'oc', query: 'budget', hits: [], count: 1 })).map((w) => w.text);
               const plain = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pb' })).map((w) => w.text);
               const sentRow = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'ps' }, { op: 'search', convId: 'oc', query: 'budget', hits: [], count: 1 })).map((w) => w.text);
-              return [J(behind) === J(['in the Outbox — this row shows the search results', 'awaiting your approval']) && J(plain) === J(['awaiting your approval']) && sentRow.length > 0 && !sentRow.includes('in the Outbox — this row shows the search results'), { behind, plain, sentRow }];
+              return [J(behind) === J(['in the Outbox — this row shows the search results', 'awaiting your approval']) && J(plain) === J(['awaiting your approval']) && sentRow.length > 0 && !sentRow.includes('in the Outbox — this row shows the search results'), { behind, plain, sentRow }];   // stale-pins: kept — the Channels menu's words (channel-touch-view rowProposalWords) keep «in the Outbox»; only the tool card's chip moved to «its card is below»
             }],
           ];
         };
