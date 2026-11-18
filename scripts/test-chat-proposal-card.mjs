@@ -567,8 +567,15 @@ try {
   await sleep(900);   // the card's arming (P.ARM_MS)
   check('⑨ a REAL click on ⑧\'s card\'s Approve (the reply with the PDF)', await realClick(`${DCARD(pid4)} .chan-prop-actions button[data-approve]`), lastMiss);
   const sent4 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?ids=${pid4}').then((x) => x.json()); const p = (r.proposals || [])[0]; return p && p.state === 'sent' ? p.state : null; })()`, 20000);
-  const own9 = sent4 ? await waitFor(`(async () => { const r = await fetch('/api/channels/fake-poll/fake-poll-ops/messages?limit=200').then((x) => x.json()).catch(() => null); const m = r && (r.records || []).find((x) => x && x.text === 'The notes are attached' && x.author && x.author.id === 'u-me'); return m && m.vendorId ? m.vendorId : null; })()`, 30000) : null;
-  check('⑨ ⑧\'s reply is SENT and the vendor lists it back: in the conversation\'s store under its own id (the account\'s own line)', !!sent4 && !!own9, { sent4, own9, state: (await api('GET', `/api/channels/outbox?ids=${pid4}`)).body?.proposals?.[0]?.state });
+  // THE LAW (src/server/channels-outbound.js — the hosted run 44305395894 found it red on both tries): a PLAIN reply, files or
+  // not, is listed back only by the conversation's next poll pass — only a thread reply or a quote gets the kick — and the hot
+  // pass comes every 30 s, the very bound this wait had. The leg needs the reply IN THE STORE, so it asks for that pass, as the
+  // owner's Refresh does (POST …/refresh, answered once the pass has run), then waits; a refused refresh (budget, queue) is said
+  // and the wait outlasts the hot pass instead
+  const rf9 = sent4 ? await api('POST', '/api/channels/fake-poll/fake-poll-ops/refresh') : null;
+  const bound9 = rf9 && rf9.status === 200 && rf9.body && rf9.body.ok ? 30000 : 45000;
+  const own9 = sent4 ? await waitFor(`(async () => { const r = await fetch('/api/channels/fake-poll/fake-poll-ops/messages?limit=200').then((x) => x.json()).catch(() => null); const m = r && (r.records || []).find((x) => x && x.text === 'The notes are attached' && x.author && x.author.id === 'u-me'); return m && m.vendorId ? m.vendorId : null; })()`, bound9) : null;
+  check('⑨ ⑧\'s reply is SENT and the vendor lists it back once its pass has run (the leg asks for it): in the conversation\'s store under its own id (the account\'s own line)', !!sent4 && !!own9, { sent4, own9, refresh: rf9 && { status: rf9.status, body: rf9.body }, bound9, state: (await api('GET', `/api/channels/outbox?ids=${pid4}`)).body?.proposals?.[0]?.state });
   fs.writeFileSync(RECALL_TARGET, String(own9 || 'none'));
   await evalJs(`(() => { if (!window.__toasts) { window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('global-toast')) window.__toasts.push(n); }).observe(document.body, { childList: true, subtree: true }); } window.__toasts.length = 0; app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'take back the reply' }); return true; })()`);
   const t9 = () => turnsLog().split('\n').filter((l) => l.startsWith('toolu_cpc5')).map((l) => l.slice(0, 400));
@@ -587,12 +594,21 @@ try {
   }
   check('⑨ CONTROL: a recall of someone else\'s message (Ada\'s fake-poll-ops-m1) is refused «not-yours» and files nothing — the seam marks only the account\'s own lines', /not-yours/.test(ctl9) && !ob9.some((q) => q.kind === 'recall' && q.recall && q.recall.msg === 'fake-poll-ops-m1'), { ctl9, recalls: ob9.filter((q) => q.kind === 'recall').map((q) => [q.id, q.state, q.recall && q.recall.msg]) });
   check('⑨ turn 5 filed ONE recall of ⑧\'s sent reply, awaiting approval (the store\'s) — without the seam it is refused «not-yours» too', !!rc9 && ob9.filter((q) => q.kind === 'recall' && q.recall && q.recall.msg === own9).length === 1, t9());
-  // the card ON SCREEN (a session's earlier views keep hidden lists holding the same card — ⑧): the visible one, marked
-  const card9 = await waitFor(`(() => { const v = [...document.querySelectorAll(${JSON.stringify(CHATP(String(rc9)))})].find((c) => c.getClientRects().length && c.getBoundingClientRect().height > 0 && c.querySelector('.chan-prop-actions button[data-approve]')); if (!v) return null; v.dataset.rc9Own = '1'; return { n: document.querySelectorAll(${JSON.stringify(CHATP(String(rc9)))}).length, text: v.textContent.slice(0, 300) }; })()`, 20000);
+  // THE CARD, found and pressed through THE on-screen list ⑧ marked (DCARD — the session's earlier views keep hidden lists with the
+  // same card). Train cure 2 (the hosted proof run: the Approve was drawn — the finder required it — but the press found NOTHING:
+  // its selector leaned on a mark put on the FIRST card element, and src/lib/channel-outbox.js gives a proposal whose signature
+  // moved a NEW element — the turn's last records repaint it right after the recall call). Now nothing is marked on the card: the
+  // press re-reads the list's selector at press time, after the list has been quiet for a second (the turn's last records land),
+  // as ⑧ presses its doors; a miss prints what the card held
+  const CARD9 = DCARD(String(rc9)), APPROVE9 = `${CARD9} .chan-prop-actions button[data-approve]`;
+  const card9 = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(CARD9)}); if (!c || !c.getClientRects().length || !c.querySelector('.chan-prop-actions button[data-approve]')) return null; return { text: c.textContent.slice(0, 300) }; })()`, 20000);
   check('⑨ the recall\'s card is drawn in the chat, quoting the message it takes back («The notes are attached»)', !!card9 && /The notes are attached/.test(card9.text), card9);
+  const settled9 = card9 && await evalJs(`new Promise((res) => { const l = document.querySelector(${JSON.stringify(LIST4)}); if (!l) return res(-1); let last = Date.now(); const t0 = last; const mo = new MutationObserver(() => { last = Date.now(); }); mo.observe(l, { subtree: true, childList: true, characterData: true }); (function w() { const now = Date.now(); if (now - last >= 1000 || now - t0 > 8000) { mo.disconnect(); return res(now - t0); } setTimeout(w, 100); })(); })`);
   await sleep(900);   // the card's arming (P.ARM_MS) — a recall's Approve is armed like every Approve
-  check('chat-recall-card-zh.png', await shot('chat-recall-card-zh.png', '.chat-msg:has([data-rc9-own="1"])', 10));
-  check('⑨ a REAL click on the recall card\'s Approve (in the chat)', !!card9 && await realClick('[data-rc9-own="1"] .chan-prop-actions button[data-approve]'), lastMiss);
+  check('chat-recall-card-zh.png', await shot('chat-recall-card-zh.png', `${LIST4} .chat-msg:has(.chan-prop[data-proposal="${rc9}"])`, 10));
+  const pressed9 = !!card9 && await realClick(APPROVE9);
+  const held9 = pressed9 ? null : await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD9)}); const all = document.querySelectorAll(${JSON.stringify(CHATP(String(rc9)))}).length; return { inList: !!c, copies: all, state: c && c.dataset.state, visible: !!c && !!c.getClientRects().length, buttons: c ? [...c.querySelectorAll('button')].map((b) => [b.className, Object.keys(b.dataset).join(','), b.disabled]) : null }; })()`);
+  check('⑨ a REAL click on the recall card\'s Approve (in the chat)', pressed9, { lastMiss, settledMs: settled9, card: held9 });
   const sent9 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?ids=${rc9}').then((x) => x.json()); const p = (r.proposals || [])[0]; return p && p.state === 'sent'; })()`, 15000);
   const toast9 = await waitFor(`window.__toasts.some((n) => n.textContent.startsWith('消息已撤回'))`, 15000);
   const tt9 = await toasts();
