@@ -23,7 +23,7 @@ const { groupOf: groupCardOf, readReport, cardOfReport } = require('./group-card
 const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
 const { COST_START, costFold, costKey, costShown, validCost } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — the restore's too
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
-const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
+const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample, SCHEMA_CLI_VERSIONS } = require('./record-shape.js'); // §3 schema drift (2026-09-21); B-f1a2: the record table
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
 const { permissionOutcome, outcomeHead, isStoppedRun, isAgentCutOff } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 const { safetyStopOf } = require('./safety-stop.js'); // PURE (lane classifier-stop-card): the CENSUS of the CLI's own safety-stop sentences — the stop card's one reader
@@ -429,6 +429,9 @@ class MessageManager extends MessageWindow {
 
   constructor(sessionId, opts = null) {
     super(sessionId);
+    this.harnessLabel = 'Claude Code'; // B-f1a2: the words of its count (message-window _noteAddedKind)
+    // B-f1a2: THE RECORD TABLE this reader's count is judged against — a build is «registered» when this release carries its table
+    this.recordTable = { registered: (v) => SCHEMA_CLI_VERSIONS.includes(String(v)) };   // the ONE require of record-shape above (test-record-shape's controls rewire exactly one)
     // lane chat-attachments-persist: the transcript this reader renders (createMessageManager's opts.threadId — a view, the
     // transcript API, a gap slab): a picture's place when its record names none
     this._placeTx = opts && typeof opts.threadId === 'string' && opts.threadId ? opts.threadId : null;

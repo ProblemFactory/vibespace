@@ -488,13 +488,13 @@
   },
   {
    "id": "record-kind-count",
-   "file": "src/message-window.js",
+   "file": "src/message-manager.js",
    "keyedOn": "version",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "a record kind a build added is counted once per build (cli-record-kind); the surprise only for a REGISTERED build (R8)",
+   "road": "a record kind a build added is counted once per build (cli-record-kind) — judged against the record table the CLAUDE manager declares (MessageManager.recordTable, B-f1a2: the require line + the table); the surprise only for a REGISTERED build (R8)",
    "suite": "test-cli-self-measure",
    "match": "schema-versions",
-   "sites": 1
+   "sites": 2
   },
   {
    "id": "cli-registration",

@@ -458,6 +458,7 @@ class CodexMessageManager extends MessageWindow {
   // refutations behind it.
   constructor(sessionId, { threadId } = {}) {
     super(sessionId);
+    this.harnessLabel = 'Codex'; // B-f1a2: no record table — its records are counted by its own breadcrumbs (codex-unknown-record:…, harness-shape-drift)
     this.userMessageIds = new Map();
     // THE INPUT QUEUE (session state, never a transcript message): the wrapper
     // publishes the WHOLE queue on every change; `_queuedMsgIds` is the set of

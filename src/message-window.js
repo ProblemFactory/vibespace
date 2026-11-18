@@ -21,7 +21,6 @@ const asArray = (v) => (Array.isArray(v) ? v : []);
 // `cli-record-kind` for a build this release has no record table for (an ordinary update: the quiet chip, nothing else), or
 // `cli-record-surprise` for a build it DOES register (a real surprise: the chip's hover says so). Never a card in the chat.
 const _kindsCounted = new Set();
-const registeredClaude = (v) => { try { return require('./record-shape.js').SCHEMA_CLI_VERSIONS.includes(String(v)); } catch { return false; } };
 
 class MessageWindow {
   constructor(sessionId) {
@@ -91,10 +90,17 @@ class MessageWindow {
     const key = kind + ':' + nm;
     const was = kinds.get(key);
     const ver = cli ? String(cli).slice(0, 40) : null;
-    const claude = (this.harnessLabel || 'Claude Code') === 'Claude Code';
-    const registered = !!ver && claude && registeredClaude(ver);
-    const counted = `${this.harnessLabel || 'Claude Code'}|${ver || '-'}|${key}`;
-    if (!_kindsCounted.has(counted) && _kindsCounted.size < 2000) { _kindsCounted.add(counted); try { global.__vsEvent?.(registered ? 'cli-record-surprise' : 'cli-record-kind', `${this.harnessLabel || 'Claude Code'} ${ver || '?'} · ${kind}:${nm}`.slice(0, 200)); } catch { } }
+    // B-f1a2 (lane bl-tests-e — the .393 before class: harnessLabel was read here and set NOWHERE, so every harness's kind was
+    // counted and worded «Claude Code», a codex build was asked of Claude's table, and one unknown codex record fired TWO
+    // events). A COUNT NAMES THE HARNESS WHOSE RECORD IT IS, and ONE FACT IS ONE COUNT: `cli-record-kind` / `-surprise` is the
+    // count of a manager that DECLARES A RECORD TABLE (`this.recordTable` — the claude manager's: src/record-shape.js
+    // SCHEMA_CLI_VERSIONS; «registered» is asked of that table only), worded with its harnessLabel; a manager without one counts
+    // its records through its OWN breadcrumbs (codex: codex-unknown-record:… and harness-shape-drift; ACP: acp-unknown-update:…).
+    // The window still reads no harness id — a capability, as the routing table asks. The chip's kinds are kept for all.
+    const table = this.recordTable || null;
+    const registered = !!ver && !!table && table.registered(ver);
+    const counted = `${this.harnessLabel || '?'}|${ver || '-'}|${key}`;
+    if (table && !_kindsCounted.has(counted) && _kindsCounted.size < 2000) { _kindsCounted.add(counted); try { global.__vsEvent?.(registered ? 'cli-record-surprise' : 'cli-record-kind', `${this.harnessLabel} ${ver || '?'} · ${kind}:${nm}`.slice(0, 200)); } catch { } }
     if (was && (!ver || was.cli === ver)) return;
     if (!was && kinds.size >= 50) return;
     kinds.set(key, { kind, name: nm, cli: ver || (was && was.cli) || null, ...(registered ? { registered: true } : {}) });
