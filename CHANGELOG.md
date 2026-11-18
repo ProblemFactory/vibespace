@@ -6,10 +6,25 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - When you browse a profile yourself and a site asks you to sign in, VibeSpace shows its sign-in form in your window, as it does while an agent drives.
+- A run request's card now says who started the turn running when it asked, beside «Allow for 1 hour»: you, another session, or «not recorded» when unknown.
+- While an agent is in a turn, the strip above the message box can hand it the waiting group messages now; if that turn is just ending, they run right after it.
+- On a phone turned sideways two windows can stand side by side: «Split» beside a window in the window list; held upright, the phone says to turn it.
+- An agent can take back its own waiting wake request once its reply came; the card in For you then reads «withdrawn by the agent».
+- A sent message whose files did not all arrive offers «Send the rest» on its card: only the missing files go, as a new message; an agent can propose it too.
+- An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
+- An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
 - A conversation on another machine no longer joins a Task Group through a symbolic link on the server's disk; only its folder as written counts.
+- On a phone the For you button shows a single number; on a wider screen its numbers fold into one when the window's name needs the room.
+- A Background Work job says which machine it runs on; an agent on another machine asking for a folder this one lacks is refused at once.
+- Ending or archiving a conversation that still runs background jobs shows a notice naming them, with Stop these too.
+- Settings: Claude’s usage refresh row now covers Claude only; Antigravity’s automatic usage reads have their own row, Off if Claude’s was Off.
+- Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off (that press was refused before).
+- The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
+- Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
+- Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
@@ -18,6 +33,26 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a workspace with sign-in, the welcome tour's first screen waits up to 3 seconds for the server, so it usually starts at three steps, not four.
 - In Diagnostics, a new kind of record from a Codex conversation is no longer counted as Claude Code's, and no longer counted twice.
 - An agent running many commands on a paired machine no longer slows the whole workspace: each command's record is written in the background.
+- When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
+- An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
+- After a restart, Resume all no longer calls a folder gone when its machine or storage mount waits for the vault or is not up; it asks you to unlock first.
+- A conversation you archived while it waited for the vault now says the message you had typed was not sent, and shows it, instead of dropping it.
+- A message sent into a running turn, then stopped, is no longer marked «Unread when stopped» when the agent read it and only a background task's turn followed.
+- Uploads and «open in editor» work when another person on the same computer also runs VibeSpace; a folder that cannot be used is named.
+- Tapping a text box on a phone no longer zooms the page, so the send button stays on the screen.
+- After switching desktops on a phone the title names that desktop's window at once, or says «No window».
+- Turning the phone no longer opens the conversation list; it stays as you left it.
+- A window's tabs stay on screen with their names when the phone is turned sideways; many tabs scroll instead of shrinking to icons.
+- On a phone the window list keeps each window's name readable: a full row shortens its billing tag, then moves «Split» and the tag into its ⋯ menu.
+- In a chat, a code block's Copy and Wrap buttons sit in their own row above it and never cover its words; on a phone they are big enough for a finger.
+- A Thinking block has no Wrap button; its one Copy button sits beside its title.
+- On a computer, moving to a code block's buttons with the Tab key shows them.
+- A job's stop, or terminating or archiving a conversation, also ends what its commands started apart; a restart keeps it; a notice names what would not stop.
+- A message or note from an agent that holds a secret-looking value no longer loses the rest of its line: only that value is hidden, and the sender is told where.
+- A secret written as NAME=value in the middle of a sentence, after a word and a colon, is now hidden like the same secret on its own line.
+- If VibeSpace restarts while delivering held channel messages, their card now says some may already have reached the agent; you choose to resend or discard.
+- When two agents propose a reply to the same message, each card now names the other, and Approve asks once more before a second reply is sent.
+- A usage wall seen again after a restart no longer reads the Antigravity account a second time.
 
 ## 2.369.410 — 2026-11-18
 
