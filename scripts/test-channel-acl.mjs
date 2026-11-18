@@ -300,6 +300,9 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     connectOffer: 'a vendor type\'s label, glyph, whether a company app is offered, how many accounts of it hold a sign-in — no conversation, nothing of one; the touch it leaves is the chat\'s Connect row',
     connectOffers: 'the types no account of which holds a sign-in ({kind, label, accounts}) — `list`\'s not-connected line',
     // lane channel-direct-send-sync
+    // lane bl-msg B-da74 / B-ae13 (restack-411)
+    resendRest: 'the drafting agent\'s rest of its OWN sent proposal: a NEW proposal from the kept bytes, always for the user\'s review (forceReview) — its answer is propose\'s (the agent\'s own draft); a caller who is not the drafter = the uniform not-found',
+    withdrawWatchRequest: 'the asker\'s OWN open wake request taken back: {id, status: withdrawn, decidedAt} — another agent, or a decided request, = refused by name; no record of a conversation',
     collectReceipt: 'the drafting agent reads its OWN direct send\'s receipt inline (receiptText = the rendered block; marks receipt.road:\'inline\') — a caller who is not the drafter = the uniform not-found',
   };
   ok(handlers.length >= 9 && called.every((k) => k in JUDGED) && Object.keys(JUDGED).every((k) => called.includes(k)), `THE ROUTE CENSUS: every engine method the ${handlers.length} agent channel handlers call is judged for what it hands an agent (${called.join(', ')})`, JSON.stringify({ called, unjudged: called.filter((k) => !(k in JUDGED)), dead: Object.keys(JUDGED).filter((k) => !called.includes(k)) }));

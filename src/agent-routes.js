@@ -2352,6 +2352,10 @@ async function composeCallers(req, res, eng, s, id, b) {
 // as the conversation that owns it. Somebody else's proposal is 403
 // `not-yours` (the uniform not-found when the caller cannot even see it); one
 // already decided / sending / of unknown outcome is 409 `not-withdrawable`.
+// THE JOB CALLER'S PRINCIPAL, BUILT ONCE (lane-redact verify r9; restack-411: the withdraw route and lane bl-msg B-da74's rest
+// route both call it — test-record-clear-stores swaps exactly this literal): a session speaks as its conversation; a JOB
+// speaks for its conversation, NAMELESS (its name is words its «Clear content…» never reaches)
+const callerChannelPrincipal = (who) => (who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null));
 app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // verify r2 (round 1 LOW 6): a BROWSER here (the owner's cookie / a fetch from a page, no agent token) is
   // refused BY NAME — withdraw is the drafting agent's verb; the user rejects from the card — not "missing token".
@@ -2370,7 +2374,7 @@ app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // A JOB SPEAKS FOR ITS CONVERSATION, NAMELESS (lane-redact verify r9): the engine stores this principal on the outbox
   // proposal (`withdrawal.by` — data/channels outbox, every client's outbox broadcast); a job's NAME there was a copy of its
   // words the job's "Clear content…" never reaches. The id is the conversation's; the name falls back to the draft's drafter.
-  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
+  const by = callerChannelPrincipal(who);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   const b = req.body || {};
   // lane bl-msg B-ae13: a WAKE REQUEST id (wr-…) is the asker's own request, taken back the same way (approval stays the person's click)
@@ -2387,8 +2391,8 @@ app.post('/api/agent/channels/proposals/:id/resend', async (req, res) => {
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
   const eng = channelsEngine();
   if (!eng || typeof eng.resendRest !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
-  if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }
-  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] } : null);
+  if (who.s && !who.job) { const ownS = ownConversationIdOf(who.s); if (!ownS.cid) return res.status(409).json({ error: ownS.why, code: 'bad-member' }); }   // the rest route's OWN guard (test-channels-engine's fifth row)
+  const by = callerChannelPrincipal(who);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   try { const r = await eng.resendRest(String(req.params.id), { ctx: by }); if (r && r.ok && r.proposal) { try { touchChannel(who.id, [{ op: 'reply', adapterId: r.proposal.adapterId, convId: r.proposal.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, placement: r.proposal.placement || null }]); } catch { } } chanAnswer(res, r); }
   catch (e) { res.status(500).json({ error: e.message }); }
