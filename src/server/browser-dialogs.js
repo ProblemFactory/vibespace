@@ -121,6 +121,7 @@ const PK_DRAIN_MS = 1000; // r6 → r7 (acceptance r6): the SLOW mark — a wait
 const PK_HOLD_BEAT_MS = 1000; // r7 (acceptance r6 BREAK 6): a sign-in waiting on that clean-up keeps its page's hold — the hook's `wait` at this pace, under its HOOK_HOLD_MS 1.5 s …
 const PK_HOLD_MAX_MS = 5000; // … for this long at most (a clean-up that never ends still lets the page's request end on its own)
 const NATIVE_ON_KERNEL = new Set(['Page.javascriptDialogOpening', 'Page.javascriptDialogClosed', 'Page.fileChooserOpened', 'Fetch.authRequired']); // one source: never read where surfaces are on
+const KERNEL_GONE_CODES = Object.freeze(['no_such_request', 'no_such_surface', 'invalid_values']); // B-d981: a kernel answer refused as these never reached the page
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
 const ANSWERED_KEEP = 32;
@@ -1856,7 +1857,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return x && now() <= taken.expiresAt ? null : 'expired-waiting'; // the entry GONE (pruned past its 10 min — by an answer anywhere) or past them now: the owner's 10 minutes are the law, never a newer answer
     };
     const outranked = async (why) => { // r10: a newer answer stands («no», or a newer «once») — nothing of the vault for this ceremony: no load, no release with the grant; the taken grant is DROPPED (never given back). r11: or the grant's 10 minutes ran out while it waited (`why`)
-      if (person) { e.pk.holds.delete(rec); rec.createdBy = null; rec.loaded = rec.uvSet = null; await pkOnceGone(w, e, rec); return pkCtl(w, e, rec, 'release'); } // his own ceremony: the authenticator paired for it goes, Chrome's own window — as with no grant (never refused for the vault's sake)
+      // B-d981 (4): only while the watch is STILL the person's — a window handed to an agent between the checks (toAgent keeps this
+      // ceremony's authenticator as the agent's, e.pk.once off) never releases the person's «no»'d registration into it: the agent's
+      // road below refuses it, and what went in leaves at its end (the marks stay for pkUnload)
+      if (person && w.mode === 'person') { e.pk.holds.delete(rec); rec.createdBy = null; rec.loaded = rec.uvSet = null; await pkOnceGone(w, e, rec); return pkCtl(w, e, rec, 'release'); } // the person's own ceremony: the authenticator paired for it goes, Chrome's own window — as with no grant (never refused for the vault's sake)
       rec.refused = true; rec.why = why; pkTrace(w, e, rec, 'refused', { why: rec.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); // the page gets its own refusal — r11: what it loaded leaves at its end (rec.loaded / rec.uvSet were marked as the calls went out)
     };
     const back = () => { if (taken && latest()) pkGrants.set(gk, taken); }; // r8: a job that lets its ceremony go WITHOUT the vault (over before its turn, over while the authenticator paired, no authenticator) gives the grant back as it was — its own 10-min clock, never extended. r9 (acceptance r8 MAJOR): only while the owner's LATEST answer at that key is still this grant — a «no» or a newer «once» answered meanwhile (standing or already spent) outranks it, and it is dropped
@@ -2384,8 +2388,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
     const f = PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === 'human', userVerification: q.userVerification });
     if (f.ask) return pkAsk(w, e, rec, v.load); // the page REQUIRES UV and nobody decided this ceremony: the owner's card is the verification
-    if (v.consumeGrant) { pkSpend(pkGrants.get(gk)); pkGrants.delete(gk); } // r11 (acceptance r10 MAJOR): spent here — the key is made at once
-    return rec.kind === 'create' ? pkKernelCreate(w, e, rec, v, f) : pkKernelSign(w, e, rec, v, f);
+    let taken = null; if (v.consumeGrant) { taken = pkGrants.get(gk) || null; pkSpend(taken); pkGrants.delete(gk); } // r11 (acceptance r10 MAJOR): spent here — the key is made at once
+    // B-d981: a failure AFTER the verdict that provably reached the site with nothing (the key not made, not stored, the kernel refused
+    // the answer as gone) gives the owner's «once» back as it was — while it is still the owner's latest answer and inside its 10 minutes
+    const giveBack = () => { if (taken && pkAnswered.get(gk) === taken && now() <= taken.expiresAt) { taken.used = false; pkGrants.set(gk, taken); } };
+    return rec.kind === 'create' ? pkKernelCreate(w, e, rec, v, f, giveBack) : pkKernelSign(w, e, rec, v, f);
   }
   /** A sign-in: the row (the page's allow list order, else the latest used), its key unsealed for ONE signature, the count bumped
    *  and WRITTEN before the answer leaves (a crash between = one count the site refuses once, never a reused one), the use noted,
@@ -2415,19 +2422,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** A registration: a P-256 pair made HERE, sealed under the passkeys' key BEFORE the answer leaves (a key VibeSpace cannot keep
    *  is never handed to a site), the row written (signCount 0, NEW_KEY_POLICY), the use noted, the answer; a page that is gone
    *  by then never got it — its row is dropped again. */
-  async function pkKernelCreate(w, e, rec, v, f) {
+  async function pkKernelCreate(w, e, rec, v, f, giveBack = () => {}) {
     const q = rec.kernel, pid = w.profileId;
     const m = WA().makeCredential({ crypto, rpId: rec.rpId, user: q.userId ? { id: q.userId } : null, flags: f });
     const sealed = PS.seal(pks.cipher, m.privateKeyPkcs8.toString('base64')), refused = PS.keyRefusal(sealed);
     m.privateKeyPkcs8.fill(0);
-    if (refused) { pkKeyRefused(w, rec, refused); return pkKernelRefuse(w, e, rec, 'webauthn_key_locked'); }
+    if (refused) { pkKeyRefused(w, rec, refused); giveBack(); return pkKernelRefuse(w, e, rec, 'webauthn_key_locked'); } // B-d981: no key made — the grant back
     pkKeyOk();
     const row = PS.normalizeRow({ credentialId: WA().b64u(m.credentialId), rpId: rec.rpId, userHandle: q.userId, userName: rec.user && rec.user.name, displayName: rec.user && rec.user.displayName, keySealed: sealed, signCount: 0, createdBy: v.createdBy === 'human' ? 'human' : 'agent', bySession: pkOwner(w, e), createdAt: now(), policy: PS.NEW_KEY_POLICY });
-    if (!row || !pkWrite(PS.withRow(pkRead(), pid, row))) { say('pk-new:' + pid, `${pid}: a new passkey was not stored — the page was told it was not allowed`); await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' }); return pkKernelEnd(w, e, rec, 'error', 'NotAllowedError'); }
+    if (!row || !pkWrite(PS.withRow(pkRead(), pid, row))) { if (row) pkCache = PS.normalizeStore(PS.dropRows(pkRead(), pid, (x) => x.credentialId === row.credentialId).store); say('pk-new:' + pid, `${pid}: a new passkey was not stored — the page was told it was not allowed`); giveBack(); await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' }); return pkKernelEnd(w, e, rec, 'error', 'NotAllowedError'); }
     rec.createdBy = row.createdBy; rec.userName = row.userName; rec.uv = f.uv; rec.harvested = true;
     pkUse(w, e, rec, `register a passkey on ${rec.rpId}`);
     const r = await pkKernelAnswer(w, e, rec, { create: { credentialId: row.credentialId, attestationObject: WA().b64u(m.attestationObject) } });
-    if (!r.ok) { rec.harvested = false; pkWrite(PS.dropRows(pkRead(), pid, (x) => x.credentialId === row.credentialId).store); }
+    if (!r.ok) { rec.harvested = false; pkWrite(PS.dropRows(pkRead(), pid, (x) => x.credentialId === row.credentialId).store); if (KERNEL_GONE_CODES.includes(r.code)) giveBack(); } // B-d981: the kernel said the request was gone ⇒ the site never got the key (a timeout stays spent: it may have)
     pkKernelEnd(w, e, rec, r.ok ? 'ok' : 'aborted-by-page', r.ok ? null : r.code);
     emit({ kind: 'passkeys', profileId: pid });
     return v;

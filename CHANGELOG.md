@@ -114,9 +114,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Starting a conversation with your own --settings file no longer drops it silently: VibeSpace's own values step aside, and you are told which.
 - A chat row that opens search results no longer just says a draft is awaiting your approval; it says where the draft waits.
 - When you browse a profile a conversation also uses, a browser sign-in sheet shown only on its desktop now gets its banner and an Open in Desktop button.
+- A passkey registration whose new key could not be saved no longer uses up your Allow once: the page can try again without asking you.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
+- Once you hand the browser to an agent, a passkey registration of yours that you then refused is refused, never completed in the agent's place.
 
 ## 2.369.409 — 2026-11-17
 

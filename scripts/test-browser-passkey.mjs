@@ -487,11 +487,11 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
   const realApply = PK.applyEvent;
   PK.applyEvent = (recs, ev, o) => { const r = realApply(recs, ev, o); if (ev && ev.ev === 'start' && r) RECS.push(r); return r; };
   const O = 'https://example.test', U1 = Buffer.from('user-1').toString('base64url');
-  async function kworld({ features, cipher = PS.cipherOf(crypto, crypto.randomBytes(32)), takeover = false, store = true, file0 = null } = {}) {
+  async function kworld({ features, cipher = PS.cipherOf(crypto, crypto.randomBytes(32)), takeover = false, store = true, file0 = null, Dmod = Dm } = {}) {
     const k = await startFakeKernel({ firstUrl: O + '/', mode: features ? { features } : {} });
     const x = { k, file: file0, items: [], resolved: [], uses: [], logs: [], writes: [], ended: [] /* ⑨r11: forYou.ended */, takeover, cipher };
-    const passkeys = store ? { read: () => x.file, write: (o) => { x.writes.push({ answersBefore: k.webauthnAnswers().length, counts: (((o.profiles || {})['bp-1'] || {}).rows || []).map((r) => r.signCount) }); x.file = JSON.parse(JSON.stringify(o)); }, cipher: x.cipher } : null;
-    x.w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: { warn: (l) => x.logs.push(String(l)), log() {} }, enableTimeoutMs: 300, promptAskMs: 60, passkeyOrphanMs: 150,
+    const passkeys = store ? { read: () => x.file, write: (o) => { if (x.failWrite > 0) { x.failWrite--; throw new Error('forced write failure'); } /* B-d981: a store whose next write fails */ x.writes.push({ answersBefore: k.webauthnAnswers().length, counts: (((o.profiles || {})['bp-1'] || {}).rows || []).map((r) => r.signCount) }); x.file = JSON.parse(JSON.stringify(o)); }, cipher: x.cipher } : null;
+    x.w = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: { warn: (l) => x.logs.push(String(l)), log() {} }, enableTimeoutMs: 300, promptAskMs: 60, passkeyOrphanMs: 150,
       holdersOf: () => [{ browserKey: 'bk-1', sessionId: 's1' }], leaseCountOf: () => 1, labelOf: () => 'Work', passkeys, takeoverOf: () => x.takeover,
       forYou: { add: (pid, it) => { x.items.push(it); return 'fy-' + x.items.length; }, resolve: (id) => x.resolved.push(id), ended: (id, fact) => x.ended.push({ id, fact }) },
       vaultUse: (entry, use, o) => { x.uses.push({ entry, use, o }); return { receipt: 'vr-' + String(x.uses.length).padStart(12, '0') }; } });
@@ -523,6 +523,32 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
   ok(r && r.kernel && r.kernel.requestId === c.request.requestId && r.kernel.surfaceId === c.request.surfaceId && r.kind === 'get' && r.rpId === 'example.test' && r.origin === O && r.allow.join() === 'AAAAAAAAAAAAAAAAAAAAAA' && r.n > 0 && r.ctx === 0,
     '⑧b webauthnRequest → THE record (PK.applyEvent\'s): kind / rpId / origin / the allow list, the kernel\'s ids kept on it', r);
   ok(a.outcome === 'cancelled' && a.error === 'NotAllowedError' && r.outcome === 'error' && r.error === 'NotAllowedError' && !r.refused, '⑧b no passkey for the site ⇒ the page meets an EMPTY authenticator: NotAllowedError (as Chrome\'s own), the record ends error — not a refusal', { a, r });
+  // B-d981 (3): a kernel-road failure AFTER the verdict that provably reached the site with nothing (here: the store's write fails ⇒
+  // the page is told NotAllowedError) gives the owner's «once» back as it was — the page's retry registers WITHOUT a second card —
+  // and the failed write leaves no row behind (the store's cache never keeps a key the disk does not)
+  {
+    const legD = async (Dmod) => {
+      const y = await kworld({ Dmod });
+      const rr = await y.w.passkeyRegister({ ...T, rpId: 'example.test', user: 'alice' }); y.w.answerPasskey(rr.proposal.id, { choice: 'once', shown: rr.proposal.shown });
+      y.failWrite = 1;
+      const c1 = create(y); const a1 = await settled(c1); const r1 = y.last();
+      const c2 = create(y); const a2 = await settled(c2); const r2 = y.last();
+      const out = { a1: a1.error || a1.outcome, r1: r1.outcome, a2: a2.outcome === 'completed' ? 'completed' : a2.error || a2.outcome, r2why: r2.why || null, rows: y.rows().length, cards: y.cards().length, failLeft: y.failWrite };
+      await y.close(); return out;
+    };
+    const good = await legD(Dm);
+    ok(good.a1 === 'NotAllowedError' && good.r1 === 'error' && good.failLeft === 0 && good.a2 === 'completed' && good.rows === 1 && good.cards === 1,
+      'B-d981 (3): the owner\'s «once», the new key NOT stored (the page told NotAllowedError) ⇒ the grant given back; the page\'s retry registers with it — no second card — and ONE row stands (the failed write left nothing)', good);
+    const ds = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const gb = "    const giveBack = () => { if (taken && pkAnswered.get(gk) === taken && now() <= taken.expiresAt) { taken.used = false; pkGrants.set(gk, taken); } };";
+    const wc = "if (row) pkCache = PS.normalizeStore(PS.dropRows(pkRead(), pid, (x) => x.credentialId === row.credentialId).store); ";
+    ok(ds.includes(gb) && ds.includes(wc), 'control setup (B-d981 (3)): the give-back and the kernel road\'s own undo of its unstored row are where the controls cut');
+    const MD = mutantCopies('browser-passkey-d981', REPO);
+    const burnt = await legD(MD.load('src/server/browser-dialogs.js', ds.replace(gb, '    const giveBack = () => {};'), 'burns-grant'));
+    ok(burnt.a2 === 'NotAllowedError' && burnt.r2why === 'no-grant' && burnt.rows === 0, 'CONTROL (B-d981 (3)): a gate that burns the grant at its verdict — the retry is refused no-grant (RED for the leg above)', burnt);
+    const kept = await legD(MD.load('src/server/browser-dialogs.js', ds.replace(wc, ''), 'cache-keeps'));
+    ok(kept.rows === 2, 'CONTROL (B-d981 (3)): a store cache that keeps the unwritten row stores TWO keys after the retry — one the site never got (RED for the leg above)', kept);
+  }
   // ⑧c register: ungranted ⇒ no-grant; granted ⇒ the row, sealed; the attestation the page got names the sealed key
   c = create(x); a = await settled(c); r = x.last();
   ok(a.error === 'NotAllowedError' && r.outcome === 'refused' && r.why === 'no-grant' && x.w.passkeyIn('bp-1', null).state === 'refused' && /passkey register example\.test/.test(x.w.passkeyIn('bp-1', null).text), '⑧c an ungranted create ⇒ refused no-grant (the page told NotAllowedError; the next verbs told how to ask)', { a, r });
@@ -1999,6 +2025,50 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       '⑨r11 MINOR 2 (the same, with an unrelated answer): another site\'s card answered while #62 waits past its grant\'s 10 minutes (its prune drops the expired entry) — #62 refused expired-waiting, the SAME honest reason, never answered-again (2b3cc419f: answered-again — a missing entry read as «the owner answered a newer card»)', R11y);
     fail9(62, 63); fail9(63, 7, true); await until8(() => !draining7(X), 300);
     X.D.shutdown();
+  }
+  // B-d981 (1) + (4), on the person's road (the person's own registration: the vault authenticator paired for it, its «once» taken):
+  //   (1) outranked() — a «no» answered while it loads (setUserVerified held) — CLEARS its marks (rec.loaded / rec.uvSet, set as its
+  //       load went out — r11) as it releases to Chrome's own window: its end never unloads through a hold already gone. RED with the
+  //       clear dropped (the r11 verdict's mutant ran 235 / 0);
+  //   (4) the r11 verdict's race (UNVERIFIED there): the window handed to an AGENT between the checks — toAgent keeps the ceremony's
+  //       authenticator as the agent's — then the «no»: the person's registration is never released into the agent's authenticator;
+  //       refused instead (what went in leaves at its end). RED on the base: released.
+  {
+    const sceneD = async (modPath, { toAgentMid = false } = {}) => {
+      const X = world2({ modPath, holders: 'human', store: VAULT5(), print: false });
+      await X.opened(); X.world.chrome = chrome6();
+      const untilD = async (pred, ms = 400) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setImmediate(r)); return pred(); };
+      const vD = (id, verb) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === verb && m.params.arguments[2] && m.params.arguments[2].value === id).length;
+      const idleD = () => !X.w().targets.get('T1').pk.draining;
+      const answerD = async (choice) => { const reg = await X.D.passkeyRegister({ profileId: PID, browserKey: null, rpId: 'example.test', user: 'me' }); return X.D.answerPasskey(reg.proposal.id, { choice, shown: reg.proposal.shown }).ok; };
+      const once = await answerD('once');
+      X.world.hold = new Set(['WebAuthn.setUserVerified']); X.world.held = [];
+      X.say({ ev: 'start', id: 9, kind: 'create', rpId: 'example.test', origin: 'https://example.test' }); const held = await untilD(() => X.world.held.length === 1);
+      if (toAgentMid) { X.world.H.human = false; X.world.H.agent = true; await X.lease({ kind: 'human-end', profileId: PID, key: HK, reason: 'released' }); await X.lease({ kind: 'attach', browserKey: CK, profileId: PID, sessionId: 's-c' }); await untilD(() => X.w().mode === 'agent'); }
+      const no = await answerD('no');
+      free7(X); await untilD(() => vD(9, 'release') + vD(9, 'refuse') > 0 && idleD());
+      const r = rec6(X, 9);
+      const out = { once, held, no, mode: X.w().mode, rel: vD(9, 'release'), ref: vD(9, 'refuse'), loaded: r.loaded === undefined ? 'undefined' : JSON.stringify(r.loaded), uvSet: r.uvSet === undefined ? 'undefined' : r.uvSet, why: r.why || null };
+      X.say({ ev: 'end', id: 9, outcome: 'error', name: 'NotAllowedError' }); await untilD(() => idleD());
+      out.uvLeft = [...((X.world.chrome && X.world.chrome.uv) || new Map()).values()].some(Boolean);   // the review: what went in leaves at its end
+      X.D.shutdown(); return out;
+    };
+    const dsD = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const MWD = mutantCopies('browser-passkey-d981-14', REPO);
+    const p1 = await sceneD(null);
+    ok(p1.once && p1.held && p1.no && p1.mode === 'person' && p1.rel === 1 && p1.ref === 0 && p1.loaded === 'null' && p1.uvSet === null,
+      'B-d981 (1): the person\'s registration, a «no» answered while it loads ⇒ released to Chrome\'s own window AND its marks cleared (loaded / uvSet null)', p1);
+    const clearCut = " rec.loaded = rec.uvSet = null; await pkOnceGone(w, e, rec); return pkCtl(w, e, rec, 'release'); }";
+    ok(dsD.includes(clearCut), 'control setup (B-d981 (1)): the clear is where the control cuts');
+    const m1 = await sceneD(MWD.write('src/server/browser-dialogs.js', dsD.replace(clearCut, " await pkOnceGone(w, e, rec); return pkCtl(w, e, rec, 'release'); }"), 'no-person-clear'));
+    ok(m1.rel === 1 && m1.loaded !== 'null', 'CONTROL (B-d981 (1)): the clear dropped ⇒ the released ceremony keeps its marks (RED for the leg above)', m1);
+    const p4 = await sceneD(null, { toAgentMid: true });
+    ok(p4.once && p4.held && p4.mode === 'agent' && p4.rel === 0 && p4.ref === 1 && p4.why === 'answered-again' && p4.uvLeft === false,
+      'B-d981 (4): the window handed to an agent while the person\'s registration loads, then «no» ⇒ refused answered-again — never released into the authenticator that is now the agent\'s', p4);
+    const modeCut = "      if (person && w.mode === 'person') { e.pk.holds.delete(rec);";
+    ok(dsD.includes(modeCut), 'control setup (B-d981 (4)): the mode check is where the control cuts');
+    const m4 = await sceneD(MWD.write('src/server/browser-dialogs.js', dsD.replace(modeCut, "      if (person) { e.pk.holds.delete(rec);"), 'person-branch-any-mode'), { toAgentMid: true });   // stale-pins: kept — the base's line, written back by this RED control
+    ok(m4.rel === 1 && m4.ref === 0, 'CONTROL (B-d981 (4)): the base\'s branch (any mode) RELEASES the «no»\'d registration into the agent\'s authenticator — the race is real (RED for the leg above)', m4);
   }
   // ⑨r9 MINOR — the give-back's two other exits, on the person's road (his own registration: the vault authenticator paired for it); RED with back() dropped at that exit alone
   {
