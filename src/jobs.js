@@ -23,6 +23,7 @@ const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
 const SR = require('./store-read.js'); // B-f276: THE STORE READ — a read that failed is no answer (never set aside, never «empty»)
+const READ_AGAIN_MS = 10_000;   // cure r1: a read again past this is said slow; the next try is armed before it is awaited
 const STORE_SHAPE = (v) => Array.isArray(v) && v.every((j) => j != null);   // jobs.json: a list of records (a null entry is torn)
 // B-2204: a recovered skeleton is the person's alone — one the release wrote with view 'all' is read back owner-less, view 'session'
 const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };
@@ -194,6 +195,8 @@ class JobManager {
     this._logsNoteOwed = { store: null, archive: null }; this._logsNoteP = null; this._logsUnnotedSaid = new Set();
     // B-f276: a store whose read FAILED (or whose torn bytes could not be set aside) — {code, why, at} while unread; nothing writes it
     this._unread = { store: null, archive: null }; this._unreadT = { store: null, archive: null }; this._unreadTries = { store: 0, archive: 0 }; this._unreadSaid = { store: false, archive: false }; this._unreadStopped = false;
+    // cure r1 (主开发 00:40Z): one read again in flight a store, bounded; the note THIS process wrote and the items its hold filed — lifted when a read answers
+    this._unreadP = { store: null, archive: null }; this._unreadSlow = { store: 0, archive: 0 }; this._unreadNoteAt = { store: null, archive: null }; this._unreadItems = { store: [], archive: [] };
     this._logsSaidNow = new Set();   // set-aside files whose item was filed in this process, merged into the record's `heldSaid`
     this._logsHeldSaid = '';         // the journal's last HELD line (said once per process per set of files)
     this._logsOwed = new Set();   // ids whose whole-dir removal the storage did not do (held / failed) — re-sent before every pass; ≤ LOGS_OWED_MAX, a restart forgets them (the law's pass takes them 14 days after their newest file)
@@ -291,7 +294,7 @@ class JobManager {
     this.d.log('[jobs] store corrupt → preserved at', bad || (this.readOnly ? '(nowhere — a read-only engine writes nothing)' : '(nowhere — its note holds the job-logs clean-up)'), '— rebuilding skeletons; error:', e.message);
     try {
       // B-ef97: an id the archive holds has its record there — a skeleton beside it would be a second, empty record of it
-      const archived = bad ? new Set(this._loadArchive().map((r) => r.id)) : new Set();
+      const archived = new Set(this._loadArchive().map((r) => r.id));   // cure r1: set aside or not (a held store's skeleton beside its archived copy)
       for (const id of fs.readdirSync(this.logsDir)) {
         if (!id.startsWith('jb-') || archived.has(id)) continue;
         // B-2204: owner-less and view 'session' — the person sees it (isUser), no conversation does (was view 'all': every one)
@@ -326,14 +329,29 @@ class JobManager {
     const t = setTimeout(() => { this._unreadT[which] = null; this._unreadRetry(which).catch((e) => { this.d.log(`[jobs] ${which} read again failed:`, e && e.message); this._unreadRetrySoon(which); }); }, SR.retryDelay(n, this._unreadCfg()));
     t.unref?.(); this._unreadT[which] = t;
   }
-  /** one read again of an unreadable store, off this thread (fs.promises) — an answer is loaded as the boot loads it */
+  /** cure r1: the words an agent and a person read while the records cannot be read — what is held, and the door (For you, the file) */
+  unreadWords(what = 'the job records cannot be read right now') {
+    const u = this._unread.store || this._unread.archive, base = this._unread.store ? path.basename(this.file) : path.basename(this.archiveFile);
+    return `Background Work: ${what} — ${base} in VibeSpace's data folder could not be read (${u ? u.code : 'unknown'}); VibeSpace reads it again every few minutes, and For you says what to check. No record is lost: nothing is written over it.`;
+  }
+  /** one read again of an unreadable store, off this thread (fs.promises) — an answer is loaded as the boot loads it. Cure r1: the
+   *  read is BOUNDED (READ_AGAIN_MS) and the NEXT try is armed BEFORE it is awaited — a mount that hangs rather than fails never
+   *  stops the tries; one read is in flight a store (a hung one is waited on, never doubled), a slow one counted and said once */
   async _unreadRetry(which) {
     if (!this._unread[which] || this._unreadStopped) return;
     const file = which === 'store' ? this.file : this.archiveFile, base = path.basename(file);
-    let read; try { read = { text: await fs.promises.readFile(file, 'utf-8') }; } catch (error) { read = { error }; }
+    this._unreadRetrySoon(which);   // the next try first: whatever this one does
+    if (this._unreadP[which]) return;   // the last read has not answered yet — waited on, never doubled (one pool thread a store)
+    const p = this._unreadP[which] = fs.promises.readFile(file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+    p.then(() => { if (this._unreadP[which] === p) this._unreadP[which] = null; });
+    const ms = (this.d.unreadRetry && Number(this.d.unreadRetry.readMs) > 0) ? Number(this.d.unreadRetry.readMs) : READ_AGAIN_MS;
+    let timer = null;
+    const read = await Promise.race([p, new Promise((r) => { timer = setTimeout(() => r(null), ms); timer.unref?.(); })]);
+    clearTimeout(timer);
     if (this._unreadStopped || !this._unread[which]) return;
+    if (!read) { if (!this._unreadSlow[which]++) this.d.log(`[jobs] ${base}: a read again did not answer in ${Math.round(ms / 1000)} s — the storage may hang; it is tried again on the same pace (said once)`); return; }
     const a = SR.storeAnswer(read, { valid: which === 'store' ? STORE_SHAPE : Array.isArray });
-    if (a.state === 'unreadable') { this._unread[which].code = a.code; return this._unreadRetrySoon(which); }
+    if (a.state === 'unreadable') { this._unread[which].code = a.code; return; }   // the next try is armed already
     const tries = this._unreadTries[which];
     this._unread[which] = null;   // the answer is loaded as the boot loads it: torn bytes that still cannot be set aside hold again
     if (which === 'archive') { this.archive = null; this._archiveAnswer(a); }
@@ -344,10 +362,29 @@ class JobManager {
       if (!this._unread.store && !this.readOnly) { this._adoptAndReplay(); this._dirty = true; }   // the boot's adoption, late: the records are this process's now
     }
     if (!this._unread[which]) {
-      this._unreadTries[which] = 0; this._unreadSaid[which] = false;
+      if (this._unreadT[which]) { clearTimeout(this._unreadT[which]); this._unreadT[which] = null; }
+      this._unreadLift(which).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));
+      this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0;
       this.d.log(`[jobs] ${base} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${a.state === 'data' ? `${a.value.length} record(s)` : a.state === 'missing' ? 'not there (no records)' : 'torn bytes, set aside'} — ${this.readOnly ? 'a read-only engine' : 'writes resume'}`);
       try { this.d.broadcast('jobs-updated', { reread: which }); } catch { }
     }
+  }
+  /** cure r1 — 主开发's ruling (00:40Z): a read again that ANSWERED and LOADED lifts what the failure filed. The records are in
+   *  memory now and nothing wrote over the file (B-f276), so the clean-up's hold has no ground: the note THIS process wrote (its
+   *  `at` is this failure's) is marked done — renamed `<store>.unread-done-<ms>`, a name no hold reads — and its For-you items are
+   *  resolved; the clean-up resumes at its next pass. A note that STOOD before (another process's failure) is left: it is not ours */
+  async _unreadLift(which) {
+    const base = path.basename(which === 'store' ? this.file : this.archiveFile), name = base + LS.NOTE_SUFFIX, at = this._unreadNoteAt[which];
+    this._logsUnread[which] = null; this._logsNoteOwed[which] = null; this._unreadNoteAt[which] = null;
+    let lifted = false;
+    if (at != null && !this.readOnly) {
+      const f = path.join(this.d.dataDir, name);
+      try { const n = JSON.parse(await fs.promises.readFile(f, 'utf8')); if (n && Number(n.at) === Number(at)) { await fs.promises.rename(f, path.join(this.d.dataDir, `${base}.unread-done-${now()}`)); lifted = true; } } catch { }
+    }
+    const items = this._unreadItems[which].splice(0);
+    for (const id of items) { try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } }
+    if (lifted || items.length) this.d.log(`[jobs] ${base} was read again: ${lifted ? `its note ${name} is marked done (renamed), ` : ''}${items.length ? `${items.length} For-you item(s) resolved, ` : ''}the job-logs clean-up resumes`);
+    return lifted;
   }
   /** lane job-logs-sweep r3 §1 / r4: a records read that failed (anything but ENOENT) is a FACT the clean-up holds:
    *  - bytes that can be read but do not parse: renamed aside (`<store>.corrupt-<ms>`), else COPIED aside — before this load returns,
@@ -411,7 +448,8 @@ class JobManager {
         if (r === 'written') {
           this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) — the note ${t.file} holds the job-logs clean-up until a person moves it`);
           // «said» keyed by the note AND its moment: a note a person moved and a later failure wrote again is told again
-          this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: t.o.at });
+          const v = this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: t.o.at });
+          if (this._unread[t.side]) { this._unreadNoteAt[t.side] = t.o.at; if (v && v.id) this._unreadItems[t.side].push(v.id); }   // cure r1: OURS — lifted when a read answers
         } else this.d.log(`[jobs] ${t.side} could not be read again (${t.o.error}) — the note ${t.file} still holds the job-logs clean-up (not a new failure: nothing filed)`);
         if (this._logsUnnotedSaid.has(t.side)) this.d.log(`[jobs] job-logs: the note ${t.file} is on disk now — it holds the clean-up, also across a restart`);
         continue;
@@ -421,7 +459,8 @@ class JobManager {
       if (this._logsUnnotedSaid.has(t.side)) continue;   // said once per process; the note is asked for again before each pass
       this._logsUnnotedSaid.add(t.side);
       this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) and no note of it could be written (${why}) — the job-logs clean-up removes nothing in this process; the note is tried again before each pass`);
-      this._forYou(null, M.forYouCopy(null, 'records-unread-unnoted', { store: t.base, error: t.o.error, when: t.o.at }));
+      const vu = this._forYou(null, M.forYouCopy(null, 'records-unread-unnoted', { store: t.base, error: t.o.error, when: t.o.at }));
+      if (this._unread[t.side] && vu && vu.id) this._unreadItems[t.side].push(vu.id);
     }
   }
 
@@ -430,9 +469,10 @@ class JobManager {
   _logsSay(name, kind, opts) {
     (this._logsTelling || (this._logsTelling = new Set())).add(name);   // filed in this process: the pass never files it again while «said» waits
     const v = this._forYou(null, M.forYouCopy(null, kind, opts));   // §93: the copy minted at the door's call, never handed in
-    if (v && v.ok === false) return;   // refused (said in the log): asked again by the next process
+    if (v && v.ok === false) return v;   // refused (said in the log): asked again by the next process
     const w = v && typeof v.written === 'function' ? v.written() : null;
     if (w && typeof w.then === 'function') w.then(() => this._logsMarkSaid(name), () => { }); else this._logsMarkSaid(name);
+    return v;
   }
   _save({ storeOnly = false } = {}) {
     // a READ-ONLY engine (second server against a live lock) must never flush
@@ -2933,7 +2973,7 @@ class JobManager {
     const vet = M.vetSpec(spec);
     if (!vet.ok) return { error: vet.error };
     // B-f276: while the records cannot be read nothing new is created (a record made now could not be written: it would end with this process)
-    if (this._unread.store) return { error: `Background Work could not read its records (jobs.json: ${this._unread.store.code}) — no job is created until they are read; they are read again every few minutes`, code: 'records-unread' };
+    if (this._unread.store) return { error: this.unreadWords('no job is created until they are read'), code: 'records-unread' };
     if (spec.kind === 'cron') {
       const v = M.validateSchedule(spec.schedule, { agentCreated: !caller.isUser });
       if (!v.ok) return { error: v.error };

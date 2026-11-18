@@ -77,10 +77,10 @@ try {
   {
     // f. §S, stronger: every removal call of jobs.js is a listed site; no alias of a removing fs call; the record never written by hand
     const JS4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile'];
+    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile', 'fs.promises.rename(f'];   // bl-jobs B-f276 cure r1: + the lifted note's rename to <store>.unread-done-<ms>
     const removals = [...JS4.matchAll(/fs\.(?:unlink|rm|rmdir|rename)Sync\(\s*[^,)]*|fs\.promises\.(?:rm|unlink|rmdir|rename)\(\s*[^,)]*/g)].map((m) => m[0]);
     const strangers = removals.filter((r) => !REMOVALS_OK.includes(r));
-    ok(removals.length === 6 && !strangers.length, `jobs.js's removal calls are exactly the listed six (the set-aside rename of a store, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
+    ok(removals.length === 7 && !strangers.length, `jobs.js's removal calls are exactly the listed seven (the set-aside rename of a store, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock, the lifted note's rename) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
     ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js');
     const saveBody = (JS4.match(/  _logsSave\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
     ok(saveBody && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');

@@ -923,7 +923,7 @@ function census(texts, rows = STORE_READS, cap = READ_DEBT_CAP) {
     if (!STATES.has(r.state)) { problems.push(`${key}: unknown state ${r.state}`); continue; }
     const src = texts.get(r.file);
     if (src == null) { problems.push(`${key}: the row's file is gone — remove the row (and lower READ_DEBT_CAP if it was debt)`); continue; }
-    if (!r.mark.test(src)) problems.push(r.state === 'debt' ? `${key}: its old read is gone — if it reads through storeAnswer now, flip the row to 'answer' (with its call as the mark) and lower READ_DEBT_CAP` : `${key}: its ${r.state === 'answer' ? 'storeAnswer call' : 'judged shape'} is no longer there — read the store again and fix the row`);
+    if (!r.mark.test(src)) problems.push(r.state === 'debt' ? `${key}: its marked read line is not there — if the line was only REWORDED, re-pin the row's mark to the new text (nothing else); only if the store reads through storeAnswer now, flip the row to 'answer' (with its call as the mark) and lower READ_DEBT_CAP` : `${key}: its ${r.state === 'answer' ? 'storeAnswer call' : 'judged shape'} is no longer there — read the store again and fix the row`);
     if (r.state === 'answer' && !USES_HELPER.test(src)) problems.push(`${key}: an 'answer' row whose file does not require src/store-read.js`);
   }
   const debt = rows.filter((r) => r.state === 'debt').length;
@@ -950,7 +950,7 @@ const commented = new Map(T); commented.set('src/server/notes.js', "// a store's
 ok(census(commented).length === 0, 'CONTROL: a set-aside name in a COMMENT is no store');
 const converted = new Map(T); converted.set('src/hosts.js', T.get('src/hosts.js').replace(/try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/, "const a = SR.storeAnswer(read);\n    if (a.state === 'unreadable') {"));
 const c2 = census(converted);
-ok(c2.length === 1 && /^src\/hosts\.js hosts\.json: its old read is gone — .*flip the row to 'answer'.*lower READ_DEBT_CAP/.test(c2[0]), 'CONTROL: a debt row whose store was converted is red until the row flips and the cap drops', c2);
+ok(c2.length === 1 && /^src\/hosts\.js hosts\.json: its marked read line is not there — if the line was only REWORDED, re-pin the row's mark to the new text \(nothing else\); only if the store reads through storeAnswer now, flip the row to 'answer'.*lower READ_DEBT_CAP/.test(c2[0]), 'CONTROL: a debt row whose marked line changed is red — its words say RE-PIN first (a reword), flip + lower the cap only for a converted store', c2);
 const lost = new Map(T); lost.set('src/jobs.js', T.get('src/jobs.js').replace('this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));', 'this._loadAnswer(JSON.parse(read.text));'));
 const c3 = census(lost);
 ok(c3.length === 1 && /^src\/jobs\.js jobs\.json: its storeAnswer call is no longer there/.test(c3[0]), 'CONTROL: a converted store that stops reading through storeAnswer is red', c3);

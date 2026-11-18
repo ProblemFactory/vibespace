@@ -13002,6 +13002,7 @@ export default {
   "Tools that did not start": "没有启动的工具",
   "New records": "新的记录种类",
   "exit code {n}": "退出码 {n}",
+  "The job records cannot be read right now ({why}). VibeSpace reads them again every few minutes; For you says what to check.": "暂时读不出任务记录（{why}）。VibeSpace 每隔几分钟会重新读取；「待你处理」里写了要检查什么。",
   "session-card::Mark": "标记",
   "msg-role::Assistant": "agent",
   "msg-role::Tool": "工具",

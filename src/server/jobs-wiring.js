@@ -87,6 +87,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     },
     log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { log('[jobs] inbox resolve failed:', e.message); return 0; } },
+    // B-f276 cure r1: an engine notice whose cause is gone (a store read again) — resolved by the id its filing returned
+    resolveNotice: (id) => { try { return userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); return null; } },
     // ── owner auto-notify lanes (2.344.0, B-0bf4) ─────────────────────────
     // Global default: agents.jobNotify (ON unless the user turned it off).
     notifyGlobal: () => { try { return serverSetting('agents.jobNotify') !== false; } catch { return true; } },
@@ -176,8 +178,11 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   };
 
   // ── user REST (cookie-authed): the panel sees and controls everything ──
+  // B-f276 cure r1: while jobs.json cannot be read — the words (the panel words its own from `code` + `why`), never an empty list
+  const unreadAnswer = () => ({ error: jm.unreadWords(), code: 'records-unread', why: (jm._unread.store && jm._unread.store.code) || 'unknown' });
   app.get('/api/jobs', (req, res) => {
     if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
+    if (jm._unread && jm._unread.store && req.query.archived !== '1') return res.status(503).json(unreadAnswer());   // B-f276 cure r1: an empty list says why
     // ?archived=1 = the archive list, SAME snapshot shape + archivedAt/archivedWhy
     // (triage §13 rule 5) — fetched by the panel only when the user asks
     if (req.query.archived) {
@@ -206,7 +211,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // never turn an id somebody holds into a 404
       const rec = jm.archivedById(req.params.id);
       if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: rec.runs } });
-      return res.status(404).json({ error: 'no such job' });
+      return res.status(jm._unread && jm._unread.store ? 503 : 404).json(jm._unread && jm._unread.store ? unreadAnswer() : { error: 'no such job' });   // B-f276 cure r1: never «no such job» while the records are unread
     }
     res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
   });
@@ -233,7 +238,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // an ARCHIVED record answers exactly two acts: ✕ (gone for good) and
       // the panel's expand ping (already acknowledged — a no-op that says so)
       const rec = jm.archivedById(req.params.id);
-      if (!rec) return res.status(404).json({ error: 'no such job' });
+      if (!rec) return res.status(jm._unread && jm._unread.store ? 503 : 404).json(jm._unread && jm._unread.store ? unreadAnswer() : { error: 'no such job' });
       // lane job-logs-sweep: «gone for good» is said once its log dir is gone (removed off the main thread; ≤ 10 s, then `logsPending`)
       if (act === 'rm') { const r = jm.rmArchived(rec.id); if (r.error) return res.status(400).json({ error: r.error }); return jm.logsGone(rec.id).then((v) => res.json({ success: true, ...r, ...(v.gone ? {} : v.kept && v.kept !== 'pending' ? { logsKept: v.kept } : { logsPending: true }) })); }   // round 2: what stays and why
       if (act === 'seen') return res.json({ success: true, changed: false, ack: M.ackState(rec), archived: true });

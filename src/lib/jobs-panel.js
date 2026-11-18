@@ -24,6 +24,9 @@ const KIND_ICON = {
   cron: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
 };
 
+// B-f276 cure r1: the list's error in the person's words — while jobs.json cannot be read the panel says why, never an empty list
+const listErrorText = (r) => (r && r.code === 'records-unread' ? t('The job records cannot be read right now ({why}). VibeSpace reads them again every few minutes; For you says what to check.', { why: r.why || '' }) : r.error);
+
 // expanded-card state survives the jobs-updated full re-render (2.357.0
 // sidebar unification — the rail panel is THE surface now, so it must not
 // collapse what the user opened every time the engine broadcasts)
@@ -534,7 +537,7 @@ export function openJobsWindow(app, opts = {}) {
     const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
     if (seq !== renderSeq) return;
     root.textContent = '';
-    if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; root.appendChild(e); return; }
+    if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = listErrorText(r); root.appendChild(e); return; }
     const jobs = r?.jobs || [];
     const counts = badgeCounts(jobs);
     summary.textContent = summaryText(counts, r?.held);
@@ -578,7 +581,7 @@ openJobsWindow.renderRail = (app, c) => {
     const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
     if (!c.isConnected) return;
     root.textContent = '';
-    if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; root.appendChild(e); return; }
+    if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = listErrorText(r); root.appendChild(e); return; }
     const jobs = r?.jobs || [];
     const counts = badgeCounts(jobs);
     summary.textContent = summaryText(counts, r?.held);

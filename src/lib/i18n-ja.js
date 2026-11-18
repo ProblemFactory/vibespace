@@ -13001,6 +13001,7 @@ export default {
   "Tools that did not start": "起動しなかったツール",
   "New records": "新しいレコードの種類",
   "exit code {n}": "終了コード {n}",
+  "The job records cannot be read right now ({why}). VibeSpace reads them again every few minutes; For you says what to check.": "ジョブの記録を今は読めません（{why}）。VibeSpace は数分ごとに読み直します。確認することは「あなた宛て」に書かれています。",
   "session-card::Mark": "マーク",
   "msg-role::Assistant": "エージェント",
   "msg-role::Tool": "ツール",

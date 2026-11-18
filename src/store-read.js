@@ -12,8 +12,8 @@
 // said); not safe (the rename AND the copy failed) ⇒ unreadable (the live file is those bytes' only copy — never written over).
 //
 // The release's loaders mixed these up: a failed read set the LIVE file aside (jobs.json on a storage hiccup: its records
-// became skeletons, then gone) or started empty and let the next save write over a healthy file. scripts/test-store-read.mjs
-// holds the census of every store's read as a ratchet.
+// became skeletons, then gone) or started empty and let the next save write over a healthy file. scripts/test-store-write-census.mjs
+// ⑧ holds the census of every store's read as a ratchet.
 
 const codeOf = (e) => String((e && (e.code || e.name || e.message)) || 'unreadable').slice(0, 60);
 
