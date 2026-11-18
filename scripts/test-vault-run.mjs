@@ -2023,36 +2023,45 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
       if (typeof got !== 'string') return false;
       return t[1] === 'nowhere' ? got === NOWHERE + t[2] : (got.startsWith(sw.runRoot + path.sep) && got.endsWith(t[2]) && !fs.existsSync(got));   // a fresh dir lives in THIS run's folder and is gone with it
     };
+    // the SIXTH term (the U1 cure): the child's search path must be the door's sealed PATH — the root-owned realpaths of the
+    // hub's PATH (the census bin and ghreal are uid-owned, so it is /usr/bin here); a tool starts programs BY NAME through it
+    const SEALED_PATH = [...new Set(hubEnv().PATH.split(':').map((x) => DOOR.sealDirReal(x)).filter(Boolean))].join(':');
+    const SEALED_ROOT_ONLY = SEALED_PATH.length > 0 && SEALED_PATH.split(':').every((x) => x !== CB && x !== GHREAL && DOOR.rootOwnedNoWrite(x));   // the yardstick itself is proven root-only (never the census bin, never ghreal)
     const missingOf = (name, E, A) => {
       const e = VR.TOOL_HOME_SEAL[name], out = [];
       for (const k of VR.SEAL_HOME_ENV) if (E[k] !== NOWHERE) out.push(k);
+      if (E[VR.SEAL_PATH_ENV] !== SEALED_PATH) out.push(VR.SEAL_PATH_ENV);
       for (const [k, v] of Object.entries(e.env)) { if (!tokenOk(v, E[k])) out.push(k); for (const x of Object.keys(E)) if (x !== k && x.toLowerCase() === k.toLowerCase()) out.push(x + ' (a case variant)'); }
       if (e.argv.length && JSON.stringify(A.slice(0, e.argv.length)) !== JSON.stringify(e.argv)) out.push('argv ' + e.argv.join(' '));
       return out;
     };
     const measured = {}, why = {};
     for (const row of VR.KNOWN_TOOLS) {
+      if (!VR.TOOL_HOME_SEAL[row.name] || !ARGS[row.name]) { measured[row.name] = -1; why[row.name] = !VR.TOOL_HOME_SEAL[row.name] ? 'no census entry (src/vault-run.js TOOL_HOME_SEAL)' : 'no census command (this leg\'s ARGS)'; continue; }   // a NEW row fails BY NAME, never a TypeError
       let cap = null;
       const spawn = (cmd, args, opts) => { cap = { cmd, args, env: opts.env }; const c = new EventEmitter(); c.pid = 99013; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; };
       const isGh = row.name === 'gh';
       const tool = isGh ? GHREAL_GH : path.join(CB, row.name);
       if (!isGh) fs.writeFileSync(tool, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-      const d = isGh ? mkGh({ spawnImpl: spawn, agentEnv: hubEnv }) : sw.mk(DOOR, { isRootOwned: REAL, spawnImpl: spawn, agentEnv: hubEnv });
+      const d = isGh ? mkGh({ spawnImpl: spawn, agentEnv: hubEnv }) : sw.mk(DOOR, { isRootOwned: (p) => p === CB || p.startsWith(CB + path.sep) || REAL(p), spawnImpl: spawn, agentEnv: hubEnv });   // each fake models a ROOT-OWNED install (a test cannot chown): the census measures the sealed case, never a programWritable one
       const { r } = await runAnswered(sw, ['--env', (isGh ? 'GH_TOKEN' : 'SECRET_T') + '=vault://agent:conv-1/gh-token', '--', tool, ...ARGS[row.name]], { door: d });
       if (!cap) { measured[row.name] = -1; why[row.name] = (r && (r.code || r.words)) || 'not spawned'; continue; }
       const miss = missingOf(row.name, cap.env || {}, cap.args || []);
       measured[row.name] = miss.length; if (miss.length) why[row.name] = miss;
       console.log(`    census ${row.name}: ${miss.length ? 'OPEN — ' + miss.join(', ') : 'sealed'}`);
     }
-    ok(Object.values(measured).every((n) => n >= 0), 'B-f1d3: every KNOWN_TOOLS row reached the spawn through the door (none refused before it — the census reads a real child env)', why);
-    // THE RED LIST — the rows still OPEN and how many of their pins the child misses (HOME + 4 XDG + the row's env pins + a case
-    // variant left beside one + the argv word). gh's 1 is its git child's ssh (GIT_SSH_COMMAND): its runSeal is the only seal today.
-    const RED_LIST = { curl: 7, wget: 7, http: 7, gh: 1, git: 8, aws: 8, gcloud: 7, az: 8, npm: 9, pip: 7, docker: 6, kubectl: 6, psql: 8, mysql: 8, rclone: 6, ssh: 6, sftp: 6, scp: 6, rsync: 6 };
+    ok(Object.values(measured).every((n) => n >= 0), 'B-f1d3: every KNOWN_TOOLS row has its census entry and command and reached the spawn through the door (none refused before it — the census reads a real child env); a NEW row is named here', Object.fromEntries(Object.entries(why).filter(([k]) => measured[k] < 0)));
+    // THE RED LIST — the rows still OPEN and how many of their pins the child misses (HOME + 4 XDG + PATH + the row's env pins + a
+    // case variant left beside one + the argv word). gh's 1 is its git child's ssh (GIT_SSH_COMMAND): its runSeal is the only seal today.
+    const RED_LIST = { curl: 8, wget: 8, http: 8, gh: 1, git: 9, aws: 9, gcloud: 8, az: 9, npm: 10, pip: 8, docker: 7, kubectl: 8, psql: 9, mysql: 9, rclone: 7, ssh: 7, sftp: 7, scp: 7, rsync: 7 };
     const open = Object.fromEntries(Object.entries(measured).filter(([, n]) => n !== 0).sort(([a], [b]) => (a < b ? -1 : 1)));
     const want = Object.fromEntries(Object.entries(RED_LIST).sort(([a], [b]) => (a < b ? -1 : 1)));
     ok(JSON.stringify(open) === JSON.stringify(want), `B-f1d3 THE HOME CENSUS (a ratchet): the rows still OPEN and the pins each child misses equal the pinned red list (${Object.keys(want).length} rows open of ${VR.KNOWN_TOOLS.length})`, { measured: open, why });
+    const pathOpen = VR.KNOWN_TOOLS.filter((r) => (why[r.name] || []).includes('PATH')).map((r) => r.name);
+    ok(SEALED_ROOT_ONLY && JSON.stringify(pathOpen) === JSON.stringify(VR.KNOWN_TOOLS.map((r) => r.name).filter((n) => n !== 'gh')),
+      'B-f1d3 (the U1 cure) PATH IS A TERM FOR EVERY ROW: the 18 rows without a seal hand the child the hub\'s PATH (its uid-owned census bin first) — open; gh\'s seal hands the sealed PATH — present (the red control: a census of five homes would count neither)', { SEALED_PATH, pathOpen });
     ok(JSON.stringify(why.gh) === '["GIT_SSH_COMMAND"]' && why.git && why.git.includes('GIT_CONFIG_GLOBAL') && why.npm && why.npm.includes('npm_config_userconfig (a case variant)'),
-      'B-f1d3: the census READS the child — gh\'s sealed pins (HOME, XDG_*, GH_CONFIG_DIR, its git child\'s config) measure as present and only its ssh child is open; git\'s same pin is open; the hub\'s lower-case npm variable is seen', { gh: why.gh, git: why.git, npm: why.npm });
+      'B-f1d3: the census READS the child — gh\'s sealed pins (HOME, XDG_*, PATH, GH_CONFIG_DIR, its git child\'s config) measure as present and only its ssh child is open; git\'s same pin is open; the hub\'s lower-case npm variable is seen', { gh: why.gh, git: why.git, npm: why.npm });
   }
 }
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)

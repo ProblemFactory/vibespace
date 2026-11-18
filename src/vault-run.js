@@ -498,40 +498,70 @@ const KNOWN_TOOLS = Object.freeze([
 ].map((r) => Object.freeze({ argvOnly: false, ...r })));
 // B-f1d3 (lane lg-vault-env) — THE HOME CENSUS: ONE unwritable environment for EVERY KNOWN_TOOLS row. Each row's tool reads
 // files the CARD CANNOT SHOW that name a PROGRAM it starts or a DESTINATION it dials — its home dotfile, its XDG config, a
-// «system» file under a prefix this user may own (nvm, brew), or the config-pointing variable the hub's own env may carry. A
-// same-uid agent writes any of them between two runs and the next run with the secret obeys it (the r10 → r11 lesson, until now
-// sealed for gh alone). `reads` names what each row reads and what it names; `env` is that tool's OWN «no user config» pin
-// (`<nowhere>` = the door's SEAL_NOWHERE, a path no user can create; `<fresh>` = an empty dir made inside THIS run's own 0700
-// run folder and shredded with it, for a tool that cannot run without writing state; `<ssh>` = a root-owned ssh
-// with `-F /dev/null`); `argv` is a pin the tool takes only as a word (inserted right after the program, never on the card);
-// `argvUnless` = flags of the agent's own that the argv pin would break (the agent's explicit config file — a card anyway).
-// HOME and every XDG_* go to SEAL_NOWHERE for every row. A HOME move alone is NOT a seal: ssh and its family read ~/.ssh
-// from the PASSWD home whatever $HOME says, and curl's manual searches the passwd home for .curlrc too — those rows need their word.
-// A credential / trust file (.netrc, .pgpass, known_hosts, root.crt) names neither a program nor a route and is left; the
-// project's own config in the run's folder (.git/config, .npmrc) is a confDest / runsProject row — a card every run. The
-// census (test-vault-run ⑬, test-vault-run-model ⑭) drives every row through the door and pins what is still open BY ROW.
+// «system» file under a prefix this user may own (nvm, brew), or the config-pointing variable the hub's own env may carry — and
+// it starts programs BY NAME through the search path. A same-uid agent writes any of those files (or a program in a PATH folder
+// it owns, ~/.local/bin, a brew bin) between two runs and the next run with the secret obeys it (the r10 → r11 lesson, until
+// now sealed for gh alone). The gh seal moves SIX things: HOME, the four XDG_* homes (SEAL_HOME_ENV) and PATH (SEAL_PATH_ENV:
+// the door's sealed PATH, root-owned realpaths only). Per row:
+//   `reads`  — what it reads that the card cannot show, and what that names (written even where the home move covers it: a
+//              later pin cheaper than the home would lose it);
+//   `env`    — that tool's OWN «no user config» pin: `<nowhere>` = the door's SEAL_NOWHERE (a path no user can create),
+//              `<fresh>` = an empty dir made inside THIS run's own 0700 run folder and shredded with it (a tool that cannot run
+//              without writing state), `<ssh>` = a root-owned ssh with `-F /dev/null`, `/dev/null`, a literal;
+//   `argv`   — a pin the tool takes only as a word (inserted right after the program, never on the card); `argvUnless` = flags
+//              of the agent's own that the word would break (its explicit config file — a card anyway);
+//   `starts` — the programs it starts BY NAME through the search path (why PATH is a term for it);
+//   `hubVars`— the variables of the HUB's own environment that name a program or a destination for it (+ SEAL_HUB_VARS_ALL for
+//              every row). A person sets those, the agent cannot: NOTED here, and the seal units decide which a run drops.
+// A HOME move alone is NOT a seal: ssh and its family read ~/.ssh from the PASSWD home whatever $HOME says, and curl's manual
+// searches the passwd home for .curlrc too — those rows need their word. A credential / trust file (.netrc, .pgpass,
+// known_hosts, root.crt) names neither a program nor a route and is left; the project's own config in the run's folder
+// (.git/config, .npmrc) is a confDest / runsProject row — a card every run. A file inside the tool's own install (npm's builtin
+// npmrc, the cloud SDK's properties) is the program's: a user-owned install is programWritable — a card every run. The census
+// (test-vault-run ⑬, test-vault-run-model ⑭) drives every row through the door and pins what is still open BY ROW.
 const TOOL_HOME_SEAL = Object.freeze(Object.fromEntries([   // rows with a name (a map keyed by tool names reads as a dispatch on ids — §78)
-  { name: 'curl', reads: ['~/.curlrc, $XDG_CONFIG_HOME/.curlrc, $CURL_HOME/.curlrc — url, proxy, config, output, write-out; its manual also searches the passwd home (getpwuid)'], env: { CURL_HOME: '<nowhere>' }, argv: ['-q'] },
-  { name: 'wget', reads: ['~/.wgetrc or $WGETRC — proxy, input file, execute, output', '$SYSTEM_WGETRC / <prefix>/etc/wgetrc — the same, under a prefix this user may own'], env: { WGETRC: '/dev/null', SYSTEM_WGETRC: '/dev/null' } },
-  { name: 'http', reads: ['$XDG_CONFIG_HOME/httpie/config.json or $HTTPIE_CONFIG_DIR — default_options (--proxy, --verify), sessions', 'the Python user site (~/.local/lib/python3*/site-packages/*.pth) — code run at start'], env: { HTTPIE_CONFIG_DIR: '<nowhere>', PYTHONNOUSERSITE: '1' } },
-  { name: 'gh', reads: ['$GH_CONFIG_DIR/config.yml — http_unix_socket, pager, browser, git_protocol; hosts.yml — hosts', 'its git child: ~/.gitconfig and ~/.ssh/config (see git)'], env: { GH_CONFIG_DIR: '<nowhere>', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_SSH_COMMAND: '<ssh>' } },
-  { name: 'git', reads: ['~/.gitconfig, $XDG_CONFIG_HOME/git/config, <prefix>/etc/gitconfig — core.sshCommand, url.<base>.insteadOf, credential.helper, http.proxy, core.hooksPath, core.fsmonitor', 'its ssh child: ~/.ssh/config from the passwd home (ProxyCommand, LocalCommand, Match exec)'], env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_SSH_COMMAND: '<ssh>' } },
-  { name: 'aws', reads: ['~/.aws/config — credential_process (a program), endpoint_url, ca_bundle; ~/.aws/credentials', '~/.aws/cli/alias — a !shell alias', 'the Python user site (aws v1)'], env: { AWS_CONFIG_FILE: '/dev/null', AWS_SHARED_CREDENTIALS_FILE: '/dev/null', PYTHONNOUSERSITE: '1' } },
-  { name: 'gcloud', reads: ['~/.config/gcloud or $CLOUDSDK_CONFIG — properties (api_endpoint_overrides, proxy), the active configuration; gcloud writes its state there', 'the Python user site'], env: { CLOUDSDK_CONFIG: '<fresh>', PYTHONNOUSERSITE: '1' } },
-  { name: 'az', reads: ['~/.azure or $AZURE_CONFIG_DIR — config (cloud endpoints), the command index; az writes its state there', '$AZURE_EXTENSION_DIR (default <config>/cliextensions) — extensions are Python code', 'the Python user site'], env: { AZURE_CONFIG_DIR: '<fresh>', AZURE_EXTENSION_DIR: '<fresh>/cliextensions', PYTHONNOUSERSITE: '1' } },
-  { name: 'npm', reads: ['~/.npmrc or $npm_config_userconfig — registry, script-shell, node-options, git', '<prefix>/etc/npmrc or $npm_config_globalconfig — the same, under nvm a prefix this user owns', '~/.npm — the cache it must write'], env: { NPM_CONFIG_USERCONFIG: '/dev/null', NPM_CONFIG_GLOBALCONFIG: '/dev/null', NPM_CONFIG_CACHE: '<fresh>' } },
-  { name: 'pip', reads: ['~/.config/pip/pip.conf, ~/.pip/pip.conf, $XDG_CONFIG_DIRS/pip/pip.conf, $VIRTUAL_ENV/pip.conf — index-url, trusted-host, proxy', 'the Python user site'], env: { PIP_CONFIG_FILE: '/dev/null', PYTHONNOUSERSITE: '1' } },
-  { name: 'docker', reads: ['~/.docker/config.json or $DOCKER_CONFIG — credsStore / credHelpers (a program), proxies, currentContext', '~/.docker/contexts — the daemon it dials', '~/.docker/cli-plugins — programs'], env: { DOCKER_CONFIG: '<nowhere>' } },
-  { name: 'kubectl', reads: ['~/.kube/config or $KUBECONFIG — server, an exec credential plugin (a program), auth-provider'], env: { KUBECONFIG: '<nowhere>' } },
-  { name: 'psql', reads: ['~/.psqlrc or $PSQLRC — \\! runs a shell', '~/.pg_service.conf or $PGSERVICEFILE — host', '$PGSYSCONFDIR/psqlrc + pg_service.conf — the same, under a prefix this user may own'], env: { PSQLRC: '/dev/null', PGSERVICEFILE: '/dev/null', PGSYSCONFDIR: '<nowhere>' } },
-  { name: 'mysql', reads: ['~/.my.cnf, $MYSQL_HOME/my.cnf, <prefix>/etc/my.cnf — host, pager, init-command', '~/.mylogin.cnf or $MYSQL_TEST_LOGIN_FILE — a login-path host (read even under --no-defaults)'], env: { MYSQL_HOME: '<nowhere>', MYSQL_TEST_LOGIN_FILE: '<nowhere>' }, argv: ['--no-defaults'], argvUnless: ['--defaults-file', '--defaults-extra-file', '--no-defaults', '--defaults-group-suffix', '--login-path', '--print-defaults'] },
-  { name: 'rclone', reads: ['~/.config/rclone/rclone.conf or $RCLONE_CONFIG — remotes (each a destination), a password command'], env: { RCLONE_CONFIG: '<nowhere>' } },
-  { name: 'ssh', reads: ['~/.ssh/config from the PASSWD home ($HOME is not read) — ProxyCommand, LocalCommand, Match exec, PKCS11Provider, KnownHostsCommand, Hostname'], argv: ['-F', '/dev/null'] },
-  { name: 'sftp', reads: ['~/.ssh/config from the passwd home, as ssh'], argv: ['-F', '/dev/null'] },
-  { name: 'scp', reads: ['~/.ssh/config from the passwd home, as ssh (scp hands -F to its ssh)'], argv: ['-F', '/dev/null'] },
-  { name: 'rsync', reads: ['its ssh child: ~/.ssh/config from the passwd home, and the first `ssh` on the PATH'], env: { RSYNC_RSH: '<ssh>' } },
-].map((v) => [v.name, Object.freeze({ name: v.name, reads: Object.freeze(v.reads), env: Object.freeze({ ...(v.env || {}) }), argv: Object.freeze(v.argv || []), argvUnless: Object.freeze(v.argvUnless || []) })])));
+  { name: 'curl', reads: ['~/.curlrc, $XDG_CONFIG_HOME/.curlrc, $CURL_HOME/.curlrc — url, proxy, config, output, write-out; its manual also searches the passwd home (getpwuid)'], env: { CURL_HOME: '<nowhere>' }, argv: ['-q'],
+    starts: [], hubVars: ['CURL_HOME', 'http_proxy / https_proxy / all_proxy / no_proxy', 'CURL_CA_BUNDLE'] },
+  { name: 'wget', reads: ['~/.wgetrc or $WGETRC — proxy, input file, execute, output', '$SYSTEM_WGETRC / <prefix>/etc/wgetrc — the same, under a prefix this user may own', 'wget2: $XDG_CONFIG_HOME/wget/wget2rc (or ~/.wget2rc) — wget2 reads neither WGETRC nor SYSTEM_WGETRC; the home move covers it'], env: { WGETRC: '/dev/null', SYSTEM_WGETRC: '/dev/null' },
+    starts: ['an askpass program (--use-askpass, $WGET_ASKPASS / $SSH_ASKPASS)'], hubVars: ['WGETRC', 'SYSTEM_WGETRC', 'WGET_ASKPASS', 'SSH_ASKPASS', 'http_proxy / https_proxy / no_proxy'] },
+  { name: 'http', reads: ['$XDG_CONFIG_HOME/httpie/config.json or $HTTPIE_CONFIG_DIR — default_options (--proxy, --verify), sessions', 'the Python user site (~/.local/lib/python3*/site-packages/*.pth) — code run at start'], env: { HTTPIE_CONFIG_DIR: '<nowhere>', PYTHONNOUSERSITE: '1' },
+    starts: ['its python (a #!/usr/bin/env python3 install)'], hubVars: ['HTTPIE_CONFIG_DIR', 'REQUESTS_CA_BUNDLE', 'http_proxy / https_proxy', 'PYTHONPATH'] },
+  { name: 'gh', reads: ['$GH_CONFIG_DIR/config.yml — http_unix_socket, pager, browser, git_protocol; hosts.yml — hosts', 'its git child: ~/.gitconfig and ~/.ssh/config (see git)'], env: { GH_CONFIG_DIR: '<nowhere>', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_SSH_COMMAND: '<ssh>' },
+    starts: ['git (its git-driving verbs) and git\'s ssh', 'a pager / browser / editor'], hubVars: ['GH_HOST', 'GH_CONFIG_DIR', 'GH_ENTERPRISE_TOKEN', 'GH_PAGER / GH_BROWSER / GH_EDITOR / PAGER / BROWSER', 'GIT_CONFIG_PARAMETERS'] },
+  { name: 'git', reads: ['~/.gitconfig, $XDG_CONFIG_HOME/git/config, <prefix>/etc/gitconfig — core.sshCommand, url.<base>.insteadOf, credential.helper, http.proxy, core.hooksPath, core.fsmonitor', 'its ssh child: ~/.ssh/config from the passwd home (ProxyCommand, LocalCommand, Match exec)'], env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_SSH_COMMAND: '<ssh>' },
+    starts: ['ssh (by name, unless GIT_SSH_COMMAND / core.sshCommand)', 'git-credential-<helper> named in its config', 'a pager / editor'], hubVars: ['GIT_CONFIG_PARAMETERS / GIT_CONFIG_COUNT / GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* (config by environment)', 'GIT_SSH / GIT_SSH_COMMAND / GIT_PROXY_COMMAND', 'GIT_EXEC_PATH / GIT_TEMPLATE_DIR', 'GIT_ASKPASS / SSH_ASKPASS', 'GIT_EXTERNAL_DIFF / GIT_PAGER / GIT_EDITOR'] },
+  { name: 'aws', reads: ['~/.aws/config — credential_process (a program), endpoint_url, ca_bundle; ~/.aws/credentials', '~/.aws/cli/alias — a !shell alias', '~/.aws/models or $AWS_DATA_PATH — botocore data; an endpoints.json there redirects a call (the home move covers ~/.aws/models)', 'the Python user site (aws v1)'], env: { AWS_CONFIG_FILE: '/dev/null', AWS_SHARED_CREDENTIALS_FILE: '/dev/null', PYTHONNOUSERSITE: '1' },
+    starts: ['a credential_process / an alias\'s shell (named in its config)', 'its python (aws v1)'], hubVars: ['AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE / AWS_PROFILE', 'AWS_ENDPOINT_URL / AWS_ENDPOINT_URL_* (endpoint overrides)', 'AWS_DATA_PATH', 'AWS_CA_BUNDLE', 'PYTHONPATH'] },
+  { name: 'gcloud', reads: ['~/.config/gcloud or $CLOUDSDK_CONFIG — properties (api_endpoint_overrides, proxy), the active configuration; gcloud writes its state there', '<sdk root>/properties — the installation\'s, no switch moves it (a user-owned SDK is programWritable — a card every run)', 'the Python user site'], env: { CLOUDSDK_CONFIG: '<fresh>', PYTHONNOUSERSITE: '1' },
+    starts: ['python — its wrapper finds it on the PATH unless $CLOUDSDK_PYTHON', 'components / credential helpers by name'], hubVars: ['CLOUDSDK_CONFIG', 'CLOUDSDK_PYTHON', 'CLOUDSDK_* (every property: api_endpoint_overrides, proxy, auth)', 'PYTHONPATH'] },
+  { name: 'az', reads: ['~/.azure or $AZURE_CONFIG_DIR — config (cloud endpoints), the command index; az writes its state there', '$AZURE_EXTENSION_DIR (default <config>/cliextensions) — extensions are Python code', 'the Python user site'], env: { AZURE_CONFIG_DIR: '<fresh>', AZURE_EXTENSION_DIR: '<fresh>/cliextensions', PYTHONNOUSERSITE: '1' },
+    starts: ['its python (the az wrapper)'], hubVars: ['AZURE_CONFIG_DIR / AZURE_EXTENSION_DIR', 'AZURE_CORE_* / AZURE_CLOUD_* (config by environment)', 'REQUESTS_CA_BUNDLE', 'PYTHONPATH'] },
+  { name: 'npm', reads: ['~/.npmrc or $npm_config_userconfig — registry, script-shell, node-options, git', '<prefix>/etc/npmrc or $npm_config_globalconfig — the same, under nvm a prefix this user owns', '<npm install>/npmrc — the builtin, no switch moves it (a user-owned npm is programWritable — a card every run)', '~/.npm — the cache it must write'], env: { NPM_CONFIG_USERCONFIG: '/dev/null', NPM_CONFIG_GLOBALCONFIG: '/dev/null', NPM_CONFIG_CACHE: '<fresh>' },
+    starts: ['node — its #!/usr/bin/env node finds it on the PATH', 'sh for lifecycle scripts, git for a git dependency'], hubVars: ['npm_config_* in any case (every config key: registry, script-shell, node-options, userconfig — a hub started by npm carries them)', 'NODE_OPTIONS / NODE_PATH'] },
+  { name: 'pip', reads: ['~/.config/pip/pip.conf, ~/.pip/pip.conf, $XDG_CONFIG_DIRS/pip/pip.conf, $VIRTUAL_ENV/pip.conf — index-url, trusted-host, proxy', 'the Python user site'], env: { PIP_CONFIG_FILE: '/dev/null', PYTHONNOUSERSITE: '1' },
+    starts: ['git / hg for a VCS requirement', 'a build backend\'s python'], hubVars: ['PIP_* (every option: index-url, trusted-host, proxy)', 'PYTHONPATH'] },
+  { name: 'docker', reads: ['~/.docker/config.json or $DOCKER_CONFIG — credsStore / credHelpers (a program), proxies, currentContext, cliPluginsExtraDirs (more plug-in folders)', '~/.docker/contexts — the daemon it dials', '~/.docker/cli-plugins — programs', 'the system cli-plugin folders (/usr/local/lib/docker/cli-plugins, /usr/local/libexec/docker/cli-plugins, /usr/lib/docker/cli-plugins, /usr/libexec/docker/cli-plugins; on a Mac /opt/homebrew/lib/docker/cli-plugins, user-owned under Homebrew) — a plug-in runs when named'], env: { DOCKER_CONFIG: '<nowhere>' },
+    starts: ['docker-credential-<store> — with NO config.json the default store (secretservice / pass / osxkeychain) is looked up on the PATH', 'a cli plug-in docker-<name>'], hubVars: ['DOCKER_HOST / DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_CERT_PATH / DOCKER_TLS_VERIFY'] },
+  { name: 'kubectl', reads: ['~/.kube/config or $KUBECONFIG — server, an exec credential plugin (a program), auth-provider', '~/.kube/kuberc or $KUBERC (kubectl 1.33+) — aliases and default flags; KUBERC=off turns it off'], env: { KUBECONFIG: '<nowhere>', KUBERC: 'off' },
+    starts: ['an exec credential plugin named in the kubeconfig, found on the PATH', 'kubectl-<name> plug-ins on the PATH', 'an editor / a diff program'], hubVars: ['KUBECONFIG', 'KUBERC', 'KUBECTL_EXTERNAL_DIFF / KUBE_EDITOR / EDITOR'] },
+  { name: 'psql', reads: ['~/.psqlrc or $PSQLRC — \\! runs a shell', '~/.pg_service.conf or $PGSERVICEFILE — host', '$PGSYSCONFDIR/psqlrc + pg_service.conf — the same, under a prefix this user may own'], env: { PSQLRC: '/dev/null', PGSERVICEFILE: '/dev/null', PGSYSCONFDIR: '<nowhere>' },
+    starts: ['a shell (\\!)', 'a pager / an editor'], hubVars: ['PGHOST / PGHOSTADDR / PGSERVICE', 'PGSERVICEFILE / PSQLRC / PGSYSCONFDIR', 'PSQL_PAGER / PAGER / PSQL_EDITOR'] },
+  { name: 'mysql', reads: ['~/.my.cnf, $MYSQL_HOME/my.cnf, <prefix>/etc/my.cnf — host, pager, init-command (the prefix file stays read when the agent\'s own first word is an option-file option)', '~/.mylogin.cnf or $MYSQL_TEST_LOGIN_FILE — a login-path host (read even under --no-defaults)'], env: { MYSQL_HOME: '<nowhere>', MYSQL_TEST_LOGIN_FILE: '<nowhere>' }, argv: ['--no-defaults'], argvUnless: ['--defaults-file', '--defaults-extra-file', '--no-defaults', '--defaults-group-suffix', '--login-path', '--print-defaults'],
+    starts: ['a shell (system / \\!)', 'a pager program'], hubVars: ['MYSQL_HOST / MYSQL_UNIX_PORT', 'MYSQL_HOME / MYSQL_TEST_LOGIN_FILE'] },
+  { name: 'rclone', reads: ['~/.config/rclone/rclone.conf or $RCLONE_CONFIG — remotes (each a destination), a password command'], env: { RCLONE_CONFIG: '<nowhere>' },
+    starts: ['a password command (--password-command, from its config or env)'], hubVars: ['RCLONE_CONFIG', 'RCLONE_CONFIG_<REMOTE>_* (a remote\'s settings)', 'RCLONE_PASSWORD_COMMAND (a command that yields a credential)', 'RCLONE_* (every flag)'] },
+  { name: 'ssh', reads: ['~/.ssh/config from the PASSWD home ($HOME is not read) — ProxyCommand, LocalCommand, Match exec, PKCS11Provider, KnownHostsCommand, Hostname'], argv: ['-F', '/dev/null'],
+    starts: ['ProxyCommand / LocalCommand / KnownHostsCommand programs (from a config)', 'ssh-askpass'], hubVars: ['SSH_AUTH_SOCK', 'SSH_ASKPASS / SSH_ASKPASS_REQUIRE / DISPLAY'] },
+  { name: 'sftp', reads: ['~/.ssh/config from the passwd home, as ssh'], argv: ['-F', '/dev/null'],
+    starts: ['ssh (its compiled path, or -S)'], hubVars: ['SSH_AUTH_SOCK', 'SSH_ASKPASS / SSH_ASKPASS_REQUIRE / DISPLAY'] },
+  { name: 'scp', reads: ['~/.ssh/config from the passwd home, as ssh (scp hands -F to its ssh)'], argv: ['-F', '/dev/null'],
+    starts: ['ssh (its compiled path, or -S)'], hubVars: ['SSH_AUTH_SOCK', 'SSH_ASKPASS / SSH_ASKPASS_REQUIRE / DISPLAY'] },
+  { name: 'rsync', reads: ['its ssh child: ~/.ssh/config from the passwd home, and the first `ssh` on the PATH', '~/.popt and /etc/popt — popt aliases rsync expands into options (an --rsh among them); the home move covers ~/.popt'], env: { RSYNC_RSH: '<ssh>' },
+    starts: ['ssh by name on the PATH (its default remote shell)'], hubVars: ['RSYNC_RSH / RSYNC_CONNECT_PROG', 'RSYNC_PROXY', 'SSH_AUTH_SOCK'] },
+].map((v) => [v.name, Object.freeze({ name: v.name, reads: Object.freeze(v.reads), env: Object.freeze({ ...(v.env || {}) }), argv: Object.freeze(v.argv || []), argvUnless: Object.freeze(v.argvUnless || []), starts: Object.freeze(v.starts || []), hubVars: Object.freeze(v.hubVars || []) })])));
 const SEAL_HOME_ENV = Object.freeze(['HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME']);   // B-f1d3: every row's home goes nowhere
+const SEAL_PATH_ENV = 'PATH';   // B-f1d3 (the U1 cure): … and its search path is the door's sealed PATH — the sixth thing the gh seal moves
+const SEAL_HUB_VARS_ALL = Object.freeze(['LD_PRELOAD / LD_LIBRARY_PATH (a library search path)', 'http_proxy / https_proxy (where a run may go is the hub\'s)']);   // noted for every row
 /** B-f1d3: a KNOWN_TOOLS row's census entry (its reads + its pin), or null for a tool with no row (a shell, an interpreter). */
 const homeSealOf = (row) => (row && Object.prototype.hasOwnProperty.call(TOOL_HOME_SEAL, row.name) ? TOOL_HOME_SEAL[row.name] : null);
 
@@ -2098,7 +2128,7 @@ module.exports = {
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, urlHostsBad, parseCfgLine, cfgRouteHosts, repoHostOf, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
   parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, ghCredEnvFor, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
-  TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, TOOL_HOME_SEAL, SEAL_HOME_ENV, homeSealOf, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
+  TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, TOOL_HOME_SEAL, SEAL_HOME_ENV, SEAL_PATH_ENV, SEAL_HUB_VARS_ALL, homeSealOf, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
   shapeOf, shapeKeyOf, commandCandidateOf, PIN_GRAMMAR, PIN_WHY, PIN_ENV, pinOf, wildcardToolOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, compileForms, isCompiledForms, createMasker, createRunMasker, maskText, compileTextScrubber,

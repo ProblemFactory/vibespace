@@ -1617,7 +1617,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 console.log('⑭ THE HOME CENSUS (B-f1d3) — one TOOL_HOME_SEAL entry per KNOWN_TOOLS row, each pin a known token');
 {
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-  const PIN_VALUE = /^(?:\/dev\/null|<(?:nowhere|fresh)>(?:\/[a-z]+)?|<ssh>|[0-9])$/;
+  const PIN_VALUE = /^(?:\/dev\/null|<(?:nowhere|fresh)>(?:\/[a-z]+)?|<ssh>|[0-9]|off)$/;
   const censusGaps = (rows, table) => {
     const out = [], names = rows.map((r) => r.name);
     for (const n of names) if (!has(table, n)) out.push(`${n}: no census entry`);
@@ -1628,6 +1628,8 @@ console.log('⑭ THE HOME CENSUS (B-f1d3) — one TOOL_HOME_SEAL entry per KNOWN
       for (const [k, v] of Object.entries(e.env || {})) if (!/^[A-Z][A-Z0-9_]*$/.test(k) || typeof v !== 'string' || !PIN_VALUE.test(v)) out.push(`${n}: env pin ${k}=${v} is not a known token`);
       if ((e.argvUnless || []).length && !(e.argv || []).length) out.push(`${n}: argvUnless without an argv pin`);
       if ((e.argv || []).some((a) => typeof a !== 'string' || !a)) out.push(`${n}: an empty argv pin word`);
+      if (!Array.isArray(e.starts) || e.starts.some((x) => typeof x !== 'string' || x.length < 8)) out.push(`${n}: starts must name each program it starts by name (an empty list when none)`);
+      if (!Array.isArray(e.hubVars) || !e.hubVars.length || e.hubVars.some((x) => typeof x !== 'string' || !/^[A-Za-z]/.test(x))) out.push(`${n}: hubVars must name the hub variables that name a program or a destination for it`);
     }
     return out;
   };
@@ -1636,16 +1638,22 @@ console.log('⑭ THE HOME CENSUS (B-f1d3) — one TOOL_HOME_SEAL entry per KNOWN
   ok(!gaps.length && Object.keys(T).length === V.KNOWN_TOOLS.length && V.KNOWN_TOOLS.length === 19, `B-f1d3: THE HOME CENSUS covers every KNOWN_TOOLS row (${V.KNOWN_TOOLS.length}) — each names what its tool reads that the card cannot show, and that tool's own pin`, gaps);
   const { curl: _dropped, ...noCurl } = T;
   const badPin = { ...T, wget: { ...T.wget, env: { WGETRC: '/home/userL/.wgetrc' } } };
-  const g1 = censusGaps(V.KNOWN_TOOLS, noCurl), g2 = censusGaps(V.KNOWN_TOOLS, badPin), g3 = censusGaps([...V.KNOWN_TOOLS, { name: 'newtool' }], T);
-  ok(g1.length === 1 && /^curl: no census entry/.test(g1[0]) && g2.length === 1 && /^wget: env pin WGETRC=/.test(g2[0]) && g3.length === 1 && /^newtool: no census entry/.test(g3[0]),
-    'B-f1d3 RED controls: the same checker names a dropped row (curl), a pin that is a home path (wget WGETRC=~/.wgetrc) and a NEW tool row that came without its census entry', { g1, g2, g3 });
+  const noVars = { ...T, psql: { ...T.psql, hubVars: [] } };
+  const g1 = censusGaps(V.KNOWN_TOOLS, noCurl), g2 = censusGaps(V.KNOWN_TOOLS, badPin), g3 = censusGaps([...V.KNOWN_TOOLS, { name: 'newtool' }], T), g4 = censusGaps(V.KNOWN_TOOLS, noVars);
+  ok(g1.length === 1 && /^curl: no census entry/.test(g1[0]) && g2.length === 1 && /^wget: env pin WGETRC=/.test(g2[0]) && g3.length === 1 && /^newtool: no census entry/.test(g3[0]) && g4.length === 1 && /^psql: hubVars/.test(g4[0]),
+    'B-f1d3 RED controls: the same checker names a dropped row (curl), a pin that is a home path (wget WGETRC=~/.wgetrc), a NEW tool row that came without its census entry, and a row with no hub-variable column (psql)', { g1, g2, g3, g4 });
   const gh = V.knownToolOf('gh'), ge = V.homeSealOf(gh);
   ok(!!ge && ge.env[gh.runSeal.configDirEnv] === '<nowhere>' && Object.entries(gh.runSeal.childEnv).every(([k, v]) => k === 'GIT_TERMINAL_PROMPT' || ge.env[k] === v),
     'B-f1d3: gh\'s census entry carries what its runSeal already sets (GH_CONFIG_DIR nowhere, its git child\'s GIT_CONFIG_GLOBAL / NOSYSTEM) — one truth, not two', { ge: ge && ge.env, runSeal: gh.runSeal.childEnv });
   ok(V.homeSealOf(V.knownToolOf('httpie')) === T.http && V.homeSealOf(V.knownToolOf('curl8')) === T.curl && V.homeSealOf(null) === null && V.homeSealOf({ name: 'bash' }) === null && V.homeSealOf({ name: 'toString' }) === null,
     'B-f1d3: homeSealOf follows a row\'s alias (httpie ⇒ http) and its version suffix (curl8 ⇒ curl); a shell / no row / a prototype name has no entry');
-  ok(JSON.stringify(V.SEAL_HOME_ENV) === JSON.stringify(['HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME']) && Object.isFrozen(T) && Object.values(T).every((e) => Object.isFrozen(e) && Object.isFrozen(e.env) && Object.isFrozen(e.argv)),
-    'B-f1d3: every row\'s home names are the five the gh seal moves; the table and each entry are frozen');
+  ok(JSON.stringify([...V.SEAL_HOME_ENV, V.SEAL_PATH_ENV]) === JSON.stringify(['HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'PATH']) && Array.isArray(V.SEAL_HUB_VARS_ALL) && V.SEAL_HUB_VARS_ALL.length > 0 && Object.isFrozen(T) && Object.values(T).every((e) => Object.isFrozen(e) && Object.isFrozen(e.env) && Object.isFrozen(e.argv)),
+    'B-f1d3: every row is handed the SIX things the gh seal moves — HOME, the four XDG_* homes and PATH (the U1 cure: the census had five); a hub-variable note for every row; the table and each entry are frozen');
+  const rd = (n) => T[n].reads.join(' | ');
+  ok(/kuberc/.test(rd('kubectl')) && T.kubectl.env.KUBERC === 'off' && /\.aws\/models/.test(rd('aws')) && /wget2rc/.test(rd('wget')) && /popt/.test(rd('rsync')) && /homebrew\/lib\/docker\/cli-plugins/.test(rd('docker')) && /cliPluginsExtraDirs/.test(rd('docker')) && /<sdk root>\/properties/.test(rd('gcloud')) && /<npm install>\/npmrc/.test(rd('npm')),
+    'B-f1d3 (the U1 cure): the table names what the readers found missing even where the home move covers it — kubectl\'s kuberc (+ KUBERC=off), aws\'s models folder, wget2\'s rc, rsync\'s popt aliases, docker\'s system and extra plug-in folders, the cloud SDK\'s and npm\'s install-level files');
+  ok(/PATH/.test(T.docker.starts.join(' ')) && /node/.test(T.npm.starts.join(' ')) && /CLOUDSDK_PYTHON/.test(T.gcloud.starts.join(' ')) && /ssh/.test(T.rsync.starts.join(' ')) && /GIT_CONFIG_PARAMETERS/.test(T.git.hubVars.join(' ')) && /AWS_ENDPOINT_URL/.test(T.aws.hubVars.join(' ')) && /RCLONE_PASSWORD_COMMAND/.test(T.rclone.hubVars.join(' ')) && /LD_LIBRARY_PATH/.test(V.SEAL_HUB_VARS_ALL.join(' ')),
+    'B-f1d3 (the U1 cure): `starts` names what a row starts BY NAME through the PATH (docker\'s default credential store, npm\'s env node, gcloud\'s python, rsync\'s ssh) and `hubVars` the hub variables that name a program or a destination (git config by environment, endpoint overrides, a remote\'s password command, a library search path)');
   ok(['ssh', 'sftp', 'scp'].every((n) => JSON.stringify(T[n].argv) === '["-F","/dev/null"]') && T.curl.argv[0] === '-q' && T.mysql.argv[0] === '--no-defaults' && /passwd home/i.test(T.ssh.reads[0]) && /passwd home/i.test(T.curl.reads[0]),
     'B-f1d3: the rows a HOME move cannot seal carry a WORD — ssh / sftp / scp read ~/.ssh from the passwd home (-F /dev/null), curl\'s manual searches the passwd home for .curlrc (-q first), mysql reads its option files under any HOME (--no-defaults first)');
 }
