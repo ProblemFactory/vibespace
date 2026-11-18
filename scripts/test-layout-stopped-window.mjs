@@ -56,6 +56,8 @@
 //      B-b05e the rollback ring is SPREAD OVER TIME — the REAL router restarted over forty days of points, then a phone's
 //        burst of 100 shape changes: every recent day and hour keeps its point, the point from before the restart is pinned
 //        and named in the dialog (the base kept the first ten ever written + the burst)
+//      B-46fc a page that leaves takes its last change — the REAL LayoutManager: a window opened, then pagehide (or the page
+//        hidden) inside the debounce ⇒ its save goes at once
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -156,7 +158,7 @@ const W0 = () => ({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: 
 // ── the real client classes over a fake app (test-desktop-record's world, trimmed) ──
 const { DesktopManager: DM } = await import(pathToFileURL(path.join(LIB, 'desktop-manager.js')).href);
 const { LayoutManager: LM } = await import(pathToFileURL(path.join(LIB, 'layout.js')).href);
-function world({ records, active = 'desk-w', extra = {} } = {}) {
+function world({ records, active = 'desk-w', extra = {}, Lm = LM } = {}) {
   const sent = [], handlers = [], closed = [], resumed = [], replayed = [];
   const wins = new Map();
   let dm = null, lm = null, seq = 0;
@@ -180,7 +182,7 @@ function world({ records, active = 'desk-w', extra = {} } = {}) {
     _snapshotWinBounds: (w) => ({ gridBounds: w.gridBounds, desktopId: w._desktopId }),
     ...extra,
   };
-  lm = new LM(app); app.layoutManager = lm;
+  lm = new Lm(app); app.layoutManager = lm;
   dm = new DM(app); app.desktopManager = dm;
   dm._desktops = DESKS.map((d) => ({ ...d })); dm._activeId = active;
   for (const [d, ws] of Object.entries(records)) { const rec = { windows: ws, grid: null }; dm._setRecord(d, rec); dm.noteWire(d, rec); }
@@ -946,6 +948,64 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
   ok(t2.boots === 2 && J(t2.firstIds) === J(P_BEFORE().map((w) => w.winId)), '§9 …a SECOND restart after a bad one keeps the point from before the FIRST (个人\'s eleven), both named in the dialog (the newest three boot points are pinned)', t2);
   const t2red = await twice(() => mutantModule('src/routes/persistence.js', PIN, 'const keep = ringKeep(files, { pinned: _boots.slice(-1) });'));
   ok(t2red.boots === 1 && J(t2red.firstIds) !== J(P_BEFORE().map((w) => w.winId)), '§9 CONTROL: one pin only ⇒ the point before the first restart is pushed out by the second burst (the leg above goes RED)', t2red);
+});
+
+await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL LayoutManager: a window opened, the page hidden while its save still waits', async () => {
+  // the page's own listeners, heard: LayoutManager adds them at construction (pagehide on window, visibilitychange on document)
+  const scene = async (Lm, how, { timer = false, gate = null } = {}) => {
+    const heard = { win: {}, doc: {} };
+    const was = { w: globalThis.addEventListener, d: document.addEventListener, hidden: Object.getOwnPropertyDescriptor(document, 'hidden') };
+    globalThis.addEventListener = (ev, fn) => { (heard.win[ev] = heard.win[ev] || []).push(fn); };
+    document.addEventListener = (ev, fn) => { (heard.doc[ev] = heard.doc[ev] || []).push(fn); };
+    let W;
+    try { W = world({ records: { 'desk-w': [files('w-0', 0)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w', Lm }); }
+    finally { globalThis.addEventListener = was.w; document.addEventListener = was.d; }
+    W.lm._lastSentJson = null;
+    if (gate === 'boot') W.lm._restoring = true; // the boot's 5 s (the measured scene: a door tap 1.8 s after the load)
+    if (gate === 'switch') W.dm._restoring = true; // a desktop switch's 1 s
+    W.mkWin('win-door', 'desk-w', { type: 'chat', title: 'Van build', _openSpec: { action: 'attachSession', serverId: 'sess-door', backendSessionId: CID(5) } }); // the door tap's window
+    W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
+    W.lm.scheduleAutoSave(); // the debounce (500 ms) — or, under a gate, deferred past it (_deferSave: asked again in 1.1 s)
+    await tick(50);
+    const before = W.syncs('desk-w').length, deferred = !!W.lm._deferT;
+    if (how === 'pagehide') for (const fn of heard.win.pagehide || []) fn({ persisted: false });
+    if (how === 'hidden') { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); try { for (const fn of heard.doc.visibilitychange || []) fn({}); } finally { if (was.hidden) Object.defineProperty(document, 'hidden', was.hidden); else delete document.hidden; } }
+    const at = W.syncs('desk-w').slice(before);
+    const carried = at.some((m) => (m.state.windows || []).some((w) => w.winId === 'win-door'));
+    const gates = [W.lm._restoring, W.dm._restoring];
+    if (timer) await tick(gate ? 1200 : 550); // the debounce's / the deferral's own timer: nothing more to send (no second copy)
+    W.lm._restoring = false; W.dm._restoring = false;
+    const after = W.syncs('desk-w').slice(before);
+    clearTimeout(W.lm._autoSaveTimer); clearTimeout(W.lm._deferT); W.lm._deferT = null;
+    return { before, now: at.length, carried, after: after.length, deferred, gates, W };
+  };
+  const ph = await scene(LM, 'pagehide', { timer: true });
+  ok(ph.before === 0 && ph.now === 1 && ph.carried, '§9 a window opened, then pagehide 50 ms into the 500 ms debounce ⇒ its save goes AT ONCE, carrying the window (b06f36e90: nothing until the timer — a reload in between showed another conversation)', { before: ph.before, now: ph.now, carried: ph.carried });
+  ok(ph.after === 1, '§9 …and the debounce\'s own timer sends no second copy of that save', ph.after);
+  const hd = await scene(LM, 'hidden');
+  ok(hd.now === 1 && hd.carried, '§9 …the page turning HIDDEN (a phone\'s app switch, a reload\'s first event) does the same', { now: hd.now, carried: hd.carried });
+  const bt = await scene(LM, 'pagehide', { gate: 'boot', timer: true });
+  ok(bt.deferred && bt.now === 1 && bt.carried && bt.gates[0] === true && bt.after === 1, '§9 THE MEASURED SCENE: the door tap inside the BOOT\'s 5 s gate (its save deferred past it), then pagehide ⇒ the save goes at once, carrying the window; the gate stands again after that one call; no second copy when the deferral\'s timer would have fired', { deferred: bt.deferred, now: bt.now, gates: bt.gates, after: bt.after });
+  const sw = await scene(LM, 'hidden', { gate: 'switch' });
+  ok(sw.deferred && sw.now === 1 && sw.carried && sw.gates[1] === true, '§9 …the same inside a desktop SWITCH\'s 1 s gate, the page turning hidden', { deferred: sw.deferred, now: sw.now, gates: sw.gates });
+  // nothing due ⇒ nothing sent (no echo of the same record), and nothing said
+  {
+    const W = world({ records: { 'desk-w': [files('w-0', 0)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w' });
+    W.lm._lastSentJson = null; W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now();
+    W.lm.scheduleAutoSave(); await W.lm._doAutoSave(); const n0 = W.syncs('desk-w').length; // the save LEFT (its own timer is moot)
+    const asked = W.lm._flushOnLeave('pagehide');
+    ok(n0 === 1 && asked === false && W.syncs('desk-w').length === 1, '§9 …a page whose last save already LEFT sends nothing more at pagehide (no echo of the same record)', { n0, asked });
+    W.lm.scheduleAutoSave(); W.lm._saveAskedAt = (W.lm._savedAt || 0) + 1; // a save asked after the last one left (due)
+    W.lm._pointerDown = true; const drag = W.lm._flushOnLeave('pagehide'); W.lm._pointerDown = false; clearTimeout(W.lm._autoSaveTimer);
+    ok(drag === false && W.syncs('desk-w').length === 1, '§9 …a pointer still DOWN (an unfinished drag) sends no snapshot of it, and the flush says it sent nothing', drag);
+  }
+  // RED CONTROLS: the pagehide listener taken out ⇒ the save waits for its timer; the gates kept up ⇒ the deferred save waits for a page that is gone
+  const { LayoutManager: LM0 } = await mutantEsm('src/lib/layout.js', "    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._flushOnLeave('pagehide'));\n", '');
+  const red = await scene(LM0, 'pagehide', { timer: true });
+  ok(red.now === 0 && red.after === 1, '§9 CONTROL: without the pagehide listener the save is NOT sent at pagehide (only by the 500 ms timer, after the page is gone) — the first leg goes RED', { now: red.now, after: red.after });
+  const { LayoutManager: LM2 } = await mutantEsm('src/lib/layout.js', '    this._restoring = false; if (dm) dm._restoring = false;\n', '');
+  const red2 = await scene(LM2, 'pagehide', { gate: 'boot' });
+  ok(red2.now === 0, '§9 CONTROL: the gates left up for the flush ⇒ the boot-gated save is deferred again and never leaves — the measured-scene leg goes RED', red2.now);
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

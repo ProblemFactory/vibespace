@@ -193,6 +193,10 @@ class LayoutManager {
     const flushPending = () => this._flushPending();
     document.addEventListener('pointerup', flushPending, { capture: true, passive: true });
     document.addEventListener('pointercancel', flushPending, { capture: true, passive: true });
+    // A PAGE THAT LEAVES TAKES ITS LAST CHANGE WITH IT (B-46fc): a reload, a closed tab, a phone's app switch — the save the
+    // debounce still holds goes at once (_flushOnLeave)
+    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._flushOnLeave('pagehide'));
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this._flushOnLeave('hidden'); });
     // Server restart resets its seq counter — reset ours on every reconnect; and a RECONNECT re-reads the layout
     // (§6b guard 9, lane desktop-move verify r1 D2): what other clients wrote during the outage never arrives
     // by broadcast. 250 ms after the open — the sends queued during the outage have left first.
@@ -1721,7 +1725,34 @@ class LayoutManager {
     // the dirty bit) still schedules nothing — guard 1 (anti-echo) holds
     if (this._restoring || this.app.desktopManager?._restoring) { this._deferSave(); return; }
     if (this._autoSaveTimer) clearTimeout(this._autoSaveTimer);
+    this._saveAskedAt = Date.now(); // a save is DUE until one leaves (_flushOnLeave)
     this._autoSaveTimer = setTimeout(() => this._doAutoSave(), 500);
+  }
+
+  /** A PAGE THAT LEAVES TAKES ITS LAST CHANGE WITH IT (B-46fc — measured on the demo 2026-10-26: a door tap, then a phone reload
+   *  1.8 s later ⇒ the reloaded page showed another conversation, the right one at 6 s): a save the person caused can wait
+   *  twice — the 500 ms debounce, and a GATE it was deferred past (the boot's 5 s, a desktop switch's 1 s, a remote apply's
+   *  1 s cooldown; _deferSave's 1.1 s re-ask) — and a page that leaves never runs either timer. At pagehide or when the page
+   *  turns hidden a save that is DUE goes NOW, over the socket that is still open, through _doAutoSave with the gates lowered
+   *  for that one call (they guard against echoing an apply's own churn — a person's act is no echo; the record sent is the held
+   *  record + what the page built, a window still coming stays held — desktop-manager recordFor) and set back after it. The
+   *  save keeps every other guard (a pointer still down re-arms it, the dirty expiry, the stale base, the breaker). A socket
+   *  that is not open queues it (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
+  _flushOnLeave(why) {
+    const timerDue = !!this._autoSaveTimer && this._saveAskedAt > (this._savedAt || 0), deferred = !!this._deferT; // asked AFTER the last save left (one asked in that same ms counts as left — a save sets _savedAt right after its own ask's debounce)
+    if ((!timerDue && !deferred) || this.app.stage?.isActive) return false; // nothing due: the last asked save has left
+    clearTimeout(this._autoSaveTimer); this._autoSaveTimer = null;
+    if (deferred) {
+      clearTimeout(this._deferT); this._deferT = null;
+      // the deferral's own re-arm (_deferSave): an apply meanwhile cleared the dirty bit, yet the person's act is newer than the last save
+      if (!this._userDirty && this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt)) this._userDirty = true;
+    }
+    const dm = this.app.desktopManager, was = [this._restoring, dm ? dm._restoring : false], before = this._savedAt;
+    this._restoring = false; if (dm) dm._restoring = false;
+    try { this._doAutoSave(); } finally { this._restoring = was[0]; if (dm) dm._restoring = was[1]; }
+    const sent = this._savedAt !== before;
+    if (sent) { try { window.__vsOp?.('layout-save-on-leave', { why, gated: !!(was[0] || was[1]) }); } catch { } }
+    return sent;
   }
 
   /** A user-caused save under a gate waits for the gate (verify r3 ③): re-asked once it is expected open. An apply
