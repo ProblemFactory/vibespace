@@ -132,6 +132,9 @@ try {
   ok('a real ChatInput mounts and its textarea holds the focus', await mount('/real') === true);
   let s = await commit(20);
   ok('the replay went through the IME path: compositionstart → the IME\'s Enter keydown → compositionend → a plain Enter keydown', /compositionstart.*keydown:Enter.*compositionend.*keydown:Enter$/.test(s.ev.join(' ')), s.ev);
+  // the verdict's follow-up (B-4d28): the runner's own delivery is still SEEN — printed, and under a loose ceiling (a page or a
+  // guard made slow by a second must go red somewhere; the burst itself is judged on the page's clock, below)
+  ok(`the runner delivered the replay's plain Enter within a second of its commit (real gap ${s.gap} ms — a loose ceiling, the load is not judged)`, Number.isFinite(s.gap) && s.gap < 1000, { realGap: s.gap });
   ok(`the replay's precondition: on the page's own clock the plain Enter came ${s.clkGap} ms after compositionend — the leg's 20 ms, inside IME_COMMIT_BURST_MS = ${BURST} ms (the runner's real gap ${s.gap} ms is told, not judged)`, BURST > 20 && s.clkGap === 20, { clkGap: s.clkGap, burst: BURST, realGap: s.gap });
   ok('THE OWNER\'S SEQUENCE: a plain Enter 20 ms after an Enter-committed word does NOT send', s.sent.length === 0, s);
   ok('…and adds no newline (the committing Enter does nothing visible)', s.value === 'hello', s.value);

@@ -575,6 +575,16 @@ try {
   const rc9 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?conv=${encodeURIComponent(CONV)}').then((x) => x.json()); const p = (r.proposals || []).find((q) => q.kind === 'recall' && q.recall && q.recall.msg === ${JSON.stringify(String(own9))} && q.state === 'awaiting-approval'); return p ? p.id : null; })()`, 30000);
   const ob9 = (await api('GET', `/api/channels/outbox?conv=${encodeURIComponent(CONV)}`)).body?.proposals || [];
   const ctl9 = t9().find((l) => l.startsWith('toolu_cpc5b ')) || '';
+  // the verdict's follow-up (B-bc21): «red without the seam» RUNS — the fixture adapter loaded twice in this process, the seam
+  // off and on, the account's own sent line stored through its own toRecord and judged by the policy the engine asks
+  {
+    const fakePath = require.resolve(path.join(repo, 'src/channels/fake.js')), was = process.env.VIBESPACE_CHANNELS_FAKE_SELF;
+    const fakeWith = (on) => { delete require.cache[fakePath]; if (on) process.env.VIBESPACE_CHANNELS_FAKE_SELF = '1'; else delete process.env.VIBESPACE_CHANNELS_FAKE_SELF; try { return require(fakePath); } finally { if (was === undefined) delete process.env.VIBESPACE_CHANNELS_FAKE_SELF; else process.env.VIBESPACE_CHANNELS_FAKE_SELF = was; delete require.cache[fakePath]; } };
+    const P9 = require(path.join(repo, 'src/channel-policy.js')), line = { vendorId: 'sent-own-9', at: Date.now() - 60e3, author: { id: 'u-me', name: 'Me' }, text: 'The notes are attached' };
+    const judge = (on) => { const rec = fakeWith(on).toRecord('fake-poll', 'fake-poll-ops', line); return { isSelf: rec.author.isSelf, verdict: P9.recallVerdict({ record: rec, row: { windowSec: 24 * 3600 }, now: Date.now() }) }; };
+    const off9 = judge(false), on9 = judge(true);
+    check('⑨ RED CONTROL, run (in process): with VIBESPACE_CHANNELS_FAKE_SELF OFF the account\'s own sent line is stored isSelf false and the recall verdict refuses it «not-yours»; with the seam ON it is the user\'s own and the verdict allows it', off9.isSelf === false && off9.verdict.code === 'not-yours' && on9.isSelf === true && on9.verdict.ok === true, { off9, on9 });
+  }
   check('⑨ CONTROL: a recall of someone else\'s message (Ada\'s fake-poll-ops-m1) is refused «not-yours» and files nothing — the seam marks only the account\'s own lines', /not-yours/.test(ctl9) && !ob9.some((q) => q.kind === 'recall' && q.recall && q.recall.msg === 'fake-poll-ops-m1'), { ctl9, recalls: ob9.filter((q) => q.kind === 'recall').map((q) => [q.id, q.state, q.recall && q.recall.msg]) });
   check('⑨ turn 5 filed ONE recall of ⑧\'s sent reply, awaiting approval (the store\'s) — without the seam it is refused «not-yours» too', !!rc9 && ob9.filter((q) => q.kind === 'recall' && q.recall && q.recall.msg === own9).length === 1, t9());
   // the card ON SCREEN (a session's earlier views keep hidden lists holding the same card — ⑧): the visible one, marked

@@ -14,6 +14,10 @@
 //   • the measures more than one § uses, moved from the § that first defined them (keyOf §1–§4, newPage §5, the r2
 //     measures and the page / launch helpers of §6), and a part's end (threw / crashed / finish: the real-home census,
 //     the verdict line, the exit).
+// ONE BOUND FOR EVERY CALL (B-baa5): bootXpraWindow REPLACES globalThis.fetch for the part's whole process — every node-side
+// fetch without a signal of its own is aborted BY NAME at FETCH_CALL_MS (60 s), and every CDP call at CDP_CALL_MS (60 s). A
+// call that waits longer ON PURPOSE (a long poll, a stream) names it: fetch(url, { boundMs: <ms> }) / cdp(m, p, { ms }) /
+// evalJs(e, { ms }); a boundMs that is not a positive number is refused by name, and every cut says which option lifts it.
 // A part calls bootXpraWindow('<its name>') ONCE and destructures what its §§ use; it never boots anything of its own.
 // SKIPs with evidence without chrome / xpra / xauth / xterm (the part exits 0 at boot); the xclip legs SKIP without
 // xclip; the plain-http legs SKIP when the hostname does not resolve. Worktree-isolated (own data/, scratch HOME,
@@ -71,8 +75,9 @@ export async function bootXpraWindow(part) {
   const rawFetch = globalThis.fetch;
   globalThis.fetch = (u, o = {}) => {
     const { boundMs = FETCH_CALL_MS, ...init } = o || {};
+    if (!(Number.isFinite(boundMs) && boundMs > 0)) return Promise.reject(new Error(`fetch ${String(u).slice(0, 160)}: boundMs must be a positive number of ms (got ${JSON.stringify(boundMs)})`));
     if (init.signal) return rawFetch(u, init);
-    return rawFetch(u, { ...init, signal: AbortSignal.timeout(boundMs) }).catch((e) => { throw (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) ? new Error(`fetch ${String(u).slice(0, 160)}: no answer in ${boundMs} ms`) : e; });
+    return rawFetch(u, { ...init, signal: AbortSignal.timeout(boundMs) }).catch((e) => { throw (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) ? new Error(`fetch ${String(u).slice(0, 160)}: no answer in ${boundMs} ms (the family's bound — a call that waits longer on purpose passes { boundMs })`) : e; });
   };
   // EVIDENCE DEADLINES (lane xpra-control-judge, 2.369.208): the pre-fix CONTROLS reddened at load 35–67 in int205–int207 and
   // were green alone — they judged on the wall clock (a 20 s boot loop, a 3 s nap before reading X, a one-shot X read, a 45 s
