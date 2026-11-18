@@ -155,6 +155,7 @@ const reportPage = (n, o) => `<!doctype html><meta charset=utf-8><title>${n}</ti
 const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 // LAW 8 (主开发 15:42Z): /gate waits on /go (released by the suite) and then starts a /chain of page loads; each chain page reports
 // its own Navigation Timing (requestStart − fetchStart holds the pause before the request leaves Chrome) and loads the next by itself
+const seen8 = []; // B-b56d cure (5): the ORDER of the hub's resume and the request reaching the site
 const gates = new Map(); const releaseGate = (n) => { const r = gates.get(n); gates.delete(n); if (r) { r.statusCode = 204; r.end(); } else gates.set(n, 'open'); };
 const chainPage = (n, i, k) => `<!doctype html><meta charset=utf-8><title>${n}-${i}</title><script>addEventListener('load',()=>{const e=performance.getEntriesByType('navigation')[0];fetch('/st',{method:'POST',body:JSON.stringify({n:${JSON.stringify(n)}+'-'+${i},wait:+(e.requestStart-e.fetchStart).toFixed(1),total:+(e.responseEnd-e.startTime).toFixed(1)}),keepalive:true}).finally(()=>{if(${i}+1<${k})location.href='/chain?n='+encodeURIComponent(${JSON.stringify(n)})+'&i='+(${i}+1)+'&k='+${k};});});</script>`;
 const col = http.createServer((req, res) => {
@@ -168,7 +169,7 @@ const col = http.createServer((req, res) => {
   if (u.pathname === '/keys') { const n = u.searchParams.get('n') || ''; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(`<!doctype html><meta charset=utf-8><title>keys ${n}</title><input id=k autofocus><script>let k=0;const N=${JSON.stringify(n)};const say=()=>fetch('/st',{method:'POST',body:JSON.stringify({n:N,keys:k}),keepalive:true});addEventListener('keydown',()=>{k++;say();},true);say();</script>`); return; } // its read (M1): a page that counts every key it is sent
   if (u.pathname === '/gate') { const n = u.searchParams.get('n') || '', k = Number(u.searchParams.get('k')) || 1; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(`<!doctype html><meta charset=utf-8><title>gate ${n}</title><script>fetch('/st',{method:'POST',body:JSON.stringify({n:'gate-'+${JSON.stringify(n)}}),keepalive:true});fetch('/go?n='+encodeURIComponent(${JSON.stringify(n)})).then(()=>{location.href='/chain?n='+encodeURIComponent(${JSON.stringify(n)})+'&i=0&k='+${k};});</script>`); return; }
   if (u.pathname === '/go') { const n = u.searchParams.get('n') || ''; if (gates.get(n) === 'open') { gates.delete(n); res.statusCode = 204; res.end(); } else gates.set(n, res); return; }
-  if (u.pathname === '/chain') { const n = u.searchParams.get('n') || '', i = Number(u.searchParams.get('i')) || 0, k = Number(u.searchParams.get('k')) || 1; res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(chainPage(n, i, k)); return; }
+  if (u.pathname === '/chain') { const n = u.searchParams.get('n') || '', i = Number(u.searchParams.get('i')) || 0, k = Number(u.searchParams.get('k')) || 1; seen8.push(`chain:${n}-${i}`); res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(chainPage(n, i, k)); return; }
   if (u.pathname === '/img') { const n = u.searchParams.get('n') || ''; hits.set(n, (hits.get(n) || 0) + 1); res.setHeader('Content-Type', 'image/gif'); res.end(GIF); return; }
   if (u.pathname === '/q') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(innerPage(u.searchParams.get('n') || '')); return; }
   if (u.pathname === '/pk') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(PK_PAGE); return; } // lane passkey-browse-yourself
@@ -504,8 +505,12 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
         `the site asks ⇒ VibeSpace's sign-in form in THE PERSON'S window, naming who asks — the host and the realm, the realm drawn as TEXT ("${String(bar1 && bar1.text).slice(0, 120)}")`, JSON.stringify(bar1));
       // a REAL click on each box and real keys (Input.dispatchKeyEvent into the app page), one by one
       const clickedU = await A.clickSel('.browser-live-prompt-user'); for (const ch of 'ann') await A.key(ch);
-      const clickedP = await A.clickSel('.browser-live-prompt-pass'); for (const ch of PWG) await A.key(ch);
+      const clickedP = await A.clickSel('.browser-live-prompt-pass'); const half = Math.ceil(PWG.length / 2); for (const ch of PWG.slice(0, half)) await A.key(ch);
+      // 主开发 (1): a MODE RECORD arrives while the caret is in the secret's box (the real socket handler, the record the bridge sends when the input state moves)
+      const modeIn = await A.h('const s = L.state(); const ws = L.ws(); if (!ws || typeof ws.onmessage !== "function") return false; ws.onmessage({ data: JSON.stringify({ type: "mode", mode: "takeover", holder: s.holder, mine: true, since: s.modeSince || 0, cause: null, human: true }) }); return document.activeElement && document.activeElement.classList.contains("browser-live-prompt-pass");').catch(() => null);
+      for (const ch of PWG.slice(half)) await A.key(ch);
       const boxes = await A.h('const u = L.el().querySelector(".browser-live-prompt-user"), p = L.el().querySelector(".browser-live-prompt-pass"); return u && p ? { user: u.value, passLen: p.value.length, focus: document.activeElement === p } : null;').catch(() => null);
+      ok(modeIn === true, '主开发 (1): a mode record arrived while the caret was in the secret\'s box — the caret STAYED there', String(modeIn));
       ok(!!k1 && clickedU && clickedP && boxes && boxes.user === 'ann' && boxes.passLen === PWG.length && boxes.focus && (reports.get('k1') || {}).keys === 0,
         'its read (M1): a real click on each box and real keys land IN THE FORM (the user name, every character of the password) — the page under it was sent NO key', JSON.stringify({ boxes, k1: reports.get('k1') }));
       ok(await A.clickSel('.browser-live-prompt-signin'), 'a real click on Sign in');
@@ -537,23 +542,29 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
       const hooked = await until(() => chainOf('hk'), 90000, 150);
       await typeA(`${SITE}/gate?n=un&k=${K8}`);
       const gateUn = await innerUntil('gate-un', () => true, 20000);
+      const hookSaid = (w) => journal.split('\n').filter((l) => l.includes(`${PID2}: the person's sign-in hook ${w} on tab`)).length;
+      const off0 = hookSaid('off');
       await A.h('window.app.wm.closeWindow(w.id); return true;');
-      await sleep(1500);
+      const readOff = await until(() => hookSaid('off') > off0, 15000, 100); // 主开发 (5): the hook READ as off (the watch's own line), never a fixed sleep
       releaseGate('un');
       const unhooked = await until(() => chainOf('un'), 90000, 150);
       console.log(`    law 8 numbers (${K8} page loads each, requestStart − fetchStart): the hook armed — median ${hooked ? med8(hooked) : '?'} ms, worst ${hooked ? worst8(hooked) : '?'} ms; no hook — median ${unhooked ? med8(unhooked) : '?'} ms, worst ${unhooked ? worst8(unhooked) : '?'} ms`);
+      ok(!!readOff, '主开发 (5): the window walked away ⇒ the journal says the person\'s sign-in hook is OFF before the no-hook loads start');
       ok(!!hooked && !!gateUn && !!unhooked, `law 8: ${K8} page loads with the sign-in hook armed and ${K8} with no hook (the window walked away, the tab kept) — every one loaded (the numbers printed above)`, JSON.stringify({ hooked, unhooked }));
+      const armed0 = hookSaid('armed');
       await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
       const again = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 40000, 200);
-      await sleep(1000);
+      const readArmed = again ? await until(() => hookSaid('armed') > armed0, 20000, 100) : false; // 主开发 (5): the hook READ as armed before the stall
+      ok(!!readArmed, '主开发 (5): the window back ⇒ the journal says the person\'s sign-in hook is ARMED before the stall');
       await typeA(`${SITE}/gate?n=st&k=1`);
       const gateSt = again ? await innerUntil('gate-st', () => true, 20000) : null;
       const STALL_MS = 2000;
       let stalled = false;
-      if (gateSt) { process.kill(srv.pid, 'SIGSTOP'); stalled = true; releaseGate('st'); await sleep(STALL_MS); process.kill(srv.pid, 'SIGCONT'); }
+      if (gateSt && readArmed) { process.kill(srv.pid, 'SIGSTOP'); stalled = true; releaseGate('st'); await sleep(STALL_MS); seen8.push('SIGCONT'); process.kill(srv.pid, 'SIGCONT'); }
       const st = stalled ? await innerUntil('st-0', () => true, 30000) : null;
       console.log(`    law 8: the hub's loop held ${STALL_MS} ms (SIGSTOP) while the page's request was paused — the page's request waited ${st ? st.wait : '?'} ms, then the page loaded`);
-      ok(!!st, 'law 8: a stall PLACED in the hub\'s loop while the person\'s page load is paused — the page waits for it, then loads (no error page)', JSON.stringify({ again: !!again, gateSt: !!gateSt, st }));
+      const iCont = seen8.indexOf('SIGCONT'), iReq = seen8.indexOf('chain:st-0');
+      ok(!!st && iCont >= 0 && iReq > iCont, `law 8: a stall PLACED in the hub's loop while the person's page load is paused — the page's request reached the site only AFTER the hub turned again (the whole ${STALL_MS} ms stall, by order — never a ms bound), then the page loaded (no error page)`, JSON.stringify({ again: !!again, gateSt: !!gateSt, st, seen: seen8.slice(-4) }));
       ok(!journal.includes(PWG), 'law 1 (again, before the hub ends below): the typed password is in no journal line');
       await typeA(`${SITE}/gate?n=rl&k=1`);
       const gateRl = await innerUntil('gate-rl', () => true, 20000);

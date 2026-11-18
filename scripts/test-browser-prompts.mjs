@@ -236,7 +236,7 @@ const surfaces = { lines, events, forYou: fy, facts: w.factFor({ ...tgt, consume
 ok(!JSON.stringify(surfaces).includes(PW), 'no log line, event, fact, note, For-you item or answer carries the password');
 const dsrc = read('src/server/browser-dialogs.js'), ssrc = read('src/server/browser-stream.js'), lsrc = read('src/lib/browser-live-window.js');
 const dLines = dsrc.split('\n').filter((l) => /\bpassword\b/.test(l));
-ok(dLines.length > 0 && dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\(/.test(l.replace(/w\.promptNotes\.push\(\{ id: rec\.id, prompt: rec, how, by, at: now\(\), targetId: rec\.targetId, person: w\.mode === 'person' \}\)/, ''))), 'the watch: no line naming the password logs, emits or keeps it', dLines);
+ok(dLines.length > 0 && dLines.every((l) => !/say\(|log\.|console\.|emit\(|push\(/.test(l.replace(/w\.promptNotes\.push\(\{ id: rec\.id, prompt: rec, how, by, at: now\(\), targetId: rec\.targetId, person: w\.mode === 'person', boundMs: authHoldMaxMs \}\)/, ''))), 'the watch: no line naming the password logs, emits or keeps it', dLines);
 const sFn = (ssrc.match(/function answerPromptFor[\s\S]*?\n {2}\}\n/) || [''])[0];
 ok(sFn && !/console\.|say\(|trace|record\(/.test(sFn) && /prompt-ack/.test(sFn) && !/password[^:]*\}\)\)$/.test(sFn), 'the stream: answerPromptFor never logs or traces the message; the ack carries no credential');
 ok(/msg\.type === 'prompt-answer'\) \{ answerPromptFor\(relay, viewer, msg\); return; \}/.test(ssrc) && ssrc.indexOf("msg.type === 'prompt-answer'") < ssrc.indexOf('function onViewerMessage') + 600, 'the stream hands prompt-answer off first thing (before any later handler sees it)');
@@ -373,7 +373,7 @@ function fakeChromeP() {
     async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
 }
 const PID6 = 'bp-0000b56d', HK6 = 'hu-0000b56d', CONV6 = 'bk-0000b56d';
-const PW6 = ['b56d', 'Pw', '4471'].join('-');
+const PW6 = ['b56d', 'Pw', '4471'].join('-'), USER6 = ['b56d', 'user', 'x7'].join('-'); // (the cure: the census names the user name too)
 const ORIGIN6 = 'http://signin.example.test:8080';
 const auth6 = (id, extra = {}) => ({ requestId: id, authChallenge: { origin: ORIGIN6, realm: 'Team', scheme: 'Basic', source: 'Server', ...extra } });
 const until6 = async (pred, ms = 1500) => { const t0 = Date.now(); for (;;) { const v = pred(); if (v) return v; if (Date.now() - t0 > ms) return v; await sleep(10); } };
@@ -396,7 +396,7 @@ async function scene6(Dm, { stop = 'end', road = 'screencast', agentFirst = fals
     holders.shift(); wp.personWindows(PID6, windowsAtMove);
     await wp.arm(PID6, { by: 'person' }); await until6(() => of('Page.setInterceptFileChooserDialog').some((m) => m.params.enabled === false), 600); // the person's policies (the chooser hook off) — the move is done
     out.moved = { cwa: cwa().filter((x) => x.id !== 'M0'), form: (wp.stuckForKey(HK6) || {}).prompt || null, ended: (wp.personPromptStateOf(HK6) || {}).ended || null };
-    if (out.moved.form) out.ans = await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: 'ann', password: PW6, by: 'user' });
+    if (out.moved.form) out.ans = await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: USER6, password: PW6, by: 'user' });
     out.movedAfter = cwa();
     return end();
   }
@@ -411,7 +411,7 @@ async function scene6(Dm, { stop = 'end', road = 'screencast', agentFirst = fals
   out.paused = { cont: of('Fetch.continueRequest').filter((m) => m.params.requestId === 'P1').length, fail: of('Fetch.failRequest').length };
   chp.emit('Fetch.authRequired', auth6('A1', { realm: '<b>Team</b>‮' })); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
   const f1 = wp.stuckForKey(HK6); out.form = f1 && f1.prompt ? f1.prompt : null;
-  out.ans = await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: 'ann', password: PW6, by: 'user' });
+  out.ans = await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: USER6, password: PW6, by: 'user' });
   if (road === 'x') { out.cwa = cwa(); return end(); }
   if (stop !== 'off') { // (the settle control needs only the held sign-in below)
   chp.emit('Fetch.authRequired', auth6('A2')); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
@@ -424,7 +424,7 @@ async function scene6(Dm, { stop = 'end', road = 'screencast', agentFirst = fals
   chp.emit('Fetch.authRequired', auth6('A4')); await until6(() => (wp.stuckForKey(HK6) || {}).prompt);
   wp.personWindows(PID6, 0); await sleep(60); // (a NEGATIVE check: nothing may happen — a short wait, then the count)
   out.heldKeeps = chp.calls.slice(mark).filter((m) => m.method === 'Fetch.disable').length;
-  await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: 'ann', password: PW6, by: 'user' }); await until6(() => chp.calls.slice(mark).some((m) => m.method === 'Fetch.disable'), 600);
+  await wp.answerPrompt({ profileId: PID6, browserKey: HK6 }, { username: USER6, password: PW6, by: 'user' }); await until6(() => chp.calls.slice(mark).some((m) => m.method === 'Fetch.disable'), 600);
   out.offAfter = chp.calls.slice(mark).map((m) => (m.method === 'Fetch.continueWithAuth' && m.params.requestId === 'A4' ? 'A4' : m.method === 'Fetch.disable' ? 'off' : null)).filter(Boolean);
   if (stop === 'off') return end();
   out.cwa = cwa();
@@ -452,14 +452,14 @@ ok(s6.window.fe && s6.window.fe.handleAuthRequests === true && s6.window.fe.patt
 ok(s6.paused.cont === 1 && s6.paused.fail === 0, 'B-b56d (law 6): a paused Document request with no challenge is continued at once — never failed, never held', s6.paused);
 ok(s6.form && s6.form.type === 'http-auth' && !s6.form.native && s6.form.origin === ORIGIN6 && s6.form.realm === '<b>Team</b>' && !/‮/.test(s6.form.realm),
   'B-b56d (law 3): the challenge becomes the person\'s form — WHO ASKS is the challenge\'s own origin and realm, page text (a bidi character dropped; markup kept as text — the window draws it with textContent)', s6.form);
-ok(s6.ans && s6.ans.ok && s6.cwa[0] && s6.cwa[0].id === 'A1' && s6.cwa[0].r === 'ProvideCredentials' && s6.cwa[0].u === 'ann' && s6.cwa[0].p === PW6,
+ok(s6.ans && s6.ans.ok && s6.cwa[0] && s6.cwa[0].id === 'A1' && s6.cwa[0].r === 'ProvideCredentials' && s6.cwa[0].u === USER6 && s6.cwa[0].p === PW6,
   'B-b56d (law 1): the person\'s answer ⇒ continueWithAuth ProvideCredentials on the paused request, nothing else', s6.cwa[0] && { ...s6.cwa[0], p: s6.cwa[0].p === PW6 ? '(the password)' : 'OTHER' });
 ok(s6.cwa.some((x) => x.id === 'A2' && x.r === 'CancelAuth') && s6.cwa.some((x) => x.id === 'A3' && x.r === 'CancelAuth'), 'B-b56d (law 4): Cancel ⇒ CancelAuth; nobody answers within the bound ⇒ CancelAuth (the page is never left hanging)', s6.cwa.map((x) => x.id + ':' + x.r));
 ok(s6.ended && s6.ended.how === 'expired' && s6.ended.origin === ORIGIN6 && s6.ended.boundMs === 300 && s6.endedEv, 'B-b56d (law 4): …and the bound is SAID — the person\'s state names the cancelled sign-in, and an event moves the window', s6.ended);
 ok(s6.heldKeeps === 0 && s6.offAfter.join() === 'A4,off', 'B-b56d (law 6 / law 4): the last window closes while a sign-in is held ⇒ the hook stays until it is answered; then it goes, AFTER Chrome has the answer', s6.offAfter);
 ok(s6.refused.hook && s6.refused.hook.armed === false && s6.refused.hook.why === 'refused' && s6.refused.ev.includes(false) && s6.repaired.hook && s6.repaired.hook.armed === true && s6.repaired.ev[s6.repaired.ev.length - 1] === true,
   'B-b56d (law 5): a hook Chrome refused is told to the person\'s window (armed false, why refused) and its return is told too — never a silent dead end', { refused: s6.refused, repaired: s6.repaired });
-ok(!s6.census.includes(PW6), 'B-b56d (law 1): the typed password is in no log line, event, For-you item, state, fact or answer of the person\'s road');
+ok(!s6.census.includes(PW6) && !s6.census.includes(USER6), 'B-b56d (law 1): the typed user name and password are in no log line, event, For-you item, state, fact or answer of the person\'s road');
 ok(s6.abandoned.form === null && s6.abandoned.cwa.length === 0 && s6.abandoned.endedSame, 'B-b56d (its read, S1): a held sign-in the page ABANDONS (its tab commits another page) is dropped — no CancelAuth to a request that is gone, no note, never said as «cancelled»', s6.abandoned);
 ok(s6.refusedAtBound.cwa.join() === 'CancelAuth' && s6.refusedAtBound.endedSame && s6.refusedAtBound.evs === 0, 'B-b56d (its read, S1): at the bound, a CancelAuth Chrome REFUSES (the request was gone) writes no note and moves no window — the window never says «VibeSpace cancelled it» of a sign-in it did not cancel', s6.refusedAtBound);
 ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO For-you item for a sign-in left unanswered past the ask clock (the person\'s window shows the form, and the bound is said there)', s6.fy6);
@@ -481,14 +481,14 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const none = wu.personPromptStateOf(HK6); wu.personWindows(PID6, 1); const unw = wu.personPromptStateOf(HK6);
   ok(none === null && unw && unw.hook && unw.hook.armed === false && unw.hook.why === 'unwatched' && ST.personPromptLines(unw, tFor('en')).hook, 'B-b56d (its read, S3): no open watch while a window of the person shows the browser ⇒ «cannot see sign-in requests» is said (beside the passkey line, never hidden by it); with no window open, nothing', { none, unw });
   const lw6 = read('src/lib/browser-live-window.js');
-  ok(/if \(prLine && prLine\.hook\) \{ const line = document\.createElement\('span'\); line\.className = 'browser-live-dialog-body browser-live-prompt-unhooked'/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws the sign-in line in the passkey «unknown» branch too');
+  ok((lw6.match(/if \(prLine\) drawPrLines\(prLine\);/g) || []).length === 2 && /\n {6}if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /\} else if \(prLine\) drawPrLines\(prLine\);/.test(lw6) && /const prl = H && !d && !stuck && !blind && !pkElse \? personPromptLines/.test(lw6), '…the window draws BOTH sign-in lines (the bound, the hook) in the passkey «unknown» branch too (the cure: the bound\'s line was missing there)');
   ok(ST.personPromptLines({ hook: { armed: false, why: 'kernel', x: false } }, tFor('en')).hook === null && ST.personPromptLines({ hook: { armed: null, why: 'connecting' } }, tFor('en')).hook === null, 'B-b56d (its read): a kernel (its own road) and a watch still connecting draw no standing line — only a refused hook and no watch at all are said');
   wu.shutdown();
 }
 { // its read (M1): THE PERSON TYPES INTO THE FORM — the window always drives its own tab, so the keys belong to the page unless a box is the
   // window's OWN: the address row and (B-b56d) the sign-in form's two boxes, in each of the four keyboard handlers (keys, paste, input, focus)
   const lw7 = read('src/lib/browser-live-window.js');
-  const ownLine = (lw7.match(/^ {2}const ownBox = \(el\) => [^\n]*$/m) || [''])[0];
+  const ownLine = (lw7.match(/^ {2}function ownBox\(el\) \{ return [^\n]*$/m) || [''])[0];
   const mk = (cls, inBar) => ({ classList: { contains: (c) => c === cls }, _inBar: inBar });
   const bar = { contains: (el) => !!(el && el._inBar) };
   const build = (line, H) => new Function('H', 'addrInput', 'dialogBar', `${line}\nreturn ownBox;`)(H, ADDR, bar);
@@ -497,7 +497,20 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   const own = ownLine ? build(ownLine, { key: HK6 }) : null, conv = ownLine ? build(ownLine, null) : null;
   ok(own && own(user) && own(pass) && own(ADDR) && !own(stray) && !own(other) && !conv(user) && !conv(pass) && !conv(ADDR),
     'B-b56d (its read, M1): the person\'s window\'s OWN boxes are its address row and the sign-in form\'s two boxes (in its dialog bar only); a conversation\'s view keeps none (the agent\'s road unchanged)', ownLine.slice(0, 120));
-  ok((lw7.match(/ownBox\(e\.target\)/g) || []).length === 4 && !/e\.target === addrInput/.test(lw7), '…and all four keyboard handlers (keys, paste, beforeinput, focusin) leave them alone — no handler keeps the old address-row-only test');   // stale-pins: kept — a deliberate check that the base's test is gone
+  const noBaseGuard = !/document\.activeElement === addrInput\)\) focusSink/.test(lw7);   // stale-pins: kept — a deliberate check that the base's mode-redraw guard is gone
+  ok((lw7.match(/ownBox\(e\.target\)/g) || []).length === 4 && (lw7.match(/!ownBox\(document\.activeElement\)\) focusSink\(\)/g) || []).length === 1 && !/e\.target === addrInput/.test(lw7) && noBaseGuard, '…and all four keyboard handlers (keys, paste, beforeinput, focusin) AND the mode redraw\'s focus guard (the cure) leave them alone — none keeps the old address-row-only test');   // stale-pins: kept — a deliberate check that the base's test is gone
+  // 主开发 17:00Z (1), as if a must: A SECRET IS NEVER TYPED INTO THE PAGE — every road that gives the focus to the sink goes through
+  // focusSink, and focusSink keeps the caret in a box of the window's own unless the person's OWN press moves it (the window's code, sliced)
+  const fsLine = (lw7.match(/^ {2}function focusSink\(\{ press = false \} = \{\}\) \{[^\n]*$/m) || [''])[0];
+  const sinkOf = (fnLine, active) => { const calls = []; const sinkEl = { focus: () => calls.push('sink') }; const fn = new Function('H', 'addrInput', 'dialogBar', 'sinkNow', 'document', `${ownLine}\n${fnLine}\nreturn focusSink;`)({ key: HK6 }, ADDR, bar, () => sinkEl, { activeElement: active }); return { fn, calls }; };
+  const redraw = fsLine ? sinkOf(fsLine, pass) : null; if (redraw) redraw.fn();              // a mode record's redraw while the caret is in the secret's box
+  const pressed = fsLine ? sinkOf(fsLine, pass) : null; if (pressed) pressed.fn({ press: true }); // the person's own press on the picture
+  const elsewhere = fsLine ? sinkOf(fsLine, stray) : null; if (elsewhere) elsewhere.fn();     // the caret in no box of the window's own
+  ok(redraw && redraw.calls.length === 0 && pressed.calls.length === 1 && elsewhere.calls.length === 1 && (lw7.match(/focusSink\(\{ press: true \}\)/g) || []).length === 3,
+    'B-b56d cure (主开发 (1)): with the caret in the secret\'s box a redraw (a mode record) leaves it there; only the person\'s own press (the picture, the Keyboard button, the take press — three sites) moves it to the page; elsewhere the sink takes it as before', { fs: fsLine.slice(0, 80) });
+  const baseFs = "  function focusSink() { try { const sk = sinkNow(); if (document.activeElement !== sk) sk.focus({ preventScroll: true }); } catch { /* detached */ } }";   // stale-pins: kept — the base's focusSink, the control below
+  const baseRun = sinkOf(baseFs, pass); baseRun.fn();
+  ok(baseRun.calls.length === 1, 'CONTROL (主开发 (1)): the base\'s focusSink takes the caret out of the secret\'s box at a mode record\'s redraw — the next keys went to the page (RED for the leg above)');
   const base = new Function('H', 'addrInput', 'e', 'return (H && e.target === addrInput);');   // stale-pins: kept — the base's test, the control below
   ok(!base({ key: HK6 }, ADDR, { target: user }) && !base({ key: HK6 }, ADDR, { target: pass }), 'CONTROL (M1): the base\'s test (the address row only) hands the form\'s boxes to the page — what the person typed went to the page (RED for the leg above)');
 }
@@ -511,8 +524,8 @@ ok(s6.fy6.length === 0, 'B-b56d (its read): the person\'s own browsing files NO 
   ok(lines.every((l) => l.ended && l.ended.line.includes('signin.example.test') && l.ended.line.includes('10') && l.hook && l.hook.line) && /cancelled it/.test(lines[0].ended.line) && /may wait/.test(lines[0].hook.line) && /open it in Desktop/.test(lx.hook.line) && /proxy sign-in/.test(lp.ended.line) && ST.personPromptLines({ hook: { armed: true } }, tFor('en')).hook === null,
     'B-b56d (laws 4 / 5): the person\'s window\'s two lines — the bound said with its host and minutes, a refused hook said (the X road\'s names Desktop) — every one in en / zh / ja; an armed hook says nothing', { en: lines[0], lx: lx.hook, lp: lp.ended });
   const lsrc6 = read('src/lib/browser-live-window.js');
-  const blk = (lsrc6.match(/\} else if \(prLine\) \{[\s\S]*?\n {4}\}\n/) || [''])[0];
-  ok(blk && /prLine\.ended\.line/.test(blk) && /prLine\.hook\.line/.test(blk) && (blk.match(/textContent = /g) || []).length === 2 && !/innerHTML/.test(blk) && /st\.prEnded = m\.ended && typeof m\.ended === 'object'/.test(lsrc6),
+  const blk = (lsrc6.match(/  function drawPrLines\(prLine\) \{[\s\S]*?\n {2}\}\n/) || [''])[0];
+  ok(blk && /prLine\.ended\.line/.test(blk) && /prLine\.hook\.line/.test(blk) && (blk.match(/textContent = /g) || []).length === 2 && !/innerHTML/.test(blk) && /st\.prEnded = m\.ended && typeof m\.ended === 'object'/.test(lsrc6) && /pass\.value = ''; if \(H\) user\.value = '';/.test(lsrc6),
     'B-b56d (law 3): the person\'s window draws both lines as TEXT (textContent, never innerHTML) from its relay record', blk.length);
 }
 { // LAW 8 (主开发 15:42Z): THE HUB'S TURN ON A PAUSED PAGE LOAD — the round trip over the real watch on an idle loop (median and worst

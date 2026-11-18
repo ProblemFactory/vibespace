@@ -893,7 +893,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const first = !st.claimed;
       if (first) { st.claimed = true; st.sent = 0; st.pressed.clear(); ky.reset('claim'); claimKeyboard(claimRec()); watchDialogs(); }
       if (H && first && (!st.url || st.url === 'about:blank')) { try { addrInput.focus({ preventScroll: true }); } catch { /* detached */ } }
-      else if (!ky.yielded && !ky.dialogHolds && !(H && document.activeElement === addrInput)) focusSink(); // lane dialog-keys: …nor while a dialog the user opened holds the keys
+      else if (!ky.yielded && !ky.dialogHolds && !ownBox(document.activeElement)) focusSink(); // lane dialog-keys: …nor while a dialog the user opened holds the keys; B-b56d cure: nor while the person types in a box of the window's own (the address row, the sign-in form)
     }
     else if (st.claimed) { st.claimed = false; st.pressed.clear(); ky.reset('release'); releaseKeyboard(winInfo.id); watchDialogs(); if (isSink(document.activeElement)) document.activeElement.blur(); kbd.value = ''; st.youPt = null; hideCopied(); }
     renderKbd();
@@ -959,7 +959,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   /** lane browser-x-in-window: THE sink is the X picture's own text field while it shows (its listeners send to the window), else ours. */
   function sinkNow() { return xp.view && xp.view.ime ? xp.view.ime : kbd; }
   const isSink = (el) => !!el && (el === kbd || (!!xp.view && el === xp.view.ime));
-  function focusSink() { try { const sk = sinkNow(); if (document.activeElement !== sk) sk.focus({ preventScroll: true }); } catch { /* detached */ } }
+  function focusSink({ press = false } = {}) { try { if (!press && ownBox(document.activeElement)) return; const sk = sinkNow(); if (document.activeElement !== sk) sk.focus({ preventScroll: true }); } catch { /* detached */ } } // B-b56d cure (主开发 17:00Z, as if a must): a SECRET IS NEVER TYPED INTO THE PAGE — no redraw, record or transition takes the caret out of the window's own boxes (the address row, the sign-in form); only the person's own press does (`press`)
   function renderKbd() {
     const own = st.claimed && iOwn();
     // lane S2 (naive study 2 T4): the bar never claims "Typing goes to the browser" while nothing reaches it — the
@@ -1166,7 +1166,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         if (prw.form) {
           const box = (type, label, cls) => { const i = document.createElement('input'); i.type = type; i.autocomplete = 'off'; i.placeholder = label; i.setAttribute('aria-label', label); i.className = 'browser-live-dialog-input ' + cls; return i; };
           const user = box('text', prw.user, 'browser-live-prompt-user'); const pass = box('password', prw.password, 'browser-live-prompt-pass');
-          const signIn = () => { if (!user.value) { user.focus(); return; } send({ type: 'prompt-answer', id: key, username: user.value, password: pass.value }); pass.value = ''; };
+          const signIn = () => { if (!user.value) { user.focus(); return; } send({ type: 'prompt-answer', id: key, username: user.value, password: pass.value }); pass.value = ''; if (H) user.value = ''; /* B-b56d cure: the person's window clears both boxes at send */ };
           for (const i of [user, pass]) i.onkeydown = (e) => { e.stopPropagation(); if (enterSubmits(e)) { e.preventDefault(); signIn(); } };
           const n = document.createElement('div'); n.className = 'browser-live-dialog-note'; n.textContent = prw.hint;
           dialogBar.append(user, pass, n);
@@ -1260,16 +1260,18 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-passkey-unknown'; line.textContent = pkUnknown.line;
       dialogBar.append(line);
       if (pkUnknown.retry) dialogBar.append(textBtn(pkUnknown.retry, () => send({ type: 'passkey-retry' }), 'browser-live-dialog-restart browser-live-passkey-retry')); // acceptance r2: the re-arms stopped — his door (his clicks on the page never re-arm)
-      if (prLine && prLine.hook) { const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-prompt-unhooked'; line.textContent = prLine.hook.line; dialogBar.append(line); } // B-b56d (its read, S3): the sign-in line beside the passkey one, never hidden by it
-    } else if (prLine) { // B-b56d: said as text — a site's host is never markup
+      if (prLine) drawPrLines(prLine); // B-b56d (its read, S3; the cure): the sign-in lines beside the passkey one, never hidden by it
+    } else if (prLine) drawPrLines(prLine);
+  };
+  /** B-b56d: the person's window's two lines — said as text (a site's host is never markup) */
+  function drawPrLines(prLine) {
       if (prLine.ended) {
         const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-prompt-ended'; line.textContent = prLine.ended.line;
         const seen = String(prLine.ended.id || '');
         dialogBar.append(line, textBtn(prLine.ended.dismiss, () => { st.prEndedSeen = seen; renderDialog(); }, 'browser-live-dialog-dismiss browser-live-prompt-ended-dismiss'));
       }
       if (prLine.hook) { const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-prompt-unhooked'; line.textContent = prLine.hook.line; dialogBar.append(line); }
-    }
-  };
+  }
   /** lane browser-surfaces: A KERNEL PROMPT'S CARD — the actor + verb + object as ONE title (the kind's words), the page's words,
    *  its details under ONE fold, a button per ANSWER (`text` / `credential` / `file` answers open a sheet of the prompt's fields
    *  first); VibeSpace paints it — the kernel paints nothing. Every answer goes back as the USER's (`dialog-answer` + its id). */
@@ -2534,7 +2536,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   fwdNav.onclick = () => humanNav({ verb: 'forward' });
   reloadNav.onclick = () => humanNav({ verb: 'reload' });
   // the touch Keyboard: the sink is focused INSIDE this tap (a phone raises its soft keyboard only for a focus in a gesture)
-  kbdBtn.onclick = () => { focusSink(); };
+  kbdBtn.onclick = () => { focusSink({ press: true }); }; // (the person's press)
   closeBtn.onclick = async () => {
     if (!H || H.ended) return;
     closeBtn.disabled = true;
@@ -2569,7 +2571,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // Hand back is a transition any viewer may trigger.
   takeBtn.onclick = () => {
     // BROWSE YOURSELF: Continue here (another window of his holds his tab: the controls MOVE here) / Continue browsing
-    if (H) { send({ type: st.mode === 'takeover' && !st.mine ? 'claim' : 'takeover' }); focusSink(); return; }
+    if (H) { send({ type: st.mode === 'takeover' && !st.mine ? 'claim' : 'takeover' }); focusSink({ press: true }); return; }
     if (!(st.mode === 'takeover' && st.mine)) send({ type: 'takeover' });
   }; // the `mode` answer claims the keyboard (renderMode)
   handBtn.onclick = () => { if (st.claimed) releaseHeld(); send({ type: 'handback', ...(Number.isInteger(st.wakes) && st.wakes > 0 ? { expectWakes: st.wakes } : {}) }); }; // verify r2 (H3): a key held in the page is let go BEFORE the handback (after it this viewer's input is refused); r6 A-F9: the count the button said
@@ -2615,7 +2617,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       if (p) canvas.dataset.lastPointer = `${p.x},${p.y}`;
       return;
     }
-    e.preventDefault(); focusSink(); // verify (2026-09-27): a press is NO copy gesture — a page's copy after a click reaches the chip only (the bridge names the gesture)
+    e.preventDefault(); focusSink({ press: true }); // (the person's press on the picture) verify (2026-09-27): a press is NO copy gesture — a page's copy after a click reaches the chip only (the bridge names the gesture)
     try { img.setPointerCapture(e.pointerId); } catch { /* optional */ }
     st.buttonsDown++;
     // lane live-input: a double / triple click is counted here (a pointerdown carries no count) and a drag holds its button
@@ -2661,7 +2663,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const appMode = () => (app._commandMode && app._commandMode._cmdMode ? 'command' : null);
   /** BROWSE YOURSELF: the person's window's OWN text boxes — its address row and (B-b56d, the owner's ruling B) the sign-in form's two
    *  boxes in its dialog bar: typed in, never sent to the page, never reclaimed (the window always drives its own tab) */
-  const ownBox = (el) => !!H && !!el && (el === addrInput || (!!el.classList && (el.classList.contains('browser-live-prompt-user') || el.classList.contains('browser-live-prompt-pass')) && dialogBar.contains(el)));
+  function ownBox(el) { return !!H && !!el && (el === addrInput || (!!el.classList && (el.classList.contains('browser-live-prompt-user') || el.classList.contains('browser-live-prompt-pass')) && dialogBar.contains(el))); } // (a declaration: the mode redraw reads it before this line runs — B-b56d cure)
   const onDocKey = (e) => {
     if (ownBox(e.target)) return; // BROWSE YOURSELF: the address row (B-b56d: and the sign-in form's boxes) is typed in, never sent to the page
     // lane dialog-keys: a key the APP takes — typed into a dialog the user opened (its Enter may open the next one), or a

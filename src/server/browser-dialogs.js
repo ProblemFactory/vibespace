@@ -125,6 +125,7 @@ const KERNEL_GONE_CODES = Object.freeze(['no_such_request', 'no_such_surface', '
 const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
 const ANSWERED_KEEP = 32;
+const AUTH_FETCH_MODES = new Set(['doc-auth', 'all-auth', 'fill-auth']); // B-b56d: the Fetch modes that hook an HTTP sign-in
 const ENDED_SHOW_MS = 60 * 60 * 1000; // B-b56d (its read, S2): a sign-in cancelled at its bound is said in the person's window for an hour at most
 const OUTCOMES_KEEP = 16;
 const VERB_RUNNING_MAX_MS = 5 * 60 * 1000;   // a /resolve without its audit is forgotten after this (a crashed CLI)
@@ -1267,7 +1268,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const t = now();
     // its read (S2): only a note made on the PERSON'S road (never a conversation's), and only within the hour
     const note = [...w.promptNotes].reverse().find((n) => n && n.person && n.how === 'expired' && n.prompt && n.prompt.type === 'http-auth' && t - (Number(n.at) || 0) < ENDED_SHOW_MS && inScope(scope, n.targetId)) || null;
-    const ended = note ? { id: String(note.id), how: 'expired', origin: note.prompt.origin, realm: note.prompt.realm || '', proxy: !!note.prompt.proxy, at: note.at, boundMs: authHoldMaxMs } : null;
+    const ended = note ? { id: String(note.id), how: 'expired', origin: note.prompt.origin, realm: note.prompt.realm || '', proxy: !!note.prompt.proxy, at: note.at, boundMs: Number(note.boundMs) || authHoldMaxMs } : null; // the cure: the bound the note was armed with
     let hook = null;
     if (w.mode === 'person' && views) {
       const x = xRoad(pid);
@@ -2319,7 +2320,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!q) return { ok: false, code: 'gone', error: 'the sign-in already ended' };
     const r = await call(w, 'Fetch.continueWithAuth', { requestId: q.requestId, authChallengeResponse: how === 'signed-in' ? { response: 'ProvideCredentials', username: String(username).slice(0, 512), password: String(password).slice(0, 1024) } : { response: 'CancelAuth' } }, q.sid || null);
     const took = !(r && (r.error || r.timeout)); // B-b56d (its read, S1): did Chrome take the answer? (a request the page abandoned did not)
-    if (took || w.mode !== 'person') { w.promptNotes.push({ id: rec.id, prompt: rec, how, by, at: now(), targetId: rec.targetId, person: w.mode === 'person' }); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift(); } // the agent's road as before; the person's: a note only for an answer Chrome took
+    if (took || w.mode !== 'person') { w.promptNotes.push({ id: rec.id, prompt: rec, how, by, at: now(), targetId: rec.targetId, person: w.mode === 'person', boundMs: authHoldMaxMs }); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift(); } // the agent's road as before; the person's: a note only for an answer Chrome took
     if (w.mode === 'person') { const e = w.targets.get(rec.targetId); if (e && e.sid && e.enabled) syncTabFetchMode(w, e); } // B-b56d: after Chrome has the answer — the hook it held for goes when no window of the person shows the browser
     if (how === 'expired' && took) emit({ kind: 'prompt-ended', profileId: w.profileId, targetId: rec.targetId, how }); // B-b56d (law 4): the person's window SAYS it (its note is kept by now) — whatever the mode now
     return r && (r.error || r.timeout) ? { ok: false, code: 'gone', error: 'the page no longer waits for that sign-in' } : { ok: true };
@@ -3600,6 +3601,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (ops.length) await Promise.all(ops);
       // B-b56d (law 5): a person's tab whose sign-in hook was refused (or came back) is told to the person's window — never a silent dead end
       if (w.mode === 'person' && !w.kernel) { const off = hookAuth && e.fetchMode !== wantFetch; if (off !== !!e.authHookOff) { e.authHookOff = off; emit({ kind: 'prompt-hook', profileId: w.profileId, targetId: e.targetId, armed: !off }); } }
+      if (w.mode === 'person' && !w.kernel) { const armedNow = AUTH_FETCH_MODES.has(e.fetchMode); if (armedNow !== !!e.personHookArmed) { e.personHookArmed = armedNow; try { log.log?.(`[browser-dialog] ${w.profileId}: the person's sign-in hook ${armedNow ? 'armed' : 'off'} on tab ${String(e.targetId || '').slice(0, 8)}`); } catch { /* */ } } } // B-b56d cure (5): the hook's state, said once per change
       const fetchOk = e.fetchMode === wantFetch && (!wantActiveFill || (e.fetchMode === 'fill-auth' || e.fetchMode === 'fill-noauth')) && (!wantCred || e.credFetchAll);
       const netOk = !wantCred || Boolean(e.credNetEnabled);
       const ok = Boolean(e.sid && w.state === 'open' && fetchOk && netOk);

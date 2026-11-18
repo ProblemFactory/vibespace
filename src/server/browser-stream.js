@@ -346,6 +346,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // write-origin page verdict — never a header-less script). The agent's road (a conversation's view) is unchanged by this unit
     if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack({ ok: false, code: 'agent_forbidden', error: 'a sign-in is the user\'s to answer — a view opened with a bearer token cannot answer it' });
     if (isHuman(relay) && !(viewer.page && pageVerdict(viewer.page.headers, ownOriginOf(viewer.page.headers, { encrypted: !!(viewer.page.socket && viewer.page.socket.encrypted) })).ok)) return ack({ ok: false, code: 'not_your_page', error: 'a sign-in is answered from VibeSpace\'s own page only' });
+    if (isHuman(relay) && !msg.id) return ack({ ok: false, code: 'no_prompt', error: 'the answer names no sign-in request — nothing was sent' }); // B-b56d cure: the person's window names the prompt it answers (never «the newest in scope»)
     if (!dialogs || !pid || typeof dialogs.answerPrompt !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
     dialogs.answerPrompt({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay), promptId: msg.id ? String(msg.id).slice(0, 80) : null },
       { cancel: msg.cancel === true, username: typeof msg.username === 'string' ? msg.username : '', password: typeof msg.password === 'string' ? msg.password : '', by: 'user' })
@@ -457,7 +458,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const rk = 'human:' + target.key;
     let relay = relays.get(rk);
     if (!relay) { relay = createRelay(rk, null, target); relays.set(rk, relay); }
-    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0, bearer: !!bearer, page }; // B-b56d: law 2 reads its handshake
+    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0, bearer: !!bearer, page, person: true }; // B-b56d: law 2 reads its handshake; `person`: a window of the person's own (the cure: only these are counted)
     relay.viewers.set(viewer.id, viewer);
     armBg(relay); // lane browser-windows (U0b): a view of a tab that paints nothing is never silent
     noteViewers(relay);
@@ -490,7 +491,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
    *  hooks a sign-in on the person's browsing only while one is open */
   function tellPersonWindows(pid) {
     if (!pid || !dialogs || typeof dialogs.personWindows !== 'function') return;
-    let n = 0; for (const r of relays.values()) if (isHuman(r) && relayProfileId(r) === pid) n += r.viewers.size;
+    let n = 0; for (const r of relays.values()) if (isHuman(r) && relayProfileId(r) === pid) for (const v of r.viewers.values()) if (v.person) n++; // the cure: a viewer that came by another road is never counted
     try { dialogs.personWindows(pid, n); } catch { /* the watch says why in its own journal */ }
   }
   function createRelay(key, sessionId, target) {

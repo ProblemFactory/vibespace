@@ -1220,6 +1220,8 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       const acks = (v) => v.got.filter((m) => m.type === 'prompt-ack');
       page.ws.send(JSON.stringify({ type: 'prompt-answer', id: 'prm-t1-1', username: 'ann', password: PWb }));
       await until2(() => acks(page).length === 1, 800);
+      page.ws.send(JSON.stringify({ type: 'prompt-answer', username: 'ann', password: PWb })); // the cure: no prompt named
+      await until2(() => acks(page).length === 2, 800);
       const script = await open({}); // a header-less client: no Origin, no Sec-Fetch-Site (with sign-in off, every upgrade is let in)
       script.ws.send(JSON.stringify({ type: 'prompt-answer', id: 'prm-t1-1', username: 'ann', password: PWb }));
       await until2(() => acks(script).length === 1, 800);
@@ -1232,7 +1234,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       try { page.ws.close(); } catch { /* */ }
       await until2(() => !told.length || told[told.length - 1][1] === 0, 800);
       bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
-      return { atHello, told, toldOpen, answered, ack: { page: acks(page)[0] || null, script: acks(script)[0] || null, bearer: acks(bearer)[0] || null }, otherSaw: JSON.stringify(other.got), scriptSaw: JSON.stringify(script.got) };
+      return { atHello, told, toldOpen, answered, ack: { page: acks(page)[0] || null, noId: acks(page)[1] || null, script: acks(script)[0] || null, bearer: acks(bearer)[0] || null }, otherSaw: JSON.stringify(other.got), scriptSaw: JSON.stringify(script.got) };
     };
     const good = await run(SB);
     ok(good.atHello && good.atHello.fact && good.atHello.fact.prompt.type === 'http-auth' && JSON.stringify(good.atHello.ended) === JSON.stringify(ENDED) && JSON.stringify(good.atHello.hook) === JSON.stringify(HOOK),
@@ -1241,6 +1243,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       'B-b56d (law 6): the watch is told how many of the person\'s windows show the browser — 1, 2 as they open, back to 0 when the last one closes', good.told);
     ok(good.ack.page && good.ack.page.ok === true && good.answered.length === 1 && good.answered[0].a.password === PWb && good.answered[0].tg.browserKey === HKb && good.answered[0].a.by === 'user',
       'B-b56d (law 1 / law 2): an answer from THIS instance\'s own page reaches the watch once, with the person\'s key', { ack: good.ack, n: good.answered.length });
+    ok(good.ack.noId && good.ack.noId.code === 'no_prompt' && good.answered.length === 1, 'B-b56d cure: on the person\'s window an answer that names no prompt is refused (never «the newest in scope»)', good.ack.noId);
     ok(good.ack.script && good.ack.script.code === 'not_your_page' && good.ack.bearer && good.ack.bearer.code === 'agent_forbidden' && good.answered.length === 1,
       'B-b56d (law 2): a header-less client (no own page) and a view that carries a bearer are refused by name — neither reaches the watch', good.ack);
     ok(!good.otherSaw.includes(PWb) && !good.scriptSaw.includes(PWb) && !JSON.stringify(good.ack).includes(PWb),
@@ -1257,9 +1260,33 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const bsB = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
     const cut1 = "    if (isHuman(relay) && (viewer.bearer || viewer.agent)) return ack(", cut2 = "    if (isHuman(relay) && !(viewer.page && pageVerdict(", cut3 = " if (isHuman(relay)) tellPersonWindows(relayProfileId(relay)); }";
     for (const c of [cut1, cut2, cut3]) if (bsB.split(c).length !== 2) throw new Error(`B-b56d control setup: the anchor ${JSON.stringify(c.slice(0, 60))} is not found once in src/server/browser-stream.js`);
+    // 主开发 17:00Z (4): THE «cancelled at its bound» LINE REACHES THE WINDOW through the bridge — first no fact and no ended, then ended
+    const endedRun = async (SBm) => {
+      let ps = null; const dl2 = new Set();
+      const dialogs2 = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => null, stuckForKey: () => null, personPromptStateOf: () => ps, personWindows: () => {}, onChange: (fn) => { dl2.add(fn); return () => dl2.delete(fn); }, openOn: () => null, surfacesIn: () => [] };
+      const bridge = SBm.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs: dialogs2, WebSocketImpl: Up, keepaliveMs: 60000 });
+      const srv = http.createServer(); srv.on('upgrade', (req, s0, h) => bridge.handleUpgrade(req, s0, h));
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const V = await new Promise((res) => { const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HKb}`, { origin: `http://127.0.0.1:${srv.address().port}` }); const got = []; ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } }); ws.on('open', () => res({ ws, got })); ws.on('error', () => res({ ws, got })); });
+      await until2(() => V.got.some((m) => m.type === 'status' && m.state === 'upstream-open')); await sleep2(30);
+      const first = V.got.filter((m) => m.type === 'prompt-fact').map((m) => ({ fact: m.fact, ended: m.ended }));
+      ps = { ended: ENDED, hook: null }; for (const fn of [...dl2]) fn({ kind: 'prompt-ended', profileId: PIDb, targetId: 'T1', how: 'expired' });
+      await until2(() => V.got.some((m) => m.type === 'prompt-fact' && m.ended), 500);
+      const after = V.got.filter((m) => m.type === 'prompt-fact').map((m) => ({ fact: m.fact, ended: m.ended }));
+      try { V.ws.close(); } catch { /* */ } bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+      return { first, after };
+    };
+    const er = await endedRun(SB);
+    ok(er.first.length === 1 && er.first[0].fact === null && er.first[0].ended === null && er.after.length === 2 && JSON.stringify(er.after[1].ended) === JSON.stringify(ENDED),
+      'B-b56d cure (主开发 (4)): the bridge says the person\'s window its «cancelled at its bound» line — first no fact and no ended (the hello), then the ended note at the watch\'s event', er);
+    const digestNow = "  const promptDigestOf = (rec) => (rec && (rec.fact || rec.ended || rec.hook) ? JSON.stringify([rec.fact ? rec.fact.prompt : null, rec.ended || null, rec.hook || null]) : '');";
+    if (bsB.split(digestNow).length !== 2) throw new Error('B-b56d control setup: the digest line is not found once in src/server/browser-stream.js');
+    const MUTe = mutantCopies('browser-passkey-b56d-ended', REPO);
+    const erBase = await endedRun(MUTe.load('src/server/browser-stream.js', bsB.replace(digestNow, "  const promptDigestOf = (rec) => (rec && rec.fact ? JSON.stringify(rec.fact.prompt) : '');"), 'digest-fact-only'));   // stale-pins: kept — the base's digest, written back by this RED control
+    ok(erBase.after.length === 1 && !erBase.after.some((m) => m.ended), 'CONTROL (主开发 (4)): a bridge whose digest reads the fact only never sends the ended note — the window would not say it (RED for the leg above)', erBase);
     const MUTb = mutantCopies('browser-passkey-b56d', REPO);
     const baseB = await run(MUTb.load('src/server/browser-stream.js', bsB.replace(cut1, '    if (false && (viewer.bearer || viewer.agent)) return ack(').replace(cut2, '    if (false && !(viewer.page && pageVerdict(').replace(cut3, ' }'), 'no-person-road'));
-    ok(baseB.answered.length === 3 && baseB.ack.script && baseB.ack.script.ok === true && baseB.ack.bearer && baseB.ack.bearer.ok === true && baseB.told.length === 0,
+    ok(baseB.answered.length === 3 && baseB.ack.noId && baseB.ack.noId.code === 'no_prompt' && baseB.ack.script && baseB.ack.script.ok === true && baseB.ack.bearer && baseB.ack.bearer.ok === true && baseB.told.length === 0,
       'CONTROL (B-b56d): a bridge without the two refusals lets a header-less script and a bearer view answer the person\'s sign-in, and without the count the watch never hears the windows (RED for the legs above)', { answered: baseB.answered.length, ack: baseB.ack, told: baseB.told });
   }
   // MAJOR 2 + MINOR: the window's own code (sliced from src/lib/browser-live-window.js, run over a stub scope)
