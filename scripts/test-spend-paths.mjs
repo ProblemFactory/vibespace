@@ -580,7 +580,7 @@ const GUARD_HINT = /authorizeSpend|getSpendGuard|spendGuard/;
 function matchClose(t, open, a, b) { let d = 0; for (let j = open; j < t.length; j++) { if (t[j] === a) d++; else if (t[j] === b) { d--; if (d === 0) return j; } } return -1; }
 /** A JavaScript text with its comments blanked (each comment byte a space, every line break kept): strings, template
  *  literals (with their `${…}` parts) and regex literals pass through untouched, so a `//` or `/*` inside one is never a comment. */
-function stripJsComments(src) {
+function stripJsComments(src) {   // (its locals never share a name with a clock span of this suite: the wall-clock census flows by NAME — an `end` here once flooded it, 2.369.411's first checkpoint)
   let out = '', i = 0, prevSig = '';
   const n = src.length, tpl = [];   // tpl: the brace depth of each open template `${…}`
   const blank = (x) => x.replace(/[^\n]/g, ' ');
@@ -589,18 +589,18 @@ function stripJsComments(src) {
     const m = out.slice(-24).match(/([A-Za-z_$][\w$]*)\s*$/);   // the word before the slash, from the tail only
     return !!(m && /^(return|typeof|case|in|of|delete|void|throw|new|instanceof|yield|await|else|do)$/.test(m[1]));
   };
-  const templateFrom = (j) => {   // j: the first char inside a template; to its end or its next `${`
-    while (j < n && src[j] !== '`') { if (src[j] === '\\') { j += 2; continue; } if (src[j] === '$' && src[j + 1] === '{') return { end: j + 2, open: true }; j++; }
-    return { end: j + 1, open: false };
+  const templateFrom = (j) => {   // j: the first char inside a template; to its upto or its next `${`
+    while (j < n && src[j] !== '`') { if (src[j] === '\\') { j += 2; continue; } if (src[j] === '$' && src[j + 1] === '{') return { upto: j + 2, open: true }; j++; }
+    return { upto: j + 1, open: false };
   };
   while (i < n) {
     const c = src[i], d = src[i + 1];
-    if (c === '/' && d === '/') { const e = src.indexOf('\n', i), end = e < 0 ? n : e; out += blank(src.slice(i, end)); i = end; continue; }
-    if (c === '/' && d === '*') { const e = src.indexOf('*/', i + 2), end = e < 0 ? n : e + 2; out += blank(src.slice(i, end)); i = end; continue; }
+    if (c === '/' && d === '/') { const e = src.indexOf('\n', i), upto = e < 0 ? n : e; out += blank(src.slice(i, upto)); i = upto; continue; }
+    if (c === '/' && d === '*') { const e = src.indexOf('*/', i + 2), upto = e < 0 ? n : e + 2; out += blank(src.slice(i, upto)); i = upto; continue; }
     if (c === '"' || c === "'") { let j = i + 1; while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1; out += src.slice(i, j + 1); i = j + 1; prevSig = c; continue; }
     if (c === '`' || (c === '}' && tpl.length && tpl[tpl.length - 1] === 0)) {
       if (c === '}') tpl.pop();
-      const r = templateFrom(i + 1); out += src.slice(i, r.end); i = r.end;
+      const r = templateFrom(i + 1); out += src.slice(i, r.upto); i = r.upto;
       if (r.open) { tpl.push(0); prevSig = '{'; } else prevSig = '`';
       continue;
     }

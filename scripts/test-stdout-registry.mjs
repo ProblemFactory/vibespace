@@ -1569,7 +1569,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
             } else if (false) {`;
       ok('NEGATIVE CONTROL: the mutation patch matches the shipped arbiter (a control that no longer patches anything is not a control)', srcTxt.includes(FROM));
       const patchedPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vs-wtpatch-')), 'claude-stream-json-prefix.cjs');
-      fs.writeFileSync(patchedPath, srcTxt.replace(FROM, TO).replace(/require\('\.\.\/\.\.\//g, `require('${REPO}/src/`));
+      fs.writeFileSync(patchedPath, srcTxt.replace(FROM, TO).replace(/require\('\.\.\/\.\.\//g, `require('${REPO}/src/`).replace(/require\('\.\.\//g, `require('${REPO}/src/server/`));   // the copy lives in a temp folder: every relative require of the real file is made absolute (B-d868's `require('../session-brain.js')` runs at attach)
       delete require.cache[idxId]; delete require.cache[soId];
       require.cache[realId] = { id: realId, filename: realId, loaded: true, exports: require(patchedPath) };
       const soPre = require(soId).create({
