@@ -176,15 +176,17 @@ function gitSpecOf(value, refIn = null) {
  *  clone's ssh is handed: no ssh config (a HostName / Port rewrite, a config alias) can move the lookup off these lines.
  *  A paste for several hosts pins only this one's. → text | throws plugin_git_hostkey (unreadable, or no key for this host:
  *  there would be nothing to check its key against). */
+/** THE DOOR every host-key refusal names (主开发's must on unit 1: «a refusal names its door») — where the pin is set or changed */
+const HOSTKEY_DOOR = "Integrations → Plugins → Plugin Git repository → Host keys, or the cluster's preset";
 const pinAliasOf = (spec) => String(spec.host).trim().toLowerCase().replace(/:\d+$/, '');
 function pinnedHostsText(spec, knownHosts) {
   const alias = pinAliasOf(spec);
   const names = [...new Set([alias, SKF.knownHostName(spec.host)])];
   const p = SKF.parseKnownHosts(knownHosts);
-  if (!p.ok) throw codedErr(400, 'plugin_git_hostkey', `git: the host keys of the Plugin Git credential cannot be read — ${p.line ? `line ${p.line}: ` : ''}${p.why}`);
+  if (!p.ok) throw codedErr(400, 'plugin_git_hostkey', `git: the host keys of the Plugin Git credential cannot be read — ${p.line ? `line ${p.line}: ` : ''}${p.why} (${HOSTKEY_DOOR})`);
   const hmac = (salt, n) => { try { return crypto.createHmac('sha1', Buffer.from(salt, 'base64')).update(n).digest('base64'); } catch { return null; } };
   const keys = p.keys.filter((k) => k.names === null || names.some((n) => k.names.includes(n)) || k.hashed.some((h) => names.some((n) => hmac(h.salt, n) === h.hash)));
-  if (!keys.length) throw codedErr(400, 'plugin_git_hostkey', `git: the host keys of the Plugin Git credential hold none for ${names.join(' / ')} — nothing to check its key against (Integrations → Plugins → Plugin Git repository → Host keys)`);
+  if (!keys.length) throw codedErr(400, 'plugin_git_hostkey', `git: the host keys of the Plugin Git credential hold none for ${names.join(' / ')} — nothing to check its key against (${HOSTKEY_DOOR})`);
   return keys.map((k) => `${alias} ${k.type} ${k.key}\n`).join('');
 }
 /** POSIX single-quoting for the askpass script's file paths (the stage path is ours; quoted anyway). */
@@ -220,7 +222,10 @@ function gitFailure(e, { url, ref, cred, timeout = GIT_TIMEOUT_MS }) {
     const what = changed.test(t)
       ? `showed an ssh host key that is not ${pinnedRoad ? 'one of the host keys the Plugin Git credential pins' : 'the one this instance\'s ssh knows for it'}`
       : 'showed no ssh host key the Plugin Git credential pins';
-    return codedErr(400, 'plugin_git_hostkey', `git: ${host} ${what} — nothing was fetched; compare the keys the host publishes${fp ? ` (it showed ${fp[1]})` : ''} (${said.slice(0, 160)})`);
+    // the door: pinned ⇒ where the pin is changed; unpinned ⇒ pinning the host's published keys there is the fix (the pinned road
+    // reads no ~/.ssh/known_hosts)
+    const door = pinnedRoad ? `if the host really changed its keys, paste its published ones in ${HOSTKEY_DOOR}` : `pin the keys the host publishes in ${HOSTKEY_DOOR}`;
+    return codedErr(400, 'plugin_git_hostkey', `git: ${host} ${what} — nothing was fetched; compare the keys the host publishes${fp ? ` (it showed ${fp[1]})` : ''}, then ${door} (${said.slice(0, 160)})`);
   }
   if (e && e.killed) return codedErr(504, 'plugin_git_timeout', `git: ${gitHostOf(url) || 'the host'} did not finish within ${+(timeout / 1000).toFixed(1)} s (its limit) — nothing was installed`);
   if (/could not read (?:Username|Password)|Authentication failed|terminal prompts disabled|Permission denied \(publickey|HTTP Basic: Access denied|Invalid username or password|\b40[13]\b|not authorized|access denied|Repository not found|repository '.*' not found|Host key verification failed/i.test(t))

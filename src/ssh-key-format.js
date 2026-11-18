@@ -163,8 +163,13 @@ function parseKnownHosts(text) {
     const type = f[at], key = f[at + 1] || '';
     if (!/^[A-Za-z0-9+/]{16,}={0,3}$/.test(key)) return no('the key is not base64');
     if (blobType(key) !== type) return no(`the key's own bytes are not a ${type} key — a cut or mixed-up paste`);
+    // a second key on the same line (a lost line break) would be read as a comment and silently not pinned (unit 1's reader)
+    if (f.slice(at + 2).some((x) => HOST_KEY_TYPES.includes(x))) return no('two keys on one line — one key per line');
     const names = [], hashed = [];
     if (at === 1) {
+      // a negated (!host) or wildcard (*, ?) name is ssh's own matching language, not a pin of one host: refused by name
+      // (a `host,!host` line would otherwise be kept for the host ssh itself would exclude — unit 1's reader)
+      if (f[0].split(',').some((n) => /^!|[*?]/.test(n))) return no('a negated (!) or wildcard (* ?) host name is not a pinned key — name the host itself');
       for (const n of f[0].split(',')) {
         const h = /^\|1\|([A-Za-z0-9+/=]+)\|([A-Za-z0-9+/=]+)$/.exec(n);
         if (h) hashed.push({ salt: h[1], hash: h[2] }); else if (n) names.push(n.toLowerCase());
