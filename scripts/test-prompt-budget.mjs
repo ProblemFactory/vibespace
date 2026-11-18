@@ -78,6 +78,42 @@ console.log('— ③b the budget is the same wherever the scratch dir is (B-52fa
     `CONTROL: measured on the REAL paths the three groups grow with the scratch dir's length (${rawHere.shapes[2].total} → ${rawLong.shapes[2].total} B) — what made a long TMPDIR red`);
 }
 
+console.log('— ③c a LONG real path steps a Context row down — and the row says so (B-07f5, the leg B-52fa asked for)');
+{
+  // The Context table tells each row at its chosen depth within the group's byte budget; a row that does not fit steps DOWN and
+  // its line says «[over the injection budget: … — told as … instead]» (src/task-groups.js _ctxPlan). A group's folder (made by
+  // `folders`, told at «file names») carries its REAL path in its row, once — so the SAME folder (24 files) under a long real
+  // path costs exactly the path's extra bytes. One budget set between the two measured costs: under the short path the row is
+  // told whole at its depth, no note; under the long path it steps down and its own line says so — never a silent drop. The
+  // plant proves itself first, by a count: the long row costs exactly the two paths' difference more, at the same depth
+  const tree = (root) => { const dir = path.join(root, 'work'); fs.mkdirSync(dir, { recursive: true }); for (let i = 0; i < 24; i++) fs.writeFileSync(path.join(dir, `notes-${String(i).padStart(2, '0')}.md`), '# notes\n'); return dir; };
+  const planAt = (root, bytes) => {
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pb-ctx-d-'));
+    try {
+      const tm = new TaskGroupManager({ dataDir: data, onChange: () => {} });
+      const g = tm.create({ title: 'Paths', objective: 'a group whose folder lives under a long path', folders: [tree(root)] });
+      return tm._ctxPlan(tm.get(g.id), bytes, { gid: '' });
+    } finally { fs.rmSync(data, { recursive: true, force: true }); }
+  };
+  const shortRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pb-ctx-s-'));
+  const longBase = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pb-ctx-l-'));
+  const longRoot = path.join(longBase, ...Array.from({ length: 6 }, (_, i) => `a-long-folder-name-a-person-chose-${i}`));
+  let s = null, l = null, sAt = null, lAt = null, budget = null;
+  try {
+    s = planAt(shortRoot, Infinity); l = planAt(longRoot, Infinity);
+    budget = Math.floor((s.rows[0].bytes + l.rows[0].bytes) / 2);
+    sAt = planAt(shortRoot, budget); lAt = planAt(longRoot, budget);
+  } finally { fs.rmSync(shortRoot, { recursive: true, force: true }); fs.rmSync(longBase, { recursive: true, force: true }); }
+  const cs = s && s.rows[0] ? s.rows[0].bytes : 0, cl = l && l.rows[0] ? l.rows[0].bytes : 0, extra = Buffer.byteLength(longRoot) - Buffer.byteLength(shortRoot);
+  ok(!!(s && l && s.rows[0].chosen === 'names' && s.rows[0].level === 'names' && l.rows[0].level === 'names' && extra > 200 && cl - cs === extra),
+    `③c the plant is where it claims: the same folder, told at «file names», costs ${cs} B under a ${shortRoot.length}-char path and ${cl} B under a ${longRoot.length}-char one — exactly the paths' ${extra} B difference (the path rides its row, once)`);
+  const sLine = sAt ? sAt.lines.join('\n') : '', lLine = lAt ? lAt.lines.join('\n') : '';
+  ok(!!(sAt && sAt.rows[0].level === 'names' && !/over the injection budget/.test(sLine)),
+    `③c within ${budget} B the short path's row is told whole at «file names», no note`);
+  ok(!!(lAt && lAt.rows[0].level !== 'names' && /\[over the injection budget: file names need [^\]]* — told as [^\]]* instead/.test(lLine) && lAt.rows[0].bytes <= cl),
+    `③c within the same ${budget} B the LONG path steps the row down (to «${lAt ? lAt.rows[0].level : '?'}») and its own line says so; the measured row only shrinks (${lAt ? lAt.rows[0].bytes : '?'} ≤ ${cl} B)`);
+}
+
 console.log('— ④ every pointer names a served manual; every surface has one');
 const intro = AR.sessionToolsIntro(T, { browserVariant: 'D' });
 const section = TaskGroupManager.prototype._toolsSectionParts.call({}, '', false, T).join('\n');
