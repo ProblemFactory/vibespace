@@ -87,8 +87,14 @@ try {
   ok(m3 === null && lines.length === 1 && /is not this user's own directory/.test(lines[0][1]) && !fs.existsSync(path.join(elsewhere, 'browser-tmp')), 'a planted symlink at the per-uid name ⇒ refused (null + a warn), nothing made through it', JSON.stringify({ m3, lines }));
   lines.length = 0;
   const mi = `30 1 0:5 / ${sb2} rw - tmpfs tmpfs rw\n`;
-  const m4 = F.makeBrowserTmpDir({ dataDir: longData, log, shortBase: sb2, mountinfo: mi });
-  ok(m4 === path.join(os.tmpdir(), `vibespace-${process.getuid()}`, 'browser-tmp') || m4 === null, 'a tmpfs short base ⇒ the fallback root (or none fits)', JSON.stringify({ m4, lines }));
+  // B-3767 (主开发 06:54Z): the RAM fallback root is <os.tmpdir()>/vibespace-<uid>/browser-tmp, so the maker would make that fixed
+  // name for real under the shared temp folder and the suite left it. For this one call the temp folder is the suite's own scratch
+  // (the leg asks for the fallback's SHAPE, never that place), and the scratch is removed with the others
+  const fbTmp = scratch('/tmp', 'f'), prevTmp = process.env.TMPDIR;
+  let m4 = null, fbWant = '';
+  process.env.TMPDIR = fbTmp;
+  try { m4 = F.makeBrowserTmpDir({ dataDir: longData, log, shortBase: sb2, mountinfo: mi }); fbWant = path.join(os.tmpdir(), `vibespace-${process.getuid()}`, 'browser-tmp'); } finally { if (prevTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmp; }
+  ok((m4 === fbWant && fbWant.startsWith(fbTmp + '/')) || m4 === null, "a tmpfs short base ⇒ the fallback root (or none fits) — made in the suite's own temp folder, never the shared one", JSON.stringify({ m4, fbWant, lines }));
   ok(lines.length === 1 && lines[0][0] === 'warn' && /\(RAM\)/.test(lines[0][1]), 'the RAM fallback is said as a WARN naming why', JSON.stringify(lines));
 
   console.log('⑤ the REAL wiring');
