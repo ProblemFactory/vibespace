@@ -1196,9 +1196,10 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
 {
   const keepR = setInterval(() => {}, 1000);
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
+  const ASIS = (src) => src; // the ONE side left as it is on purpose (B-0d3e: only it may mark its copy `same`)
   const both = (pS, pL, tag) => {
     const s2 = pS(SS), l2 = pL(LS);
-    return s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`, { same: s2 === SS })), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`, { same: l2 === LS })) } : null; // a side left as it is (`(src) => src`) says so (B-0d3e); `sub` answers null when its anchor is gone
+    return s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`, { same: pS === ASIS })), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`, { same: pL === ASIS })) } : null; // a side left as it is (ASIS) says so (B-0d3e); `sub` answers null when its anchor is gone; any other patcher whose copy equals the file fails by name
   };
   const sub = (from, to) => (src) => (src.includes(from) ? src.replace(from, to) : null);
   const ASK_ON = '{ convId, windowOf: () => windowOf(ASK_WINDOW) }';
@@ -1210,7 +1211,7 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
   const ASK_CATCH = "catch (e) { if ((n > 1 || bounded) && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }";
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const m1 = both(sub(ASK_ON, '{ convId }'), lWin, 'r3-m1-ask-outside-budget');
-  const m1w = both(sub(ASK_CATCH, 'catch (e) { throw e; }'), (src) => src, 'r3-m1-ask-own-words');
+  const m1w = both(sub(ASK_CATCH, 'catch (e) { throw e; }'), ASIS, 'r3-m1-ask-own-words');
   const m2a = both(sub(STOP_S, STOP_S.replace('if (!w)', 'if (false)')), sub(STOP_L, STOP_L.replace('if (!w)', 'if (false)')), 'r3-m2-no-stop');
   const m2b = both(sub(STOP_S, STOP_S.replace('n - 1', 'n')), sub(STOP_L, STOP_L.replace('n - 1', 'n')), 'r3-m2-off-by-one');
   const rows = [
