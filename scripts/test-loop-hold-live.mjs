@@ -138,8 +138,12 @@ if (!isMainThread) {
     for (const k of ['readFileSync', 'statSync', 'realpathSync']) { const o = fs[k]; fs[k] = function (p, ...a) { if (under(p)) Atomics.wait(nap, 0, 0, ms); return o.call(this, p, ...a); }; }
     for (const k of ['readFile', 'stat', 'realpath']) { const o = fs.promises[k]; fs.promises[k] = async function (p, ...a) { if (under(p)) await new Promise((r) => setTimeout(r, ms)); return o.call(this, p, ...a); }; }
   }
-  if (process.env.LH_POSTLOG) { const insp = require('inspector'), fs = require('fs'), orig = insp.Session.prototype.post;   // (主开发 20:19Z) each post, its thread state, on fd 2
-    const st = () => { try { const t = fs.readFileSync('/proc/self/task/' + process.pid + '/stat', 'utf8'); return t.charAt(t.lastIndexOf(')') + 2) || '?'; } catch { return '?'; } };
+  if (process.env.LH_POSTLOG) { const insp = require('inspector'), fs = require('fs'), orig = insp.Session.prototype.post, ofs = fs.readFileSync, me = '/task/' + process.pid + '/stat';   // (主开发 20:19Z) each post, its thread state, on fd 2
+    // (its reader's M2) THE PRODUCT'S OWN READ: the last …/task/<main>/stat text the watchdog itself read (ask() reads it just before it
+    // posts — src/server/sync-fs-witness-worker.js readProc → fs.readFileSync) — never a second read of its own
+    let lastStat = null;
+    fs.readFileSync = function (p, ...a) { const r = ofs.call(this, p, ...a); if (typeof p === 'string' && p.endsWith(me)) lastStat = r; return r; };
+    const st = () => { const t = String(lastStat || ''), i = t.lastIndexOf(')'); return (i >= 0 && t.charAt(i + 2)) || '?'; };
     insp.Session.prototype.post = function (m, ...a) { if (m === 'Runtime.evaluate') { try { fs.writeSync(2, '[lh-post] ' + st() + ' ' + mono().toFixed(3) + '\\n'); } catch { } } return orig.call(this, m, ...a); }; }
   if (process.env.LH_POSTWATCH) { const insp = require('inspector'), b = new BroadcastChannel('lh-posts'); b.unref(); const orig = insp.Session.prototype.post;
     insp.Session.prototype.post = function (m, ...a) { if (m === 'Runtime.evaluate') b.postMessage({ ev: 'post', at: mono() }); return orig.call(this, m, ...a); }; }
@@ -157,15 +161,19 @@ const FIRST_ASK_MS = askDue(0), SECOND_ASK_MS = askDue(1), THIRD_ASK_MS = askDue
 // (主开发 2026-11-18 20:19Z's sharper form — with NO product seam; its readers' S1 / S2) WHICH ASK MET THE EXIT: the sweep preload
 // (LH_POSTLOG, the watchdog's own thread) stamps every Runtime.evaluate the watchdog posts on fd 2 with the main thread's kernel
 // state read at that post (the read the product makes a moment before it — src/server/sync-fs-witness-worker.js ask()), and the
-// child stamps its call's end. A «Waiting for the debugger…» line is THE STATED RESIDUAL only when an ask was posted with the
-// thread RUNNING within SESSION_MS (+ 5 ms) of the call's end — its session kept, the exit inside it (post(), docs/kb-design-
-// lessons.md «NO SESSION ACROSS AN EXIT»); a line with no such post is THE LAW BROKEN (an asleep ask kept a session): red
+// child stamps its call's end. A «Waiting for the debugger…» line is THE STATED RESIDUAL only when the LAST ask before the exit
+// was posted with the thread RUNNING within SESSION_MS of the call's end (+ 5 ms: MINE — the worker's 20 ms timer can close a
+// little late) — its session kept, the exit inside it (post(), docs/kb-design-lessons.md «NO SESSION ACROSS AN EXIT»); any other
+// line is THE LAW BROKEN (an asleep ask kept a session): red. THE STAMP IS THE PRODUCT'S OWN STATE READ (the preload keeps the last
+// …/stat text the watchdog read; ask() reads it just before it posts) — never a second read, so no flip between two reads (its
+// reader's M2: a second read taken as the thread woke could stamp R on an ask the product read asleep, and excuse the very
+// regression the law forbids). A stamp of «?» (no read seen) is never R: it errs toward red
 const exitJudge = (err) => {
   const e = String(err || ''), line = e.includes('Waiting for the debugger'), end = Number((/\[kid\] call end ([\d.]+)/.exec(e) || [])[1]);
   const posts = [...e.matchAll(/\[lh-post\] ([A-Z?]) ([\d.]+)/g)].map((m) => ({ st: m[1], at: Number(m[2]) }));
   const last = posts.length ? posts[posts.length - 1] : null;   // the LAST ask before the exit (主开发 20:19Z's form; its second reader's N2)
   const onCpu = Number.isFinite(end) && !!last && last.st === 'R' && last.at >= end - LH.SESSION_MS - 5;
-  return { line, residual: line && onCpu, broken: line && !onCpu, posts: posts.length, asleepPosts: posts.filter((p) => p.st === 'S' || p.st === 'D').length, stamped: Number.isFinite(end) };
+  return { line, residual: line && onCpu, broken: line && !onCpu, posts: posts.length, asleepPosts: posts.filter((p) => p.st === 'S' || p.st === 'D').length, lastAsleep: !!last && (last.st === 'S' || last.st === 'D'), stamped: Number.isFinite(end) };
 };
 // THE BOOT through the REAL boot-trace start (server.js's 6th line): the off switch read from data/settings.json BEFORE anything is asked
 const BOOTKID = path.join(ROOT, 'bootkid.js');
@@ -451,7 +459,7 @@ async function run(cfg, opts = {}) {
   r.starve = rows;
   return r;
 }
-function run1(cfg, { node = process.execPath, args = [], timeoutMs = 30000, onReady = null, env = {}, pin = null } = {}) {
+function run1(cfg, { node = process.execPath, args = [], timeoutMs = 30000, onReady = null, env = {}, pin = null, atClose = false } = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     const c = pin != null ? spawn('taskset', ['-c', String(pin), node, ...args, KID, JSON.stringify(cfg)], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir(), ...env } })
@@ -459,7 +467,12 @@ function run1(cfg, { node = process.execPath, args = [], timeoutMs = 30000, onRe
     let out = '', err = '', exitAt = null, readied = false;
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; if (onReady && !readied && err.includes('[kid] ready')) { readied = true; onReady(c); } });
     const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, timeoutMs);
-    c.on('exit', (code) => { exitAt = Date.now(); clearTimeout(kill); let j = null; try { j = JSON.parse(out); } catch { } if (j && j.cpuMs) cpuMs += j.cpuMs; resolve({ code, out: j, err, lines: err.split('\n').filter(Boolean), wallMs: exitAt - t0, exitAt }); });
+    // (主开发 21:55Z, law 1) atClose: a run whose stderr is JUDGED resolves when its pipes close — at 'exit' its last bytes (the
+    // «Waiting…» line, the call's stamp) may be unread; a pipe still open 2 s after the exit resolves anyway, marked cutShort (red by name)
+    let done1 = false;
+    const finish = (code, cutShort) => { if (done1) return; done1 = true; exitAt = exitAt || Date.now(); clearTimeout(kill); let j = null; try { j = JSON.parse(out); } catch { } if (j && j.cpuMs) cpuMs += j.cpuMs; resolve({ cutShort: !!cutShort, code, out: j, err, lines: err.split('\n').filter(Boolean), wallMs: exitAt - t0, exitAt });  };
+    if (atClose) { let code0 = null; c.on('exit', (code) => { code0 = code; exitAt = Date.now(); const t = setTimeout(() => finish(code0, true), 2000); t.unref?.(); }); c.on('close', (code) => finish(code0 != null ? code0 : code, false)); }
+    else c.on('exit', (code) => { exitAt = Date.now(); finish(code, false); });
   });
 }
 const holdLines = (r) => r.lines.filter((l) => l.startsWith('[loop-hold] the main loop was held') || l.startsWith('[loop-hold] the boot held'));
@@ -624,22 +637,37 @@ async function legAcceptance() {
   const rows = ['exitInside', 'exitAfter', 'throwInside', 'throwAfter', 'sigterm', 'sigtermFlush'];
   const seen = {};
   for (const row of rows) for (let i = 0; i < 2; i++) {
-    const r = await run({ plan: 'stopRow', row }, { onReady: (c) => { setTimeout(() => { try { c.kill('SIGTERM'); } catch { } }, 120); } });
-    seen[row] = (seen[row] || 0) + (r.err.includes('Waiting for the debugger') ? 1 : 0);
+    const r = await run({ plan: 'stopRow', row }, { atClose: true, onReady: (c) => { setTimeout(() => { try { c.kill('SIGTERM'); } catch { } }, 120); } });   // atClose: its reader's S1
+    seen[row] = (seen[row] || 0) + (r.err.includes('Waiting for the debugger') || r.cutShort ? 1 : 0);   // a stderr never closed is no green
   }
   ok(rows.every((r) => seen[r] === 0), `5 — the six stop rows, twice each (exit / throw inside and right after a sampled hold, SIGTERM inside one, a SIGTERM handler's 1.1 s flush): no «Waiting for the debugger…» line (${JSON.stringify(seen)})`);
   const nat = [];
   for (const row of ['exitNative', 'exitNativeCross']) for (let i = 0; i < 2; i++) {
-    const r = await run({ plan: 'stopRow', row, ...(row === 'exitNative' ? { samplesPerHold: 1 } : {}) }, { args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' } });
-    nat.push({ row, code: r.code, ...exitJudge(r.err) });
+    const r = await run({ plan: 'stopRow', row, ...(row === 'exitNative' ? { samplesPerHold: 1 } : {}) }, { args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' }, atClose: true });
+    nat.push({ row, code: r.code, cutShort: r.cutShort, ...exitJudge(r.err) });
   }
   const natSay = (row) => { const L = nat.filter((x) => x.row === row); return `${row} ${L.filter((x) => x.residual).length} of ${L.length}`; };
   // (its second reader's S1) exitJudge's PLANT and RED CONTROL: the stamp reads the MAIN thread's state — an ask posted inside a
   // 0.35 s call is stamped asleep (S / D) in at least one of the four runs, never «R» always; a line whose last ask was posted asleep
   // is «broken», one whose last ask was posted running at the call's end is the residual
-  const jB = exitJudge('[lh-post] S 100.000\n[kid] call end 400.000\nWaiting for the debugger to disconnect...\n'), jR = exitJudge('[lh-post] S 100.000\n[lh-post] R 401.000\n[kid] call end 400.000\nWaiting for the debugger to disconnect...\n');
-  ok(nat.some((x) => x.asleepPosts >= 1) && jB.broken && !jB.residual && jR.residual && !jR.broken, `5 — exitJudge reads what it claims: ${nat.reduce((n, x) => n + x.asleepPosts, 0)} asks stamped asleep inside the calls (the main thread's state, not the poster's); RED CONTROL: a line whose last ask was posted asleep is «broken», one posted running at the call's end the residual`, nat.map((x) => ({ row: x.row, posts: x.posts, asleep: x.asleepPosts })));
-  ok(nat.every((x) => x.code === 0 && x.stamped && x.posts >= 1 && !x.broken), `5 — an exit right after a 0.35 s native hold, twice each: exitNative (ONE ask a hold, abandoned asleep) and exitNativeCross (the second ask met in the exit) exit by themselves (code 0), each with its asks stamped; NO line without an ask posted on the CPU within SESSION_MS of the call's end — the stated residual counted: ${natSay('exitNative')}, ${natSay('exitNativeCross')}`, nat);
+  // (主开发 21:55Z, law 2) the cases that ISOLATE each term: an asleep post 1 ms before the call's end (inside the window — only the
+  // STATE term makes it broken), a running post with no call-end stamp (the stamp term), an asleep post long before; (its reader's M3)
+  // a RUNNING post 300 ms before the call's end (the WINDOW term alone); (N2) a running post in the window FOLLOWED by an asleep one
+  // (the LAST-ask term: «any running post» would excuse it); (N3) each control's own parse asserted first
+  const W8 = 'Waiting for the debugger to disconnect...\n';
+  const jW = exitJudge('[lh-post] R 100.000\n[kid] call end 400.000\n' + W8), jL = exitJudge('[lh-post] R 399.000\n[lh-post] S 399.500\n[kid] call end 400.000\n' + W8);
+  const jB = exitJudge('[lh-post] S 100.000\n[kid] call end 400.000\n' + W8), jS1 = exitJudge('[lh-post] S 399.000\n[kid] call end 400.000\n' + W8), jNoEnd = exitJudge('[lh-post] R 399.000\n' + W8), jR = exitJudge('[lh-post] S 100.000\n[lh-post] R 401.000\n[kid] call end 400.000\n' + W8);
+  const parsed = jB.posts === 1 && jB.stamped && jB.lastAsleep && jS1.posts === 1 && jS1.lastAsleep && jNoEnd.posts === 1 && !jNoEnd.stamped && jR.posts === 2 && jR.stamped && jW.posts === 1 && !jW.lastAsleep && jL.posts === 2 && jL.lastAsleep;
+  ok(parsed && nat.some((x) => x.asleepPosts >= 1) && jB.broken && !jB.residual && jS1.broken && !jS1.residual && jNoEnd.broken && !jNoEnd.residual && jW.broken && !jW.residual && jL.broken && !jL.residual && jR.residual && !jR.broken, `5 — exitJudge reads what it claims: ${nat.reduce((n, x) => n + x.asleepPosts, 0)} asks stamped asleep inside the calls (the main thread's state, not the poster's); RED CONTROLS, each parse proved first: a line whose last ask was posted asleep is «broken» — 300 ms before the call's end AND 1 ms before it (the state term alone); one with no call-end stamp; one whose last ask ran 300 ms before the end (the window term alone); one whose running ask in the window was followed by an asleep one (the last-ask term); one posted running at the call's end is the residual`, nat.map((x) => ({ row: x.row, posts: x.posts, asleep: x.asleepPosts })));
+  ok(nat.every((x) => x.code === 0 && !x.cutShort && x.stamped && x.posts >= 1 && !x.broken), `5 — an exit right after a 0.35 s native hold, twice each: exitNative (ONE ask a hold, abandoned asleep) and exitNativeCross (the second ask met in the exit) exit by themselves (code 0), their stderr read whole (at close), each with its call and its asks stamped; NO line without its last ask posted on the CPU within SESSION_MS of the call's end (${nat.filter((x) => x.broken).length} broken) — red in every branch`, nat);
+  // (主开发 21:55Z, law 3; its reader's M1 / S2) A SKIP IS NOT A GREEN: the asleep-ask law is EXERCISED by an exit with NO line after an
+  // ask stamped asleep (the product's own read); an exit excused as the residual, or one that was asked nothing asleep, exercised
+  // nothing. None exercised ⇒ a counted site's named skip (a broken exit is red above, whatever this count)
+  const natJudged = nat.filter((x) => !x.line && x.asleepPosts >= 1).length;
+  site(); if (!natJudged) skip('5 — the asleep-ask law exercised at an exit right after a 0.35 s native hold', `no exit this run had an ask posted asleep and no line (the stated residual: ${natSay('exitNative')}, ${natSay('exitNativeCross')})`);
+  else ok(natJudged >= 1 && !nat.some((x) => x.broken), `5 — the asleep-ask law exercised: ${natJudged} of ${nat.length} exits had an ask posted asleep and NO line; the stated residual counted: ${natSay('exitNative')}, ${natSay('exitNativeCross')}`, nat);
+  { const exN = nat.filter((x) => x.row === 'exitNative' && x.residual).length;
+    if (exN) console.log(`  · 5 — A STARVED-RUNNER SIGN: exitNative (ONE ask a hold) was excused ${exN} of 2 — its only ask was posted on the CPU at the exit, so the watchdog was late past the whole 0.35 s call`); }
   // 6. a debugger that arrives DURING the hold stands the sampler down (the sample checks it on the main thread)
   // ROUND 5 (law A): AN ASK THE SAMPLER WITHDREW IS NOT A SAMPLE — each of the three stand-downs, three times, over a PURE
   // JavaScript hog: «not sampled (why)», or «JavaScript» from ANOTHER ask that was really answered — never «native» / «on the
@@ -697,9 +725,9 @@ async function legConditions() {
   const op = await run({ plan: 'openPort' });
   const said = op.lines.filter((l) => l.startsWith('[loop-hold] a debugger port is open')), ol = holdLines(op)[0];
   ok(said.length === 1 && ol && /not sampled \(a debugger is attached\)/.test(ol), `condition 4: a loopback port opened at RUN time (inspector.open) — the main thread's beat says it once, the sampler stands down: ${ol}`, op.lines);
-  const st = await run({ plan: 'stopNoLine' });
+  const st = await run({ plan: 'stopNoLine' }, { atClose: true });   // its reader's S1: the absence of a line is read on the WHOLE stderr
   const sampled = holdLines(st).some((l) => / \d samples?: busyHog/.test(l));
-  ok(sampled && st.code === 0 && st.err.includes('[kid] an ordinary stop') && !st.err.includes('Waiting for the debugger'), 'condition 5: after a SAMPLED hold, an ordinary stop (process.exit) prints no «Waiting for the debugger to disconnect…» — the session lives only while the hold does', st.err.slice(-400));
+  ok(sampled && st.code === 0 && !st.cutShort && st.err.includes('[kid] an ordinary stop') && !st.err.includes('Waiting for the debugger'), 'condition 5: after a SAMPLED hold, an ordinary stop (process.exit) prints no «Waiting for the debugger to disconnect…» — the session lives only while the hold does', st.err.slice(-400));
   const ds = await run({ plan: 'deepSoak', beatMs: 1, profileEveryMs: 1, profileMs: 2500 }, { timeoutMs: 60000 });
   const k = (ds.out && ds.out.checks) || {}, pl2 = ds.out && ds.out.report.profile.last;
   const deepN = pl2 ? (pl2.top.find((x) => x.frame === LH_KEYS_DEEP) || { n: 0 }).n : 0;
@@ -774,10 +802,12 @@ async function legRound3(node, tag) {
     // (主开发 20:20Z; its readers' S2) BOTH ASKS' DOORS meet this sweep — at its low end the call can return before the first ask is
     // posted, at its high end past the second's due — so every point is judged by exitJudge: a line excused only by an ask posted
     // on the CPU within SESSION_MS of the call's end (counted, said), any other line red
-    const resid = [], unstamped = [];
-    for (let x = X0; x <= 220; x += 10) { nX++; const r = await run({ plan: 'exitNativeX', x }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' } }); const j = exitJudge(r.err); if (!j.stamped) unstamped.push(x); if (j.broken) hits.push(x); if (j.residual) resid.push(x); }
+    const resid = [], unstamped = []; let judged7 = 0;
+    for (let x = X0; x <= 220; x += 10) { nX++; const r = await run({ plan: 'exitNativeX', x }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' }, atClose: true }); const j = exitJudge(r.err); if (!j.stamped || r.cutShort) unstamped.push(x); if (j.broken) hits.push(x); if (j.residual) resid.push(x); if (!j.line && j.asleepPosts >= 1) judged7++; }
+    ok(!unstamped.length && !hits.length, `(7) every point's child stamped its call's end and closed its stderr whole (${nX} points); NO line without its last ask posted on the CPU within SESSION_MS of the call's end (${hits.length} broken${hits.length ? ' at X = ' + hits.join(' / ') : ''}) — red in every branch`, { unstamped, hits });
     console.log(`  · (7) the stated residual (an ask posted on the CPU within SESSION_MS of the call's end): ${resid.length} of ${nX}${resid.length ? ' at X = ' + resid.join(' / ') + ' ms' : ''} — counted, never asserted`);
-    ok(!hits.length && !unstamped.length, `(7) a sync child of X ms (X = ${X0} … 220, across the first ask at ~${F7} ms and its old 50 ms window, and past the second at ${SECOND_ASK_MS} ms) then process.exit(): «Waiting for the debugger to disconnect…» without an ask posted on the CPU within SESSION_MS of the call's end 0 of ${nX} — an ask of a main thread asleep in a call keeps NO session`, hits); }
+    site(); if (!judged7) skip('(7) the asleep-ask law exercised at an exit right after a sync child', `no point this run had an ask posted asleep and no line (${resid.length} the stated residual, the rest asked nothing asleep)`);
+    else ok(judged7 >= 1 && !hits.length, `(7) the asleep-ask law exercised at ${judged7} of ${nX} points (an ask posted asleep, NO line) — a sync child of X ms (X = ${X0} … 220, across the first ask at ~${F7} ms and its old 50 ms window, and past the second at ${SECOND_ASK_MS} ms) then process.exit(): «Waiting for the debugger to disconnect…» without an ask posted on the CPU within SESSION_MS of the call's end 0 of ${nX} — an ask of a main thread asleep in a call keeps NO session`, hits); }
   // (8) THE PRESS: a debugger port opened in the same tick, and a watchdog that died
   { const r = await run({ plan: 'pressSameTick' }, { node });
     const pr = r.out && r.out.checks.press;
@@ -967,11 +997,13 @@ async function legRound4(node, tag, tree = null) {
   // (C) MUST 2 — THE WATCHDOG'S OWN FILE READS NEVER DELAY A CHECK: every read of a repo source takes SLOW_READ_MS (sync or async,
   //     in the watchdog's own thread); a 700 ms hold is asked at held ≈ 80, 200, 400 ms ON TIME, the next hold too, and
   //     the frames whose files were not read are said by location, with why
-  // (its second reader's S2) the stand-in's read is 500 ms (300 before 2.369.411): a read at ANY ask puts the next one past its own
-  // due + 250 — the asks are due at least 120 ms apart (80 → 200: 80 + 500 = 580 > 450; 200 → 400: 200 + 500 = 700 > 650), and the
-  // next hold's first ask the same (> FIRST_ASK_MS + 250) — so due + 250 alone catches it, with no bound between asks (a 300 ms read
-  // at the first ask would land the second at about 385, under 450)
-  const SLOW_READ_MS = 500;
+  // (its readers' S2 / S3; 主开发 21:55Z law 4) the stand-in's read is 700 ms (300 before 2.369.411). COVERED: a read at the FIRST or
+  // SECOND ask (the next ask lands at ≥ 780 / 900 ms — past the 700 ms hold's end: the hold carries fewer than 3 asks, red by the
+  // count; lateness only pushes it later), and at the HOLD'S END (the next hold starts ≥ 150 ms later, so its first ask comes ≥ 550 ms
+  // into it — past its due + 250 = 330, or past that 400 ms hold altogether; the margin is ~220 ms, a child's late timer eats it only
+  // past that). NOT covered: a read at the THIRD ask (its delay ends inside the gap before the next hold). (At 300 ms a read at the
+  // first ask landed the second at about 385, under 450; at 500 the hold's end kept only ~20 ms of margin)
+  const SLOW_READ_MS = 700;
   const C = await run({ plan: 'slowNames', tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTWATCH: '1', LH_SLOW_SRC_MS: String(SLOW_READ_MS), LH_SLOW_ROOT: ROOT }, timeoutMs: 30000 });
   const cc = C.out && C.out.checks;
   const lag = cc ? cc.holds.map((x) => cc.posts.filter((p) => p.at >= x.start - 25 && p.at <= x.end).map((p) => Math.round(p.at - x.start))) : [];
@@ -979,11 +1011,12 @@ async function legRound4(node, tag, tree = null) {
   say(`(C) the asks of the two holds, ms after each began: ${JSON.stringify(lag)}; ${lines.filter((l) => /said by location alone/.test(l)).length} of ${lines.length} lines say frames by location`);
   if (!tree) {
     // (cure 3) the first ask is due one beat before the bar (LH.firstAskMs, B-7c97); the law is «a slow read never delays a check»:
-    // each ask bounded under the read's own delay: due + 250, which a SLOW_READ_MS read at any ask overshoots (above); a watchdog late on
+    // each ask bounded under the read's own delay: due + 250 and three asks inside the hold — a SLOW_READ_MS read at the first two asks
+    // or the hold's end breaks one of them (above; not one at the third); a watchdog late on
     // the CPU past due + 60 is counted and said, never red
     const F = FIRST_ASK_MS, due = [F, SECOND_ASK_MS, THIRD_ASK_MS], first = lag[0] || [];
     const lateN = due.filter((d, i) => first[i] != null && first[i] > d + 60).length + ((lag[1] || [])[0] > F + 60 ? 1 : 0);
-    ok(!!cc && first.length >= 3 && due.every((d, i) => first[i] != null && first[i] <= d + 250) && (lag[1] || [])[0] != null && lag[1][0] <= F + 250, `(C) ${tag}: with every source read taking ${SLOW_READ_MS} ms, the 700 ms hold is asked at ${first.join(' / ')} ms (due ${due.join(' / ')} + one check; ${lateN} later than due + 60 — the watchdog late on the CPU, said; a ${SLOW_READ_MS} ms read at any ask would put the next past its due + 250) and the next hold at ${(lag[1] || [])[0]} ms — no read delays a check`, { lag, err: C.err.slice(-400) });
+    ok(!!cc && first.length >= 3 && due.every((d, i) => first[i] != null && first[i] <= d + 250) && (lag[1] || [])[0] != null && lag[1][0] <= F + 250, `(C) ${tag}: with every source read taking ${SLOW_READ_MS} ms, the 700 ms hold is asked at ${first.join(' / ')} ms (due ${due.join(' / ')} + one check; ${lateN} later than due + 60 — the watchdog late on the CPU, said; a ${SLOW_READ_MS} ms read at the first two asks or at the hold's end would push an ask past its bound or out of its hold — not one at the third) and the next hold at ${(lag[1] || [])[0]} ms — no read delays a check`, { lag, err: C.err.slice(-400) });
     ok(lines.length >= 2 && lines.every((l) => /said by location alone \((the source files answered slowly|the time for reading names was spent)/.test(l)) && lines.every((l) => /src\/hogs\.js:\d+/.test(l) && !/busyHog \(src\/hogs/.test(l)),
       `(C) ${tag}: their frames are said by location alone (src/hogs.js:…, no name), and the line says why`, lines.slice(0, 2));
   }
@@ -1162,7 +1195,7 @@ const sk = skipped.length ? `, ${skipped.length} skipped` : '';
   const { fileURLToPath } = await import('node:url');
   const SRC9 = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)), calls = SRC9.filter((l) => /(?<![\w.])skip\(/.test(l) && !/const skip = /.test(l));
   const bare = calls.filter((l) => !/site\(\); (?:if \(.+\) )?skip\(/.test(l));
-  ok(!orphanSkips.length && calls.length >= 12 && !bare.length, `every skip sits behind a counted site: ${calls.length} skip calls in the source, each after «site();» (${bare.length} not); ${orphanSkips.length} skipped this run with no armed site`, { orphanSkips, bare: bare.map((l) => l.trim().slice(0, 120)) });
+  ok(!orphanSkips.length && calls.length >= 14 && !bare.length, `every skip sits behind a counted site: ${calls.length} skip calls in the source, each after «site();» (${bare.length} not); ${orphanSkips.length} skipped this run with no armed site`, { orphanSkips, bare: bare.map((l) => l.trim().slice(0, 120)) });
 }
 console.log(`\nLEGS WITH A SAMPLE FLOOR: ${floorSites - skipped.length} judged, ${skipped.length} NOT judged (named above), of ${floorSites}; ${pass + fail} checks judged in all`);
 if (floorSites && skipped.length * 2 > floorSites) console.log(`\n⚠ MOST LEGS WITH A SAMPLE FLOOR WERE NOT JUDGED THIS RUN (${skipped.length} of ${floorSites}) — this run proves little about them`);
