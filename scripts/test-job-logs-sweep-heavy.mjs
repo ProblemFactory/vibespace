@@ -194,9 +194,15 @@ try {
   J1.archive = [{ id: arcId, kind: 'task', name: 'archived-one', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - 2 * DAY, endedAt: Date.now() - 2 * DAY }], archivedAt: Date.now() - DAY, archivedWhy: 'done' }, ...(J1.archive || [])];
   J1._writeArchive(J1.archive);
   const arcRun = seedRun(d1, arcId, Date.now() - 2 * DAY);
-  const rmA = J1.rmArchived(arcId);
-  const stillThere = has(arcRun);
-  ok(rmA.ok && stillThere, 'the ✕ answers its record\'s removal with the dir still there — no removal on the main thread', `ok=${rmA.ok} there=${stillThere}`);
+  // B-d24c (the .404 readings unit's hosted heavy shard, both tries: ok=true there=false): «the dir still there» right after the
+  // call asserted an ORDER between two threads — the worker had already removed it. What is judged now is what the MAIN THREAD
+  // DID during the ✕: every synchronous fs removal it called is recorded (none may touch the run's dir); the worker's removal is the next leg's
+  const mainRm = [], FSRM = ['rmSync', 'rmdirSync', 'unlinkSync'], realRm = Object.fromEntries(FSRM.map((k) => [k, fs[k]]));
+  for (const k of FSRM) fs[k] = function (p, ...a) { mainRm.push(String(p)); return realRm[k].call(this, p, ...a); };
+  let rmA = null;
+  try { rmA = J1.rmArchived(arcId); } finally { Object.assign(fs, realRm); }
+  const byMain = mainRm.filter((p) => p === arcRun || p.startsWith(arcRun + path.sep) || p === path.dirname(arcRun));
+  ok(rmA && rmA.ok && !byMain.length, 'the ✕ answers its record\'s removal with no removal on the main thread — none of its fs removals touched the run\'s dir', `ok=${rmA && rmA.ok} main-thread removals there: ${JSON.stringify(byMain)}`);
   ok(typeof J1.logsGone === 'function' && (await J1.logsGone(arcId)).gone === true && !has(d1, 'job-logs', arcId), '…and logsGone() resolves once the remover\'s worker has removed it (the routes answer the person then)');
   // a whole-dir verdict never takes a live run: the gc's leg (a) over a done task past 14 days with a live stray run
   const gcT = 'jb-9c0de0aa', live2 = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(live2);
@@ -830,7 +836,9 @@ try {
       ok(v3.pending && rec3 && (rec3.owed || []).includes('jb-a9c0ffe3'), 'a ✕ the storage held is OWED in the record, on disk (the «still being deleted» promise survives a restart)');
       X._logsRm = real; X.shutdown();
       const { jm: X2 } = boot(x, { bootDelayMs: 20 });
-      await until(() => !has(owedRun), 5000, 10);
+      // B-d24c: the dir goes on the worker's thread BEFORE the main thread reads the worker's answer and clears what is owed —
+      // wait on BOTH facts the leg states (the .404 hosted shard read the first and not yet the second, both tries)
+      await until(() => !has(owedRun) && !X2._logsOwed.has('jb-a9c0ffe3'), 5000, 10);
       ok(!has(owedRun) && !X2._logsOwed.has('jb-a9c0ffe3'), '…and the next engine\'s first pass removes it: nothing owed is forgotten by a restart');
       // past the cap: said ONCE
       const { jm: X3, logs: LX3 } = boot(mkDir('x4b'));
