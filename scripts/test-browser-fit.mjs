@@ -51,6 +51,7 @@ import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const FIT = require('../src/browser-fit.js');
 const S = require('../src/browser-stream.js');
@@ -812,7 +813,7 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     const K = require('../src/server/browser-keeper.js');
     const dir = path.join(ROOT, 'keeper-note-rec'); fs.mkdirSync(dir, { recursive: true });
     const recOf = (id, extra = {}) => ({ profileId: id, ns: 'vs-x', pid: null, state: 'ready', startedAt: 1, endedAt: null, ...extra });
-    fs.writeFileSync(path.join(dir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+    (landedU5b(), fs).writeFileSync(path.join(dir, 'browser-profiles.json'), JSON.stringify({ version: 1,
       profiles: [{ id: 'bp-0000000b', label: '(ephemeral) s1', ephemeral: true, owner: { kind: 'conversation', id: 'bk-0000000b' }, createdAt: 1 }, { id: 'bp-0000000c', label: 'Work', createdAt: 1 }],
       browsers: { 'bp-0000000b': recOf('bp-0000000b', { ephemeral: true }), 'bp-0000000c': recOf('bp-0000000c') } }));
     let notifies = 0;
@@ -823,7 +824,7 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     const nE = FIT.fitNoteOf({ agent: { kind: 'viewport', width: 800, height: 600, scale: 1, at: 7 }, baseline: { width: 1280, height: 577 } });
     const nA = FIT.fitNoteOf({ applied: { width: 700, height: 900 }, baseline: { width: 1280, height: 577 }, floorW: 500 });
     const w1 = k1.noteViewport(tE, nE), w2 = k1.noteViewport(tA, nA);
-    const disk = JSON.parse(fs.readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8'));
+    const disk = JSON.parse((landedU5b(), fs).readFileSync(path.join(dir, 'browser-profiles.json'), 'utf8'));
     const k2 = mk(); // "the server restarts"
     const rE = k2.viewportNoteFor(tE), rA = k2.viewportNoteFor(tA);
     ok(w1 && w2 && disk.browsers['bp-0000000b'].viewport && disk.browsers['bp-0000000b'].viewport.agent.width === 800 && disk.browsers['bp-0000000c'].viewport.applied.width === 700 && notifies === 0, `the real keeper writes the note ON the browser record (ephemeral by its browser key, an attachment by its profile id), to disk, with no roster broadcast (${notifies})`, JSON.stringify(disk.browsers));

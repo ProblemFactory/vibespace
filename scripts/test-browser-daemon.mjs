@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const { WebSocket } = require('ws');
 const K = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), V = require('../src/browser-verbs.js');
@@ -81,7 +82,7 @@ function world(tag) {
   const daemonTable = async () => { const rows = await Ff.daemonRows(); const keep = new Set(rows.filter(mine).map((r) => r.pid)); for (let n = 0; n < 3; n++) for (const r of rows) if (keep.has(r.ppid)) keep.add(r.pid); return rows.filter((r) => keep.has(r.pid)); };
   const make = (Km = K, x = {}) => Km.create({ dataDir: path.join(D, 'data'), homeDir: KH, env: () => env, serverSetting: (k) => SET[k], liveKeys: () => live, runtime: Ff.createBrowserRuntime({ env }), facts: Ff.createBrowserFacts({ env }), log: { log: jl, warn: jl, error: jl, info: jl }, install: false, tickMs: 3600e3, daemonTable, ...x });
   const store = path.join(D, 'data', 'browser-profiles.json');
-  const edit = (fn) => { const doc = JSON.parse(fs.readFileSync(store, 'utf8')); fn(doc); fs.writeFileSync(store, JSON.stringify(doc)); };
+  const edit = (fn) => { const doc = JSON.parse((landedU5b(), fs).readFileSync(store, 'utf8')); fn(doc); (landedU5b(), fs).writeFileSync(store, JSON.stringify(doc)); };
   return { D, env, journal, make, edit, daemonTable };
 }
 const SRC = path.join(REPO, 'src');

@@ -241,6 +241,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const folderNotices = new Map();   // B-0645 cure: profileId → {id, rec} — the For-you notice of a download folder not confirmed put back (at the top: emitLease ends one at any time)
   if (!dataDir) throw new Error('browser-keeper: dataDir is required');
   const storeFile = path.join(dataDir, STORE_FILE);
+  // lane lg-store-writes (B-0248 U5b): the registry's bytes go through THE STORE WRITER, keyed by the resolved path (browser-env
+  // asks the writer for the same file before it reads it)
+  const storeKey = path.resolve(storeFile);
+  const writerOf = () => require('../store-writer.js').storeWriter();
   const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   // ONE base environment for the probe, the runtime and the socket-root answer
   // (r2): the root a command lands under is computed from exactly what the
@@ -697,6 +701,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  empty, writable registry: an empty registry here DELETES folders — the kept sweep, Housekeeping, a build's removal) */
   function loadFrom(read) {
     let rawDoc = null;
+    try { const W = writerOf(); if (W.pending(storeKey)) W.flushSync([storeKey]); } catch { }   // lane lg-store-writes U5b: a keeper made AGAIN in the same process (a suite's) lands what the last one still owed before it reads (a hub's boot owes nothing)
     const a = SR.storeAnswer(read, { valid: REG_VALID });
     if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }
     else { reg = B.normalizeRegistry(null); if (a.state !== 'missing') holdRegistry(a); }
@@ -775,9 +780,24 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     reg.humans = humansForDisk(); // BROWSE YOURSELF verify r1 (H4): mirrored at every write (the Map stays the truth)
     reg.host = os.hostname(); // lane profile-lock-roll (L1): the file names the machine that wrote it — the next pod's legacy witness
     // lane grants-unify: a record's `grantUse` is the grants store's row mirrored in memory — never written here
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, { ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }); dirty = false; return true; }
-    catch (e) { log.warn?.(`[browser] could not write ${STORE_FILE}: ${e.message}`); return false; } // verify r9 (④): a caller that must know (a Forget's move) asks
+    // lane lg-store-writes (B-0248 U5b): browser-profiles.json was written whole (temp + rename) ON THE MAIN THREAD at every
+    // registry change (4.2 s of holds in five hours on the production hub). Its bytes now go to the store writer by name, made
+    // when the write is due (a burst of changes is one write), as an ACT (rank 0 + durable(): the writer's next writes). A
+    // caller that must have it ON DISK before what follows (a directory's lineage before its move) asks saveNow().
+    try {
+      const W = writerOf();
+      W.dirty(storeKey, { name: 'browser-profiles.write', rank: 0, mode: FILE_MODE, produce: () => JSON.stringify({ ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }, null, 2),
+        onWritten: (ok, e) => { if (!ok) log.warn?.(`[browser] could not write ${STORE_FILE}: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } });
+      W.durable(storeKey).catch(() => { });
+      dirty = false; return true;
+    } catch (e) { log.warn?.(`[browser] could not write ${STORE_FILE}: ${e.message}`); return false; } // verify r9 (④): a caller that must know (a Forget's move) asks
   }
+  /** the registry ON DISK before what follows (lane lg-store-writes U5b: a directory's lineage is written before the directory
+   *  moves) — handed to the writer, then that one file's write waited for (a named wait); false: it did not land */
+  function saveNow() { return save() && landNow(); }
+  /** the registry's owed write waited for (a named wait): saveNow's, and a MIGRATION's reshape — the boot's next migration may
+   *  read the FILE (2026-10-grants-unify reads browser-profiles.json from disk), so a reshape is on disk before it returns */
+  function landNow() { try { const r = writerOf().flushSync([storeKey]); return !r.left.some((x) => x.file === storeKey); } catch { return false; } }
   function notify() {
     try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); }
     // lane S2: every registry change (a start, a failure, a pin, a removal, a label) may move a conversation's
@@ -2396,7 +2416,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const t = dirKeyOf(to); if (!t || t === f) return { ok: true, moved: false, key: null, error: null };
     const before = reg.dirHosts;
     reg.dirHosts = B.rekeyDirHosts(reg.dirHosts, f, t); dirty = true;
-    if (!save()) { reg.dirHosts = before; dirty = true; lineageLedger('rekey-refused', { from: f, to: t }); log.warn?.(`[browser] the launch-host lineage of ${f} could not be written under ${t} (${STORE_FILE} unwritable) — the directory is NOT moved`); return { ok: false, moved: false, key: null, error: `${STORE_FILE} could not be written` }; }
+    if (!saveNow()) { reg.dirHosts = before; dirty = true; lineageLedger('rekey-refused', { from: f, to: t }); log.warn?.(`[browser] the launch-host lineage of ${f} could not be written under ${t} (${STORE_FILE} unwritable) — the directory is NOT moved`); return { ok: false, moved: false, key: null, error: `${STORE_FILE} could not be written` }; }
     lineageLedger('rekeyed-by-move', { from: f, to: t });
     log.log?.(`[browser] the launch-host lineage of ${f} follows its directory to ${t} (written before the move)`);
     return { ok: true, moved: true, key: t, error: null };
@@ -8525,7 +8545,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _cliNow: () => cliNow() /* B-7a30: the launch's bounded stamp (the gate places a stall in it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
-    reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
+    reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); landNow(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save — ON DISK before it returns (lane lg-store-writes U5b: the boot's next migration may read the file; one that did not land is the runner's landStores' to say)
     diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk, // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam

@@ -32,6 +32,7 @@ import { createRequire } from 'node:module';
 import { scratch, scratchHome, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const D = require('../src/browser-display.js');
 const F = require('../src/browser-facts.js');
 const B = require('../src/browser-profiles.js');
@@ -245,7 +246,7 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
     const NOW_I = Date.parse('2026-10-20T12:00:00Z'); let idleSeq = 0;
     const idleSweep = async (Kmod, stored, facts = {}) => {
       const root = path.join(ROOT, `idle-default-${++idleSeq}`), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
-      fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-000000c1', label: 'IDLE', dir: path.join(root, 'prof'), createdAt: NOW_I - 3600e3 }],
+      (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-000000c1', label: 'IDLE', dir: path.join(root, 'prof'), createdAt: NOW_I - 3600e3 }],
         browsers: { 'bp-000000c1': { profileId: 'bp-000000c1', ns: 'vs-bp-000000c1', state: 'ready', pid: null, hostId: null, external: false, display: { headed: true, fallback: { rung: 'hidden-window' } } } } }));
       const acts = [], quiet = { log() {}, info() {}, warn() {}, error() {} };
       const kk = Kmod.create({ dataDir, homeDir: root, env: () => ({ PATH: path.join(root, 'nobin'), HOME: root }), install: false, log: quiet, now: () => NOW_I, tickMs: 3600e3,

@@ -56,6 +56,7 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const KB = require('../src/browser-kept.js');
 const B = require('../src/browser-profiles.js');
 const CR = require('../src/channel-record.js');
@@ -1095,13 +1096,13 @@ function envSweepLeg(BEmod, tag) {
   const reg = mkd(F1_A), free = mkd(F1_B);
   const regFile = path.join(D, BE.PROFILE_REGISTRY_FILE || 'browser-profiles.json');
   const regDoc = { version: 1, profiles: [B.newProfileRecord({ id: 'bp-0000f1e1', label: 'bank', dir: reg.replace('/browser-profiles/', '//browser-profiles/') + '/', now: 1 })], leases: [], browsers: {} };
-  fs.writeFileSync(regFile, JSON.stringify(regDoc));
+  (landedU5b(), fs).writeFileSync(regFile, JSON.stringify(regDoc));
   const be = BEmod.create({ dataDir: D, homeDir: path.join(W, 'home'), log: quiet, socketDirBase: path.join(W, 'sock') });
   const s1 = be.sweep(new Set(), { graceMs: 0 });
   const out = { regStays: fs.existsSync(path.join(reg, 'Default/Cookies')), freeGone: !fs.existsSync(free), swept: s1.swept };
   // an UNREADABLE registry spares every key-named directory (fail closed)
   const free2 = mkd('bk-0000f1c3');
-  fs.writeFileSync(regFile, '{ torn');
+  (landedU5b(), fs).writeFileSync(regFile, '{ torn');
   const s2 = be.sweep(new Set(), { graceMs: 0 });
   out.tornSpares = fs.existsSync(free2) && s2.registryUnreadable === true;
   return out;

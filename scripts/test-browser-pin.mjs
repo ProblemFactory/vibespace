@@ -46,6 +46,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { withUse } from './grant-fixtures.mjs';   // lane grants-unify: a hand-built record's list mirrored as the keeper mirrors the store's row
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const B = require('../src/browser-profiles.js');
 const F = require('../src/browser-facts.js');
 const K = require('../src/server/browser-keeper.js');
@@ -283,7 +284,7 @@ let kA, workId, teamId, thirdId;
   workId = work.id;
   ok(B.isProfileId(work.id) && work.owner.kind === 'only' && work.owner.who.length === 1 && work.owner.who[0].id === KEY_A && work.scope === 'only' && work.use.mode === 'only' && work.use.who[0].key === KEY_A && work.dir === path.join(HOME, '.agent-browser', 'vs-' + work.id), `createProfile mints ${work.id} kept to the conversation (a one-row list; the digest's use names its key), dir under ~/.agent-browser/`);
   ok((fs.statSync(work.dir).mode & 0o777) === 0o700, 'the profile directory is 0700');
-  ok((fs.statSync(kA.storeFile).mode & 0o777) === 0o600 && JSON.parse(fs.readFileSync(kA.storeFile, 'utf8')).profiles.length === 1, 'data/browser-profiles.json is written 0600 and carries the record');
+  ok(((landedU5b(), fs).statSync(kA.storeFile).mode & 0o777) === 0o600 && JSON.parse((landedU5b(), fs).readFileSync(kA.storeFile, 'utf8')).profiles.length === 1, 'data/browser-profiles.json is written 0600 and carries the record');
   ok(bcast.length >= 1 && bcast[bcast.length - 1].type === 'browser-profiles-updated' && bcast[bcast.length - 1].profiles.length === 1, 'every commit broadcasts browser-profiles-updated with the digest (multi-client law)');
   const e = await threw(() => kA.createProfile({ label: 'work' }));
   ok(e && e.code === 'label_taken', 'a duplicate label is refused with the PURE validator\'s code');
@@ -361,7 +362,7 @@ let kA, workId, teamId, thirdId;
   ok(u && u.memBytes === 4 * 1024 ** 3 && u.memMetric === 'pss' && /^memory \(PSS\) 4\.0 GB \(limit 3\.0 GB\)$/.test(u.over || '') && u.since > 0 && u.rssBytes === 9 * 1024 ** 3, 'the live row carries memBytes + memMetric, the report sentence (`over`, the metric named) and since when (rssBytes kept, deprecated)', u);
   ok(resourceNotices().length === 1 && resourceNotices()[0].t === 'The agent browser of profile "Work" is using 4.0 GB (PSS) — Stop it from the Browser panel if that is not what you expect', 'ONE server notice names the profile, the reading with its metric, and the user\'s own lever', resourceNotices());
   ok(tel.some((e) => e.name === 'browser-resource' && e.value === 4096) && !tel.some((e) => e.name === 'browser-runaway'), 'telemetry browser-resource (value = MB) — the fleet still sees a hot browser');
-  ok(!('runawayParkedUntil' in reg(kA)) && !('runawayParkedUntil' in JSON.parse(fs.readFileSync(kA.storeFile, 'utf8'))), 'nothing is parked: no park map in memory or on disk');
+  ok(!('runawayParkedUntil' in reg(kA)) && !('runawayParkedUntil' in JSON.parse((landedU5b(), fs).readFileSync(kA.storeFile, 'utf8'))), 'nothing is parked: no park map in memory or on disk');
   await sampleTick(overSample);
   ok(resourceNotices().length === 1, 'still over on the next sample ⇒ no second notice (a level, not a timer)');
   const st0 = await kA.start(workId);
@@ -717,6 +718,35 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   await kR.stop(teamId2).catch(() => { });
   kR.shutdown();
   srv.close(); srv = null;
+}
+
+// ═══ lane lg-store-writes U5b (B-0248): THE KEEPER'S REGISTRY GOES THROUGH THE STORE WRITER — browser-profiles.json is never
+// written on the main thread at a change; a change is an act the writer writes next; a lineage move lands it first ═══
+{
+  const SWb = require('../src/store-writer.js');
+  const scene = async (Kmod, tag) => {
+    const D5 = path.join(ROOT, 'data-u5b-' + tag); fs.mkdirSync(D5, { recursive: true });
+    const k5 = Kmod.create({ dataDir: D5, homeDir: HOME, env: keeperEnv, broadcast: () => { }, serverSetting: (k) => settings[k], serverNotice: () => true,
+      getTelemetry: () => ({ record: () => { } }), liveKeys: () => new Set(), limits: { ...LIMITS, CONCURRENT_CAP: 2 }, log, now, tickMs: 3600e3, install: false });
+    await k5._facts.probeVersion();
+    const before = fs.existsSync(k5.storeFile) ? fs.readFileSync(k5.storeFile, 'utf8') : '';
+    k5.createProfile({ label: 'U5b Team' }, { owner: { kind: 'instance', id: null } });
+    const after = fs.existsSync(k5.storeFile) ? fs.readFileSync(k5.storeFile, 'utf8') : '';
+    return { k5, D5, writtenAtChange: after !== before && after.includes('U5b Team'), owed: SWb.storeWriter().pending(path.resolve(k5.storeFile)) };
+  };
+  const a = await scene(K, 'moved');
+  ok(!a.writtenAtChange && a.owed, 'U5b: a profile made hands browser-profiles.json to the store writer — owed, NOT written on the main thread at the change', { written: a.writtenAtChange, owed: a.owed });
+  SWb.storeWriter().flushSync([path.resolve(a.k5.storeFile)]);
+  const doc = JSON.parse(fs.readFileSync(a.k5.storeFile, 'utf8'));
+  ok(doc.profiles.some((x) => x.label === 'U5b Team') && (fs.statSync(a.k5.storeFile).mode & 0o777) === 0o600, 'U5b: …landed by the writer: the record is in the file, 0600 (the keeper\'s own mode)', doc.profiles.map((x) => x.label));
+  // RED CONTROL: the change removed — the old synchronous save (the writer bypassed, a mutant copy)
+  const kSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/server/browser-keeper.js'), 'utf8');
+  const aK = "  const writerOf = () => require('../store-writer.js').storeWriter();";
+  ok(kSrc.split(aK).length === 2, 'U5b ANCHOR: the keeper\'s one writer line');
+  const SyncK = mutantCopies('browser-pin-u5b', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/server/browser-keeper.js', kSrc.replace(aK, "  const writerOf = () => ({ dirty: (f, o) => fs.writeFileSync(f, o.produce(), { mode: o.mode }), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }) });"), 'sync-save');
+  const r = await scene(SyncK, 'red');
+  ok(r.writtenAtChange && !r.owed, 'U5b CONTROL: the old synchronous save ⇒ browser-profiles.json is written on the main thread at the change — the first check above would be red', { written: r.writtenAtChange });
+  try { a.k5.shutdown(); r.k5.shutdown(); } catch { }
 }
 
 reapAll();

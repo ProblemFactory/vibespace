@@ -61,6 +61,7 @@ const STORES = Object.freeze({
   'desktop-apps.write': row('write', 'desktop-apps', 'src/desktop-serve.js', ['save']),   // through the store writer on the hub (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the desktop app records — an act; the device agent writes at the call)
   'device-alerts.write': row('write', 'device-alerts', 'src/server/device-alerts.js', ['save']),   // through the store writer (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the device alerts' dedup ledger)
   'turn-carry-outstanding.write': row('write', 'turn-carry-outstanding', 'src/turn-carry.js', ['save']),   // through the store writer (lane lg-store-writes, B-0248 U2: the outstanding deliveries — a mark an act, the rest paced)
+  'browser-profiles.write': row('write', 'browser-profiles', 'src/server/browser-keeper.js', ['save']),   // through the store writer (lane lg-store-writes, B-0248 U5b: the keeper's registry — an act)
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote']), // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
   'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)

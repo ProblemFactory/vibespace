@@ -62,6 +62,7 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const B = require('../src/browser-profiles.js');
 /** lane H verify r4: every generated config carries the keeper's launch MARK for its browser key as its LAST `args`
  *  switch — B-1789 cure: after Chrome's logging off, THE LAUNCH TAIL (B.launchTail) — the config minus that tail (a
@@ -1718,7 +1719,7 @@ console.log('\n㉓ lane new-session-form: mayAttach at create (the form\'s profi
     { id: 'bp-0000a004', label: 'Bank', owner: { kind: 'only', who: [{ kind: 'session', id: 'bk-7a1e90c2' }] } },
     { id: 'bp-0000a005', label: 'Odd', owner: { kind: 'future-kind' } },
   ];
-  fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: NS_PROFILES, pins: {} }), { mode: 0o600 });
+  (landedU5b(), fs).writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: NS_PROFILES, pins: {} }), { mode: 0o600 });
   // int346 (lane grants-unify): "Who can use it" is a row of the ONE grants store — a pre-unify fixture seeds the rows the
   // way the 2026-10-grants-unify migration carries them (scripts/grant-fixtures.mjs), so the keeper reads what the leg meant
   const { seedBrowserProfiles } = await import(path.join(REPO, 'scripts/grant-fixtures.mjs'));
@@ -1732,7 +1733,7 @@ console.log('\n㉓ lane new-session-form: mayAttach at create (the form\'s profi
   ok(bank && !bank.ok && bank.code === 'not_owner' && k.admitsAtCreate({ taskIds: [] }).find((x) => x.id === 'bp-0000a005').code === 'not_owner', 'a profile kept to one conversation is never offered to a new one; an owner shape this release cannot judge is refused (fail closed)');
   const one = k.mayAttachAtCreate('bp-0000a002', { taskIds: ['T-261023-ir'] });
   ok(one.ok && one.via === 'task' && one.taskId === 'T-261023-ir' && k.mayAttachAtCreate('bp-0000a002', { taskIds: [] }).code === 'not_owner' && k.mayAttachAtCreate('bp-ffffffff', {}).code === 'not-found', 'mayAttachAtCreate = B.mayAttach over the picked groups (no key: a new conversation is on no list by itself)');
-  ok(JSON.parse(fs.readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')).profiles.find((p) => p.id === 'bp-0000a002').owner.who.length === 1, 'asking writes nothing (the who-list is untouched)');
+  ok(JSON.parse((landedU5b(), fs).readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')).profiles.find((p) => p.id === 'bp-0000a002').owner.who.length === 1, 'asking writes nothing (the who-list is untouched)');
   try { k.stop?.(); } catch { }
   // (㉓ the form's admission wiring pins — MOVED to the fast scripts/test-browser-profiles-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }

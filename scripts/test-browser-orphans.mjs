@@ -29,6 +29,7 @@ import { spawn } from 'child_process';
 import { deadPorts } from './scratch.mjs';
 import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const O = require('../src/browser-orphans.js');
 const K = require('../src/server/browser-keeper.js');
@@ -122,7 +123,7 @@ console.log('— ③ the keeper');
   const dataDir = path.join(ROOT, 'data'); fs.mkdirSync(CFG, { recursive: true });
   const prof = (n, label, extra = {}) => ({ id: `bp-0000000${n}`, label, dir: path.join(ROOT, 'prof-' + n), createdAt: NOW - 9 * H, ...extra });
   const recd = (n, pid, st) => ({ profileId: `bp-0000000${n}`, ns: `vs-bp-0000000${n}`, pid, starttime: st, state: 'stopped', stoppedBy: 'idle', endedAt: NOW - 2 * H, hostId: null, external: false });
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
     profiles: [prof('a', 'Leased'), prof('b', 'Idle', { lastVerbAt: NOW - 2 * H }), prof('c', 'Recent', { lastVerbAt: NOW - MIN })],
     leases: [{ profileId: 'bp-0000000a', browserKey: 'bk-0000000a', at: NOW - 3 * H }],
     browsers: { 'bp-0000000a': recd('a', 9001, 111), 'bp-0000000b': recd('b', 9002, 222), 'bp-0000000c': recd('c', 9003, 333) } }));
@@ -146,7 +147,7 @@ console.log('— ③ the keeper');
   ok(!ended.some((x) => /^900[68]:/.test(x)), 'KEPT: the one with a Chrome — and the unmarked one is never ended', ended);
   ok(lines.filter((l) => /pid 9006 .*reported, left running/.test(l)).length === 1, 'the unmarked daemon is REPORTED, once', lines.filter((l) => /9006/.test(l)));
   ok(lines.some((l) => /ended the browser daemon pid 9004 \(its browser ended 3 h ago and no live record keeps it; no browser for 3 h; conversation bk-0000000d\): ended; its Xvfb pid 9005 ended/.test(l)), 'ONE journal line per ending names the why, the conversation and its Xvfb', lines.filter((l) => /9004/.test(l)));
-  const rb = JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-0000000b'];
+  const rb = JSON.parse((landedU5b(), fs).readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-0000000b'];
   ok(rb && rb.note === 'stopped — its browser daemon was ended at 08:00 UTC: its browser ended 3 h ago and no live record keeps it (the next command starts a fresh one)', 'the profile row says why it was ended and that the next command starts a fresh one', rb && rb.note);
   ok(require('../src/browser-verbs.js').browserCell(keeper.browserOf('bp-0000000a')) === keeper.browserOf('bp-0000000a').note, '`status` says it too (its browser cell is the row\'s words — never a silent exit)', require('../src/browser-verbs.js').browserCell(keeper.browserOf('bp-0000000a')));
   await keeper.tick();
@@ -174,7 +175,7 @@ function keeperCopy(name, patches = [], orphans = null) {
 async function otherHalf(Kmod, tag) {
   const dataDir = path.join(ROOT, 'oh-' + tag, 'data'); const cfg = path.join(dataDir, 'browser-env'); fs.mkdirSync(cfg, { recursive: true });
   const T1 = NOW + 5 * MIN;
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
     profiles: [{ id: 'bp-000000e1', label: 'Wedged', dir: path.join(ROOT, 'prof-h'), createdAt: NOW - 9 * H, lastVerbAt: T1 - 10000 }, { id: 'bp-000000e2', label: 'Gone', dir: path.join(ROOT, 'prof-i'), createdAt: NOW - 9 * H, lastVerbAt: T1 - 10000 }],
     leases: [{ profileId: 'bp-000000e1', browserKey: 'bk-000000e1', at: NOW - H }, { profileId: 'bp-000000e2', browserKey: 'bk-000000e2', at: NOW - H }],
     browsers: { 'bp-000000e1': { profileId: 'bp-000000e1', ns: 'vs-bp-000000e1', pid: 9101, starttime: 1101, state: 'stopped', lastError: 'the recorded daemon is alive but its namespace no longer answers', endedAt: NOW - H, hostId: null, external: false, cdpUrl: `ws://127.0.0.1:${SILENT}/devtools/browser/aaaaaaaa-0000` },
@@ -222,7 +223,7 @@ async function bootLeg(Kmod, tag) {
   await new Promise((r) => setTimeout(r, 150));
   const ID = { j: 'f1', k: 'f2', l: 'f3', m: 'f4' }; const P = (n) => ({ id: `bp-000000${ID[n]}`, label: n.toUpperCase(), dir: path.join(ROOT, 'prof-' + n), createdAt: NOW - 9 * H });
   const R = (n, pid, st, x = {}) => ({ profileId: `bp-000000${ID[n]}`, ns: `vs-bp-000000${ID[n]}`, pid, starttime: st, hostId: null, external: false, ...x });
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
     profiles: ['j', 'k', 'l', 'm'].map(P), leases: ['j', 'k', 'l', 'm'].map((n) => ({ profileId: `bp-000000${ID[n]}`, browserKey: `bk-0000000${n === 'j' ? 'a' : n === 'k' ? 'b' : n === 'l' ? 'c' : 'd'}`, at: NOW - H })),
     browsers: { 'bp-000000f1': R('j', 9201, 2201, { state: 'stopped', endedAt: NOW - H, lastError: 'the recorded daemon is alive but its namespace no longer answers' }),
       'bp-000000f2': R('k', 9301, 3301, { state: 'stopped', endedAt: NOW - H }),
@@ -242,7 +243,7 @@ async function bootLeg(Kmod, tag) {
   await kk.boot();
   const v = (n) => kk.browserOf(`bp-000000${ID[n]}`) || {};
   const r = { j: { state: v('j').state, pid: v('j').pid }, k: { state: v('k').state, note: v('k').note }, l: { state: v('l').state, lastError: v('l').lastError, alive: F.pidAlive(sl.pid) }, m: { state: v('m').state, alive: F.pidAlive(sm.pid) },
-    ended: ended.slice(), lines: lines.filter((l) => /boot: the browser daemon/.test(l)), asked: asked.length, cdpJ: (JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-000000f1'] || {}).cdpUrl };
+    ended: ended.slice(), lines: lines.filter((l) => /boot: the browser daemon/.test(l)), asked: asked.length, cdpJ: (JSON.parse((landedU5b(), fs).readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-000000f1'] || {}).cdpUrl };
   kk.shutdown();
   for (const c of [sl, sm]) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
   return r;
@@ -282,7 +283,7 @@ async function endLeg(Kmod, tag, waitMs = 6000) {
   await until8(() => cmd8(dA.pid).includes('agent-browser-linux-x64') && cmd8(cA.pid).includes('--user-data-dir') && cmd8(sR.pid).includes('sleep'), 3000); // each has exec'd (its /proc names it)
   const [PE] = await deadPorts(1);
   const P8 = (id, label, dir) => ({ id, label, dir, provider: 'chromium', browser: { kind: 'plugin', id: 'fixture.engine' }, createdAt: NOW - H });
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
     profiles: [P8('bp-000000a8', 'Marked', dirA), P8('bp-000000b8', 'Recycled', path.join(base, 'prof-b')), P8('bp-000000c8', 'Stopped', path.join(base, 'prof-c'))],
     leases: [{ profileId: 'bp-000000a8', browserKey: 'bk-000000a8', at: NOW - H }],
     browsers: {
@@ -339,7 +340,7 @@ async function unreadLeg(Kmod, tag, waitMs = 6000) {
   const cmd8 = (pid) => String(F.procCmdline(pid) || '');
   await until8(() => cmd8(dA.pid).includes('agent-browser-linux-x64') && cmd8(cA.pid).includes('--user-data-dir') && cmd8(dB.pid).includes('agent-browser-linux-x64'), 3000);
   const [PA, PB] = await deadPorts(2);
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
     profiles: [{ id: 'bp-000000d8', label: 'Cloaked', dir: dirA, provider: 'cloak', fingerprintSeed: 4242, createdAt: NOW - H }, { id: 'bp-000000e8', label: 'Old proxy', dir: dirB, provider: 'chromium', createdAt: NOW - H }],
     leases: [{ profileId: 'bp-000000d8', browserKey: 'bk-000000d8', at: NOW - H }],
     browsers: {

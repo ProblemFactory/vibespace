@@ -208,6 +208,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
    *  profiles only (a remote profile's path names another machine). Unreadable ⇒ null, and the sweep spares every
    *  key-named directory (fail CLOSED). Compared by REAL identity; an unknown compare counts as registered. */
   const registeredDirs = () => {
+    // lane lg-store-writes (B-0248 U5b): the keeper's registry is the STORE WRITER's — a write it still owes for this file lands
+    // before the file is read (a named wait, only when one is owed), so the sweep never spares by an older registry
+    try { const f = path.resolve(dataDir, PROFILE_REGISTRY_FILE), W = require('../store-writer.js').storeWriter(); if (W.pending(f)) W.flushSync([f]); } catch { }
     let raw;
     try { raw = fs.readFileSync(path.join(dataDir, PROFILE_REGISTRY_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? [] : null; }
     // the B-f276 remainder (bl-jobs, its read S1): a parse that is NOT a registry (an object without its profiles list, null, an array)

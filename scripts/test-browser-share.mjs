@@ -41,6 +41,7 @@ import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
 const K = require('../src/server/browser-keeper.js');
@@ -416,7 +417,7 @@ else await (async () => {
     // ── ⑥ the migration `2026-09-browser-profiles-who-list` over a PRE-LIST registry (a folded pin) ──
     const R2 = path.join(ROOT, 'inst2'), D2 = path.join(R2, 'data'); fs.mkdirSync(D2, { recursive: true });
     const bankDir = path.join(KH, '.agent-browser', 'vs-bp-0000d0b1'); fs.mkdirSync(bankDir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(D2, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-0000d0b1', label: 'bank', dir: bankDir, provider: 'chromium', owner: { kind: 'session', id: KA }, sharing: 'owner', createdAt: 1, lastUsedAt: 0, record: false, legacy: false, scopeAt: 100 }], leases: [], browsers: {}, pins: { [KB]: { profileId: 'bp-0000d0b1', origin: 'chosen', at: 200, by: 'user' } } }), { mode: 0o600 });
+    (landedU5b(), fs).writeFileSync(path.join(D2, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-0000d0b1', label: 'bank', dir: bankDir, provider: 'chromium', owner: { kind: 'session', id: KA }, sharing: 'owner', createdAt: 1, lastUsedAt: 0, record: false, legacy: false, scopeAt: 100 }], leases: [], browsers: {}, pins: { [KB]: { profileId: 'bp-0000d0b1', origin: 'chosen', at: 200, by: 'user' } } }), { mode: 0o600 });
     const k0 = K.create({ dataDir: D2, homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: kenv }), facts, log: quiet, install: false });
     let e0 = null; try { await k0.attach({ profileId: 'bp-0000d0b1', browserKey: KB, sessionId: 'sess-2', by: 'pin' }); } catch (e) { e0 = e; }
     k0.shutdown();

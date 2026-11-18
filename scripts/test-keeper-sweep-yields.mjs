@@ -20,8 +20,8 @@
 //   ⑦ F4 THE WHOLE TURN THE CONVERSATION ENDS IN: a conversation with N leases, N child handles and N records ends at run time
 //      (the tick, past the grace): the one turn that drops its leases and reaps its handles is COUNTED — in-memory acts only
 //      (0 registry writes, 0 broadcasts, 0 child starts in it) — then its records retire one per turn.
-//   ⑧ F5 ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK: the writes and the broadcasts (each counted: the rename
-//      onto the registry file, the keeper's own broadcast) are bounded by the PIECES THE WALK SPANNED in this run (its own span
+//   ⑧ F5 ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK: the writes and the broadcasts (each counted: the keeper's
+//      hand-off of the registry file to the store writer — lane lg-store-writes U5b — and the keeper's own broadcast) are bounded by the PIECES THE WALK SPANNED in this run (its own span
 //      over the keeper's SWEEP_PIECE_MS — a slower machine spans more pieces, never fewer) and stay below the removals. MUTANT:
 //      the batching dropped ⇒ one per record, RED on any machine. K1: an orderly STOP mid-walk (shutdown) writes what memory
 //      holds — the records the walk removed and had not yet written.
@@ -49,6 +49,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const K = require('../src/server/browser-keeper.js');
 const F = require('../src/browser-facts.js');
@@ -81,10 +82,17 @@ function registry(N, { live = false, extra = [], dirMark = false } = {}) {
     if (dirMark) browsers[id].mark = `vsk-sweep-${dirN}-${i}`;   // and its launch mark (the reap scans /proc for it)
   }
   for (const x of extra) { profiles.push(x.profile); browsers[x.profile.id] = x.browser; }
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles, leases: [], browsers, children: {}, told: {}, pins: {} }));
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles, leases: [], browsers, children: {}, told: {}, pins: {} }));
   return dataDir;
 }
-const onDisk = (dataDir) => JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).profiles.filter((p) => p.ephemeral).length;
+// lane lg-store-writes U5b (B-0248): the registry is the STORE WRITER's. A registry WRITE in this suite is the keeper's HAND-OFF of
+// the file to the writer (one save() — what the walk's batching bounds; the writer may land two hand-offs as one write, and the
+// rename is the worker's), counted at the shared writer's dirty() with the records ITS bytes hand on (the keeper's produce(), as
+// memory stood at the hand-off). A mutant copy requires through the original's path, so it hands to the same writer.
+const SWreg = require('../src/store-writer.js').storeWriter();
+const onRegistryHandOff = (file, fn) => { const key = path.resolve(file), orig = SWreg.dirty; SWreg.dirty = function (f, o) { const r = orig.apply(this, arguments); if (f === key && o && o.name === 'browser-profiles.write') { let bytes = null; try { bytes = o.produce(); } catch { } fn(bytes); } return r; }; return () => { SWreg.dirty = orig; }; };
+const eph = (bytes) => { try { return JSON.parse(bytes).profiles.filter((p) => p.ephemeral).length; } catch { return -1; } };
+const onDisk = (dataDir) => JSON.parse((landedU5b(), fs).readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).profiles.filter((p) => p.ephemeral).length;
 
 /** Run one sweep over `dataDir` with keeper module `Km`: `how` = 'boot' (keeper.boot()) | 'reconcile' (reconcile at graceMs 0,
  *  the sweep awaited) | 'tick' (keeper.tick() — the runtime half). A setImmediate ticker numbers the loop turns; each
@@ -97,10 +105,10 @@ async function sweep(Km, dataDir, { how = 'reconcile', onRemoved = null, onWrite
   const perTurn = new Map(); const removed = [];
   let kref = null;
   const line = (m) => { const s = String(m); if (/ephemeral browser record \S+ .* removed with its conversation/.test(s)) { removed.push(s); perTurn.set(turn, (perTurn.get(turn) || 0) + 1); stall(stallMs); if (onRemoved) onRemoved(removed.length, kref); } };
-  // F5's counters: every write of THIS registry file (the keeper's writeJsonAtomic renames onto it) and every broadcast of the list
+  // F5's counters: every write of THIS registry file (lane lg-store-writes U5b: the keeper's hand-off of it to the store writer,
+  // with the records its bytes hand on) and every broadcast of the list
   const storeFile = path.join(dataDir, 'browser-profiles.json'), writes = [], bcasts = [];
-  const origRename = fs.renameSync;
-  fs.renameSync = function (a, b) { const r = origRename.apply(this, arguments); if (b === storeFile) { writes.push({ turn, left: onDisk(dataDir) }); if (onWrite) onWrite(writes.length, writes[writes.length - 1]); } return r; };
+  const unhook = onRegistryHandOff(storeFile, (bytes) => { writes.push({ turn, left: eph(bytes), bytes }); if (onWrite) onWrite(writes.length, writes[writes.length - 1]); });
   const closes = [];
   const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') { closes.push(args.join(' ')); if (closeHook) closeHook(opts); } const c = typeof opts === 'function' ? opts : cb; setImmediate(() => c(null, '{"success":true,"data":{}}', '')); return { on() { }, kill() { } }; };
   const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => new Set(), install: false, log: { log: line, warn: line, error: line, info: line }, broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') bcasts.push(turn); }, tickMs: 3600e3 });
@@ -114,7 +122,7 @@ async function sweep(Km, dataDir, { how = 'reconcile', onRemoved = null, onWrite
     else { const r = k.reconcile({ graceMs: 0 }); await r.retired; }
     walkMs = performance.now() - tw;   // K2: the walk's own span in this run — the pieces it spanned bound its writes
     await new Promise((res) => setTimeout(res, 12));   // the timer fires once more: a hold that ran to the end is read too
-  } finally { running = false; clearInterval(iv); fs.renameSync = origRename; try { k.shutdown(); } catch { /* none */ } }
+  } finally { running = false; clearInterval(iv); unhook(); try { k.shutdown(); } catch { /* none */ } }
   return { perTurnMax: Math.max(0, ...perTurn.values()), turnsWithRemovals: perTurn.size, removed: removed.length, closes: closes.length, lateEvidenceMs: Math.round(maxLate), left: onDisk(dataDir), writes: writes.length, writeLog: writes, broadcasts: bcasts.length, piecesSpanned: Math.floor(walkMs / K.SWEEP_PIECE_MS) + 1, k };
 }
 let closeHook = null;
@@ -182,7 +190,8 @@ console.log('— ③ L4: progress persists — the file loses a PIECE per write;
   const dataDir = registry(120);
   const mid = path.join(ROOT, 'mid'); fs.mkdirSync(mid, { recursive: true });
   let copied = null;
-  const s = await sweep(K, dataDir, { stallMs: 5, onWrite: (n, w) => { if (copied === null && w.left > 0) { copied = w.left; fs.copyFileSync(path.join(dataDir, 'browser-profiles.json'), path.join(mid, 'browser-profiles.json')); } } });
+  // the copy taken at a write = the bytes that write hands on (lane lg-store-writes U5b: the registry as it stands once that write lands)
+  const s = await sweep(K, dataDir, { stallMs: 5, onWrite: (n, w) => { if (copied === null && w.left > 0) { copied = w.left; fs.writeFileSync(path.join(mid, 'browser-profiles.json'), w.bytes); } } });
   const lefts = s.writeLog.map((w) => w.left);
   ok(s.removed === 120 && s.left === 0 && s.writes >= 2 && s.writes < 120 && lefts.every((x, i) => i === 0 || x < lefts[i - 1]) && lefts[lefts.length - 1] === 0, `the registry file loses a PIECE per write — ${s.writes} writes for 120 removals, the records left after each: ${lefts.join(' → ')}`, { writes: s.writes, lefts });
   const left = copied == null ? -1 : onDisk(mid);
@@ -255,7 +264,7 @@ console.log('— ⑦ F4: the whole turn in which a conversation ends — its lea
   const span = { first: 0, last: 0 };   // evidence only: the drop loop's span on the clock (never asserted — test-ci-gate §2e)
   const walk = { first: 0, last: 0 };   // the walk's own span (its first and last removal): the pieces it spanned bound its writes (K2)
   const line = (m) => { const x = String(m); if (/\] dropped the lease of /.test(x) || /\] reaped child handle /.test(x)) { const t = performance.now(); if (!span.first) span.first = t; span.last = t; } if (/\] dropped the lease of /.test(x)) bump(turn, 'lease'); else if (/\] reaped child handle /.test(x)) bump(turn, 'handle'); else if (/ephemeral browser record \S+ .* removed with its conversation/.test(x)) { const t = performance.now(); if (!walk.first) walk.first = t; walk.last = t; bump(turn, 'record'); } };
-  const origRename = fs.renameSync; fs.renameSync = function (a, b) { const r = origRename.apply(this, arguments); if (b === file) bump(turn, 'write'); return r; };
+  const unhook = onRegistryHandOff(file, () => bump(turn, 'write'));   // lane lg-store-writes U5b: a registry write = a hand-off to the store writer
   const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') bump(turn, 'start'); const cbk = typeof opts === 'function' ? opts : cb; setImmediate(() => cbk(null, '{"success":true,"data":{}}', '')); return { on() { }, kill() { } }; };
   const k = K.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => live, now: () => clock, install: false, log: { log: line, warn: line, error: line, info: line }, broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') bump(turn, 'broadcast'); }, tickMs: 3600e3 });
   let maxLate = 0, last = performance.now();
@@ -268,7 +277,7 @@ console.log('— ⑦ F4: the whole turn in which a conversation ends — its lea
     await new Promise((res) => setTimeout(res, 20));   // the next tick in a turn of its own (the timer's), as the keeper's own timer runs it
     await k.tick();                       // past the grace: in ONE reconcile its leases drop and its handles are reaped, then the walk
     await new Promise((res) => setTimeout(res, 12));
-  } finally { running = false; clearInterval(iv); fs.renameSync = origRename; try { k.shutdown(); } catch { /* none */ } }
+  } finally { running = false; clearInterval(iv); unhook(); try { k.shutdown(); } catch { /* none */ } }
   const turns = [...perTurn.values()];
   const drop = turns.find((m) => m.lease > 0) || {};
   const tot = turns.reduce((a, m) => { for (const kk of Object.keys(m)) a[kk] = (a[kk] || 0) + m[kk]; return a; }, {});
@@ -332,7 +341,7 @@ const carriedRetire = async (Km, detachFirst) => {
   const daemon = spawn('sleep', ['30'], { stdio: 'ignore' });
   await new Promise((res) => setTimeout(res, 50));
   const KEY = 'bk-0000c8b8', id = 'bp-18b18b18';
-  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+  (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
     profiles: [B.newProfileRecord({ id, label: '(ephemeral) carried', dir: null, ephemeral: true, owner: { kind: 'conversation', id: KEY }, now: 1790000000000 })],
     leases: [{ profileId: id, browserKey: KEY, sessionId: 'sess-c', targetId: null, since: 1790000000000, input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }],
     browsers: { [id]: { profileId: id, state: 'ready', pid: daemon.pid, starttime: F.procStart(daemon.pid), cdpUrl: null, ns: 'vs-' + KEY, startedAt: 1790000000000 } },

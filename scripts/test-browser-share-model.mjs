@@ -37,6 +37,7 @@ import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
+const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
 const K = require('../src/server/browser-keeper.js');
@@ -1121,9 +1122,12 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
     return { kk, counts, dd };
   };
   const narrow = ({ kk, counts, dd }) => {
-    const rename = fs.renameSync; counts.broadcasts = 0; counts.writes = 0;
-    fs.renameSync = function (a, b) { if (String(b) === path.join(dd, 'browser-profiles.json')) counts.writes++; return rename.call(fs, a, b); };
-    try { return kk.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: MANY[0] }] } }); } finally { fs.renameSync = rename; }
+    // lane lg-store-writes U5b (B-0248): the registry is the STORE WRITER's — a registry write is the keeper's hand-off of the
+    // file to it (one save; the writer may land two as one, the rename is the worker's), counted at the shared writer's dirty()
+    const W = require('../src/store-writer.js').storeWriter(), key = path.resolve(path.join(dd, 'browser-profiles.json')), dirty = W.dirty;
+    counts.broadcasts = 0; counts.writes = 0;
+    W.dirty = function (f, o) { if (f === key && o && o.name === 'browser-profiles.write') counts.writes++; return dirty.apply(this, arguments); };
+    try { return kk.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: MANY[0] }] } }); } finally { W.dirty = dirty; }
   };
   const wReal = countedKeeper(K, 'real-w'); const rw = narrow(wReal);
   ok(rw.detached.length === 49 && wReal.kk.leasesOn('bp-0000c0d1').length === 1 && wReal.counts.writes === 1 && wReal.counts.broadcasts === 1, `a narrowing over 50 leases (real keeper): 49 detached, ONE registry write, ONE broadcast (${wReal.counts.writes} / ${wReal.counts.broadcasts})`, wReal.counts);
@@ -1306,7 +1310,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     await kL.attach({ profileId: roll.id, browserKey: KA, sessionId: 'sess-1' });
     let rec = kL._reg().browsers[roll.id];
     ok(rec && rec.state === 'ready' && rec.host === HOST && Array.isArray(rec.hosts) && rec.hosts.join() === HOST && logOf('launches.log').length === L0 + 1, '④b a launch stamps the record with THIS machine\'s hostname (the witness the next pod reads)', { host: rec && rec.host, hosts: rec && rec.hosts });
-    const onDisk = JSON.parse(fs.readFileSync(path.join(DATA_L, 'browser-profiles.json'), 'utf8'));
+    const onDisk = JSON.parse((landedU5b(), fs).readFileSync(path.join(DATA_L, 'browser-profiles.json'), 'utf8'));
     ok(onDisk.host === HOST && onDisk.browsers[roll.id].host === HOST, '④b …and the registry file names its writer (the legacy witness of a record written before the stamp)', { host: onDisk.host });
     await kL.stop(roll.id, { why: 'user' });
     // THE ROLL: the registry says the last launch was on pod-old (as the file the old pod wrote would), the lock names pod-old
@@ -1380,7 +1384,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const id = tag === 'stamped' ? 'bp-00000a11' : 'bp-00000a12';
       const dir = path.join(HOME, '.agent-browser', B.profileDirName(id)); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       const legacy = { version: 1, ...(fileHost ? { host: fileHost } : {}), profiles: [B.newProfileRecord({ id, label: 'Legacy ' + tag, dir, now: 1 })], leases: [], browsers: { [id]: { profileId: id, ns: 'vs-' + id, pid: null, starttime: null, cdpUrl: null, state: 'stopped', startedAt: 1, endedAt: 2, lastError: null, mark: id } } };
-      fs.writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
+      (landedU5b(), fs).writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
       carryGrants(DATA_X);
       plant(dir, 'pod-old');
       const kX = mkKeeper(K, { dataDir: DATA_X, log: klog });
@@ -1400,12 +1404,12 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const id = tag === 'product' ? 'bp-00000a21' : 'bp-00000a22';
       const dir = path.join(HOME, '.agent-browser', B.profileDirName(id)); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       const legacy = { version: 1, host: 'pod-old', profiles: [B.newProfileRecord({ id, label: 'Legacy2 ' + tag, dir, now: 1 })], leases: [], browsers: { [id]: { profileId: id, ns: 'vs-' + id, pid: null, starttime: null, cdpUrl: null, state: 'stopped', startedAt: 1, endedAt: 2, lastError: null, mark: id } } };
-      fs.writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
+      (landedU5b(), fs).writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
       carryGrants(DATA_X);
       plant(dir, 'pod-old');
       const k1 = mkKeeper(Kmod, { dataDir: DATA_X, log: klog });
       await k1.boot(); k1.createProfile({ label: 'Other' }); // a boot, a save, no launch
-      const onDisk = JSON.parse(fs.readFileSync(path.join(DATA_X, 'browser-profiles.json'), 'utf8'));
+      const onDisk = JSON.parse((landedU5b(), fs).readFileSync(path.join(DATA_X, 'browser-profiles.json'), 'utf8'));
       k1.shutdown();
       const k2 = mkKeeper(Kmod, { dataDir: DATA_X, log: klog });
       const Lx = logOf('launches.log').length;
@@ -2052,7 +2056,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     out.S34 = { firstHadIt: first.length > 0, size: keys.length, liveEvicted: !keys.includes(liveDir), dir0Kept: keys.includes(dirs[0]), said, liveStillLaunches: (await threw(() => kk.attach({ profileId: live.id, browserKey: KA, sessionId: 'sess-1' }))) ? 'threw' : null };
     await stopI(kk, live); kk.shutdown(); await sleepI(150);
     { const DI2 = path.join(ROOT, 'data-i-bound2-' + tag); fs.mkdirSync(DI2, { recursive: true }); const m = {}; const bd = path.join(IROOT, 'bdirs-' + tag); for (let i = 0; i < N + 2; i++) { const d = path.join(bd, 'd' + i); fs.mkdirSync(d, { recursive: true }); m[d] = { hosts: [PREV], at: i < 2 ? 9_000_000_000_000 : 1_000_000_000 + i }; } // the two FIRST-inserted are the NEWEST
-      fs.writeFileSync(path.join(DI2, 'browser-profiles.json'), JSON.stringify({ host: PREV, profiles: [], browsers: {}, dirHosts: m })); const k2 = mkKeeper(Kmod, { dataDir: DI2, log: klogI }); await k2.boot(); const ks2 = Object.keys(k2._reg().dirHosts);
+      (landedU5b(), fs).writeFileSync(path.join(DI2, 'browser-profiles.json'), JSON.stringify({ host: PREV, profiles: [], browsers: {}, dirHosts: m })); const k2 = mkKeeper(Kmod, { dataDir: DI2, log: klogI }); await k2.boot(); const ks2 = Object.keys(k2._reg().dirHosts);
       out.S35 = { size: ks2.length, newestKept: ks2.includes(path.join(bd, 'd0')) && ks2.includes(path.join(bd, 'd1')), oldestDropped: !ks2.includes(path.join(bd, 'd2')) && !ks2.includes(path.join(bd, 'd3')) }; k2.shutdown(); await sleepI(150); }
     return out;
   };
@@ -2088,7 +2092,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     // S44 a file-level RESTORE: the data tree AND the directories copied file by file (every inode new, the same paths); the new pod works (a save under its name); the kept directory resumes carrying the pre-restore pod's lock
     { let kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); const dir = await retiredDirI(kk, parent, 's44'); const tok = (kk._reg().dirHosts[dir] || {}).tok; kk.shutdown(); await sleepI(150);
       const ino1 = fs.statSync(dir).ino; for (const D of [DI, parent]) { fs.cpSync(D, D + '.restored', { recursive: true }); fs.rmSync(D, { recursive: true, force: true }); fs.renameSync(D + '.restored', D); } const ino2 = fs.statSync(dir).ino;
-      kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); await kk.boot(); { const p = kk.createProfile({ label: 'other-' + tag }); kk.removeProfile(p.id); } const fileHost = JSON.parse(fs.readFileSync(path.join(DI, 'browser-profiles.json'), 'utf8')).host;
+      kk = mkKeeper(Kmod, { dataDir: DI, log: klogI }); await kk.boot(); { const p = kk.createProfile({ label: 'other-' + tag }); kk.removeProfile(p.id); } const fileHost = JSON.parse((landedU5b(), fs).readFileSync(path.join(DI, 'browser-profiles.json'), 'utf8')).host;
       plantI(dir, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's44-again', dir }).profile;
       out.S44 = { tok: B.isLineageToken(tok), markerKept: fs.existsSync(path.join(dir, MK)), inoChanged: ino1 !== ino2, fileHostIsThis: fileHost === os.hostname(), ...(await actI(kk, p2, attachI(kk, p2))) }; unplantI(dir); await stopI(kk, p2); kk.shutdown(); await sleepI(150); }
     // S43 the keeper leg runs where the scratch filesystem REUSES a removed directory's inode (ext4 — the fleet's; measured 20/20); tmpfs never does, the PURE row S43p carries the rule
@@ -2102,7 +2106,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     // S54 a directory moved aside (Forget) and adopted again at its NEW path: found by its token ⇒ taken over, ONE entry re-keyed to the new spelling
     { const kk = mkKeeper(Kmod, { dataDir: path.join(DI, 'd54'), log: klogI }); const dir = await retiredDirI(kk, parent, 's54'); const aside = dir + '.aside'; fs.renameSync(dir, aside); plantI(aside, PREV, await deadPidI()); const p2 = kk.adoptDirectory({ label: 's54-aside', dir: aside }).profile; const got = await actI(kk, p2, attachI(kk, p2)); const keys = Object.keys(kk._reg().dirHosts); out.S54 = { ...got, oneEntry: keys.length === 1 && keys[0] === aside }; unplantI(aside); await stopI(kk, p2); kk.shutdown(); await sleepI(150); }
     // S49 what the load does to MANY directories is said ONCE per kind (40 gone / 40 r4-era keys / 40 unreadable)
-    { const mkFile = (D, map) => { fs.mkdirSync(D, { recursive: true }); fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify({ host: PREV, profiles: [], browsers: {}, leases: [], dirHosts: map })); };
+    { const mkFile = (D, map) => { fs.mkdirSync(D, { recursive: true }); (landedU5b(), fs).writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify({ host: PREV, profiles: [], browsers: {}, leases: [], dirHosts: map })); };
       { const D = path.join(DI, 'd49a'); const m = {}; for (let i = 0; i < 40; i++) m[path.join(parent, 'gone', 'g' + i)] = { hosts: [PREV], at: 1 + i }; mkFile(D, m); const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0); out.S49a = { left: Object.keys(kk._reg().dirHosts).length, lines: said.filter((l) => /forgotten — the directory is gone/.test(l)).length, counted: said.some((l) => /40 directories forgotten — the directory is gone — each of: /.test(l)) }; kk.shutdown(); await sleepI(150); }
       { const D = path.join(DI, 'd49b'); const realH = path.join(parent, 'h-real'), linkH = path.join(parent, 'h-link'); fs.mkdirSync(realH, { recursive: true }); fs.symlinkSync(realH, linkH); const m = {}; for (let i = 0; i < 40; i++) { fs.mkdirSync(path.join(realH, 'd' + i), { recursive: true }); m[path.join(linkH, 'd' + i)] = { hosts: [PREV], at: 1 + i }; } mkFile(D, m); const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0); const rp = fs.realpathSync(realH); out.S49b = { rekeyed: Object.keys(kk._reg().dirHosts).filter((x) => x.startsWith(rp + '/')).length, lines: said.filter((l) => /is remembered under its real path/.test(l)).length }; kk.shutdown(); await sleepI(150); }
       if (!isRoot) { const D = path.join(DI, 'd49c'); const pp = path.join(parent, 'unread'); const m = {}; for (let i = 0; i < 40; i++) { fs.mkdirSync(path.join(pp, 'd' + i), { recursive: true }); m[path.join(pp, 'd' + i)] = { hosts: [PREV], at: 1 + i }; } mkFile(D, m); fs.chmodSync(pp, 0o000); const kk = mkKeeper(Kmod, { dataDir: D, log: klogI }); const l0 = linesI.length; await kk.boot(); const said = linesI.slice(l0); fs.chmodSync(pp, 0o700); out.S49c = { kept: Object.keys(kk._reg().dirHosts).length, lines: said.filter((l) => /40 directories kept — the directory cannot be read right now \(EACCES\); judged again at the next load — each of: /.test(l)).length }; kk.shutdown(); await sleepI(150); } }
@@ -2230,7 +2234,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     // ── the keeper legs ──
     const KS7 = KSt; const settings7 = { 'browser.idleTimeoutMs': 600000 }; const quiet7 = { log() { }, warn() { }, error() { } };
     const OSM = require('os'); const realHostname = OSM.hostname;
-    const readReg7 = (D) => JSON.parse(fs.readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')); const writeReg7 = (D, j) => fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify(j));
+    const readReg7 = (D) => JSON.parse((landedU5b(), fs).readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')); const writeReg7 = (D, j) => (landedU5b(), fs).writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify(j));
     const runR7 = async (Kmod, tag, only = null) => {
       const want = (id) => !only || only.includes(id);
       const out = {}; const DI = path.join(ROOT, 'data-r7-' + tag); fs.mkdirSync(DI, { recursive: true }); const parent = path.join(IROOT, 'r7-' + tag); fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -2346,7 +2350,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     const MK8 = B.LINEAGE_MARKER; const tokOf8 = (dir) => { try { return fs.readFileSync(path.join(dir, MK8), 'utf8').trim(); } catch { return null; } };
     const entry8 = (kk, dir) => (kk._reg().dirHosts || {})[dir] || null;
     const ledger8 = (D) => { try { return fs.readFileSync(path.join(D, 'browser-lineage-journal.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { kind: 'UNPARSABLE' }; } }); } catch { return []; } }; // verify r9
-    const readReg8 = (D) => JSON.parse(fs.readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')); const writeReg8 = (D, j) => fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify(j));
+    const readReg8 = (D) => JSON.parse((landedU5b(), fs).readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')); const writeReg8 = (D, j) => (landedU5b(), fs).writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify(j));
     const settings8 = { 'browser.idleTimeoutMs': 600000 }; const quiet8 = { log() { }, warn() { }, error() { } };
     const BT = require('../src/server/browser-trace.js');
     const runR8 = async (Kmod, tag, only = null, BTmod = BT) => {
@@ -2537,7 +2541,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       ok(noMove !== tsrc8, '④k control setup: the Forget\'s re-key is where the control cuts');
       const c18 = await runR8(K, 'ctl18', ['S75'], M.load('src/server/browser-trace.js', noMove, 'no-forget-rekey'));
       ok(c18.S75b.entryFollowed === false && c18.S75b.err === 'profile_locked', '④k CONTROL 18: a Forget whose rename never re-keys the lineage leaves the entry at the old path (pruned at the next boot) and the adopted-back directory\'s old-pod lock is foreign by name (r7) — S75b catches it', { f: c18.S75b.entryFollowed, e: c18.S75b.err }); }
-    { const cut = 'if (!save()) { reg.dirHosts = before;'; const noSave = ksrc8.replace(cut, 'if (false && !save()) { reg.dirHosts = before; /* CONTROL: the move re-keys in memory only (r8) */');
+    { const cut = 'if (!saveNow()) { reg.dirHosts = before;'; const noSave = ksrc8.replace(cut, 'if (false && !saveNow()) { reg.dirHosts = before; /* CONTROL: the move re-keys in memory only (r8) */');   // lane lg-store-writes U5b: the move's save is saveNow() (on disk before the move)
       ok(noSave !== ksrc8, '④k control setup: the move\'s save is where the control cuts');
       const c19 = await runR8(M.load('src/server/browser-keeper.js', noSave, 'move-never-saves'), 'ctl19', ['S76']);
       ok(c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (isRoot || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }

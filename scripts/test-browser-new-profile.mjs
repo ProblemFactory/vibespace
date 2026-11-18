@@ -113,19 +113,24 @@ function mkKeeper(dataDir, extra = {}) {
   const D = path.join(ROOT, 'data-2');
   const { k, notifies } = mkKeeper(D);
   const file = path.join(D, K.STORE_FILE);
-  const n0 = notifies();
+  // lane lg-store-writes U5b (B-0248): the registry is the STORE WRITER's — a write is the keeper's hand-off of the file to it
+  // (its change count, stats().version); the file is read once the owed write has landed
+  const SWn = require('../src/store-writer.js').storeWriter(), fileKey = path.resolve(file);
+  const verOf = () => (SWn.stats().find((x) => x.file === fileKey) || { version: 0 }).version;
+  const landed = () => { SWn.flushSync([fileKey]); return fs.readFileSync(file, 'utf8'); };
+  const n0 = notifies(), v0 = verOf();
   const p = k.createProfile({ label: 'Ops browser' }, { owner: { kind: 'instance', id: null }, use: { mode: 'only', who: [{ kind: 'task', id: 'T-1' }, { kind: 'session', key: KEY_A }] }, knownKeys: [KEY_A] });
   const U = B.whoMayUse(p);
   ok(U.mode === 'only' && U.who.length === 2 && U.who.some((w) => w.kind === 'task' && w.id === 'T-1') && U.who.some((w) => w.kind === 'session' && w.id === KEY_A), 'the record is BORN with its list (a Task Group + a picked conversation)', U);
-  ok(notifies() - n0 === 1, 'ONE write, ONE broadcast for the create with its list (never create-then-PATCH)', notifies() - n0);
-  const before = fs.readFileSync(file, 'utf8');
+  ok(notifies() - n0 === 1 && verOf() - v0 === 1, 'ONE write (one hand-off to the store writer), ONE broadcast for the create with its list (never create-then-PATCH)', { broadcasts: notifies() - n0, writes: verOf() - v0 });
+  const before = landed(), v1 = verOf();
   const thr = (fn) => { try { fn(); return null; } catch (e) { return e; } };
   const e1 = thr(() => k.createProfile({ label: 'Ghost' }, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-9' }] } }));
   const e2 = thr(() => k.createProfile({ label: 'Ghost' }, { use: { mode: 'only', who: [{ kind: 'session', key: KEY_B }] }, knownKeys: [] }));
   const e3 = thr(() => k.createProfile({ label: 'Ghost' }, { use: { mode: 'only', who: [] } }));
   ok(e1 && e1.code === 'unknown_task' && e2 && e2.code === 'unknown_conversation' && e3 && e3.code === 'empty_list', 'an unknown Task Group / a conversation nobody picked / an empty list ⇒ refused BY NAME (the PATCH\'s own verdict)', [e1 && e1.code, e2 && e2.code, e3 && e3.code]);
-  ok(fs.readFileSync(file, 'utf8') === before && !k.list().profiles.some((x) => x.label === 'Ghost') && !fs.readdirSync(path.join(HOME, '.agent-browser')).some((d) => !k.list().profiles.some((x) => x.dir && path.basename(x.dir) === d)),
-    '…and a refusal writes NOTHING: the registry byte-identical, no record, no directory minted');
+  ok(verOf() === v1 && landed() === before && !k.list().profiles.some((x) => x.label === 'Ghost') && !fs.readdirSync(path.join(HOME, '.agent-browser')).some((d) => !k.list().profiles.some((x) => x.dir && path.basename(x.dir) === d)),
+    '…and a refusal writes NOTHING: nothing handed to the store writer for the registry, the file byte-identical once landed, no record, no directory minted');
   const all = k.createProfile({ label: 'Everyone' }, { owner: { kind: 'instance', id: null }, use: { mode: 'all' } });
   ok(B.whoMayUse(all).mode === 'all', '{mode:"all"} ⇒ every conversation (owner ruling A)');
 }
