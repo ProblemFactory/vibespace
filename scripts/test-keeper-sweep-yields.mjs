@@ -406,16 +406,16 @@ console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is neve
   const Knaive = ksrc.includes(BEFORE) ? M.load('src/server/browser-keeper.js', ksrc.replace(BEFORE, '    const served = Math.max(Number(pe && pe.lastVerbAt) || 0, Number(rec.startedAt) || 0); // the newest verb (the asking one)'), 'law2-newest-verb') : null;
   const [r, rel, naive] = await Promise.all([law2(K), Krel ? law2(Krel) : null, Knaive ? law2(Knaive) : null]);
   ok(r.every((x) => x.state === 'stopped' && x.by === 'idle'), 'every gone daemon is recorded stopped with stoppedBy «idle» — every behaviour keyed on it unchanged (the next verb starts it again, its kept tabs reopen)', r);
-  ok(r[0].early && r[0].early.afterMs === 65000 && r[0].early.idleMs === IDLE && /^the browser ended 65 s after its last command, before its idle timeout \(15 min\) — why is not known here; the next command starts it again$/.test(r[0].note) && r[0].rowEarly && r[0].rowEarly.afterMs === 65000,
-    'B-346d law 2: a daemon gone 69 s after its start against a 15-minute idle says «ended 65 s after its last command, before its idle timeout» — never «idled out» — the cause said as unknown; the Housekeeping row carries the fact', r[0]);
+  ok(r[0].early && r[0].early.withinMs === 65000 && r[0].early.idleMs === IDLE && /^the browser was found gone within 65 s of a command it served, before its idle timeout of 15 min — why is not known here; the next command starts it again$/.test(r[0].note) && r[0].rowEarly && r[0].rowEarly.withinMs === 65000,
+    'B-346d law 2: a daemon gone 69 s after its start against a 15-minute idle is «found gone within 65 s of a command it served, before its idle timeout» — a BOUND, never when it ended — never «idled out», the cause said as unknown; the Housekeeping row carries the fact', r[0]);
   ok(!r[1].early && /^the browser idled out \(15 min without a command\)/.test(r[1].note) && !r[1].rowEarly, 'a daemon quiet past its idle timeout still idled out (the words as before)', r[1]);
-  ok(!r[2].early && /^the browser idled out/.test(r[2].note), 'takeover C3: the verb ASKING now (stamped 1 s ago, before the judge) never makes an idle-out read «ended 1 s after» — the daemon is judged by the verb before it', r[2]);
+  ok(!r[2].early && /^the browser idled out/.test(r[2].note), 'takeover C3: the verb ASKING now (stamped 1 s ago, before the judge) never makes an idle-out read «found gone within 1 s» — the daemon is judged by the verb before it', r[2]);
   if (rel) ok(/idled out/.test(rel[0].note) && !rel[0].early, 'CONTROL (the release: every gone daemon «idled out»): the row\'s own 69 s daemon reads «idled out» — RED', rel[0]);
-  if (naive) ok(naive[2].early && /ended 1 s after/.test(naive[2].note), 'CONTROL (judged by the newest verb, the asking one): a real idle-out reads «ended 1 s after its last command» — RED', naive[2]);
+  if (naive) ok(naive[2].early && /found gone within 1 s of a command it served/.test(naive[2].note), 'CONTROL (judged by the newest verb, the asking one): a real idle-out reads «found gone within 1 s of a command it served» — RED', naive[2]);
   // the kept store: 'ended' is its own word, reopened as an idle-out is (D2: an automatic stop)
   ok(KB.STOP_WHYS.includes('ended') && KB.stopWhyOf('ended') === 'ended' && KB.restoreKindFor('ended') === 'auto' && KB.restoreKindFor('ended') === KB.restoreKindFor('idle')
-    && /ended before its idle timeout \(why is not known here\)/.test(KB.stopWhyWords('ended')) && KB.stopWhyWords('idle') === 'it idled out',
-    'the kept browser\'s reason: «ended» (before its idle timeout, why unknown) — its tabs reopen by themselves as an idle-out\'s do; the agent\'s words say it', { why: KB.stopWhyOf('ended'), kind: KB.restoreKindFor('ended'), words: KB.stopWhyWords('ended') });
+    && /found gone before its idle timeout \(why is not known here\)/.test(KB.stopWhyWords('ended')) && KB.stopWhyWords('idle') === 'it idled out',
+    'the kept browser\'s reason: «ended» (found gone before its idle timeout, why unknown) — its tabs reopen by themselves as an idle-out\'s do; the agent\'s words say it', { why: KB.stopWhyOf('ended'), kind: KB.restoreKindFor('ended'), words: KB.stopWhyWords('ended') });
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

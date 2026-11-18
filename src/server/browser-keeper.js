@@ -1948,8 +1948,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return v;
   }
   /** An ephemeral daemon whose pid is gone: recorded `stopped` — not an error; the next verb starts it again. B-346d law 2:
-   *  it idled out (the CLI's own timeout) ONLY when it was quiet that long. `endedEarly` = its daemon ended BEFORE its idle
-   *  timeout — CERTAIN: the daemon served nothing later than max(the verb before the newest, its own start) (the newest verb
+   *  it idled out (the CLI's own timeout) ONLY when it was quiet that long. `endedEarly` = its daemon was found gone BEFORE its
+   *  idle timeout, `withinMs` a BOUND (found gone within it of a command it served — never when it ended) — CERTAIN: the daemon served nothing later than max(the verb before the newest, its own start) (the newest verb
    *  may be the very one asking now, stamped before this judge — takeover C3), so its own quiet is no longer than that. Why it
    *  ended (a crash, a kill) is not known here: the words say so. stoppedBy stays 'idle': every behaviour keyed on it (the
    *  next verb starts it again, its kept tabs reopen) is the idle-out's. */
@@ -1960,13 +1960,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const quietMs = served > 0 ? Math.max(0, now() - served) : null;
     const early = quietMs != null && Number(idleFor) > 0 && quietMs < Number(idleFor);
     rec.state = 'stopped'; rec.endedAt = now(); rec.stoppedBy = 'idle'; rec.lastError = null;
-    rec.endedEarly = early ? { afterMs: quietMs, idleMs: Number(idleFor) } : null;
+    rec.endedEarly = early ? { withinMs: quietMs, idleMs: Number(idleFor) } : null; // withinMs: a BOUND — found gone within it of a command it served, never when it ended
     dropEgress(rec.profileId); delete rec.egress; // lane engine-spi-egress r2: its proxy's port is free again
-    rec.note = early ? `the browser ended ${Math.round(quietMs / 1000)} s after its last command, before its idle timeout (${Math.round(Number(idleFor) / 60000)} min) — why is not known here; the next command starts it again`
+    rec.note = early ? `the browser was found gone within ${Math.round(quietMs / 1000)} s of a command it served, before its idle timeout of ${Math.round(Number(idleFor) / 60000)} min — why is not known here; the next command starts it again`
       : `the browser idled out (${Math.round(Number(idleFor) / 60000)} min without a command) — the next command starts it again`;
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
-    log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (${early ? `ended ${Math.round(quietMs / 1000)} s after its last command, before its idle timeout` : 'idle'}), the next verb restarts it`);
+    log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (${early ? `found gone within ${Math.round(quietMs / 1000)} s of a command it served, before its idle timeout of ${Math.round(Number(idleFor) / 60000)} min — why is not known here` : 'idle'}), the next verb restarts it`);
     emitLease({ kind: 'browser-stopped', profileId: rec.profileId, why: 'idle', local: true, ...ephEventFields(rec.profileId) }); // lane H: its holder row leaves the digest
     keptNote('stop', profile(rec.profileId), { why: early ? 'ended' : 'idle' }); // lane browser-resume: its logins + its last tabs are kept (the daemon is gone: the relay's list); B-346d: 'ended' reopens as 'idle' does
     reapOrphan(rec, seenBy); // verify r2 M1: the Chrome its dead daemon left behind is ended (tracked; a start waits on it)

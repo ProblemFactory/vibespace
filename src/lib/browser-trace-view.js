@@ -72,7 +72,7 @@ export function ephemeralStateText(e) {
   if (e.state === 'ready') return e.adopted ? t('running (adopted)') : t('running');
   if (e.state === 'starting') return t('starting');
   if (e.state === 'failed') return t('failed');
-  if (e.state === 'stopped') return e.endedEarly ? t('ended early') : e.stoppedBy === 'idle' ? t('idled out') : t('stopped'); // B-346d law 2: a daemon gone before its idle timeout never reads «idled out»
+  if (e.state === 'stopped') return e.endedEarly ? t('found gone early') : e.stoppedBy === 'idle' ? t('idled out') : t('stopped'); // B-346d law 2: a daemon gone before its idle timeout never reads «idled out»
   return t('not started');
 }
 
@@ -1022,7 +1022,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     return row;
   }
   /** lane browser-resume (§3.9): why a kept browser stopped, in the device's words (the store's closed vocabulary). */
-  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), ended: t('it ended before its idle timeout'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
+  const keptWhyText = (w) => ({ 'turn-idle': t('released after its turn'), idle: t('idled out'), ended: t('it was found gone before its idle timeout'), heal: t('its browser was restarted'), restart: t('VibeSpace restarted'), 'conversation-gone': t('its session ended'), user: t('stopped by you'), agent: t('closed by the agent') }[w] || '');
   /** lane browser-resume (§3.9): ONE kept browser — a conversation's own browser's logins + tabs after it stopped. KEYED
    *  (by its browser key, rebuilt only when what it prints moved); Forget only on a stopped one (a running one says so). */
   const keptRows = new Map(); // browserKey → { row, sig }
