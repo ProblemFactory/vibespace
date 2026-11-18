@@ -132,5 +132,37 @@ function judgeAnswer({ cv, al, ctl }, { name, home } = {}) {
   return { kind: 'none', wrapper };
 }
 
-module.exports = { S0_SH, pickLoginShell, shellLine, programLookup, parseShellAnswer, wrapperOf, aliasTarget, judgeAnswer, shellName, NAME_OK, CONTROL_WORD,
+// ── THE REMOTE TWIN (B-69ec): a paired machine's OWN login shell says where a CLI is there ──
+const R_SHELL = '__VS_RSHELL__=', R_HOME = '__VS_RHOME__=', R_RC = '__VS_RRC__=';
+/** The sh script a paired machine (an ssh host, a dial device) runs through the hub's remote exec (hosts._hostShell — ssh, or
+ *  the device's run op: NO tty) to ask ITS user's login shell where `name` is: the same ladder (S0_SH), the same line per
+ *  shell (shellLine, picked in sh by the shell's name), a sanitized env (env -i: HOME USER LOGNAME SHELL TERM=dumb
+ *  VIBESPACE_SHELL_PROBE=1 and the agent's PATH — what the local ask hands its shell), stdin from /dev/null, bounded by
+ *  `timeout` where the machine has one (the hub's exec bounds it anyway). Our sh prints the shell and the home it asked
+ *  BEFORE any rc runs, and the shell's exit code after it. */
+function remoteAskScript(name, { timeoutS = 10 } = {}) {
+  if (!NAME_OK.test(String(name || ''))) throw new TypeError(`login-shell: not a plain command name: ${String(name).slice(0, 60)}`);
+  const sq = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
+  const line = (sh) => sq(shellLine(name, sh));
+  return `${S0_SH}printf '\\n${R_SHELL}%s\\n${R_HOME}%s\\n' "$S0" "$HOME"; `
+    + `case "\${S0##*/}" in bash) L=${line('bash')};; zsh) L=${line('zsh')};; ksh|ksh93|mksh) L=${line('ksh')};; fish) L=${line('fish')};; *) L=${line('sh')};; esac; `
+    + `T=; command -v timeout >/dev/null 2>&1 && T="timeout ${Math.max(1, Number(timeoutS) | 0)}"; `
+    + `$T env -i HOME="$HOME" USER="\${USER:-}" LOGNAME="\${LOGNAME:-}" SHELL="$S0" TERM=dumb VIBESPACE_SHELL_PROBE=1 PATH="$PATH" "$S0" -l -i -c "$L" </dev/null 2>&1; `
+    + `printf '\\n${R_RC}%s\\n' "$?"`;
+}
+/** The remote printout → judgeAnswer's verdict + { shell, home, shellPath } — or { kind: 'unanswered', why } when the line did
+ *  not complete (timeout = the machine's `timeout` 124; exit:<rc>; no-answer). The shell and the home are OUR sh's lines (the
+ *  FIRST ones — printed before any rc ran), the exit code the LAST. */
+function remoteAnswer(out, name) {
+  const lines = String(out || '').split(/\r?\n/);
+  const first = (tag) => { const l = lines.find((x) => x.startsWith(tag)); return l == null ? null : l.slice(tag.length).trim(); };
+  const last = (tag) => { for (let i = lines.length - 1; i >= 0; i--) if (lines[i].startsWith(tag)) return lines[i].slice(tag.length).trim(); return null; };
+  const shell = first(R_SHELL) || null, home = first(R_HOME) || null, rc = last(R_RC);
+  const p = parseShellAnswer(out);
+  if (!p.complete) return { kind: 'unanswered', why: rc === '124' ? 'timeout' : rc == null ? 'no-answer' : `exit:${rc}`, shell, home };
+  const v = judgeAnswer(p, { name, home });
+  return { ...v, shell, home, shellPath: p.path };
+}
+
+module.exports = { remoteAskScript, remoteAnswer, S0_SH, pickLoginShell, shellLine, programLookup, parseShellAnswer, wrapperOf, aliasTarget, judgeAnswer, shellName, NAME_OK, CONTROL_WORD,
   BEGIN, END, AL_BEGIN, AL_END, CTL_BEGIN, CTL_END, PATH_END };

@@ -765,13 +765,14 @@ class HostManager {
    *  as not-installed/unreachable while the same probes worked over ssh). */
   /** `by` (lane device-act-audit): who asked — a caller that knows (a person's route, an agent) names it; the hub's own
    *  probes are `system:hosts`. */
-  async _hostShell(h, script, { timeoutMs = 15000, by = 'system:hosts' } = {}) {
+  async _hostShell(h, script, { timeoutMs = 15000, by = 'system:hosts', consent = false } = {}) { // `consent` (B-69ec): a person's own press carries it
     try {
       if (h.transport === 'dial') {
         // 15s, not the 6s default (review catch): accountsStatus rides this
         // inside session CREATE (linked/host-held rescue) — a tight bound
         // failed creates a slow-but-healthy link would have served.
         const dm = await this.deviceBounded(h.id, 15000);
+        if (consent) { const rc = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, consent: true }); return String(rc.stdout || ''); } // B-69ec: a person's create carries its consent
         const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });
         return String(r.stdout || '');
       }

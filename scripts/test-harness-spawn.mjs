@@ -209,9 +209,9 @@ console.log('— ④ the spawn-ladder seam: a fake transport through ONE registr
   ok(globalThis.__acmeLinkCalls.length === 2 && globalThis.__acmeLinkCalls[1].mode === 'chat' && y.spawned.length === 0 && !y.session,
     'a chat create asks the same member\'s chat(c); its "answered the socket" (nothing) ends the create with NO spawn', { calls: globalThis.__acmeLinkCalls.length, spawned: y.spawned.length });
   globalThis.__acmeLinkCalls = [];
-  const pre = "const sp = await spawnFor(h).terminal(ladderCtx({ h, shq }));";
+  const pre = "const sp = await spawnFor(h).terminal(ladderCtx({ h, shq, ...(rcmdT ? { rcmd: rcmdT } : {}) }));"; // B-69ec: the remote CLI's program rides the ladder
   ok(src.split(pre).length === 2, 'control: the terminal dispatch is one identifiable line');
-  const old = viaReg(src).replace(pre, "const sp = await (h.transport === 'dial' ? require('./spawn/dial') : require('./spawn/ssh')).terminal(ladderCtx({ h, shq }));");
+  const old = viaReg(src).replace(pre, "const sp = await (h.transport === 'dial' ? require('./spawn/dial') : require('./spawn/ssh')).terminal(ladderCtx({ h, shq, ...(rcmdT ? { rcmd: rcmdT } : {}) }));");
   let z; try { z = await drive(M.load('src/ws-create.js', old, 'acme-link-preseam'), { backend: 'acme', hostId: 'host-acme-1' }, { hosts: hostsStub }); } catch (e) { z = { threw: e.message, spawned: [] }; }
   ok(globalThis.__acmeLinkCalls.length === 0 && !(z.spawned[0] && z.spawned[0].args.includes('acme-link-cli')),
     'CONTROL: the pre-lane dispatch restored (dial-or-ssh) never reaches the registered member — the leg above can go red', z.threw || (z.sent || []).map((m) => m.type));

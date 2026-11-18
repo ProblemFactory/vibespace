@@ -220,6 +220,7 @@ function sshLadder(c) {
             // locally-resolved binary paths mean nothing on the remote
             // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the CLI's configured NAME, never a local path's basename
             const rcmd = ctx.cliCmds?.remoteName ? ctx.cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+            const rcmdT = c.rcmd || rcmd; // B-69ec: the machine's own login shell's program (ws-create asked it), else the configured name
             const ra = await remoteAgentSetup();
             let acctEnv = '';
             try { acctEnv = await remoteAccountEnv(h); }
@@ -229,7 +230,7 @@ function sshLadder(c) {
             // (an `env KEY=$(cat …)` argument would expand into env's argv).
             const inner = buildRemoteExec({
               cwd, shq, pre: ra.prelude, browser: spawnBrowserPre, tokenAssign: ra.tokenAssign, acctEnv,
-              parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)],
+              parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmdT, ...spawnArgs.map(shq)],
             });
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];

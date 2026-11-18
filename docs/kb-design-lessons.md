@@ -703,15 +703,15 @@ The spawn is ALWAYS a program path, and a vanished one re-asks (B-a18e). The cen
 
 **The census.** /api/backend-status carries per CLI `provenance`, `shell`, `askedAt`, `answer`, `via` ('program' | 'alias'), `wrapper` (its kind + text, NAMED, never run), `notExecutable` + `dangling` (a target that does not run, by its cause), `envName`, `unanswered`, `hubPath`, `hint`. Manage agents shows ONE line under each local CLI's version chip («found by your zsh at ~/.nvm/versions/node/v24.12.0/bin/codex» / «found by your zsh through its alias at ~/.claude/local/claude» / «your zsh wraps it in an alias — VibeSpace runs the program at …, without the alias; …» / «your zsh’s alias names …, which is missing» / «not found by your zsh · the hub's PATH has …» / «your zsh could not be asked (timed out after 10 s) · using the hub's PATH»), HOME as ~, textContent only. Re-check (now on an installed row too) re-asks. A remote host's rows are its own probe's. No «measured» verdict is claimed that was not measured.
 
-**The twin on the other transports (unchanged here; B-69ec «remote CLI resolution asks the device user's login shell the way the local road does»).**
+**The twin on the other transports (B-69ec, 2.369.408: a paired machine's OWN login shell is asked the way the local road asks — src/server/remote-cli.js over src/login-shell.js remoteAskScript, through the existing remote exec; no device update).**
 
 | transport | where the CLI is resolved after this lane |
 |---|---|
 | local pty terminal | the person's login shell (askShell) › the hub's walk (provisional / unanswered) — refused when neither has it |
 | local chat (dtach wrapper) | the same, the same one forSpawn |
 | R6 daemon pipe (local chat) | the same, the same one forSpawn |
-| ssh host | src/remote-shell.js REMOTE_PRELUDE: PATH + nvm.sh, an EMULATED login shell (unchanged) |
-| dial device | the same REMOTE_PRELUDE for an agent; a device SHELL terminal already runs the device user's real login shell (S0_SH, dial.js) |
+| ssh host | that machine's login shell (remoteAskScript over ssh exec, no tty) › the REMOTE_PRELUDE name when it could not be asked — refused by name when the shell holds none |
+| dial device | the same ask through the device's run op › the REMOTE_PRELUDE name; a device SHELL terminal runs the device user's real login shell (S0_SH, dial.js) |
 | fleet pod | the pod user's bash from the image (deploy Dockerfile), claude-code preinstalled globally — unchanged, a convenience |
 
 **Gated by:** test-cli-env (fast: round 2 — the five shapes in REAL zsh + bash under planted homes, the version gate over two fake claudes, the readers census, the usage door's no-shell wall read, a shell without `command`; the rung over SCRATCH shells, the answer kinds, the decoy, the sanitized env, the timeout, the S0 twin, the provenance replacement, the forced re-ask, fail-closed; mutants: fail-closed removed / the sentinel parse removed / the env unsanitized / the bound removed ⇒ RED), test-cli-cmd-refresh (heavy: a scratch server whose SHELL is a scratch login shell; gone everywhere ⇒ cli-missing, no dtach), test-cli-missing-chrome (heavy: the dialog en/zh/ja + the census lines), test-architecture §93 (the FIXED spawn-env row) + §85 (the probe's group kill), test-acp-harness-pins (the folded branch: ws-create's ONE verdict).

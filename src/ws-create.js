@@ -21,6 +21,7 @@ const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { spawnFor } = require('./spawn'); // decoupling wave 2b: the per-transport spawn ladders (local / ssh / dial)
+const { remoteCmdFor, remoteRefusal } = require('./server/remote-cli'); // B-69ec: a paired machine's OWN login shell says where its CLI is
 const { sessionSpawnLine } = require('./spawn/line'); // PURE (lane antigravity-spawn-argv): THE local session line — node <wrapper> <buf> <meta> <ONE executable> …args + the env
 const SPRI = require('./server/spawn-priority.js'); // B-460d: the start's CPU priority — a local conversation starts below the hub (nice +5 on the line itself)
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
@@ -1422,7 +1423,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Unknown host: ' + data.hostId })); return; } // the request named (lane phone-resume-keeps-layout r4 N2: a bare error ended no create on the page)
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-            const sp = await spawnFor(h).terminal(ladderCtx({ h, shq }));
+            // B-69ec THE REMOTE TWIN: a CLI's terminal runs the program THAT machine's login shell found (src/server/remote-cli.js);
+            // it holds none ⇒ refused by name before anything starts; it could not be asked ⇒ the prelude decides, as before
+            let rcmdT = null;
+            if (cliCmds?.current?.(backend) != null) {
+              try { rcmdT = await remoteCmdFor({ hosts, h, backend, name: cliCmds.remoteName ? cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd) }); } catch (e) {
+                if (!e || e.code !== 'cli-missing') throw e;
+                global.__vsEvent?.('spawn-cli-missing', `${backend}/remote`);
+                ws.send(JSON.stringify(remoteRefusal(e, data.reqId))); return;
+              }
+            }
+            const sp = await spawnFor(h).terminal(ladderCtx({ h, shq, ...(rcmdT ? { rcmd: rcmdT } : {}) }));
             if (!sp) return; // the ladder answered the socket
             ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = sp);
           } else if (data.hostId && hosts && sessionMode === 'chat') {
@@ -1453,6 +1464,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // no-op on devices without the keeper).
             // the LOCAL shell's answer is LOCAL (lane cli-shell-truth r3): the remote runs the CLI's configured NAME
             const rcmd = cliCmds?.remoteName ? cliCmds.remoteName(backend, spawnCmd) : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+            // B-69ec THE REMOTE TWIN: the chat runs the program THAT machine's login shell found for the name (none ⇒ refused)
+            let rcmdR = rcmd;
+            if (cliCmds?.current?.(backend) != null) {
+              try { rcmdR = (await remoteCmdFor({ hosts, h, backend, name: rcmd })) || rcmd; } catch (e) {
+                if (!e || e.code !== 'cli-missing') throw e;
+                global.__vsEvent?.('spawn-cli-missing', `${backend}/remote`);
+                ws.send(JSON.stringify(remoteRefusal(e, data.reqId))); return;
+              }
+            }
             const rargs = [...spawnArgs];
             // The harness's chat transport flags (adapter.chatTransportArgs —
             // claude's stream-json set; the local chat-wrapper appends the same
@@ -1460,7 +1480,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // hazard: a blanket append once reached every future backend).
             const ta = adapter && typeof adapter.chatTransportArgs === 'function' ? adapter.chatTransportArgs() : [];
             for (const fl of ta) { if (!rargs.includes(fl[0])) rargs.push(...fl); }
-            const sp = await spawnFor(h).chat(ladderCtx({ h, shq, rcmd, rargs }));
+            const sp = await spawnFor(h).chat(ladderCtx({ h, shq, rcmd: rcmdR, rargs }));
             if (!sp) return; // the ladder answered the socket
             ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = sp);
           }

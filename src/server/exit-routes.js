@@ -344,7 +344,7 @@ app.get('/api/hosts/:id/dir-complete', async (req, res) => {
 // "path list" the New Session dialog offers as chips for a remote host.
 // Backend (CLI) status on a host — Manage Agents dialog when a host is chosen.
 app.get('/api/hosts/:id/backend-status', async (req, res) => {
-  try { res.json(await hosts.backendStatus(req.params.id)); }
+  try { const st = await hosts.backendStatus(req.params.id); const rc = require('./remote-cli.js').remoteCliOf(hosts); res.json(rc ? { ...st, cliWhere: rc.census(req.params.id) } : st); } // B-69ec: where THAT machine's login shell found each CLI (the creates' answers, no ask)
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // VibeSpace integration on a host (2.129.0, backlog B-34bb): the ~/.vibespace

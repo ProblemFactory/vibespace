@@ -24,7 +24,7 @@ import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
-import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
+import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
@@ -2464,8 +2464,9 @@ export function installManageAgents(App, ctx = {}) {
         // THE OBSERVED CENSUS (lane cli-shell-truth): ONE line under the version chip — where this machine's CLI was
         // found and by whom («found by your zsh at ~/.nvm/…/codex» / «not found by your zsh · the hub's PATH has …» /
         // «your zsh could not be asked (timed out) · using the hub's PATH»). A remote host's row is its probe's own.
-        if (!selectedHost) {
-          const where = cliWhereWords(info);
+        // B-69ec: a remote host's row says where THAT machine's login shell found it (its last create's answer)
+        {
+          const where = !selectedHost ? cliWhereWords(info) : remoteCliWhereWords(st.cliWhere && st.cliWhere[b.key], hostLabel);
           if (where) {
             const el = document.createElement('div');
             el.className = 'ob-cli-where' + (where.tone === 'warn' ? ' ob-cli-where-warn' : '');
