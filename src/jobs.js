@@ -2559,10 +2559,11 @@ class JobManager {
   _finalizeRun(job, run, exit, why) {
     if (run.endedAt) return; // ONE JUDGE PER RUN END (round 5): a run is judged once — a second caller (an overlapping pass) returns
     run.endedAt = exit.endedAt || now();
-    // B-cac2: a start asked while this run's stop ran (or a restart) is taken HERE, at the run's end, on every road out below
-    const startAsked = !!job._startAfterStop; delete job._startAfterStop;
     // lane jobs-browser (B-dbc1): the run is over — what it held as its conversation (its browser lease + window) is released
     try { this.d.onRunEnded?.(job, run); } catch { }
+    // B-cac2: a start asked while this run's stop ran (or a restart) is taken HERE — after the release above (a browser the run held is
+    // let go first; test-jobs-browser pins that order), before every road out below
+    const startAsked = !!job._startAfterStop; delete job._startAfterStop;
     run.exit = exit.code;
     const untilHit = job._untilHit;
     // AN UPDATE'S WINDOW IS NOT A FAILURE (lane job-wrapper-update-window, fb-7f7be1e24e): the wrapper on disk spoke another
