@@ -69,7 +69,7 @@ ok(!JSON.stringify(row).includes('vswh_') && !JSON.stringify(row).includes('toke
 console.log('§3 the caller picker');
 const P = V.pickerRows([{ id: 'c-1', name: 'A', delivery: { mode: 'reply-url' } }, { id: 'c-2', name: 'B', delivery: { mode: 'poll' } }, { id: 'c-3', name: 'C', delivery: { mode: 'none' } }, { id: 'c-4', name: 'D', delivery: { mode: 'poll' }, revokedAt: 5 }], { t });
 ok(P.length === 3 && !P[0].disabled && !P[1].disabled && P[2].disabled && /takes no replies/.test(P[2].why) && P.every((x) => x.disabled === !!x.why), 'delivery none ⇒ disabled WITH its reason (never a bare greyed box); revoked ⇒ not offered', P);
-ok(/if \(pk\.disabled\) \{ m\.body\.appendChild\(needLine\(\{ words: `\$\{pk\.name\} — \$\{pk\.why\}`/.test(WSRC) && /door: 'callers'/.test(WSRC) && !/b\.disabled = pk\.disabled;/.test(WSRC), 'a caller that takes no replies is a line — its name, why and «Change delivery…» — never a greyed box (lane ui-needs-a-button)');
+ok(/if \(pk\.disabled\) \{ m\.body\.appendChild\(needLine\(\{ words: `\$\{pk\.name\} — \$\{pk\.why\}`/.test(WSRC) && /door: 'callers'/.test(WSRC) && !/b\.disabled = pk\.disabled;/.test(WSRC), 'a caller that takes no replies is a line — its name, why and «Change delivery…» — never a greyed box (lane ui-needs-a-button)');   // stale-pins: kept — a «gone» check: the old words must stay out
 
 console.log('§4 the budget row');
 ok(V.budgetText('deploys', { used: 1, lim: 6 }, { t }) === 'path deploys: 1 / 6 wakes this hour' && V.budgetText('x', null, { t }) === null && V.budgetText('x', { used: 0, lim: 0 }, { t }) === null, '"path deploys: 1 / 6 wakes this hour"; nothing where none is declared');

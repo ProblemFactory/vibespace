@@ -801,7 +801,7 @@ const T32 = (c) => String(c).repeat(32);
     'plugins-integrations-19: the relay rows say one page serves Lark, Slack and Google (the published path is not renamed)');
   // sidebar-sessions-4: the tick is drawn whether or not the parent exists (one row, its door on the line)
   const PF = fs.readFileSync(path.join(REPO, 'src/lib/path-field.js'), 'utf8');
-  ok(/\+ `<label class="pf-tickrow"><input type="checkbox" data-act="tick"/.test(PF) && !/x\.parentOk \? `<label class="pf-tickrow">/.test(PF) && !/nor the folder above — pick another/.test(PF),
+  ok(/\+ `<label class="pf-tickrow"><input type="checkbox" data-act="tick"/.test(PF) && !/x\.parentOk \? `<label class="pf-tickrow">/.test(PF) && !/nor the folder above — pick another/.test(PF),   // stale-pins: kept — a «gone» check: the old words must stay out
     'sidebar-sessions-4: «create it?» always carries its create on the line — a missing parent too (made with it at use: /api/mkdir is mkdir -p)');
 }
 
@@ -1249,7 +1249,7 @@ if (CL) {
       && !/Tailscale admin console/.test(of.text) && of.door === 'Turn on HTTPS…' && of.opened.length === 1,
       'plugins-integrations-13 (reader #4 / #14): «Connecting needs an https address» — on the default «auto» the line also says what is missing (the tailnet\'s HTTPS certificates, on Tailscale\'s side) and its door is the row for «My own certificate files»; with https off, «Turn on HTTPS…»', { au, of });
     const VT = fs.readFileSync(path.join(REPO, 'src/lib/voice-teach-ui.js'), 'utf8'), IWS = fs.readFileSync(path.join(REPO, 'src/lib/integrations-window.js'), 'utf8'), PU = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8');
-    ok(/renderConnectRow\(box, DROPLINE_CONNECT, st, rerender, \{ app \}\)/.test(VT) && /renderConnectRow\(box, v\.connect, st, \(\) => refresh\(v\.id\), \{ app \}\)/.test(IWS) && /renderVoiceSheet\([\s\S]{0,120}app: this \}\)/.test(PU) && !/t\('[^']*Services › Integrations/.test(VT + PU),
+    ok(/renderConnectRow\(box, DROPLINE_CONNECT, st, rerender, \{ app \}\)/.test(VT) && /renderConnectRow\(box, v\.connect, st, \(\) => refresh\(v\.id\), \{ app \}\)/.test(IWS) && /renderVoiceSheet\([\s\S]{0,120}app: this \}\)/.test(PU) && !/t\('[^']*Services › Integrations/.test(VT + PU),   // stale-pins: kept — a «gone» check: the old words must stay out
       'plugins-integrations-13: both surfaces hand the app to the Connect block (its door is drawn on the voice sheet AND the Integrations card); no wrong menu path in the key link or the chip\'s title');
   }
   // browser-profiles-4: the browser list's needs said ONCE, each with its door's target — the chosen cloud browser's own card
@@ -1396,17 +1396,17 @@ console.log('⑥ WINDOWS, DIALOGS AND MACHINE ROWS (lane ui-needs-a-button pick 
     'machines-12: a name already taken (ui-language\'s code host-name-taken) carries «Open that machine» on the error line');
   // agents-accounts-6 / -8
   const MA = src('src/lib/manage-agents.js');
-  ok(/needLine\(\{ words: t\('No machines yet — add an SSH machine or pair a device\.'\)[\s\S]{0,80}doors: \[addSsh, pairDoor\(this, null/.test(MA) && !/t\('No machines yet — add an SSH host or pair a device in the Remote tab\.'\)/.test(MA),
+  ok(/needLine\(\{ words: t\('No machines yet — add an SSH machine or pair a device\.'\)[\s\S]{0,80}doors: \[addSsh, pairDoor\(this, null/.test(MA) && !/t\('No machines yet — add an SSH host or pair a device in the Remote tab\.'\)/.test(MA),   // stale-pins: kept — a «gone» check: the old words must stay out
     'agents-accounts-6: no machine yet — «Add an SSH machine…» and «Pair a device…» on the line, never «in the Remote tab»');
-  ok(/if \(info\.installed && !info\.loggedIn\) \{[\s\S]{0,200}quietLogin \? t\('Log in on this machine…'\)/.test(MA) && !/claude \/login\)…'\)/.test(MA),
+  ok(/if \(info\.installed && !info\.loggedIn\) \{[\s\S]{0,200}quietLogin \? t\('Log in on this machine…'\)/.test(MA) && !/claude \/login\)…'\)/.test(MA),   // stale-pins: kept — a «gone» check: the old words must stay out
     'agents-accounts-8: the machine login stays a door on its row (quiet beside the named accounts); the menu item names no command');
   // gear-and-system-12
   const AP = src('src/lib/app.js');
-  ok(/\]\.filter\(Boolean\);\n\s*if \(sensRows\.length\) sensWrap\.append\(\.\.\.sensRows\);/.test(AP) && /door: 'set-password', run: \(\) => this\._showPasswordDialog\(\)/.test(AP) && !/disabled: !info\.sensitive\./.test(AP),
+  ok(/\]\.filter\(Boolean\);\n\s*if \(sensRows\.length\) sensWrap\.append\(\.\.\.sensRows\);/.test(AP) && /door: 'set-password', run: \(\) => this\._showPasswordDialog\(\)/.test(AP) && !/disabled: !info\.sensitive\./.test(AP),   // stale-pins: kept — a «gone» check: the old words must stay out
     'gear-and-system-12: only the sensitive data that exists is a row (no greyed rows); none ⇒ one line; no password ⇒ «Set a password…»');
   // channels-accounts-4 / outbox-2 / policy-7 / policy-1
   const CA = src('src/lib/channel-account-dialogs.js');
-  ok(/function refDoor\(app, a, ref, close\)/.test(CA) && /showGrantAccessDialog\(app, target\)/.test(CA) && /showAccountReachDialog\(app, a\)/.test(CA) && /disc\.dataset\.door = 'disconnect'/.test(CA) && !/same rule as a credential with submounts/.test(CA),
+  ok(/function refDoor\(app, a, ref, close\)/.test(CA) && /showGrantAccessDialog\(app, target\)/.test(CA) && /showAccountReachDialog\(app, a\)/.test(CA) && /disc\.dataset\.door = 'disconnect'/.test(CA) && !/same rule as a credential with submounts/.test(CA),   // stale-pins: kept — a «gone» check: the old words must stay out
     'channels-accounts-4: each reference carries «Release…» (its Grant access / Reach & policy), «Disconnect» sits beside them; the rule\'s echo is gone');
   const WV = await imp('src/lib/webhook-view.js');
   const pk = typeof WV.pickerRows === 'function' ? WV.pickerRows([{ id: 'c1', name: 'Billing', delivery: { mode: 'none' } }, { id: 'c2', name: 'Ops', delivery: { mode: 'reply-url' } }]) : [];
@@ -1441,11 +1441,11 @@ console.log('⑦ ACTS, DEAD ENDS AND COMPANY WORDS (lane ui-needs-a-button pick 
 {
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const LA = src('src/lib/desktop-app-launcher.js');
-  ok(/door: 'install-recheck'/.test(LA) && /sayDeadEnd\('no_sudo'/.test(LA) && /sayDeadEnd\('no_apt'/.test(LA) && /door: 'install-terminal'/.test(LA) && /door: 'install-xpra-page'/.test(LA) && !/in a terminal there, then check again/.test(LA),
+  ok(/door: 'install-recheck'/.test(LA) && /sayDeadEnd\('no_sudo'/.test(LA) && /sayDeadEnd\('no_apt'/.test(LA) && /door: 'install-terminal'/.test(LA) && /door: 'install-xpra-page'/.test(LA) && !/in a terminal there, then check again/.test(LA),   // stale-pins: kept — a «gone» check: the old words must stay out
     'desktop-apps-20 / -21 (M5): no passwordless sudo ⇒ «Open a terminal» + «Check again»; no apt-get ⇒ «Open the xpra download page» + «Check again» + «Close» — on the refusal\'s line; «there» never said of this machine (the machine table\'s marker: door: \'install-recheck\')');
   ok(/dataset\.door = 'registry-install'/.test(LA) && /openAppSearch\(app, machineOf\(host\), \{ query,/.test(LA) && /\{ onDone = null, query = '' \}/.test(src('src/lib/app-install-dialog.js')),
     'desktop-apps-3: a built-in app that is not installed carries «Install…» — the package search with its program\'s name filled in');
-  ok(/door: 'remove-forget'/.test(LA) && /door: 'remove-copy'/.test(LA) && /desktop-remove-details/.test(LA) && !/p\.textContent = \[said, r && r\.error\]/.test(LA),
+  ok(/door: 'remove-forget'/.test(LA) && /door: 'remove-copy'/.test(LA) && /desktop-remove-details/.test(LA) && !/p\.textContent = \[said, r && r\.error\]/.test(LA),   // stale-pins: kept — a «gone» check: the old words must stay out
     'desktop-apps-18: a failed removal says it ONCE with «Forget it» / «Copy the command» / «Close»; the error and output once, under «Details»');
   const CE = src('src/lib/code-editor.js');
   ok(/'● ' \+ t\('Unsaved'\)/.test(CE) && /'✓ ' \+ t\('Saved'\)/.test(CE) && /door: 'disk-keep'/.test(CE) && /m <= \(this\._diskKept \|\| 0\)/.test(CE),
@@ -1455,10 +1455,10 @@ console.log('⑦ ACTS, DEAD ENDS AND COMPANY WORDS (lane ui-needs-a-button pick 
   ok(!kOwn.includes('refusal.admin') && kPre.includes('refusal.admin') && !/admin/.test(OS.WORDS.refusal) && /company app/.test(OS.WORDS['refusal.admin'] || ''),
     'M3 (plugins-integrations-20): a company app\'s admin is named only beside a company preset — the refusal line itself assumes none', { kOwn, kPre });
   const SC = src('src/lib/signin-card.js');
-  ok(!/Ask your administrator|Your company uses/.test(SC) && /data-door="claude-signup" href="https:\/\/claude\.ai\/"/.test(SC) && !/your company uses/i.test(src('src/lib/setup-flows.js')),
+  ok(!/Ask your administrator|Your company uses/.test(SC) && /data-door="claude-signup" href="https:\/\/claude\.ai\/"/.test(SC) && !/your company uses/i.test(src('src/lib/setup-flows.js')),   // stale-pins: kept — a «gone» check: the old words must stay out
     'agents-accounts-15 / first-run-6 (M3): no Claude preset kind exists ⇒ the sign-in words are personal; «No Claude account yet?» carries «Sign up at claude.ai»');
   const MP = ['cloud', 'drive', 'gmail', 'onedrive'].map((n) => src(`src/mount-providers/${n}.js`)).join('\n');
-  ok(!/below — no terminal needed/.test(MP) && (MP.match(/— no terminal needed/g) || []).length >= 4,
+  ok(!/below — no terminal needed/.test(MP) && (MP.match(/— no terminal needed/g) || []).length >= 4,   // stale-pins: kept — a «gone» check: the old words must stay out
     'storage-1: no access box points BELOW at its Connect button (drawn above it) — the button is named, no direction');
   const UI = TABLES.find((x) => x.scope === 'ui').T;
   const deferredRows = UI.NEEDS.filter((r) => r.door.deferred).map((r) => r.id);
