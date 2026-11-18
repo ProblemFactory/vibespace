@@ -154,7 +154,8 @@ function create(engineCtx) {
     const can = p.state === 'unknown' ? (!c ? { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' } : recallKind ? (caps.recallRowOf(c) ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel no longer declares a recall — only a person can check the platform' }) : reactionKind ? (reactionsRow(c).read === 'list' ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel does not list reactions — only a person can check the platform' }) : P.canReconcile(c)) : null;
     const also = alsoView(p);   // lane bl-msg B-9b9c
     return {
-      ...p, ...(also ? { also } : {}), ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
+      ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
+      ...(also ? { also } : {}),   // lane bl-msg B-9b9c: the other replies to this message, resolved now
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
       convKind: (p.key && store.index.live()[p.key] && store.index.live()[p.key].kind) || null,
       // lane lark-upload-preflight: an awaiting card whose files this account cannot carry WARNS on the chip and its
@@ -190,9 +191,7 @@ function create(engineCtx) {
   const scopeConvOf = (p) => (p && !p.compose && p.convId ? p.convId : null);
   function agentProposalView(ctx, p) {
     if (!p) return p;
-    let v = agentProposalViewRaw(ctx, p);
-    // lane bl-msg B-9b9c: an agent reads the other replies by id and state — whether one is its OWN, never another conversation's name
-    if (v && Array.isArray(v.also) && ctx && ctx.kind === 'agent') v = { ...v, also: v.also.map((a) => ({ id: a.id, state: a.state, mine: !!(a.by && a.by.kind === 'agent' && a.by.id === ctx.id) })) };
+    const v = agentProposalViewRaw(ctx, p);
     return ctx && ctx.kind === 'agent' ? agentIdsOf(v) : v;   // verify r3 F6: an AGENT's view carries its ids as line pieces (the user's window keeps them as they are)
   }
   /** the drafter's view (whole while it still sees, else the fate) — its two lines are test-channels-engine's control pins, kept verbatim */
@@ -205,6 +204,10 @@ function create(engineCtx) {
   function agentIdsOf(v) {
     if (!v || typeof v !== 'object') return v;
     const out = { ...v, convId: agentId(v.convId), threadKey: agentId(v.threadKey), replyTo: agentId(v.replyTo) };
+    // lane bl-msg B-9b9c: an agent reads the other replies to its message by id and state — whether one has its proposal's own drafter
+    // (`mine`) or the person (`byUser`), never another conversation's name; the raw ids list stays the engine's
+    delete out.alsoFor;
+    if (Array.isArray(v.also)) { const d = v.draftedBy || {}; out.also = v.also.map((a) => ({ id: a.id, state: a.state, mine: !!(a.by && a.by.kind === 'agent' && d.kind === 'agent' && a.by.id === d.id), byUser: !!(a.by && a.by.kind === 'user') })); }
     if (v.replyEnvelope && typeof v.replyEnvelope === 'object') out.replyEnvelope = agentEnvelope(v.replyEnvelope);   // B-a085: the recipients the agent's CLI prints
     if (v.receipt && typeof v.receipt === 'object') out.receipt = { ...v.receipt, vendorMessageId: agentId(v.receipt.vendorMessageId) };
     if (v.reaction && typeof v.reaction === 'object') out.reaction = { ...v.reaction, msg: agentId(v.reaction.msg), ...(v.reaction.quote && typeof v.reaction.quote === 'object' ? { quote: { ...v.reaction.quote, author: agentText(v.reaction.quote.author, { kind: 'line', max: 200 }) } } : {}) };
@@ -329,7 +332,7 @@ function create(engineCtx) {
    *  so at apply time it is either visible (skip) or the replace's check will
    *  read this write (refused before anything is made). */
   async function transition(id, to, by, patch = null, { unless = null } = {}) {
-    let verdict = { ok: false, why: 'no such proposal' };
+    let verdict = { ok: false, why: 'no such proposal' }, linkedOf = null;
     await store.outbox.update((ob) => {
       const p = ob.proposals[id];
       if (!p) return;
@@ -341,10 +344,12 @@ function create(engineCtx) {
       if (to === 'awaiting-approval') p.awaitingSince = t;
       if (!Array.isArray(p.history)) p.history = [];
       p.history.push({ state: to, at: t, by });
+      if (Array.isArray(p.alsoFor) && p.alsoFor.length) linkedOf = p.alsoFor.slice();   // lane bl-msg B-9b9c r2 (B4): its linked cards redraw on every move
       if (patch) patch(p, t);
       if (OF.UNSENT_ENDS.includes(to) && P.storedAttachments(p).length) p.attachmentsGoneAt = t;
     });
     // design 005 §2.B retention: an UNSENT end (rejected / withdrawn / expired) takes the proposal's files at once
+    if (verdict.ok && linkedOf) { try { notifyOutbox(linkedOf); } catch { } }
     if (verdict.ok && OF.UNSENT_ENDS.includes(to)) { try { OF.remove(store.dir, id); } catch (err) { log.warn(`[channels] ${id}: its attachments could not be removed now (${(err && err.message) || err}) — the sweep tries again`); } }
     return verdict;
   }
@@ -684,7 +689,10 @@ function create(engineCtx) {
       await store.outbox.update((ob) => {
         const id = store.outbox.nextId();
         // lane bl-msg B-9b9c: every other reply to THIS message still open or sent (read in the same update that writes this one)
-        const alsoIds = v.proposal.replyTo ? Object.values(ob.proposals || {}).filter((q) => q && q.id !== id && !q.kind && !q.compose && q.adapterId === adapterId && q.convId === convId && q.replyTo != null && String(q.replyTo) === String(v.proposal.replyTo) && ALSO_STATES.has(q.state)).map((q) => q.id).slice(-ALSO_MAX) : [];
+        // r2 (the read's B3): the message a reply answers = its replyTo, else its envelope's anchor (a mail reply with no --to anchors the newest)
+        const answers = (x) => (x && (x.replyTo || (x.replyEnvelope && x.replyEnvelope.anchorId))) || null;
+        const target = v.proposal.replyTo || (ra && ra.envelope && ra.envelope.anchorId) || null;
+        const alsoIds = target ? Object.values(ob.proposals || {}).filter((q) => q && q.id !== id && !q.kind && !q.compose && q.adapterId === adapterId && q.convId === convId && answers(q) != null && String(answers(q)) === String(target) && ALSO_STATES.has(q.state)).map((q) => q.id).slice(-ALSO_MAX) : [];
         created = ob.proposals[id] = {
           id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: OF.metaOf(att.files),

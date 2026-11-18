@@ -3712,6 +3712,7 @@ async function chatReadLegs(ENGmod, name) {
             ['src/lib/channel-touch-view.js', "app.openChannelOutbox({ inside: true, ...(v.filter ? { filter: v.filter } : {}), ...(v.show ? { show: v.show } : {}) })", 'inside', 'a row that names a proposal: the Channels chip\'s rows + the tool-card rows, the ONE door'],
             ['src/lib/chat-view.js', 'this.app.openChannelOutbox?.({ filter: this._outboxFilter() })', 'inside', 'the chat\'s «Outbox · N» chip'],
             ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ show: String(p.replacedBy) })', 'keeps', '«replaced»: keeps the view, drops the filter only when it hides the newer one'],
+            ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ show: String(a.id) })', 'keeps', 'lane bl-msg B-9b9c: «Show it» on another reply to the same message — keeps the view, like «replaced»'],
             ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ filter: f })', 'inside', 'a card\'s «Only drafts by <agent>»'],
             ['src/lib/channel-outbox.js', 'c.app.openChannelOutbox({ filter: { keys: sessionKeysOf(c.s), name: c.displayName || c.s.name || t(\'this conversation\') } })', 'inside', 'the session menu\'s «Outbox of this conversation»'],
             ['src/lib/channel-outbox.js', 'app.openChannelOutbox({ syncId })', 'keeps', 'a layout replay'],
@@ -4419,7 +4420,7 @@ console.log('§bl-msg B-9b9c two replies to ONE message — both cards name the 
   ok(g.msg !== g.other && g.p1 && g.p2 && g.p1.state === 'awaiting-approval' && g.p2.state === 'awaiting-approval', 'two agents each proposed a reply to the same message (both await approval)', JSON.stringify({ s1: g.p1 && g.p1.state, s2: g.p2 && g.p2.state }));
   ok(JSON.stringify(ids(g.v1)) === JSON.stringify([g.p2.id]) && JSON.stringify(ids(g.v2)) === JSON.stringify([g.p1.id]) && g.v2.also[0].by && g.v2.also[0].by.name === 'Worker' && g.v2.also[0].state === 'awaiting-approval',
     'THE CARDS: each view names the other (id, state, who drafted it) — linked both ways', JSON.stringify({ v1: g.v1.also, v2: g.v2.also }));
-  ok(Array.isArray(g.p2.also) && g.p2.also.length === 1 && g.p2.also[0].mine === false && !('by' in g.p2.also[0]) && !JSON.stringify(g.p2.also).includes('Worker'),
+  ok(Array.isArray(g.p2.also) && g.p2.also.length === 1 && g.p2.also[0].mine === false && g.p2.also[0].byUser === false && !('by' in g.p2.also[0]) && !('alsoFor' in g.p2) && !JSON.stringify(g.p2.also).includes('Worker'),
     'THE AGENT\'S ANSWER: the second drafter is told the other proposal by id and «not yours», never the other conversation\'s name', JSON.stringify(g.p2.also));
   ok(!ids(g.v3).length && !ids(g.v1).includes(g.p3.id), 'a reply to ANOTHER message is not linked');
   ok(!ids(g.v2after).length, '…and once the other is rejected, the card no longer names it (resolved now, never a frozen copy)', JSON.stringify(g.v2after.also || null));
