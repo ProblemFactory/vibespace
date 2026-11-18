@@ -50,7 +50,7 @@ export function planWords(plan) {
   const counts = autoResumeAllWords({ total: plan.counts ? plan.counts.total : 0, on: plan.counts ? plan.counts.on : 0 }, t);
   const n = plan.eligible ? plan.eligible.length : 0;
   const cw = n ? costWords(plan.estimate, t) : null;
-  return { ...counts, n, resumeButton: resumeButtonWords(n, t), passive: cw ? cw.passive : null };
+  return { ...counts, n, resumeButton: resumeButtonWords(n, t, { waiting: (plan.skipped || []).length }), passive: cw ? cw.passive : null };
 }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
@@ -125,7 +125,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   };
   if (!n && !p.running) {   // (a batch RUNNING with nothing left to plan still gets its Stop door and its progress — below)
     // NOTHING GREYED WITH A HINT: an empty set SAYS so (and why the ones it has are not resumable now)
-    body.appendChild(el('p', 'resume-stopped-empty', resumeButtonWords(0, t)));
+    body.appendChild(el('p', 'resume-stopped-empty', resumeButtonWords(0, t, { waiting: (p.skipped || []).length })));
     const sk = skippedList(p.skipped); if (sk) body.appendChild(sk);
     footer.appendChild(cancel);
     return null;

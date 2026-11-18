@@ -4989,6 +4989,7 @@ export default {
   "Turn auto-continue off for every session": "すべてのセッションで自動続行をオフ",
   "Resume every session a usage limit or overload stopped ({n})": "使用上限・過負荷で止まったセッションをすべて再開 ({n})",
   "No sessions stopped by a limit": "上限で止まったセッションはありません",
+  "None of the {m} stopped sessions can be resumed now": "止まっている {m} 件のセッションは、どれも今は再開できません",
   "still inside a limit": "まだ上限内",
   "already running": "実行中",
   "its process has ended": "プロセスは終了済み",

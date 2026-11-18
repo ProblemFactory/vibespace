@@ -142,6 +142,7 @@ const tZh = (s, p) => fill(zh[s] !== undefined ? zh[s] : s, p);
   ok('zh counts: «将开启 37 个会话；已开启 3 个»', SB.autoResumeAllWords({ total: 40, on: 3 }, tZh).line === '将开启 37 个会话；已开启 3 个', SB.autoResumeAllWords({ total: 40, on: 3 }, tZh));
   ok('zh buttons: «对所有会话开启自动继续» + «全部关闭»', SB.autoResumeAllWords({}, tZh).onButton === '对所有会话开启自动继续' && SB.autoResumeAllWords({}, tZh).offButton === '全部关闭');
   ok('zh resume button: «恢复所有因用量上限/过载停止的会话 (12)»; an EMPTY set SAYS so: «没有因用量上限停止的会话»', SB.resumeButtonWords(12, tZh) === '恢复所有因用量上限/过载停止的会话 (12)' && SB.resumeButtonWords(0, tZh) === '没有因用量上限停止的会话');
+  ok('stopped sessions that cannot be resumed NOW are never «none stopped»: «3 个停下的会话现在都不能恢复»', SB.resumeButtonWords(0, tZh, { waiting: 3 }) === '3 个停下的会话现在都不能恢复' && SB.resumeButtonWords(0, tZh) === '没有因用量上限停止的会话' && /waiting: \(p\.skipped \|\| \[\]\)\.length/.test(read('src/lib/bulk-resume.js')));
   const skipped = Array.from({ length: 8 }, (_, i) => ({ id: 's' + i, why: 'walled', until: reset }));
   ok('zh outcome: «恢复了 29 个 · 跳过 8 个（仍在用量上限内）· 拒绝 0»', SB.summaryWords({ resumed: 29, skipped, refused: 0 }, tZh) === '恢复了 29 个 · 跳过 8 个（仍在用量上限内）· 拒绝 0', SB.summaryWords({ resumed: 29, skipped, refused: 0 }, tZh));
   ok('mixed skips say how many of them are walls; an undelivered continue is counted aloud', /跳过 9 个（其中 8 个仍在用量上限内）/.test(SB.summaryWords({ resumed: 1, skipped: [...skipped, { why: 'running' }], refused: 0, failed: 2 }, tZh)) && /未能送达 2/.test(SB.summaryWords({ resumed: 1, skipped, failed: 2 }, tZh)));
