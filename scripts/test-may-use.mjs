@@ -421,11 +421,18 @@ console.log('— ⑯ B-48a4: the exit lister answers as the door does — the sa
 }
 console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority row AND the «What it may use» section, each once');
 {
-  const sp = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
-  const once = (s) => sp.split(s).length === 2;
-  ok(once("import { cpuPriorityWords } from './cpu-priority-words.js';") && once("import { mountMayUse } from './may-use-section.js';") && once("if (cpuWords) row(idSec, t('CPU priority'), escHtml(cpuWords));")
-    && once('if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(') && once("muSec.classList.add('session-props-may-use');") && sp.indexOf("row(idSec, t('CPU priority')") < sp.indexOf("muSec.classList.add('session-props-may-use')"),
-    '⑰ both units stand in Session Properties: the CPU priority row in the identity section (B-460d), the may-use section of its own after it, mounted once per window');
+  const SP = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  const CPU_ROW = "if (cpuWords) row(idSec, t('CPU priority'), escHtml(cpuWords));", MOUNT = 'if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(';
+  const both = (sp) => { const once = (x) => sp.split(x).length === 2;
+    return once("import { cpuPriorityWords } from './cpu-priority-words.js';") && once("import { mountMayUse } from './may-use-section.js';") && once(CPU_ROW)
+      && once(MOUNT) && once("muSec.classList.add('session-props-may-use');") && sp.indexOf("row(idSec, t('CPU priority')") < sp.indexOf("muSec.classList.add('session-props-may-use')"); };
+  ok(both(SP), '⑰ both units stand in Session Properties: the CPU priority row in the identity section (B-460d), the may-use section of its own after it, mounted once per window');
+  // RED CONTROLS (主开发 21:35Z: the presence pin had none) — each proves its plant first: the line stands once, the copy lacks it
+  const drop = (x) => (SP.split(x).length === 2 ? SP.replace(x, '') : null);
+  const noMount = drop(MOUNT), noCpu = drop(CPU_ROW);
+  ok(!!noMount && !noMount.includes(MOUNT) && !!noCpu && !noCpu.includes(CPU_ROW), '⑰ CONTROL plants: the section\'s once-per-window mount and B-460d\'s CPU row each stand once in session-props.js, and each copy lacks its line');
+  ok(!!noMount && both(noMount) === false, '⑰ RED CONTROL: a Properties without the «What it may use» mount is caught');
+  ok(!!noCpu && both(noCpu) === false, '⑰ RED CONTROL: a Properties that lost B-460d\'s CPU priority row is caught');
 }
 
 // B-e630 (主开发's ruling 2026-11-18): ONE HOME + THE CONNECT FORM'S FOLD, from the GRANT facts only. A profile whose grant row does
