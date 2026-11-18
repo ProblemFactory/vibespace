@@ -33,7 +33,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const wt = scratch('dr-wt'), stubDir = scratch('dr-stub'), fakeHome = scratch('dr-home'), CWD = scratch('dr-cwd');
 for (const d of [stubDir, fakeHome, CWD]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('check(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SECOND = 'deliveries resume leg second password';
 

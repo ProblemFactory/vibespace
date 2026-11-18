@@ -26,7 +26,7 @@ const CAT = require(path.join(REPO, 'src/server/cli-model-catalog.js'));
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
 const COL = require(path.join(REPO, 'src/server/conversation-facts.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-level-'));
 const BASE = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-model-catalog-2.1.321.json'), 'utf8'));
 // the declaration's SHAPE as the record union states it (a short stand-in written here — the helpers' names are the bundle's own)

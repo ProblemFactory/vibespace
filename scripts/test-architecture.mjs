@@ -2981,7 +2981,14 @@ await section(async () => {
     return n;
   };
   const bootsIn = Object.fromEntries(bootFiles.map((f) => [f, bootsOf(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))]).filter(([, n]) => n));
-  const nBoots = Object.values(bootsIn).reduce((a, n) => a + n, 0);
+  // CARRIED BY NAME (主开发 2026-11-18 09:00Z, the manager stack restacked onto the train): two heavy suites written before the
+  // helper — a restack changes no test; each re-pointed by backlog row B-cdb2, and a re-pointed one leaves this list (the leg below)
+  const BOOTS_NAMED = Object.freeze({
+    'test-deliveries-resume-hub.mjs': 'B-cdb2 — it restarts the hub in the middle of the suite (endHub hubOnly + a second startHub over the same root and data)',
+    'test-resume-pages-follow-chrome.mjs': 'B-cdb2 — its conversations\' folder must lie OUTSIDE the scratch root: session discovery skips scratch folders',
+  });
+  const nBoots = Object.entries(bootsIn).filter(([f]) => !BOOTS_NAMED[f]).reduce((a, [, n]) => a + n, 0);
+  ok(Object.keys(BOOTS_NAMED).every((f) => bootsIn[f] === 1), `§57c a suite carried by name still boots once outside the helper — a re-pointed one leaves BOOTS_NAMED in the same commit (${Object.keys(BOOTS_NAMED).map((f) => `${f}: ${bootsIn[f] || 0}`).join(', ')})`);
   console.log(`    §57c hub boots outside the helper: ${nBoots} sites in ${Object.keys(bootsIn).length} files (${Object.keys(bootsIn).filter((f) => !/^test-/.test(f)).join(', ')} among them)`);
   ok(nBoots <= BOOTS_OUTSIDE_HELPER, `§57c no NEW hub boot outside scripts/hub-boot.mjs (${nBoots} sites, the ratchet ${BOOTS_OUTSIDE_HELPER})${nBoots > BOOTS_OUTSIDE_HELPER ? ' — boot the hub through hub-boot.mjs startHub' : ''}`);
   ok(nBoots >= BOOTS_OUTSIDE_HELPER, `§57c the ratchet only falls and is lowered with the fall (${nBoots} sites, the ratchet ${BOOTS_OUTSIDE_HELPER})${nBoots < BOOTS_OUTSIDE_HELPER ? ` — lower BOOTS_OUTSIDE_HELPER to ${nBoots} in the same commit` : ''}`);

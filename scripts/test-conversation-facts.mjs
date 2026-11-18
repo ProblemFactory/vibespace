@@ -19,7 +19,7 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
 let pass = 0, fail = 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 
 /** A row with every verdict fact known and nothing busy. */
 const IDLE = Object.freeze({ state: 'running', turn: 'idle', background: [], heldPrompts: 0, asks: 0, goal: 'none', continue: { armed: false },

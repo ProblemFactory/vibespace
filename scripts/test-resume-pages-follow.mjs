@@ -21,7 +21,7 @@ import path from 'node:path';
 import { REPO, J, tick, S, CID, DOC, hub, loadHandler, pageOn, loadLifecycle, files, chat } from './layout-dup-world.mjs';
 
 let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + J(extra).slice(0, 1500) : '')); } return !!c; };
+const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (extra !== undefined ? '\n    ' + J(extra).slice(0, 1500) : '')); } return !!c; };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const NEW = 'sess-77-52000';   // the session the resume made (its conversation is CID — the ended window's)
 const OTHER = { id: 'sess-1-1', backend: 'claude', backendSessionId: 'c0de0000-0000-4000-8000-000000000001', name: 'other', cwd: '/srv/o', mode: 'chat' };

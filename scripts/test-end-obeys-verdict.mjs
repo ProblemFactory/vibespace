@@ -28,7 +28,7 @@ const ROOT = scratch('end-obeys-verdict');
 fs.mkdirSync(ROOT, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 
 const CID = 'e2e00000-0000-4000-8000-0000000000a1', CALLER = 'e2e00000-0000-4000-8000-0000000000ee';
 const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: true } };
