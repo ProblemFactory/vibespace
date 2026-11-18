@@ -57,7 +57,7 @@ import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane pa
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: the read-only window says why its session stopped
 import { fineScrollEntry, pushFine, FINE_SCROLL_MS } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the FINE scroll trace after a run toggle / the ↓ (PURE)
-import { NeedsCards } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
+import { NeedsCards, hiddenRecord } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -7730,10 +7730,6 @@ class ChatView {
       // directive; same-kind-only grouping never reached its threshold in
       // real turns). Which kinds participate is configurable since 2.213.0
       // (chat.collapseKinds: thinking/bash/read/write).
-      const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
-      const hooksHidden = document.body.classList.contains('hide-hook-cards');
-      const stopNoticeHidden = document.body.classList.contains('hide-stop-hook-notice');
-      const notesHidden = document.body.classList.contains('hide-assistant-notes'); // lane S3: chat.showAssistantNotes off
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
       const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['note', 'thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search', 'image']);
       // per-member classification (also used by flush() for the summary) —
@@ -7743,10 +7739,9 @@ class ChatView {
       const kindOf = (el) => {
         if (!el.classList?.contains('chat-msg') || el.classList.contains('chat-gap-msg')) return null;
         // display:none'd cards are invisible glue — 'skip' (never break a run)
-        if (hideEmptyThink && el.classList.contains('chat-empty-thinking')) return 'skip';
-        if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';
-        if (stopNoticeHidden && el.classList.contains('chat-stop-hook-notice')) return 'skip';
-        if (notesHidden && el.classList.contains('chat-vs-note')) return 'skip';
+        // B-2adb's follow-up: ONE list of the records a CSS rule hides whole (a chat setting's body class, or always — a superseded
+        // record) — the needs cards' (chat-needs-card.js HIDDEN_RECORDS), never a twin kept here
+        if (hiddenRecord(el)) return 'skip';
         const m = el._rawMsg;
         if (!m) return null;
         // A card waiting for the user's Allow/Deny (or an AskUserQuestion

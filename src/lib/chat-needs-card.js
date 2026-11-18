@@ -77,6 +77,11 @@ const SHORT_VIEW_PX = 450;
 const HIDDEN_RECORDS = Object.freeze([['hide-hook-cards', 'chat-msg-hook'], ['hide-assistant-notes', 'chat-vs-note'], ['hide-stop-hook-notice', 'chat-stop-hook-notice'], ['hide-empty-thinking', 'chat-empty-thinking'], ['', 'chat-msg-superseded']]);
 const hiddenRecord = (el) => !!el && HIDDEN_RECORDS.some(([b, c]) => !!el.classList?.contains(c) && (!b || !!document.body?.classList?.contains(b)));
 const hiddenSig = () => HIDDEN_RECORDS.map(([b]) => (b && document.body?.classList?.contains(b) ? 1 : 0)).join('');
+/** the follow-up (主开发's verdict on 94f94988a): a mutation record — did a RECORD of the list (its direct child) gain or lose one of
+ *  the hiding classes (an empty thought that got its words, a record marked superseded)? */
+const hiddenFlipped = (r, list) => !!r && r.type === 'attributes' && r.target?.parentNode === list && HIDDEN_RECORDS.some(([, c]) => String(r.oldValue || '').split(/\s+/).includes(c) !== !!r.target.classList?.contains(c));
+/** ONE list (the follow-up ②): the run fold's own «hidden — invisible glue» test (chat-view _updateRuns kindOf) reads this one */
+export { hiddenRecord };
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -166,6 +171,11 @@ export class NeedsCards {
     this._hidSig = hiddenSig();
     this._bodyMO = new MutationObserver(() => { const s = hiddenSig(); if (s !== this._hidSig) { this._hidSig = s; go(); } });
     if (document.body) this._bodyMO.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    // the follow-up ①: a record's OWN hiding class flipped (chat-view: an empty thought gets its words, a rewind marks a record
+    // superseded) — nothing in the list's children nor the body changed, so this asks the pass (the records alone: a class change
+    // deep inside a card, or a run's own fold classes, asks nothing)
+    this._hidMO = new MutationObserver((recs) => { if (recs.some((r) => hiddenFlipped(r, this.view._messageList))) go(); });
+    this._hidMO.observe(this.view._messageList, { attributes: true, attributeFilter: ['class'], attributeOldValue: true, subtree: true });
     this.schedule();
   }
 
@@ -174,6 +184,7 @@ export class NeedsCards {
     try { this._ctl?.abort(); } catch { }
     try { this._mo?.disconnect(); } catch { }
     try { this._bodyMO?.disconnect(); } catch { }
+    try { this._hidMO?.disconnect(); } catch { }
     try { this._dockRO?.disconnect(); } catch { }
     try { this._shortRO?.disconnect(); } catch { }
     // the OPENED strip's own observers (its place's ResizeObserver, its column's MutationObserver) end with the view too — a window

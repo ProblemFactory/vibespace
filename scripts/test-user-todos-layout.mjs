@@ -2959,6 +2959,29 @@ console.log('㊴ A RECORD A CSS RULE HIDES WHOLE IS NO DRAWN RECORD (B-2adb — 
   const watch = { mo: /this\._bodyMO = new MutationObserver\(\(\) => \{ const s = hiddenSig\(\); if \(s !== this\._hidSig\) \{ this\._hidSig = s; go\(\); \} \}\);/.test(CARD),
     obs: CARD.includes("this._bodyMO.observe(document.body, { attributes: true, attributeFilter: ['class'] });"), stop: CARD.includes('try { this._bodyMO?.disconnect(); } catch { }') };
   ok(Object.values(watch).every(Boolean), `a chat setting flipped (the body's class) asks the cards a pass — only when a hiding class changed — and the watch goes at stop (${J(watch)})`, watch);
+  // D — the follow-up ① (主开发's verdict on 94f94988a): A RECORD'S OWN HIDING CLASS FLIPPED ASKS A PASS — the REAL hiddenFlipped (sliced
+  // with its list) over mutation records: an empty thought that got its words, a record marked superseded ⇒ yes; a run's own fold
+  // class, a class deep inside a card, a childList record ⇒ no
+  const flipSrc = (() => { const a = CARD.indexOf('const HIDDEN_RECORDS = '), b = CARD.indexOf('\n', CARD.indexOf('const hiddenFlipped = ')); return a >= 0 && b > a ? CARD.slice(a, b) : null; })();
+  const flipsOf = (src) => { if (!src) return null; let fn; try { fn = new Function('document', `${src}\nreturn hiddenFlipped;`)({ body: { classList: { contains: () => false } } }); } catch (e) { return String(e); }
+    const L = {}, rec = (old, now, parent = L, type = 'attributes') => ({ type, oldValue: old, target: { parentNode: parent, classList: { contains: (c) => now.includes(c) } } });
+    return { words: fn(rec('chat-msg chat-empty-thinking', ['chat-msg']), L), superseded: fn(rec('chat-msg', ['chat-msg', 'chat-msg-superseded']), L), fold: fn(rec('chat-msg', ['chat-msg', 'chat-run-collapsed']), L),
+      inner: fn(rec('x chat-empty-thinking', ['x'], {}), L), child: fn(rec(null, [], L, 'childList'), L) }; };
+  const fl = flipsOf(flipSrc);
+  ok(!!fl && J(fl) === '{"words":true,"superseded":true,"fold":false,"inner":false,"child":false}', `RED-able (94f94988a: only a body class asked a pass): a record's own hiding class flipped asks the cards a pass — an empty thought that got its words, a record marked superseded (${J(fl && [fl.words, fl.superseded])}); a run's fold class, a class inside a card, a childList record do not (${J(fl && [fl.fold, fl.inner, fl.child])})`, fl);
+  const flx = flipsOf(flipSrc && flipSrc.replace(/const hiddenFlipped = \(r, list\) => [^\n]*/, 'const hiddenFlipped = () => false;'));
+  ok(!!flx && flx.words === false, `CONTROL (the follow-up ①): the mutant that never sees a record's own class flip asks no pass for an empty thought that got its words — the leg goes red`);
+  const hid = { mo: CARD.includes('this._hidMO = new MutationObserver((recs) => { if (recs.some((r) => hiddenFlipped(r, this.view._messageList))) go(); });'),
+    obs: CARD.includes("this._hidMO.observe(this.view._messageList, { attributes: true, attributeFilter: ['class'], attributeOldValue: true, subtree: true });"), stop: CARD.includes('try { this._hidMO?.disconnect(); } catch { }') };
+  ok(Object.values(hid).every(Boolean), `the records' own classes are watched on the list (class only, the old value kept, the records alone judged) and the watch goes at stop (${J(hid)})`, hid);
+  // E — the follow-up ②: ONE LIST of what is hidden — the run fold (chat-view _updateRuns kindOf) reads the cards' hiddenRecord and
+  // keeps no twin of its own (they agreed by luck: the fold's twin had no superseded record)
+  const CVS = fs.readFileSync(path.join(ROOT, 'src/lib/chat-view.js'), 'utf8');
+  const oneOf = (cv) => ({ import: cv.includes("import { NeedsCards, hiddenRecord } from './chat-needs-card.js';"), reads: cv.includes("        if (hiddenRecord(el)) return 'skip';"), twins: (cv.match(/el\.classList\.contains\('(chat-empty-thinking|chat-msg-hook|chat-stop-hook-notice|chat-vs-note)'\)\) return 'skip';/g) || []).length, exported: /^export \{ hiddenRecord \};$/m.test(CARD) });
+  const one = oneOf(CVS);
+  ok(one.import && one.reads && one.twins === 0 && one.exported, `RED-able (94f94988a: four twin lines in kindOf): the run fold reads the ONE list of hidden records (${J(one)})`, one);
+  const oneBase = oneOf(CVS.replace("        if (hiddenRecord(el)) return 'skip';", "        if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';"));
+  ok(oneBase.twins === 1 && !oneBase.reads, `CONTROL (the follow-up ②): a twin line put back in kindOf reds the census (${J(oneBase)})`);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
