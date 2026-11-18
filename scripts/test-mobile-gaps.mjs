@@ -78,7 +78,7 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 // parallel run's is never touched (an unstamped dir from before this fix: its pid, by name, must be gone too).
 const SHOTS = scratchDir('mobile-gaps-shots');
 function sweepDeadShots() {
-  const root = path.dirname(SHOTS), stem = path.basename(SHOTS).replace(/-\d+$/, '-');
+  const root = path.dirname(SHOTS), stem = path.basename(SHOTS).replace(/-\d+(?:-[A-Za-z0-9]{6})?$/, '-');   // B-d8e3: beside a leftover the run's own name carries a fresh suffix
   const gone = [];
   for (const n of fs.readdirSync(root)) {
     const m = n.startsWith(stem) ? /^(\d+)$/.exec(n.slice(stem.length)) : null;
@@ -92,7 +92,7 @@ function sweepDeadShots() {
 }
 {
   // the leg: one dead run's stamped dir, one unstamped dir of a gone pid, one LIVE run's (this process's parent) — the control
-  const root = path.dirname(SHOTS), stem = path.basename(SHOTS).replace(/-\d+$/, '-');
+  const root = path.dirname(SHOTS), stem = path.basename(SHOTS).replace(/-\d+(?:-[A-Za-z0-9]{6})?$/, '-');   // B-d8e3: beside a leftover the run's own name carries a fresh suffix
   const deadPid = Number(fs.readFileSync('/proc/sys/kernel/pid_max', 'utf-8')) + 10 + (process.pid % 1000);   // above pid_max — never a live process
   const dead = path.join(root, stem + deadPid), legacy = path.join(root, stem + (deadPid + 1)), live = path.join(root, stem + process.ppid);
   for (const d of [dead, legacy]) fs.mkdirSync(d, { recursive: true });

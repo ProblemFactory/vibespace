@@ -45,14 +45,32 @@ export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later'
 export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(' ')} } catch {}`;
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
+// B-d8e3: name → the path this PROCESS decided for it (below) — one map for every copy of this module in the process (a mutant)
+const MINTED = (globalThis[Symbol.for('vibespace.scratch.minted')] ??= new Map());
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
   // which the scratch reaper (scripts/ci.mjs PRODUCT_ROOT_RE) never judges — a suite minting it would hide from the sweep
   if (name === 'ab') throw new Error('scratch(): "ab" would mint /tmp/vs-ab-<pid> — the product\'s own socket-dir shape; pick another name');
-  const p = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
+  if (MINTED.has(name)) return MINTED.get(name);
+  let p = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
+  if (fs.existsSync(p)) p = leftoverAside(p);
+  MINTED.set(name, p);
   if (IS_SUITE) endScratchAtExit(p);
   return p;
+}
+/** B-d8e3 (lane bl-scratch, 2026-11-17): A FOLDER THIS PROCESS DID NOT MAKE IS NOT ITS FOLDER. The name carries the pid, and a
+ *  pid comes back: a leftover of an earlier run (killed by a gate's timeout, so no exit hook ran) under the same name broke
+ *  the next suite that drew that pid — test-vault-run's first write into a read-only stand-in the old run had left
+ *  (EACCES). So a name is decided once per process (`MINTED`: the same name answers the same path), and when the pid-keyed
+ *  path already exists at that first ask, the run takes a FRESH name beside it (`<name>-<pid>-<6 chars>`, unique by mkdtemp,
+ *  then removed so the caller still gets a path that does not exist) and says so on stderr. The leftover is never touched
+ *  here: the gate's directory sweep (scripts/scratch-sweep.mjs) judges it by its holders and its age. */
+function leftoverAside(p) {
+  const fresh = fs.mkdtempSync(`${p}-`);
+  fs.rmdirSync(fresh);
+  process.stderr.write(`scratch(): ${p} already exists and this process did not make it (an earlier run's leftover under a recycled pid) — left for the gate's sweep; this run uses ${fresh}\n`);
+  return fresh;
 }
 
 /** B-60d2 (2026-10-07): A SUITE ENDS WHAT IT MADE. /tmp is tmpfs (RAM + swap) and held 30 of 62 GB: 13 986 `vs-*`
@@ -103,7 +121,9 @@ function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true
  *  how the policy is proven complete before a later lane enforces it. A suite that posts reports ON PURPOSE
  *  (test-csp-report) hands its sink an explicit file of its own. */
 export const CSP_REPORTS_ENV = 'VIBESPACE_CSP_REPORTS_FILE';
-export const CSP_REPORTS_FILE = IS_SUITE ? path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}csp-reports-${process.pid}`, 'csp-reports.jsonl') : null;
+// B-d8e3: the same pid-keyed name, so the same rule — a folder this process did not make (a killed run's, its report lines in it)
+// is left to the sweep and this run takes a fresh one beside it (never another run's reports, never its folder removed here)
+export const CSP_REPORTS_FILE = IS_SUITE ? path.join((() => { const d = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}csp-reports-${process.pid}`); return fs.existsSync(d) ? leftoverAside(d) : d; })(), 'csp-reports.jsonl') : null;
 /** THE ONE EXCEPTION LIST (主开发's ruling, 2026-10-20): a report a suite may end with, pinned by suite + directive + what
  *  was blocked + where. Every other report in any suite FAILS it. Never 'unsafe-inline' on the app page instead.
  *  EMPTY since lane design-frame-host (B-8679): its two rows — test-design-window's artboard / print / print-all srcdoc

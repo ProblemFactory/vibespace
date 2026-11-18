@@ -158,7 +158,7 @@ const taught = (t) => /vibespace-channels/.test(t) && /vibespace-docs channels|\
 // two groups created and rendered moments apart (R and R0). The 2.369.336 mirror rendered them across 13:10:00Z: one minute word
 // apart, red. So every leg renders at ONE injected clock (Date.now pinned, restored after) and the equality stays byte-exact;
 // `at(leg, t0)` moves a leg's clock (the minute-edge control in ④). `scrub` folds paths and per-session names only, never a clock word.
-const scrub = (t) => t.replace(/vs-chan-teach-\d+\/routes-[^/\s`]+/g, '<dir>').replace(/\bw\d+\b/g, 'w').replace(/sess\d+/g, 'sess');
+const scrub = (t) => t.replace(/vs-chan-teach-\d+(?:-[A-Za-z0-9]{6})?\/routes-[^/\s`]+/g, '<dir>').replace(/\bw\d+\b/g, 'w').replace(/sess\d+/g, 'sess');
 const sameNoEngine = (out) => scrub(out.noEngine.start) === scrub(out.none.start) && out.noEngine.p1 === out.none.p1;
 const legsOf = async ({ at = null, ...mods } = {}, tag = 'real') => {
   const realNow = Date.now, t0 = realNow();

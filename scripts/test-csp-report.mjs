@@ -767,7 +767,7 @@ console.log('⑥ the chrome suites\' teardown — a report at the end of a suite
       + (plant ? `const fs = await import('node:fs'); const path = await import('node:path'); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.appendFileSync(file, JSON.stringify({ directive: 'img-src', blocked: 'https://planted.example' }) + '\\n');\n` : '')
       + `console.log('FILE ' + file); console.log('ALL PASS (1)'); process.exit(0);\n`);
     const r = spawnSync(process.execPath, [f], { encoding: 'utf8', env: { ...process.env, VIBESPACE_CSP_REPORTS_FILE: '' } });
-    const file = (/^FILE (\/tmp\/vs-csp-reports-\d+\/csp-reports\.jsonl)$/m.exec(r.stdout) || [])[1];
+    const file = (/^FILE (\/tmp\/vs-csp-reports-\d+(?:-[A-Za-z0-9]{6})?\/csp-reports\.jsonl)$/m.exec(r.stdout) || [])[1];   // B-d8e3: beside a leftover, a fresh suffix
     if (file) fs.rmSync(path.dirname(file), { recursive: true, force: true }); // the mutant child's hook never removes it
     return { rc: r.status, out: r.stdout + r.stderr };
   };

@@ -480,6 +480,24 @@ console.log('\n§9d the directory sweep (B-60d2)');
   ok(readAll(ordNat, 0), `B-0d6d: …and when the event loop runs out (no process.exit): ${JSON.stringify(ordNat)}`);
   ok(readAll(ordHook, ordHook.code), `B-0d6d: …and past an exit hook that throws (the listeners after it never run — the emit's finally removes the roots; the exit code is Node's own): ${JSON.stringify(ordHook)}`);
   ok(ordNoFin.o?.seen.join() === 'same-turn:true,later:true' && ordNoFin.o.roots.every((d) => fs.existsSync(d)), `CONTROL B-0d6d: without the emit's finally a throwing hook leaves the roots on disk (red): ${JSON.stringify(ordNoFin)}`);
+  // B-d8e3: A FOLDER THIS PROCESS DID NOT MAKE IS NOT ITS FOLDER — a leftover at the pid-keyed name (an earlier run under a
+  // recycled pid) is left alone and the run takes a fresh name beside it, the same for every ask; RED control: the old
+  // scratch() hands the leftover over
+  const ASIDE = 'if (fs.existsSync(p)) p = leftoverAside(p);';
+  ok(SCRSRC.includes(ASIDE), 'CONTROL B-d8e3: the patched line is in scratch.mjs');
+  const reuseBody = (url) => `import fs from 'node:fs';\nimport path from 'node:path';\nimport { createRequire } from 'node:module';\nimport { scratch } from ${JSON.stringify(url)};\nconst { FIXTURE_CWD_PREFIX, TMP_ROOTS } = createRequire(${JSON.stringify(path.join(REPO, 'scripts', 'x.mjs'))})('../src/fixture-guard.js');\nconst left = path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'cigate9d-reuse-' + process.pid);\nfs.mkdirSync(left); fs.writeFileSync(path.join(left, 'an-old-run'), '');\nconst p = scratch('cigate9d-reuse'), q = scratch('cigate9d-reuse');\nconsole.log(JSON.stringify({ left, p, q, leftKept: fs.existsSync(path.join(left, 'an-old-run')), pFree: !fs.existsSync(p) }));\n`;
+  const runReuse = (file, url) => new Promise((res) => {
+    const f = path.join(MUT, file); fs.writeFileSync(f, reuseBody(url));
+    const c = spawn(process.execPath, [f], { stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = '';
+    const t = setTimeout(() => c.kill('SIGKILL'), 20000);
+    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (code) => { clearTimeout(t); let o = null; try { o = JSON.parse(out.trim().split('\n').pop()); } catch { } if (o) for (const d of [o.left, o.p]) tmpDirs.push(d); res({ code, o, err: err.trim().slice(0, 300) }); });
+  });
+  const oldReuseUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC.replace(ASIDE, ''), 'old-reuse')).href;
+  const [reuse, reuseOld] = await Promise.all([runReuse('test-fx9d-reuse.mjs', scratchUrl), runReuse('test-fx9d-reuse-old.mjs', oldReuseUrl)]);
+  ok(reuse.code === 0 && !!reuse.o && reuse.o.p !== reuse.o.left && reuse.o.p.startsWith(reuse.o.left + '-') && reuse.o.p === reuse.o.q && reuse.o.leftKept && reuse.o.pFree && /already exists and this process did not make it/.test(reuse.err),
+    `B-d8e3: a leftover at the pid-keyed name is left alone and said; the run takes a fresh name that does not exist, the same for every ask: ${JSON.stringify(reuse)}`);
+  ok(!!reuseOld.o && reuseOld.o.p === reuseOld.o.left, `CONTROL B-d8e3: the old scratch() hands the leftover over as the run's own folder (red): ${JSON.stringify(reuseOld.o)}`);
   ok(ordOld.o?.seen.join() === 'same-turn:false,later:false' && ordOld.o.roots.every((d) => !fs.existsSync(d)), `CONTROL B-0d6d: the closer armed alone (the old order) runs first — the hooks read removed roots (red): ${JSON.stringify(ordOld)}`);
   // THE EVIDENCE: a live process's cwd and XDG_RUNTIME_DIR are held paths (real /proc); a private session bus under a
   // record-less root is a suite's executable; a verify workspace's lane dir is its own root (item 4: dpi-measure)
