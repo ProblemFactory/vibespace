@@ -401,6 +401,7 @@ function writeJsonAtomic(file, obj) {
  *        look (nothing held, said or granted) at the press's authorization: the plan leaves a refused account's conversations
  *        stopped, by name, BEFORE the press (主开发 2026-11-18 16:20Z — form two).
  * @param deps.notePress (batchId, n, reason) => void — THE RECORD OF A PRESS: one row in the attended tally (the cure).
+ * @param deps.notePressEnd (batchId, delivered) => void — …and its end: how many it delivered (主开发 21:04Z).
  * @param deps.workflowRunAtWall (id, session, {fireAt}) => Promise<{runId, unfinished}|null> — B-3437: the Workflow run this
  *        conversation's usage wall cut short (src/server/auto-resume-workflow.js: off the main loop, bounded), asked every two
  *        minutes while the wall's arm stands; the continue names only a fresh answer.
@@ -419,7 +420,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, previewSpendBatch = null, notePress = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -871,6 +872,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const settled = new Set([...rec.resumed.map((r) => r.id)]);
         for (const [sid, h] of holdOf) if (!settled.has(sid) && releaseSpend) { try { releaseSpend(sid, null, h.hold); } catch { } }
         rec.done = true; batchRunning = null; stopWakers.delete(batchId);
+        if (v.attended && notePressEnd) { try { notePressEnd(batchId, rec.resumed.length); } catch (err) { log('[auto-resume] recording the press\'s end failed: ' + err.message); } }   // (b): how many it delivered
         log(`[auto-resume] bulk resume ${batchId} done: resumed ${rec.resumed.length} · skipped ${rec.skipped.length} · not delivered ${rec.failed.length}${rec.stopped.length ? ` · stopped ${rec.stopped.length}` : ''}`);
         if (onListChange) { try { onListChange(); } catch { } }
       });

@@ -12,7 +12,7 @@
 // Both are reached from Settings → Spending (the auto-resume row) and the session list's ⋯ menu.
 import { t } from './i18n.js';
 import { api, fetchJson, createModalShell, showToast, toastWordsInto } from './utils.js';   // toastWordsInto: a sentence's settings link drawn as its door
-import { autoResumeAllWords, resumeButtonWords, waitingCount, skipGroups, summaryWords, refusedWords, memberWords } from '../stopped-by.js';
+import { autoResumeAllWords, resumeButtonWords, waitingCount, skipGroups, summaryWords, refusedWords, memberWords, pressWords } from '../stopped-by.js';
 import { costWords } from '../bulk-resume-cost.js';
 import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
 import { spendRowLink } from '../spend-authorizer.js';   // PURE: the row a refusal names, as its link (test-setting-links: a sentence naming a ROW carries its link)
@@ -74,7 +74,11 @@ function answerWords(r) {
 function capDoorWords(why) {
   const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day')
     : why === 'overage-in-use' ? t('\u26a0 Allow unattended turns while an account bills paid overage') : null;   // form two: the door where the person changes it
-  return setting ? ' ' + t('Change it in Settings → Spending → «{setting}»: {link}', { setting, link: spendRowLink({ why }) }) : '';   // the ROW it names carries its link (lane setting-doors' census)
+  if (setting) return ' ' + t('Change it in Settings → Spending → «{setting}».', { setting });
+  // (e) the two other account refusals have their door too (主开发 21:04Z): sign it in again; its spend control is the vendor's
+  if (why === 'identity-cannot-serve') return ' ' + t('Sign the account in again (Accounts).');
+  if (why === 'spend-control-reached') return ' ' + t('Its spend control is set with its vendor — raise it there.');
+  return '';
 }
 function batchRefusalWords(f) {
   if (!f) return '';
@@ -138,7 +142,9 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
   }
   // THE OVERAGE SENTENCE IS TRUE ON EVERY INSTANCE (the cure): where the instance allows turns in paid overage, the press bills it — said
   const overAllowed = !!(p.overage && p.overage.allowed);
-  if (n) body.appendChild(el('p', 'resume-stopped-lead', overAllowed ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.', { n }) : t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n })));
+  // (c) the quiet preview missing (nothing read): «not known now» — never «still refused» on an instance that may allow it
+  const overKnown = !!p.overage;
+  if (n) body.appendChild(el('p', 'resume-stopped-lead', !overKnown ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. Whether an account in paid overage would be refused could not be read now; you can stop the rest at any time.', { n }) : overAllowed ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.', { n }) : t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n })));
   const cw = costWords(p.estimate, t);
   if (cw) {
     const cost = el('div', 'resume-stopped-cost');
@@ -150,8 +156,12 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     }
     if (cw.unknown) cost.appendChild(el('div', 'resume-stopped-basis', cw.unknown));
     if (cw.unpriced) cost.appendChild(el('div', 'resume-stopped-basis', cw.unpriced));
-    for (const b of overAllowed && Array.isArray(p.overage.billed) ? p.overage.billed : []) cost.appendChild(el('div', 'resume-stopped-member', t('{member}: {n} of these continues bill paid overage', { member: memberWords(b.name, t), n: b.n })));   // the cost line names it (the cure)
     body.appendChild(cost);
+  }
+  // (d) the account billed as overage is named with or without an estimate (主开发 21:04Z) — beside the cost when there is one
+  if (n && overAllowed && Array.isArray(p.overage.billed) && p.overage.billed.length) {
+    const box = body.querySelector('.resume-stopped-cost') || body.appendChild(el('div', 'resume-stopped-cost'));
+    for (const b of p.overage.billed) box.appendChild(el('div', 'resume-stopped-member', t('{member}: {n} of these continues bill paid overage', { member: memberWords(b.name, t), n: b.n })));
   }
   let skBox = skippedList(p.skipped); if (skBox) body.appendChild(skBox);
   const status = el('p', 'resume-stopped-status');
@@ -287,6 +297,14 @@ export function renderAutoResumeBulk(container, app) {
     box.appendChild(row);
     if (w.passive) box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-passive', w.passive));
     box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-note', t('These buttons change the sessions you have now — the default above decides for new ones.')));
+    // (a) THE PRESSES OF THE DAY (主开发 21:04Z): when, how many planned, how many continued, by account — words only
+    const pw = pressWords(plan && plan.presses, t, { clock: (ms) => stampAt(ms, { now: Date.now(), words: true }) });
+    if (pw) {
+      box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-presses', pw.head));
+      const ul = el('ul', 'dialog-list auto-resume-bulk-press-list');
+      for (const r of pw.rows) { const li = el('li', null, r.line); if (r.accounts.length) li.appendChild(el('div', 'dialog-hint', r.accounts.join(' · '))); ul.appendChild(li); }
+      box.appendChild(ul);
+    }
   };
   paint();
   return box;

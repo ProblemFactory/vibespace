@@ -203,5 +203,20 @@ console.log('§6 wiring pins');
   ok('FORM TWO: …and in zh (the account named in the rule)', /^留在停止状态.*B 正在使用付费超额.*2 个$/.test(zhW[0]), JSON.stringify(zhW));
 }
 
+// THE PRESSES OF THE DAY in a person's words (主开发 2026-11-18 21:04Z (a)) — the spending view's lines; and the page's three smalls
+{
+  const P = [{ at: 2, press: 'rb-2', planned: 3, delivered: null, byAccount: [] }, { at: 1, press: 'rb-1', planned: 30, delivered: 28, byAccount: [{ key: '__global__', name: '__global__', n: 20 }, { key: 'B', name: 'B', n: 8 }] }];
+  const clk = (ms) => (ms === 1 ? '14:02' : '15:10');
+  const en = SB.pressWords(P, null, { clock: clk }), zhP = SB.pressWords(P, tZh, { clock: clk });
+  ok('PRESSES OF THE DAY (en): the head counts them; a press says planned and continued, a running one says so; the accounts with the machine\'s login in words', en.head === 'Your presses today (2)' && en.rows[0].line === '15:10 — 3 planned, still running' && en.rows[1].line === '14:02 — 30 planned, 28 continued' && en.rows[1].accounts.join(' · ') === 'This machine’s own login: 20 · B: 8', JSON.stringify(en));
+  ok('PRESSES OF THE DAY (zh)', zhP.head === '你今天的批量恢复（2 次）' && /计划 30 个，已继续 28 个/.test(zhP.rows[1].line) && /本机自己的登录：20/.test(zhP.rows[1].accounts[0]), JSON.stringify(zhP));
+  ok('PRESSES OF THE DAY: none ⇒ no block at all (null)', SB.pressWords([], null) === null && SB.pressWords(null, null) === null);
+  const page = read('src/lib/bulk-resume.js');
+  ok('the page (21:04Z (c)): no quiet preview read ⇒ «could not be read now», never «still refused»', /!overKnown \? t\('[^']*Whether an account in paid overage would be refused could not be read now/.test(page));
+  ok('the page (21:04Z (d)): the account billed as overage is named OUTSIDE the cost box\'s condition (an estimate missing names it too)', /if \(n && overAllowed && Array\.isArray\(p\.overage\.billed\) && p\.overage\.billed\.length\) \{/.test(page) && !/if \(cw\) \{[^}]*bill paid overage/.test(page));
+  ok('the page (21:04Z (e)): the two other account refusals have their door — sign it in again; the vendor\'s spend control', /why === 'identity-cannot-serve'\) return ' ' \+ t\('Sign the account in again \(Accounts\)\.'\)/.test(page) && /why === 'spend-control-reached'\) return ' ' \+ t\('Its spend control is set with its vendor — raise it there\.'\)/.test(page));
+  ok('the page (21:04Z (a)): the Settings row lists the presses of the day from the plan', /pressWords\(plan && plan\.presses, t,/.test(page));
+}
+
 console.log(`\n${failed ? 'FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);

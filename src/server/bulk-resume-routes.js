@@ -30,7 +30,7 @@ const LEDGER_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;  // a conversation's last re
 const ESTIMATE_TTL_MS = 30 * 1000;                     // the Settings row and the dialog may ask in a burst
 
 
-function create({ activeSessions, getAutoResume = () => null, getUsageHistory = () => null, readCacheFor = () => null, sessionModelFor = () => null, log = () => { } }) {
+function create({ activeSessions, pressesToday = null, getAutoResume = () => null, getUsageHistory = () => null, readCacheFor = () => null, sessionModelFor = () => null, log = () => { } }) {
   let cache = { sig: null, at: 0, est: null };
 
   /** The batch's expected cost for the plan's eligible rows (null = nothing to estimate). */
@@ -101,7 +101,7 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
     let estimate = null;
     try { estimate = estimateFor(plan.eligible, now); } catch (e) { log('[bulk-resume] estimate failed: ' + e.message); }
     const pub = (e) => ({ id: e.id, name: e.name, kind: e.kind, at: e.at, member: e.identity ? { key: e.identity.key, name: e.identity.name } : null });
-    return { ok: true, counts: ar.bulkCounts(), eligible: plan.eligible.map(pub), skipped: plan.skipped, total: plan.total, running: plan.running || null, estimate, overage: plan.overage || null };
+    return { ok: true, counts: ar.bulkCounts(), eligible: plan.eligible.map(pub), skipped: plan.skipped, total: plan.total, running: plan.running || null, estimate, overage: plan.overage || null, presses: (() => { try { return pressesToday ? pressesToday() : []; } catch { return []; } })() };   // (a): the presses of the day, for the spending view
   }
 
   function register(app) {

@@ -208,6 +208,20 @@ const REFUSED_NAMED_KEYS = Object.freeze({
   'identity-cannot-serve': '{member} cannot serve a turn now',
   'spend-control-reached': '{member} reached the spend control set with its vendor',
 });
+/** THE PRESSES OF THE DAY in a person's words (主开发 21:04Z (a)) — the spending view's lines: «14:02 — 30 planned, 28 continued»
+ *  and, under each, the accounts it continued on. PURE: `presses` = the guard's pressesToday; `clock` the page's time words. */
+function pressWords(presses, tIn, { now = Date.now(), clock = isoClock } = {}) {
+  const t = tOf(tIn);
+  const list = Array.isArray(presses) ? presses.filter((p) => p && Number(p.at) > 0) : [];
+  if (!list.length) return null;
+  return {
+    head: t('Your presses today ({n})', { n: list.length }),
+    rows: list.map((p) => ({
+      line: p.delivered === null || p.delivered === undefined ? t('{time} — {planned} planned, still running', { time: clock(p.at, now), planned: p.planned }) : t('{time} — {planned} planned, {delivered} continued', { time: clock(p.at, now), planned: p.planned, delivered: p.delivered }),
+      accounts: (Array.isArray(p.byAccount) ? p.byAccount : []).map((a) => t('{member}: {n}', { member: memberWords(a.name || a.key, t), n: a.n })),
+    })),
+  };
+}
 /** An account in a person's words: the machine's own login (its ledger key `__global__…`) is never shown as its key. */
 function memberWords(m, tIn) { const t = tOf(tIn); return /^__global/.test(String(m || '')) ? t('This machine’s own login') : String(m || ''); }
 /** The authorizer's reason in a person's words, or null (a reason not in the table) — the dialog's refusal line reads it. */
@@ -263,11 +277,11 @@ const WORD_KEYS = Object.freeze([
   'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit', 'The stopped session cannot be resumed now', 'None of the {m} stopped sessions can be resumed now',
   ...Object.values(SKIP_KEYS), 'skipped', '{why} until {time}',
   'Resumed {n}', 'skipped {n} (still inside a limit)', 'skipped {n} ({w} still inside a limit)', 'skipped {n}', 'refused {n}', 'could not deliver {n}', 'not reached {n}',
-  ...Object.values(REFUSED_KEYS), ...Object.values(REFUSED_NAMED_KEYS), 'This machine’s own login', '{why} ({reason})', '{why} — {n}', 'stopped {n}',
+  ...Object.values(REFUSED_KEYS), ...Object.values(REFUSED_NAMED_KEYS), 'This machine’s own login', 'Your presses today ({n})', '{time} — {planned} planned, {delivered} continued', '{time} — {planned} planned, still running', '{member}: {n}', '{why} ({reason})', '{why} — {n}', 'stopped {n}',
 ]);
 
 module.exports = {
   STOP_KINDS, SAID_MAX, SKIP_KEYS, REFUSED_KEYS, REFUSED_NAMED_KEYS, WORD_KEYS,
   boundSaid, isOverloadError, stopVerdict, normalizeStoppedBy, liveFactOf, isStoppedBy, stillWalled, planBatch,
-  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, waitingCount, skipWords, skipGroups, summaryWords, refusedWords, memberWords,
+  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, waitingCount, skipWords, skipGroups, summaryWords, refusedWords, memberWords, pressWords,
 };

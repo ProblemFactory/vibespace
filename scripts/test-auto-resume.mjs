@@ -1938,20 +1938,21 @@ await (async () => {
         sendToSession: (id, s2) => { sent.push(id); s2._isStreaming = true; if (overAfterFirst && sent.length === 1) over.add(overAfterFirst); return true; }, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
         previewSpendBatch: (items) => guard.previewBatch({ reason: 'bulk-resume', items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
         authorizeSpendBatch: (items, reason) => guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
-        noteBatchSpend: (id, s2, identity, hold, reason, press) => guard.note({ reason, identity, hold, press }), notePress: (batchId, n, reason) => guard.notePress({ reason, press: batchId, n }),
+        noteBatchSpend: (id, s2, identity, hold, reason, press) => guard.note({ reason, identity, hold, press }), notePress: (batchId, n, reason) => guard.notePress({ reason, press: batchId, n }), notePressEnd: (batchId, delivered) => guard.notePressEnd({ press: batchId, delivered }),
         releaseSpend: (id, s2, hold) => guard.release({ hold }), renewSpend: (h) => guard.renewHolds(h), wallVerdict: () => null, bulkPaceMs: 5 });
       const plan = ar.stoppedPlan();
       let rec = ar.resumeBatch({ pressed: PRESS3 });
       const until = Date.now() + 3000;
       while (Date.now() < until && rec && !rec.done) { await new Promise((r) => setTimeout(r, 5)); rec = ar.batchStatus(rec.batchId); }
-      const att = guard.snapshot().budget.attended || [];
+      await new Promise((r) => setTimeout(r, 20));   // the batch's end runs in its own finally
+      const att = guard.snapshot().budget.attended || [], presses = guard.pressesToday();
       fs.rmSync(dir, { recursive: true, force: true });
-      return { plan, rec, sent: sent.join(), att };
+      return { plan, rec, sent: sent.join(), att, presses };
     };
     const w1 = await realWorld({ overFromStart: ['B'], overAfterFirst: 'A' });
     const b1 = w1.plan.skipped.find((x) => x.id === 'b1'), a2 = w1.rec.skipped.find((x) => x.id === 'a2');
     ok('17b. FORM TWO, THE REAL ENGINE + THE REAL GUARD: B named before the press (left stopped, overage); A turns to overage after a1 — a2 and a3 left stopped, A NAMED; nothing else sent', !!b1 && b1.why === 'account-refused' && b1.member === 'B' && w1.sent === 'a1' && !!a2 && a2.why === 'account-refused' && a2.member === 'A' && a2.reason === 'overage-in-use' && w1.rec.skipped.filter((x) => x.member === 'A').length === 2, JSON.stringify({ plan: w1.plan.skipped, rec: w1.rec.skipped, sent: w1.sent }));
-    ok('17b. THE RECORD OF A PRESS through the real guard: ONE press row (3 planned, its batch id) and ONE folded row for A (1 continue); no stamp', w1.att.filter((t) => t.press === w1.rec.batchId && t.total === 3).length === 1 && w1.att.filter((t) => t.press === w1.rec.batchId && t.key === 'A' && (t.count || 1) === 1).length === 1, JSON.stringify(w1.att));
+    ok('17b. THE RECORD OF A PRESS through the real guard: ONE press row (3 planned, its batch id; at its end 1 DELIVERED — 主开发 21:04Z (b)) and ONE folded row for A (1 continue); no stamp; the presses of the day say it', w1.presses.length === 1 && w1.presses[0].planned === 3 && w1.presses[0].delivered === 1 && w1.presses[0].byAccount.map((x) => x.name + ':' + x.n).join() === 'A:1' && w1.att.filter((t) => t.press === w1.rec.batchId && t.planned === 3).length === 1 && w1.att.filter((t) => t.press === w1.rec.batchId && t.key === 'A' && (t.count || 1) === 1).length === 1, JSON.stringify(w1.att));
     const w2 = await realWorld({ allow: true, overFromStart: ['B'] });
     ok('17b. (2) where the instance ALLOWS paid overage: the plan says so and names B as billed (1 continue) — and B IS continued (the press bills it, as the dialog says)', !!w2.plan.overage && w2.plan.overage.allowed === true && w2.plan.overage.billed.map((b) => b.name + ':' + b.n).join() === 'B:1' && w2.sent === 'a1,b1,a2,a3', JSON.stringify({ overage: w2.plan.overage, sent: w2.sent }));
   }

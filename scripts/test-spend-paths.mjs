@@ -4828,7 +4828,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     for (let i = 0; i < 3; i++) st = A.noteUnattendedSpend(st, { identity: { key: 'Z' }, reason: 'held-deliver', at: now - 3600e3 + i }).state;
     st = A.notePressRow(st, { reason: 'bulk-resume', press: 'rb-600', n: 600, at: now });
     for (let i = 0; i < 600; i++) st = A.noteUnattendedSpend(st, { identity: { key: i % 2 ? 'sub-a' : 'sub-b' }, reason: 'bulk-resume', press: 'rb-600', at: now + i }).state;
-    const rows = A.pruneBudget(st, now + 1000).attended, counts = A.producerCounts(rows), pressRow = rows.find((t) => t.press === 'rb-600' && t.total === 600);
+    const rows = A.pruneBudget(st, now + 1000).attended, counts = A.producerCounts(rows), pressRow = rows.find((t) => t.press === 'rb-600' && t.planned === 600);
     let un = A.emptyBudget();
     for (let i = 0; i < 3; i++) un = A.noteUnattendedSpend(un, { identity: { key: 'Z' }, reason: 'held-deliver', at: now - 3600e3 + i }).state;
     for (let i = 0; i < 600; i++) un = A.noteUnattendedSpend(un, { identity: { key: 'sub-a' }, reason: 'bulk-resume', at: now + i }).state;
@@ -4875,7 +4875,24 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     gU.notePress({ reason: 'bulk-resume', press: 'rb-g', n: 2 });
     gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' }); gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' });
     const attG = gU.snapshot().budget.attended || [];
-    ok('§13 (3) GUARD: notePress writes ONE press row (2, rb-g); its two continues on A fold into one row counting 2; nothing stamped', attG.filter((t) => t.press === 'rb-g' && t.total === 2).length === 1 && attG.filter((t) => t.press === 'rb-g' && t.key === 'A' && t.count === 2).length === 1 && (gU.snapshot().budget.identities.A || []).length === 0, JSON.stringify(attG));
+    ok('§13 (3) GUARD: notePress writes ONE press row (2, rb-g); its two continues on A fold into one row counting 2; nothing stamped', attG.filter((t) => t.press === 'rb-g' && t.planned === 2).length === 1 && attG.filter((t) => t.press === 'rb-g' && t.key === 'A' && t.count === 2).length === 1 && (gU.snapshot().budget.identities.A || []).length === 0, JSON.stringify(attG));
+  }
+  { // 主开发 21:04Z: (b) the press's END says how many it delivered; (a) the presses of the day as the owner reads them; (f) a paced
+    // press longer than a day keeps its rows — CONTROL FIRST: a press row nothing touched for 30 h IS pruned (the plant is the stamp)
+    const H = 3600e3;
+    let lone = A.notePressRow(A.emptyBudget(), { reason: 'bulk-resume', press: 'rb-lone', n: 1, at: now - 30 * H });
+    ok('§13 (f) CONTROL FIRST: a press row with no continue for 30 h is pruned out of the day (what the stamp below prevents)', A.pressesOf(lone, { now }).length === 0);
+    let st = A.notePressRow(A.emptyBudget(), { reason: 'bulk-resume', press: 'rb-long', n: 16, at: now - 30 * H });
+    for (let h = 30; h >= 1; h -= 2) st = A.noteUnattendedSpend(st, { identity: { key: 'sub-a', name: 'A' }, reason: 'bulk-resume', press: 'rb-long', at: now - h * H }).state;
+    st = A.notePressEnd(st, { press: 'rb-long', delivered: 15, at: now - H });
+    const day = A.pressesOf(st, { now });
+    ok('§13 (f)+(b) a paced press of 30 h keeps its press row and its folded row (pruned by the LAST continue): planned 16, delivered 15, A ×15', day.length === 1 && day[0].planned === 16 && day[0].delivered === 15 && day[0].byAccount.length === 1 && day[0].byAccount[0].name === 'A' && day[0].byAccount[0].n === 15, JSON.stringify(day));
+    const running = A.pressesOf(A.notePressRow(A.emptyBudget(), { reason: 'bulk-resume', press: 'rb-run', n: 4, at: now }), { now });
+    ok('§13 (b) a press not ended yet says delivered null (still running) — never a count it has not reached', running.length === 1 && running[0].delivered === null && running[0].planned === 4, JSON.stringify(running));
+    const gP = guardMod.create({ dataDir: tmpdir('vs-spend-bulkpress-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    gP.notePress({ reason: 'bulk-resume', press: 'rb-p', n: 3 }); gP.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-p' }); gP.note({ reason: 'bulk-resume', identity: { key: 'B', name: 'B' }, hold: null, press: 'rb-p' }); gP.notePressEnd({ press: 'rb-p', delivered: 2 });
+    const pt = gP.pressesToday();
+    ok('§13 (a) GUARD pressesToday: the press of the day — planned 3, delivered 2, A 1 · B 1 — the owner\'s spending view reads this', pt.length === 1 && pt[0].planned === 3 && pt[0].delivered === 2 && pt[0].byAccount.map((x) => x.name + ':' + x.n).sort().join() === 'A:1,B:1', JSON.stringify(pt));
   }
   { // (4) on the guard: an UNREADABLE budget file — the twin batch and its quiet preview refuse by name (control first: the file is unreadable)
     const dU = tmpdir('vs-spend-bulkled-');
@@ -4959,6 +4976,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
   ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
   ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
+  ok('§13 WIRING (主开发 21:04Z): the press\'s end and the presses of the day to the bulk routes', /notePressEnd: \(batchId, delivered\) => spendGuard\.notePressEnd\(\{ press: batchId, delivered \}\)/.test(read('server.js')) && /bulk-resume-routes\.js'\)\.create\(\{ activeSessions, pressesToday: \(\) => spendGuard\.pressesToday\(\), /.test(read('server.js')) && /presses: \(\(\) => \{ try \{ return pressesToday \? pressesToday\(\) : \[\]; \}/.test(read('src/server/bulk-resume-routes.js')));
   ok('§13 WIRING (the cure): server.js hands the core the guard\'s QUIET preview (as the press would ask), the press record, and the press id on every charge', /previewSpendBatch: \(items\) => spendGuard\.previewBatch\(\{ reason: 'bulk-resume', items: items\.map\(/.test(read('server.js')) && /notePress: \(batchId, n, reason\) => spendGuard\.notePress\(\{ reason, press: batchId, n \}\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
   ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask, every charge and the press record', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 4);
   { const rt = read('src/server/bulk-resume-routes.js'), h = rt.indexOf("app.post('/api/sessions/resume-stopped'"), body = rt.slice(h, rt.indexOf('app.post(', h + 10));

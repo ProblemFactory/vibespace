@@ -419,6 +419,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
 
   /** THE RECORD OF A PRESS (the cure, 主开发 20:16Z): one row in the attended tally — when, how many, the batch id. */
   function notePress({ reason, press, n = 0, now = Date.now() } = {}) { state = A.notePressRow(state, { at: now, reason, press, n }); persist(); return true; }
+  /** …its end (主开发 21:04Z (b)): how many it delivered. And the presses of the day, for the owner's spending view (a). */
+  function notePressEnd({ press, delivered = 0, now = Date.now() } = {}) { state = A.notePressEnd(state, { at: now, press, delivered }); persist(); return true; }
+  function pressesToday(now = Date.now()) { return A.pressesOf(state, { now }); }
 
   /** A QUIET LOOK at what a batch's authorization WOULD answer, per account (the bulk dialog's plan, BEFORE the press — 主开发
    *  16:20Z: «… 10 on account B are left stopped: B is billing paid overage» is said before as well as after): nothing held,
@@ -518,7 +521,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   }
 
   return {
-    authorize, authorizeBatch, previewBatch, notePress, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    authorize, authorizeBatch, previewBatch, notePress, notePressEnd, pressesToday, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
     // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the

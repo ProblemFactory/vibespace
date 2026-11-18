@@ -135,7 +135,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 const turnsOf = (sid) => { try { return fs.readFileSync(path.join(TURNS, sid), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-const tallyOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return { stamps: Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length, attended: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && !(Number(x.total) >= 0)).reduce((n, x) => n + (Number(x.count) || 1), 0), presses: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && Number(x.total) >= 0).length }; } catch { return { stamps: -1, attended: -1 }; } };
+const tallyOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return { stamps: Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length, attended: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && !(Number(x.planned) >= 0)).reduce((n, x) => n + (Number(x.count) || 1), 0), presses: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && Number(x.planned) >= 0).length }; } catch { return { stamps: -1, attended: -1 }; } };
 const stamps = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return Object.values(b.identities || {}).flat().filter((x) => x && x.reason === 'bulk-resume').length; } catch { return -1; } };
 
 try {
@@ -309,6 +309,11 @@ try {
   const gone = await until(() => D.ev(`(() => { const m = ${marks}; const p = ${pill}; return Object.values(m).every((x) => x && !x.mark) && !p ? m : null; })()`), 15000, 200);
   check('desk: every mark is gone (the sessions ran again) and so is the filter pill', !!gone, { m: await D.ev(marks), p: await D.ev(pill) });
   const pDone = await shot(D.S, 'desk-done.png');
+  // THE PRESSES OF THE DAY where the owner looks at spending (主开发 2026-11-18 21:04Z (a)): the Settings row lists the press —
+  // when, 3 planned, 3 continued, on the machine's own login in words
+  await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
+  const pressesRow = await until(() => D.ev(`(() => { const h = document.querySelector('.auto-resume-bulk-presses'); const li = [...document.querySelectorAll('.auto-resume-bulk-press-list li')].map((x) => x.textContent); return h && li.length ? { head: h.textContent, li } : null; })()`), 10000, 200);
+  check('desk: Settings → Spending lists the press of the day — «你今天的批量恢复（1 次）», «计划 3 个，已继续 3 个», on «本机自己的登录：3»', !!pressesRow && /你今天的批量恢复（1 次）/.test(pressesRow.head) && pressesRow.li.some((x) => /计划 3 个，已继续 3 个/.test(x) && /本机自己的登录：3/.test(x)), pressesRow);
   // FORM TWO ON THE PAGE (the cure, 主开发 2026-11-18 20:16Z): the machine's login reports PAID OVERAGE (its usage cache), the
   // fourth conversation stops on an overload ⇒ the dialog names the account BEFORE the press — «留在停止状态（本机自己的登录 正在使用
   // 付费超额）» — with the door (设置 → 花费), and offers nothing to start

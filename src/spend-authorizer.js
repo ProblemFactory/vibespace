@@ -263,18 +263,39 @@ const stampReason = (t) => (t && typeof t === 'object' && t.reason ? String(t.re
 function producerCounts(list) {
   const out = {};
   for (const t of Array.isArray(list) ? list : []) {
-    if (t && Number(t.total) >= 0 && t.press) continue;   // a PRESS row (notePressRow) is the record of the press, not one more turn
+    if (isPressRow(t)) continue;   // a PRESS row (notePressRow) is the record of the press, not one more turn
     const r = stampReason(t) || 'unknown'; out[r] = (out[r] || 0) + (t && Number(t.count) > 1 ? Number(t.count) : 1);   // a press's folded row counts its continues
   }
   return out;
 }
-/** PURE (the cure, 主开发 20:16Z): THE RECORD OF A PRESS — one row in the attended tally: when, how many it started, the batch
- *  id (`press`) — kept beside its folded per-continue rows; what the owner reads afterwards as what a press cost. */
+/** PURE (the cure, 主开发 20:16Z): THE RECORD OF A PRESS — one row in the attended tally: when, how many it PLANNED (`planned`),
+ *  the batch id (`press`) — kept beside its folded per-continue rows; `delivered` / `ended` are written when the batch ends
+ *  (notePressEnd). What the owner reads afterwards as what a press cost (pressesOf). */
+const isPressRow = (t) => !!(t && t.press && Number(t.planned) >= 0);
 function notePressRow(state, { at = Date.now(), reason = null, press = null, n = 0 } = {}) {
   const s = pruneBudget(state, at, LOAD_RETENTION);
   if (!isAttended(reason) || !press) return s;
-  s.attended = [...s.attended, { at, reason, press: String(press).slice(0, 80), total: Math.max(0, Math.floor(Number(n)) || 0) }].slice(-ATTENDED_KEEP);
+  s.attended = [...s.attended, { at, reason, press: String(press).slice(0, 80), planned: Math.max(0, Math.floor(Number(n)) || 0) }].slice(-ATTENDED_KEEP);
   return s;
+}
+/** PURE (主开发 21:04Z (b)): the press ended — how many it DELIVERED, and when. Its row only; a press never seen is left alone. */
+function notePressEnd(state, { at = Date.now(), press = null, delivered = 0 } = {}) {
+  const s = pruneBudget(state, at, LOAD_RETENTION);
+  const pid = press ? String(press).slice(0, 80) : null;
+  const i = pid ? s.attended.findIndex((t) => isPressRow(t) && t.press === pid) : -1;
+  if (i < 0) return s;
+  s.attended = [...s.attended.slice(0, i), { ...s.attended[i], delivered: Math.max(0, Math.floor(Number(delivered)) || 0), ended: at }, ...s.attended.slice(i + 1)];
+  return s;
+}
+/** PURE (主开发 21:04Z (a)): THE PRESSES OF THE DAY, as the owner reads them — [{at, press, reason, planned, delivered|null, ended|null,
+ *  byAccount:[{key, name, n}]}], newest first; `byAccount` = the press's folded per-continue rows (what was delivered where). */
+function pressesOf(state, { now = Date.now() } = {}) {
+  const rows = pruneBudget(state, now, LOAD_RETENTION).attended;
+  return rows.filter(isPressRow).map((p) => ({
+    at: stampAt(p), press: p.press, reason: p.reason, planned: Number(p.planned) || 0,
+    delivered: Number.isFinite(Number(p.delivered)) && p.delivered !== undefined ? Number(p.delivered) : null, ended: Number(p.ended) || null,
+    byAccount: rows.filter((t) => !isPressRow(t) && t.press === p.press).map((t) => ({ key: t.key || null, name: t.name || t.key || null, n: Number(t.count) || 1 })),
+  })).sort((a, b) => b.at - a.at);
 }
 /** PURE. "job-notification ×9, auto-resume ×3" — the top producers, most first. */
 function producersText(counts, { top = 3 } = {}) {
@@ -300,7 +321,8 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   const notices = {};
   for (const [k, v] of Object.entries(s.notices || {})) if (Number(v) > cut) notices[k] = Number(v);
   // the ATTENDED tally (lane owner-press-attended): `{at, reason, key}` per press, a day, never a stamp any cap reads
-  const attended = Array.isArray(s.attended) ? s.attended.filter((t) => stampAt(t) > cut).slice(-ATTENDED_KEEP) : [];
+  // (f) a paced press longer than a day keeps its rows: a folded row is pruned by its LAST continue, a press row by its end
+  const attended = Array.isArray(s.attended) ? s.attended.filter((t) => Math.max(stampAt(t), Number(t && t.last) || 0, Number(t && t.ended) || 0) > cut).slice(-ATTENDED_KEEP) : [];
   return { v: 1, identities, instance: keep(s.instance), notices, attended };
 }
 
@@ -762,9 +784,13 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
     // A PRESS'S CONTINUES ARE ONE ROW PER ACCOUNT (the cure, 主开发 20:16Z): a press of any size never pushes its own first rows
     // or the day's earlier ones out of the tally — its per-continue rows are folded by (press, account), `count` = how many
     const pid = press ? String(press).slice(0, 80) : null;
-    const i = pid ? s.attended.findIndex((t) => t && t.press === pid && t.key === key && t.reason === reason && !(Number(t.total) >= 0)) : -1;
-    if (i >= 0) { const row = s.attended[i]; s.attended = [...s.attended.slice(0, i), { ...row, count: (Number(row.count) || 1) + 1, last: at }, ...s.attended.slice(i + 1)]; return { state: s, warn: null }; }
-    s.attended = [...s.attended, { at, reason, key, ...(pid ? { press: pid, count: 1 } : {}) }].slice(-ATTENDED_KEEP);
+    const i = pid ? s.attended.findIndex((t) => t && t.press === pid && t.key === key && t.reason === reason && !isPressRow(t)) : -1;
+    if (i >= 0) { const row = s.attended[i]; s.attended = [...s.attended.slice(0, i), { ...row, count: (Number(row.count) || 1) + 1, last: at }, ...s.attended.slice(i + 1)]; }
+    else s.attended = [...s.attended, { at, reason, key, ...(pid ? { press: pid, count: 1, ...(identity && identity.name ? { name: String(identity.name).slice(0, 80) } : {}) } : {}) }].slice(-ATTENDED_KEEP);
+    // (f) a press still running is as fresh as its LAST continue: its press row is stamped with it, so a paced press longer than a
+    // day is never pruned under its own continues (主开发 21:04Z)
+    const pi = pid ? s.attended.findIndex((t) => isPressRow(t) && t.press === pid) : -1;
+    if (pi >= 0) s.attended = [...s.attended.slice(0, pi), { ...s.attended[pi], last: at }, ...s.attended.slice(pi + 1)];
     return { state: s, warn: null };
   }
   if (!key) return { state: s, warn: null };
@@ -1041,7 +1067,7 @@ module.exports = {
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow,
+  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow, notePressEnd, pressesOf,
   pendingCounts, reservePending, releasePending, renewPending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,
