@@ -3547,6 +3547,8 @@ export default {
   "Handed to the running turn — the agent reads it at its next tool call": "実行中のターンに渡しました · 次のツール呼び出しで届きます",
   "Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again": "エージェントが読む前に停止しました。会話には残っていて、エージェントが次に受け取るメッセージ（あなたのもの、または起こす通知）と一緒に届きます — もう一度送る必要はありません",
   "{k} message(s) unread when stopped — they go with your next message": "{k} 件のメッセージは停止時に未読 · 次のメッセージと一緒に届きます",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed": "停止が届いた時点で、先に送ったメッセージはすでにモデルに送られていました——すぐに打ち切りましたが、課金される場合があります",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed": "停止が届いた時点で、先に送ったメッセージはすでにモデルに送られていました——停止が届く前に回答され、課金されます",
   "{k} message(s) you sent into the turn had already reached the agent": "ターンに送った {k} 件のメッセージはすでにエージェントに届いていました",
   "Enter hands it to the running turn — the agent reads it at its next tool call": "Enter で実行中のターンに渡す — エージェントは次のツール呼び出しで読みます",
   "Alt+Enter queues it until the turn ends — editable until then": "Alt+Enter でターン終了までキュー — それまでは編集できます",

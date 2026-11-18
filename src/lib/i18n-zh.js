@@ -3548,6 +3548,8 @@ export default {
   "Handed to the running turn — the agent reads it at its next tool call": "已交给正在进行的回合 · 下一次工具调用时送达",
   "Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again": "停止先于 agent 读到它。它留在对话里，会随 agent 收到的下一条消息（你的，或唤醒它的通知）一起送达——不必再发一次",
   "{k} message(s) unread when stopped — they go with your next message": "{k} 条消息停止时未读 · 随你的下一条消息送达",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed": "停止到达时，先前送入的消息已经发给了模型——它被立即截断，可能会计费",
+  "The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed": "停止到达时，先前送入的消息已经发给了模型——在停止生效前它已得到回答，会计费",
   "{k} message(s) you sent into the turn had already reached the agent": "{k} 条已送入本轮的消息此前已送达智能体",
   "Enter hands it to the running turn — the agent reads it at its next tool call": "Enter 立即送入正在进行的回合——agent 在下一次工具调用时读到",
   "Alt+Enter queues it until the turn ends — editable until then": "Alt+Enter 排队到回合结束——在那之前都可以编辑",

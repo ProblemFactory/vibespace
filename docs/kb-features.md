@@ -802,9 +802,11 @@ impossible rather than a review promise.
   and its bubble reads «Unread when stopped — goes with your next message» (.388,
   lane midturn-order; was «Stays with the stopped turn»). When the CLI had not taken
   it in yet, the CLI RUNS it +11 ms after the interrupt (measured) — the wrapper
-  interrupts that follow-up turn on its first line, so nothing answers after
-  Stop; the message stays in the conversation and the agent reads it with the
-  next one. A held message keeps the .354 rule (it comes back into the box).
+  interrupts that follow-up turn on its first line — nothing answers after
+  Stop, unless on a loaded machine the CLI read that interrupt after the
+  follow-up's request left (B-28b1): the Stop's line then says so once, and
+  that it may be billed (the fact rides the follow-up's result). The message
+  stays in the conversation and the agent reads it with the next one. A held message keeps the .354 rule (it comes back into the box).
   **Acceptance r2 (the same .363):** the hand-over door needs PROOF — the
   wrapper advertises 'steer' only from the CLI's FIRST `session_state_changed`
   (the real CLI says 'running' before its first init, so a session proves itself

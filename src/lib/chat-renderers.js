@@ -710,6 +710,11 @@ const peerFoldLabel = (open, who) => (who
   : (open ? t('Hide the message') : t('Show the message')));
 
 
+// B-28b1 (TELL, DO NOT PRETEND): a Stop's follow-up that reached the model before the CLI read the second interrupt — one line,
+// in that Stop's own row (the fact rides the follow-up's result: every client and a reload draw the same)
+const stopLateLine = (f) => (f && f.cut === false
+  ? t('The Stop arrived after the message handed in earlier had already gone to the model — it was answered before the Stop reached it, and it is billed')
+  : t('The Stop arrived after the message handed in earlier had already gone to the model — it was cut off at once, and it may be billed'));
 /** A USAGE WALL'S ROOM (lane agy-wall-signal): another model group of the walled account whose weekly window is read
  *  under 90 % — agy's own group name, the whole percent; a model switch continues the conversation there. */
 const wallRoomLine = (r) => t('{name}: weekly limit {pct} % used — switch this conversation’s model to continue', { name: String(r.name || ''), pct: Number(r.usedPct) || 0 });
@@ -2177,7 +2182,10 @@ class ChatRenderers {
     // Error / interrupted
     if (msg.status === 'error' || msg.status === 'interrupted') {
       if (msg.errorKind === 'prompt-too-long') return { el: this.appendContextFullCard(text), sideEffect: null };
+      const late = msg.content?.[0]?.stopLate;
+      if (late && late.cut === false) { const lel = this.appendSystem(stopLateLine(late)); lel.classList.add('chat-stop-late'); return { el: lel, sideEffect: null }; }
       const el = this.appendSystem(text);
+      if (late) { const line = document.createElement('div'); line.className = 'chat-system chat-stop-late'; line.textContent = stopLateLine(late); el.appendChild(line); }
       // the usage wall's ONE added sentence (lane agy-wall-signal): another model group of this account has weekly room
       const room = msg.content?.[0]?.wallRoom;
       if (room) { const line = document.createElement('div'); line.className = 'chat-system chat-wall-room'; line.textContent = wallRoomLine(room); el.appendChild(line); }

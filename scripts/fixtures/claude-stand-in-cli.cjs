@@ -66,7 +66,18 @@
 //                      nothing is `success` with stdout '' too; the additionalContext its stdout names is what the turn CARRIES
 //                      ($STAND_IN_DELIVERED {how:'context', text}; a hook's stderr never is); an interrupt during it SIGTERMs it
 //                      (`cancelled`, exit_code 1 — measured +45 ms)
-// Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯, scripts/test-claude-steer-chrome.mjs and scripts/test-turn-carry.mjs.
+// THE STOP THAT CAME LATE (B-28b1): a STALL PLACED in the window — a fixed delay, never load. With $STAND_IN_FOLLOW_REQ_MS set, a
+// follow-up's REQUEST reaches the model that long after its init ($STAND_IN_DELIVERED gets {how:'request'}; from then on its
+// result counts tokens — ASSUMED, not measured: the 2.1.312 recording has only a follow-up that sent nothing, with `{}`; whether
+// the real CLI counts an aborted stream is what the heavy §A's told/shown counts will say). $STAND_IN_FOLLOW_STALL_MS: the stand-in reads no stdin line for that long
+// after a follow-up's init (the real CLI's loop busy sending) — an interrupt waits in the pipe. $STAND_IN_FOLLOW_HOLD_INTERRUPTS=N:
+// after a follow-up's init no stdin line is read until N interrupt lines wait in the pipe (a stall placed by COUNT: a second
+// Stop is surely read before the follow-up's result, whatever the load). $STAND_IN_FOLLOW_ANSWER_MS
+// (with REQ_MS): an assistant record that long after the request (the model answered). $STAND_IN_FOLLOW_AGENT_TOKENS=N: a
+// follow-up's result says N tokens of OTHER calls in model_usage_since_last_result (a background agent's, as the 2.1.312 recording
+// shows: never in the result's own `usage`). All five unset: the shape every older leg drives (nothing is sent inside FOLLOW_MS,
+// nothing billed).
+// Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯, scripts/test-claude-steer.mjs §8, scripts/test-claude-steer-chrome.mjs and scripts/test-turn-carry.mjs.
 // Never a vendor call: no network at all.
 const fs = require('fs');
 const CAP = process.env.STUB_CAPTURE || '';
@@ -76,6 +87,13 @@ const FOLLOW_MS = Number(process.env.STAND_IN_FOLLOW_MS || 300);
 const SPLIT_FOLLOW = process.env.STAND_IN_SPLIT_FOLLOW === '1';
 const NO_STATE = process.env.STAND_IN_NO_STATE === '1';
 const POST_MS = Number(process.env.STAND_IN_POST_MS || 5);
+const FOLLOW_REQ_MS = process.env.STAND_IN_FOLLOW_REQ_MS ? Number(process.env.STAND_IN_FOLLOW_REQ_MS) : null;
+const FOLLOW_STALL_MS = Number(process.env.STAND_IN_FOLLOW_STALL_MS || 0);
+const FOLLOW_ANSWER_MS = process.env.STAND_IN_FOLLOW_ANSWER_MS ? Number(process.env.STAND_IN_FOLLOW_ANSWER_MS) : null;
+const FOLLOW_HOLD_N = Number(process.env.STAND_IN_FOLLOW_HOLD_INTERRUPTS || 0);
+const FOLLOW_AGENT_TOKENS = Number(process.env.STAND_IN_FOLLOW_AGENT_TOKENS || 0);
+let stallUntil = 0;   // B-28b1: no stdin line is read before this (a follow-up's init placed it)
+let holdInterrupts = 0;   // B-28b1: …nor before this many interrupt lines wait
 // $STAND_IN_RIDE_MISS=1 (lane midturn-order r2 M1): a frame written while the tool ran MISSED the request built after its result
 // (the race the wrapper counts a riding frame KEPT for, chat-wrapper dropHeldForStop) — it stays held by the CLI, which runs it
 // as a follow-up turn after a Stop
@@ -117,7 +135,7 @@ function nextFollow() {
 }
 function end(subtype) {
   if (!busy) return;
-  clearTimeout(busy.timer);
+  clearTimeout(busy.timer); clearTimeout(busy.reqTimer); clearTimeout(busy.ansTimer);
   const interrupted = subtype !== 'success';
   if (interrupted && busy.tool) {
     out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: busy.tool, content: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", is_error: true }] } });
@@ -128,7 +146,12 @@ function end(subtype) {
   }
   // an interrupted result carries NO `result` words (measured on 2.1.312: claude-steer-inject measure/r3-312/stop-late-*, `result`
   // absent on error_during_execution) — the chat's row says «Interrupted» alone (lane midturn-order r2 r1)
-  out({ type: 'result', subtype, is_error: interrupted, ...(interrupted ? {} : { result: busy.text }), session_id: SID, duration_ms: 1, total_cost_usd: 0, ...(SINCE_LAST ? { model_usage_since_last_result: {} } : {}) });
+  // B-28b1: a follow-up whose request reached the model counts it on its result — in its own `usage` on every version, and in
+  // model_usage_since_last_result on 2.1.312+ (with $STAND_IN_FOLLOW_AGENT_TOKENS, an agent's calls there too, never in `usage`)
+  const billed = !!busy.requested, outTok = busy.answered ? 8 : 0, agentTok = busy.follow ? FOLLOW_AGENT_TOKENS : 0;
+  const since = (billed || agentTok) ? { 'claude-sonnet-4-5': { inputTokens: (billed ? 1200 : 0) + agentTok, outputTokens: outTok + (agentTok ? 1 : 0), cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0.0036, contextWindow: 200000 } } : {};
+  out({ type: 'result', subtype, is_error: interrupted, ...(interrupted ? {} : { result: busy.text }), session_id: SID, duration_ms: 1, total_cost_usd: billed ? 0.0036 : 0, ...(billed ? { usage: { input_tokens: 1200, output_tokens: outTok, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } : {}), ...(SINCE_LAST ? { model_usage_since_last_result: since } : {}) });
+  if (holdInterrupts) { holdInterrupts = 0; setImmediate(readLines); }   // the follow-up ended on its own: the hold ends with it
   busy = null;
   // what the CLI was holding runs as a turn of its own — after an interrupt too (measured); after an interrupt its
   // request is still out for FOLLOW_MS when a second interrupt can end it
@@ -215,15 +238,31 @@ function begin(f, { follow = false } = {}) {
     }, /LONGER-/.test(text) ? LONG_MS * 3 : LONG_MS);
     return;
   }
-  busy.timer = setTimeout(() => { say('reply: ' + text); end('success'); }, follow ? FOLLOW_MS : (/LONG-/.test(text) ? LONG_MS : 5));
+  if (follow && FOLLOW_REQ_MS !== null) {
+    const b = busy;   // B-28b1: the follow-up's request leaves FOLLOW_REQ_MS after its init — the model has it from then on
+    b.reqTimer = setTimeout(() => {
+      if (busy !== b) return;
+      b.requested = true; delivered('request', text);
+      if (FOLLOW_ANSWER_MS !== null) b.ansTimer = setTimeout(() => { if (busy !== b) return; b.answered = true; say('reply: ' + text); }, FOLLOW_ANSWER_MS);
+    }, FOLLOW_REQ_MS);
+  }
+  if (follow && FOLLOW_STALL_MS > 0) stallUntil = Date.now() + FOLLOW_STALL_MS;   // B-28b1: the placed stall
+  if (follow && FOLLOW_HOLD_N > 0) holdInterrupts = FOLLOW_HOLD_N;   // …by count
+  busy.timer = setTimeout(() => { if (!busy.answered) say('reply: ' + text); end('success'); }, follow ? FOLLOW_MS : (/LONG-/.test(text) ? LONG_MS : 5));
 }
 if (process.env.STAND_IN_BOOT_INIT === '1') out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION });
 let buf = '';
 process.stdin.setEncoding('utf8');
-process.stdin.on('data', (d) => {
-  buf += d;
+process.stdin.on('data', (d) => { buf += d; readLines(); });
+function readLines() {
   let i;
   while ((i = buf.indexOf('\n')) >= 0) {
+    if (Date.now() < stallUntil) { setTimeout(readLines, stallUntil - Date.now() + 1); return; }   // B-28b1: lines wait out the stall, in order
+    if (holdInterrupts) {   // …and the hold by count: a new chunk calls readLines again
+      const waiting = buf.slice(0, buf.lastIndexOf('\n')).split('\n').filter((l) => /"subtype":"interrupt"/.test(l)).length;
+      if (waiting < holdInterrupts) return;
+      holdInterrupts = 0;
+    }
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     if (!line.trim()) continue;
     if (CAP) fs.appendFileSync(CAP, line + '\n');
@@ -239,5 +278,5 @@ process.stdin.on('data', (d) => {
     if (!f.message || !(typeof f.message.content === 'string' || Array.isArray(f.message.content))) continue;
     if (busy) queued.push(f); else start(f);
   }
-});
-process.stdin.on('end', () => process.exit(0));
+}
+process.stdin.on('end', () => { const done = () => (buf.indexOf('\n') >= 0 ? setTimeout(done, 5) : process.exit(0)); done(); });

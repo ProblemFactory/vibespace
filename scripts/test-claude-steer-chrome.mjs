@@ -812,6 +812,26 @@ process.stdout.write(JSON.stringify(mm.messages.filter(m=>m.role==='user').map(m
  *  inside the window), 'result' (the moment the wrapper tees the CLI's interrupted result: B's follow-up is still to come —
  *  inside), 'settled' (once the wrapper logged the settle — outside: a plain send), or a number = a fixed δ the leg
  *  CLASSIFIES by what the wrapper did (held ⇒ it came inside, a plain send ⇒ after the settle) and prints. */
+// THE LAW AS IT NOW IS (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18 «TELL, DO NOT PRETEND»). The CLI runs
+// the frame it held at Stop as a follow-up, and the wrapper interrupts it on its init in the same tick; on a loaded machine the CLI
+// can read that interrupt after its request left. So after a Stop EITHER no request reached the model before the stop settled, OR
+// exactly the held frame's ONE follow-up did — and then the wrapper recorded the stop-late fact on its result and the page drew it
+// once. Anything else is red: a second leaked request, C before the settle, a leak that was not told, a fact told where nothing
+// leaked. Every run prints how many follow-ups leaked, by leg: a leak is never a silent green.
+const { createMessageManager: stopLawMM } = require(path.join(REPO, 'src/normalizers.js'));
+function lateOf(recs) { return recs.filter((x) => x.type === 'result' && x.webui_stop_late).length; }
+function shownOf(recs) {
+  const mm = stopLawMM('claude', 'stop-law');
+  mm.convertHistory(recs.filter((x) => x.type !== '_stdin_ack').map(({ __at, ...x }) => x));
+  return mm.messages.filter((m) => m.content?.[0]?.stopLate).length;
+}
+/** `leaked` = the carried marks of each request that reached the model after Stop and is not C's own. */
+function stopLaw(leaked, late, shown) {
+  if (!leaked.length) return late === 0 && shown === 0;
+  return leaked.length === 1 && leaked[0].includes('MARK-B') && !leaked[0].includes('MARK-C') && late === 1 && shown === 1;
+}
+const leakedOf = (l) => (l.reqsAfterStop || []).filter((q) => !q.carries.includes('MARK-C')).map((q) => q.carries);
+const cReqsOf = (l) => (l.reqsAfterStop || []).filter((q) => q.carries.includes('MARK-C'));
 async function realLateC(at) {
   const r = await realWrapper('late-' + at);
   r.say('TOOL-5S run a slow command', 'm-a');
@@ -839,6 +859,7 @@ async function realLateC(at) {
     settledBeforeC: (() => { const lg = r.log(); const iS = lg.indexOf('stop settled'), iC = lg.indexOf('held a mid-turn frame'); return iS >= 0 && (iC < 0 || iS < iC); })(),
     reqsAfterStop: after.map((q) => ({ beforeDrain: drainAt === null || q.t < drainAt, carries: q.all })),
     answeredC: r.recs.some((x) => x.type === 'assistant' && /MARK-C/.test(S(x.message?.content || []))),
+    late: lateOf(r.recs), shown: shownOf(r.recs),
   };
   await r.end(); return out;
 }
@@ -870,6 +891,8 @@ else {
       await until(() => r.results() >= 2, 15000);
       await sleep(2500);
       const reqsAfterStop = r.mock.reqs.length - reqsAtStop;
+      const leaked = r.mock.reqs.slice(reqsAtStop).map((q) => q.all);   // B-28b1: before MARK-D, every one is a leaked follow-up
+      const late = lateOf(r.recs), shown = shownOf(r.recs);
       const follow = r.follows();
       const kept = r.drops().flatMap((d) => d.keptIds);
       const drop = r.drops().map((d) => ({ items: d.items, kept: d.kept }));
@@ -877,7 +900,7 @@ else {
       await until(() => r.mock.reqs.length > reqsAtStop + reqsAfterStop, 20000);
       await sleep(500);
       const next = r.mock.reqs[r.mock.reqs.length - 1];
-      const out = { reqsAfterStop, follow, kept, drop, nextCarries: next ? next.all : null };
+      const out = { reqsAfterStop, leaked, late, shown, follow, kept, drop, nextCarries: next ? next.all : null };
       await r.end(); return out;
     })(),
     realLateC('stop'), realLateC('result'), realLateC('settled'), realLateC(20), realLateC(45),
@@ -898,18 +921,19 @@ else {
   ]);
   ok(lands.afterTool.length === 1 && /The user sent a new message while you were working:\s*MARK-B handed while the Bash runs/.test(lands.afterTool[0]) && lands.results === 1, '§A ① the REAL CLI took the stamped frame INTO THE RUNNING TURN: the request after the tool result carries «The user sent a new message while you were working: …» — one turn', lands);
   ok(S(lands.handed) === S(['m-b']) && S(lands.landed) === S(['m-b']), '§A ① …and the wrapper said handed → landed', lands);
-  ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && stops.reqsAfterStop === 0, '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — NO request reached the model after Stop', stops);
+  console.log(`    §A leaked follow-ups (B-28b1: the CLI read the second interrupt after its request left) — ② ${stops.leaked.length} · ③ stop ${leakedOf(rl0).length} · result ${leakedOf(rlRes).length} · settled ${leakedOf(rlSet).length} · δ20 ${leakedOf(rl20).length} · δ45 ${leakedOf(rl45).length}; told ${[stops, rl0, rlRes, rlSet, rl20, rl45].map((l) => l.late).join('/')}, shown ${[stops, rl0, rlRes, rlSet, rl20, rl45].map((l) => l.shown).join('/')}`);
+  ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && stopLaw(stops.leaked, stops.late, stops.shown), '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — THE LAW (B-28b1): no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact was recorded and shown', stops);
   ok(S(stops.drop) === S([{ items: 0, kept: 1 }]), '§A ② …ONE queue_dropped that puts nothing back and counts the handed frame (the toast\'s «stays with the turn»)', stops);
   ok(Array.isArray(stops.nextCarries) && stops.nextCarries.includes('MARK-B') && stops.nextCarries.includes('MARK-D'), '§A ② …and it stayed in the conversation: the next message\'s request carries it too', stops);
   for (const l of [rl0, rlRes]) {
     ok(l.cHeld && !l.cHanded && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]), `§A ③ the REAL CLI, C stamped at «${l.at}» (inside the Stop window by its signal, +${l.tC} ms): HELD as a plain queued send, never handed — ONE record keeps B`, l);
-    ok(l.reqsAfterStop?.length === 1 && l.reqsAfterStop.every((q) => !q.beforeDrain) && l.answeredC, `§A ③ …«${l.at}»: NO request reached the model before the stop settled; the one after it is C's own turn (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
+    ok(cReqsOf(l).length === 1 && !cReqsOf(l)[0].beforeDrain && stopLaw(leakedOf(l), l.late, l.shown) && l.answeredC, `§A ③ …«${l.at}»: THE LAW (B-28b1) — before the stop settled no request reached the model, or the held frame's ONE follow-up did and it was told; C's own turn came after the drain (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
   }
-  ok(!rlSet.cHeld && !rlSet.cHanded && rlSet.answeredC && rlSet.reqsAfterStop?.length === 1 && rlSet.follows === 1, `§A ③ C stamped once the stop SETTLED (+${rlSet.tC} ms, the wrapper's own settle line): a plain send — it runs as its own turn, and B's follow-up was still interrupted`, rlSet);
+  ok(!rlSet.cHeld && !rlSet.cHanded && rlSet.answeredC && cReqsOf(rlSet).length === 1 && stopLaw(leakedOf(rlSet), rlSet.late, rlSet.shown) && rlSet.follows === 1, `§A ③ C stamped once the stop SETTLED (+${rlSet.tC} ms, the wrapper's own settle line): a plain send — it runs as its own turn, and B's follow-up was still interrupted`, rlSet);
   for (const l of [rl20, rl45]) {
     const inside = l.cHeld;
     console.log(`    §A ③ δ=${l.at} ms: C came ${inside ? 'INSIDE the window (held)' : 'AFTER the settle (a plain send)'} — the settle ${l.settledBeforeC ? 'preceded' : 'followed'} it`);
-    ok(!l.cHanded && l.answeredC && l.reqsAfterStop?.length === 1 && l.reqsAfterStop.every((q) => !inside || !q.beforeDrain) && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]) && (inside || l.settledBeforeC), `§A ③ δ=${l.at} ms, judged by its signal: never handed, nothing answered B, C ran as its own turn — ${inside ? 'held until the settle' : 'a plain send after it'}`, l);
+    ok(!l.cHanded && l.answeredC && cReqsOf(l).length === 1 && (!inside || !cReqsOf(l)[0].beforeDrain) && stopLaw(leakedOf(l), l.late, l.shown) && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]) && (inside || l.settledBeforeC), `§A ③ δ=${l.at} ms, judged by its signal: never handed, nothing answered B, C ran as its own turn — ${inside ? 'held until the settle' : 'a plain send after it'}`, l);
   }
   ok(rride.rodeWith && S(rride.drops) === S([{ items: 0, kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && rride.follows === 0 && S(rride.landedAfter) === S(['m-b']), '§A ④ (r4) the REAL CLI, Stop after B rode the tool result but before the model spoke: not proven read, so the record KEEPS it — the CLI started no follow-up (it had taken it in), so the settle says `landed` afterwards', rride);
   // ── §A, ACCEPTANCE r4: the product's own prompt hook, and the restart ──

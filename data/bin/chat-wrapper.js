@@ -774,7 +774,7 @@ function dropHeldForStop() {
   const held = handed.length + (stopping ? stopping.held : 0);
   const live = turnBusy || cliOwesTurn || !!stopping;
   handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
-  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, named: stopping && stopping.named ? stopping.named : new Set(), namesSaid: !!(stopping && stopping.namesSaid), kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))) }; armBound(); }
+  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, named: stopping && stopping.named ? stopping.named : new Set(), namesSaid: !!(stopping && stopping.namesSaid), kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))), followRun: stopping ? stopping.followRun || null : null }; armBound(); }   // B-28b1: a second Stop inside the follow-up keeps its mark — it is still judged at its result
   const dropped = promptQueue.splice(0, promptQueue.length);
   settleCopies(dropped.map((q) => q.msgId)); // put back (or VibeSpace's own): never run — its kept files go
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
@@ -789,6 +789,21 @@ function dropHeldForStop() {
   if (dropped.length) publishQueue();
   log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept (${riding.length} of them riding a tool result), ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`);
   saySettle();
+}
+/** THE STOP THAT CAME LATE (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18: «TELL, DO NOT PRETEND»). The
+ *  follow-up the window interrupted on its init still reached the model when the CLI read that second interrupt after its
+ *  request had left (about 12 ms after the init, measured on 2.1.312; a loaded machine loses that race — hosted runners: the
+ *  stop settled at +57..66 ms and the follow-up reached the mock model). The CLI's own records say so: an assistant record of
+ *  that turn before its result (the model answered; a `<synthetic>` record sent nothing — the processLine mark skips it), or
+ *  tokens in its result's OWN `usage` — that turn's main-thread calls only (recorded on 2.1.312: a background agent's calls
+ *  land in model_usage_since_last_result, never in `usage`; a follow-up that sent nothing says 0/0), on every CLI version. A
+ *  request the CLI aborted before the model's first event leaves neither (the heavy suite's mock counts that one).
+ *  → null, or the fact the follow-up's result carries: { follow, how: 'answered' | 'billed', cut (false: it ran to its end), tokens? } */
+function stopLateOf(result, run) {
+  const sum = (o, keys) => keys.reduce((a, k) => { const v = Number(o && o[k]); return a + (Number.isFinite(v) && v > 0 ? v : 0); }, 0);
+  const tokens = sum(result && result.usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']);
+  if (!run.answered && !(tokens > 0)) return null;
+  return { follow: run.n, how: run.answered ? 'answered' : 'billed', cut: !(result && result.subtype === 'success'), ...(tokens > 0 ? { tokens } : {}) };
 }
 /** The Stop window closes: the CLI settled (its idle — or its result, where it says no state word). */
 function settleStop(why) {
@@ -1006,6 +1021,8 @@ function processLine(line) {
         settleCopies(ids);
       }
     }
+    // B-28b1: the follow-up interrupted on its init SPOKE — its request had left before the CLI read the second interrupt
+    if (msg.type === 'assistant' && stopping && stopping.followRun && msg.message?.model !== '<synthetic>') stopping.followRun.answered = true;   // a <synthetic> record sent nothing
     if (starts) {
       turnBusy = true; awaitingStart = false;
       clearTimeout(boundTimer); boundTimer = null; boundUntil = null;
@@ -1018,6 +1035,7 @@ function processLine(line) {
         // A second Stop the person sent inside the window IS that interrupt (its request id, answered by the CLI).
         if (!deliverHeldInterrupt('on the follow-up init')) sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-${process.pid}-${++handSeq}`, request: { subtype: 'interrupt' } }));
         stopping.follows++;
+        stopping.followRun = { n: stopping.follows, answered: false };   // B-28b1: judged at its result (stopLateOf)
         log(`interrupt: the CLI started follow-up turn ${stopping.follows} for what it held at Stop — interrupted on its init`);
         // WHO THE FOLLOW-UP CARRIES IS SAID BY ITS INIT (lane midturn-order r3–r4, m15; measured: `user_message_uuids` names every
         // stamped frame the turn consumed, 2.1.307 on). Every follow-up's names are REMEMBERED — the CLI may split what it held
@@ -1034,6 +1052,18 @@ function processLine(line) {
     } else if (msg.type === 'result' || (idle && !awaitingStart)) {
       turnBusy = false; awaitingStart = false; turnEnded = true;
       if (msg.type === 'result') {
+        // B-28b1 (TELL, DO NOT PRETEND): the follow-up the window interrupted on its init ended. If it still reached the model,
+        // the fact rides ITS OWN result record (a second client and a reload read the same line) and the page says it once,
+        // in that Stop's line. Nothing is sent, held or dropped because of it: a frame held behind the window waits for the
+        // settle as before.
+        if (stopping && stopping.followRun) {
+          const late = stopLateOf(msg, stopping.followRun);
+          stopping.followRun = null;
+          if (late) {
+            msg.webui_stop_late = late; line = JSON.stringify(msg);
+            log(`stop late: follow-up turn ${late.follow} reached the model before the CLI read the second interrupt (${late.how}${late.tokens ? `, ${late.tokens} tokens` : ''}, ${late.cut ? 'cut off' : 'ran to its end'}) — recorded on its result, said once`);
+          }
+        }
         // a frame that rode this turn's last request is in the conversation as read, whatever the model said after
         const rode = handed.filter((h) => h.phase === 'riding');
         if (rode.length) { for (const h of rode) handed.splice(handed.indexOf(h), 1); record('input_handover', { state: 'landed', msg_ids: rode.map((h) => h.msgId).filter(Boolean) }); settleCopies(rode.map((h) => h.msgId)); }
