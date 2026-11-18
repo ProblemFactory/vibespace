@@ -219,6 +219,19 @@ try {
     await until(() => D.ev(`(() => { const it = ${MENU_ITEM.slice(3)}; if (!it) return null; it.click(); return true; })()`), 5000, 30);
     return until(() => D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const mw = document.getElementById('main-wrapper'); return o && o.querySelector('.btn-create') ? { sliding: mw.getAnimations().map((x) => x.transitionProperty).join(',') } : null; })()`), 5000, 30);
   };
+  // EACH RED CONTROL LEAVES THE FORM AS IT FOUND IT (主开发 2026-11-18 20:38Z, B-2481 — the hosted shard s3c, red on BOTH tries at the
+  // release's bytes, run 44383892468): control ③'s ungated press can LAND on 确定 (its log names no miss, unlike ②'s) — a real
+  // confirm. On a slow runner its answer is still out when the real leg opens its form: the form disables 取消 while it posts, so
+  // slideOpen's cancel did nothing, the menu RAISED that same singleton form, and the still door waited on its disabled 确定 until the
+  // late answer removed it («gone after 5025 ms … found false») — the toast was the control's (try 2: after ④ cleared the list, so its
+  // leg passed by accident; try 1: before, so null). Each control's press is now waited OUT — the form gone with its answer, or
+  // standing with nothing in flight — and what it left is closed, a counted step
+  const leaveAsFound = async (label) => {
+    const out = await until(() => D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); if (!o) return { open: false }; const b = o.querySelector('.btn-create'), c = o.querySelector('.btn-cancel'); return b && c && !b.disabled && !c.disabled ? { open: true } : null; })()`), 15000, 100);
+    if (out && out.open) await D.ev("(document.querySelector('#refresh-live-dialog .btn-cancel')?.click(), true)");
+    const gone = await until(() => D.ev("document.getElementById('refresh-live-dialog') ? null : true"), 5000, 50);
+    check(`still: ${label} leaves the form as it found it — its press waited out (the form ${out && out.open ? 'standing, nothing in flight' : 'gone with its answer'}) and nothing of it left open`, !!out && gone === true, { out, gone });
+  };
   await D.S('Animation.enable'); await D.S('Animation.setPlaybackRate', { playbackRate: 0.1 });
   try {
     // ① the form opened mid-slide: 确定 rides the workspace
@@ -228,13 +241,17 @@ try {
     // ② RED CONTROL — a press aimed where 确定 WAS (it pressed once 确定 had slid ≥ 60 px past that point): a named miss
     const red1 = await DOOR(OK_SEL, { gate: false, aim: async (look) => { await until(() => D.ev(`(() => { const e = document.querySelector(${JSON.stringify(OK_SEL)}); if (!e) return null; const q = e.getBoundingClientRect(); return q.left + q.width / 2 - ${look.x} >= 60 ? true : null; })()`), 4000, 20); return { x: look.x, y: look.y }; } });
     check(`still: RED CONTROL — a press aimed where 确定 WAS (it slid ≥ 60 px since) is a named miss: «${DOOR.last?.landed?.why}»`, red1 === false && !!DOOR.last?.landed && !DOOR.last.landed.ok, DOOR.last);
+    await leaveAsFound('RED CONTROL ②');
     // ③ RED CONTROL — the door WITHOUT its still gate presses while the workspace still moves (the gate is what waits)
     await slideOpen();
     const red2 = await DOOR(OK_SEL, { gate: false });
     const red2Look = DOOR.last && DOOR.last.look;
     check(`still: RED CONTROL — the ungated door presses at once, while 确定 still moves (moving at its press: ${(red2Look?.movers || []).join(', ') || 'nothing'})`, !!red2Look && (red2Look.movers || []).length > 0, { red2, last: DOOR.last });
+    await leaveAsFound('RED CONTROL ③');
     // ④ THE STILL DOOR — it waits the slide out, then presses 确定 once; it lands; the dialog closes with the toast
-    await slideOpen();
+    const o4 = await slideOpen();
+    const stand4 = await D.ev(`(() => { const o = document.getElementById('refresh-live-dialog'); const b = o && o.querySelector('.btn-create'), c = o && o.querySelector('.btn-cancel'); return !!b && !b.disabled && !!c && !c.disabled; })()`);
+    check('still: the real leg\'s form is OPEN and STANDING before its press — a fresh form, 确定 and 取消 enabled (nothing of the controls in flight)', !!o4 && stand4 === true, { o4, stand4 });
     await D.ev('(window.__toasts.length = 0, true)');
     const good = await DOOR(OK_SEL);
     const g = DOOR.last || {};
