@@ -9535,6 +9535,7 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .vault-otp-open { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font: inherit; font-size: 13px; line-height: 1; cursor: pointer; }
 .vault-otp-open:hover, .vault-otp-wrap > .vault-pw[aria-expanded="true"] + .vault-otp-open { color: var(--text); background: var(--bg-hover); }
 .vault-otp-list { position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 30; box-sizing: border-box; border: 1px solid var(--border-active); border-radius: var(--radius-sm); background: var(--bg-input); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); padding: 4px; max-height: 220px; overflow: auto; font-weight: normal; }
+.vault-otp-list.up { top: auto; bottom: calc(100% + 3px); }   /* too little room under the field: the list opens above it */
 .vault-otp-list[hidden], .vault-otp-note[hidden], .vault-otp-state[hidden] { display: none; }
 .vault-otp-head { padding: 2px 6px 4px; color: var(--text-dim); font-size: 11px; }
 .vault-otp-rows { display: flex; flex-direction: column; }

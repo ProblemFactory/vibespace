@@ -3,7 +3,8 @@
 // dialog, the login card an agent's ask files — in the tray and in its own window) named the vault's two-step codes through
 // the browser's NATIVE list (the tree's only <datalist>); every platform draws that list as its own suggestion popup, and the
 // owner read it as the browser's history. Now THE PAGE draws the list:
-//   · opened by the field's own mark (the icon set's chevron at its right end) and by focus; headed in plain words; a row per code by its NAME (the
+//   · opened by the field's own mark (the icon set's chevron at its right end), by a press in the field, by typing and by ↓ —
+//     never by focus alone (a Tab passing through the optional field leaves the card's Save uncovered: follow-up of the cure); headed in plain words; a row per code by its NAME (the
 //     vault's own, unique — GET /api/vault/totp answers names);
 //   · placed UNDER the field and taking NO room in the flow (cure, 主开发 2026-11-18 00:02Z: a list in the flow that closed on
 //     blur moved Save between a press's down and its up — the press landed on nothing; opening it pushed Save down the same
@@ -103,6 +104,9 @@ export function otpField(input, { addCode = null } = {}) {
   };
   const say = () => {
     const v = typedVerdict(facts, input.value);
+    // a read in flight: a note already shown keeps its BOX (its words hidden) until the read lands — nothing under it moves
+    if (v === 'unknown' && facts.reading && !note.hidden) { note.style.visibility = 'hidden'; input.setAttribute('aria-invalid', 'false'); return; }
+    note.style.visibility = '';
     const words = v === 'unlisted' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : '';
     if (note.textContent !== words) note.textContent = words;
     note.hidden = !words;
@@ -165,8 +169,12 @@ export function otpField(input, { addCode = null } = {}) {
     // capped to the room under the field inside the box that clips it (never cut by the chat's message, never a scrollbar that
     // narrows the dialog): at most 220 px, at least two rows
     const clip = clipBoxOf(wrap), z = parseFloat(getComputedStyle(document.body).zoom) || 1;
-    const bottom = Math.min(clip ? clip.getBoundingClientRect().bottom : innerHeight, innerHeight), room = (bottom - wrap.getBoundingClientRect().bottom - 6) / z;
-    panel.style.maxHeight = `${Math.round(Math.max(72, Math.min(220, room)))}px`;
+    const box = wrap.getBoundingClientRect(), bottom = Math.min(clip ? clip.getBoundingClientRect().bottom : innerHeight, innerHeight), top = Math.max(clip ? clip.getBoundingClientRect().top : 0, 0);
+    const below = (bottom - box.bottom - 6) / z, above = (box.top - top - 6) / z;
+    // too little room under the field (a card at a message's foot, the viewport's bottom) and more above: the list opens UPWARD
+    const up = below < 120 && above > below;
+    panel.classList.toggle('up', up);
+    panel.style.maxHeight = `${Math.round(Math.max(72, Math.min(220, up ? above : below)))}px`;
   };
   const close = () => {
     open = false; active = -1; panel.remove(); input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant');
@@ -177,7 +185,7 @@ export function otpField(input, { addCode = null } = {}) {
     close(); say();
     if (document.activeElement !== input) { try { input.focus({ preventScroll: true }); } catch { } }
   };
-  input.addEventListener('focus', () => { if (!open) show(); });
+  input.addEventListener('click', () => { if (!open) show(); });   // a PRESS in the field opens it — a focus alone (Tab) does not
   input.addEventListener('input', () => {
     if (picking) return;
     active = -1;

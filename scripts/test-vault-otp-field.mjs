@@ -91,8 +91,8 @@ ok(lists.length === 0 && /removeAttribute\('list'\)/.test(fld) && /\['autocomple
   'the browser offers nothing of its own: no `list`, autocomplete off, the password managers\' ignore marks; the field a combobox over a listbox (its own) — no page file makes a <datalist> any more', lists);
 ok(/window\.addEventListener\('keydown', [^\n]*\}, true\)/.test(fld) && /if \(st\.taken\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}/.test(fld) && /keyStep\(\{ open, active \}, e\.key, rows\.length\)/.test(fld) && /e\.isComposing \|\| e\.keyCode === 229/.test(fld),
   'the keys are heard at the WINDOW\'s capture (before the tray\'s document-capture Escape and the form\'s door), through the model\'s keyStep; a taken key reaches nobody else; a composing key is never read');
-ok((fld.match(/addEventListener\('pointerdown', \(e\) => e\.preventDefault\(\)\)/g) || []).length >= 3 && /input\.addEventListener\('focus', \(\) => \{ if \(!open\) show\(\); \}\)/.test(fld) && /mark\.addEventListener\('click'/.test(fld),
-  'opened by focus and by the field\'s own mark; a press on a row, the mark or the empty vault\'s door keeps the focus in the field (nothing blurs and closes under it)');
+ok((fld.match(/addEventListener\('pointerdown', \(e\) => e\.preventDefault\(\)\)/g) || []).length >= 3 && /input\.addEventListener\('click', \(\) => \{ if \(!open\) show\(\); \}\)/.test(fld) && !/input\.addEventListener\('focus'/.test(fld) && /mark\.addEventListener\('click'/.test(fld),   // stale-pins: kept — a deliberate absence check: a focus alone never opens the list
+  'opened by a press in the field and by the field\'s own mark (never by a focus alone — a Tab through the optional field leaves the card\'s Save uncovered); a press on a row, the mark or the empty vault\'s door keeps the focus in the field (nothing blurs and closes under it)');
 ok(/t\('Two-step codes in this vault'\)/.test(fld) && /t\('No two-step code in this vault yet'\)/.test(fld) && /t\('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»'\)/.test(fld) && /addCode\(\)/.test(fld),
   'headed in plain words; an empty vault says so with the caller\'s «Two-step code…» door; a typed name that lists nothing is said under the field (the add door\'s own sentence)');
 const add = row.slice(row.indexOf('export function showLoginAddDialog('));
@@ -110,9 +110,13 @@ ok(/const my = \+\+gen;/.test(fld) && /if \(my !== gen\) return;/.test(fld) && /
 ok(/f\.otpPick\.added\(r\.name\); try \{ refresh\(\); \} catch \{ \} \}/.test(add), 'the add dialog\'s «Two-step code…» door refreshes the Vault window too (the new code listed at once)');
 ok(/import \{ afterPointerUp \} from '\.\/blur-commit\.js';/.test(fld) && /afterPointerUp\(closeIfAway\);/.test(fld) && !/(?:window|document)\.addEventListener\(\s*'(?:pointerup|pointercancel|pointermove)'/.test(fld),
   'cure round 2: a POINTER press that moves the focus closes the list only AFTER its click has landed (nothing moves between its down and its up, whatever the placement); a key (Tab) closes it at once');
+ok(/const up = below < 120 && above > below;/.test(fld) && /panel\.classList\.toggle\('up', up\);/.test(fld) && /\.vault-otp-list\.up \{ top: auto; bottom: calc\(100% \+ 3px\); \}/.test(css),
+  'follow-up: too little room under the field and more above ⇒ the list opens UPWARD, its height capped to that room — a card at a message\'s foot never cuts its rows');
+ok(/if \(v === 'unknown' && facts\.reading && !note\.hidden\) \{ note\.style\.visibility = 'hidden';/.test(fld),
+  'follow-up: a read in flight keeps a shown note\'s BOX (its words hidden until the read lands) — nothing under the note moves');
 ok(/if \(!loading\) load\(true\);/.test(fld) && /facts\.reading = true;/.test(fld) && /if \(facts\.loaded && typedSettled\(facts\.names, input\.value\)\) \{ if \(open\) close\(\);/.test(fld),
   'cure round 2: every opening reads the names again (a code added elsewhere, an unlock); a listed name typed in full settles the choice and closes the list');
-ok(/const clipBoxOf = /.test(fld) && /panel\.style\.maxHeight = `\$\{Math\.round\(Math\.max\(72, Math\.min\(220, room\)\)\)\}px`;/.test(fld) && /\/paint\|strict\|content\/\.test\(cs\.contain/.test(fld),
+ok(/const clipBoxOf = /.test(fld) && /panel\.style\.maxHeight = `\$\{Math\.round\(Math\.max\(72, Math\.min\(220, up \? above : below\)\)\)\}px`;/.test(fld) && /\/paint\|strict\|content\/\.test\(cs\.contain/.test(fld),
   'cure round 2: the open list is capped to the room under the field inside the box that clips it (the chat\'s message contains its paint) — never cut off, never a scrollbar that narrows the dialog');
 ok(/if \(e\.key === 'Tab' && !e\.shiftKey && open\) \{/.test(fld) && /KEYED\.set\(door, doorKeys\);/.test(fld) && /panel\.addEventListener\('pointerdown', \(e\) => e\.preventDefault\(\)\);/.test(fld) && /otp\.setAttribute\('aria-labelledby', otpWords\.id\)/.test(fieldsFn + row),
   'cure round 2: Tab reaches the list\'s door (Escape on it closes the list, back to the field); a press anywhere on the list keeps the focus; the field is named by its label\'s words alone');
