@@ -275,6 +275,7 @@ export function showUnlock({ then = null, opener = 'person' } = {}) {
     let r; try { r = await post('/api/vault/unlock', { password: pw.value }); } finally { unlockAsked--; }
     done();
     if (r && r.ok) { pw.value = ''; applyUnlockHere(r); close(); showToast(t('Vault unlocked')); return; }
+    if (!unlockAsked) ownUnlockMissed();   // this page's unlock did not land (and no other press of it is still in flight — a second Enter): a `here` wait another page's unlock raced ends unrun (the restack read)
     pw.value = ''; pw.focus();
     err.textContent = vaultWords(r);
     if (r && r.state) applyVaultFacts(r);
@@ -354,7 +355,12 @@ export function showChange() {
 /** THIS page's own unlock answer (the dialog's submit) — applied with `unlockedHere` raised, so a wait that asked for THIS
  *  page's unlock (unlockThen `here`) tells it from another tab's or device's (the broadcast applies the same facts). */
 let unlockedHere = false, unlockAsked = 0;
-function applyUnlockHere(r) { unlockedHere = true; try { applyVaultFacts(r); } finally { unlockedHere = false; } }
+// the restack read (a narrow race): `here` waits that saw ANOTHER page's unlock while this page's own was in flight wait for its
+// answer — applied ⇒ they run (applyUnlockHere); NOT ok (a network error, a refusal) ⇒ they end unrun (ownUnlockMissed), never
+// left armed with no dialog to pop the menu at some later unlock here
+const raceWaits = new Set();
+function applyUnlockHere(r) { unlockedHere = true; try { applyVaultFacts(r); } finally { unlockedHere = false; raceWaits.clear(); } }
+function ownUnlockMissed() { for (const end of [...raceWaits]) end(); raceWaits.clear(); }
 
 /** RUN `go` ONCE AFTER THE UNLOCK ASK (B-864f cure — the reader round's must): when the person closes the unlock dialog (an
  *  unlock, 「稍后」, Esc, ✕) OR the vault turns unlocked (this dialog, another tab, another device), whichever comes first.
@@ -367,10 +373,13 @@ export function unlockThen(go, { here = false } = {}) {
   // later must not pop it open); the close here still runs it
   // cure 2b (the read): another page's unlock ENDS a `here` wait unrun — left armed, a later unlock here for another reason
   // would pop the menu hours after the press; one that lands while THIS page's own unlock is in flight waits for its answer
+  const endUnrun = () => { if (ran) return; ran = true; if (off) off(); };
   off = onVaultFacts((f) => {
-    if (!f || f.state !== 'unlocked') return;
+    if (!f) return;
+    if (f.state === 'not_set_up') { if (here) endUnrun(); else once(); return; }   // the restack read: a reset while it waits — the ⚙ wait ends unrun, a resume-all goes on (its door comes back)
+    if (f.state !== 'unlocked') return;
     if (!here || unlockedHere) { once(); return; }
-    if (!unlockAsked) { ran = true; off(); }
+    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);
   });
   if (facts && facts.state === 'unlocked') { once(); return; }
   showUnlock({ then: once });

@@ -9998,6 +9998,7 @@ export default {
   "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，什么也不会丢。",
   "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，然后发出你写好的消息，什么也不会丢。",
   "Not resumed — this conversation was archived while it waited for the vault.": "未恢复——这个对话在等保险库时被你归档了。",
+  "Not resumed — this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»": "未恢复——这个对话在等保险库时被你归档了。你写的消息没有发送：「{text}」",
   "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "这个对话的文件夹在 {name} 上，它现在没有挂载——什么也没启动；等挂载恢复后再恢复这个对话。",
   "The folder is on {name}, which is not mounted right now — start again once it is back.": "文件夹在 {name} 上，它现在没有挂载——等它恢复后再重新开始。",
   "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "文件夹在 {name} 上，要等保险库解锁后才能打开——请先解锁，再重新开始。",

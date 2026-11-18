@@ -997,17 +997,19 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   ok(u1.atUnlock === 1 && u1.went === 1, 'unlockThen: the vault turns UNLOCKED while the dialog is open (it is removed, no closer runs) ⇒ go runs ONCE, and a later close runs nothing more', u1);
   const u2 = await scene(null, thenScene('close'));
   ok(u2.atClose === 1 && u2.went === 1, 'unlockThen: the person closes the dialog (Later) first ⇒ go runs ONCE (the resumes start; each folder that waits says so), a later unlock runs nothing more', u2);
-  const uRed = await scene((s0) => s0.replace("  off = onVaultFacts((f) => {\n    if (!f || f.state !== 'unlocked') return;\n    if (!here || unlockedHere) { once(); return; }\n    if (!unlockAsked) { ran = true; off(); }\n  });\n", "  off = () => { };\n"), thenScene('unlock'));
+  const uRed = await scene((s0) => s0.replace("  off = onVaultFacts((f) => {\n    if (!f) return;\n    if (f.state === 'not_set_up') { if (here) endUnrun(); else once(); return; }   // the restack read: a reset while it waits — the ⚙ wait ends unrun, a resume-all goes on (its door comes back)\n    if (f.state !== 'unlocked') return;\n    if (!here || unlockedHere) { once(); return; }\n    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);\n  });\n", "  off = () => { };\n"), thenScene('unlock'));
   // the ⚙ press (unlockFirst — the same root, the cure's own read): THIS page's unlock in its dialog (which removes it) opens the
   // menu after it, once; ANOTHER tab's or device's unlock does not (cure 2, 主开发: a menu popping open minutes later is not what
   // the press asked for). The leg's own bundle exposes the page's own unlock road (applyUnlockHere, the dialog's submit) by a
   // source line it appends — the product exports nothing for it
-  const exposeHere = (s0) => s0 + '\nexport const __applyUnlockHere = applyUnlockHere;\nexport const __asking = (n) => { unlockAsked += n; };\n';
+  const exposeHere = (s0) => s0 + '\nexport const __applyUnlockHere = applyUnlockHere;\nexport const __asking = (n) => { unlockAsked += n; };\nexport const __ownMissed = () => ownUnlockMissed();\n';
   const gearScene = (by) => (p) => (async () => {
     p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick();
     let opened = 0; p.M.unlockFirst(() => { opened++; });
     const facts = async (state) => { const rp = p.M.refreshVaultFacts(); p.answer({ state, startedAt: 7 }); await rp; };   // the hub's facts (a broadcast / a read)
     if (by === 'here') p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 });
+    else if (by === 'missed') { p.M.__asking(1); await facts('unlocked'); await tick(); p.M.__asking(-1); p.M.__ownMissed(); await new Promise((r) => setTimeout(r, 5)); await facts('locked'); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // the restack read: another device's unlock lands while THIS page's own is in flight, and this page's own comes back NOT ok; hours later an unlock here for another reason
+    else if (by === 'reset') { await facts('not_set_up'); await new Promise((r) => setTimeout(r, 5)); await facts('locked'); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // the restack read: the vault is RESET while the dialog is open; later it is set up again and unlocked here
     else if (by === 'raced') { p.M.__asking(1); await facts('unlocked'); await tick(); p.M.__asking(-1); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // this page's unlock: the hub's broadcast lands BEFORE its answer
     else { await facts('unlocked'); await new Promise((r) => setTimeout(r, 5)); await facts('locked'); p.M.__applyUnlockHere({ state: 'unlocked', startedAt: 7 }); }   // another device unlocks; later the vault locks and THIS page unlocks for another reason
     await new Promise((r) => setTimeout(r, 5)); await tick();
@@ -1019,15 +1021,29 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   ok(g2.opened === 0, 'the ⚙ press while locked: ANOTHER device\'s unlock ENDS the wait unrun — no menu then, and none when this page unlocks later for another reason (cure 2b)', g2);
   const g3 = await scene(exposeHere, gearScene('raced'));
   ok(g3.opened === 1, 'the ⚙ press: THIS page\'s unlock whose broadcast lands before its own answer still opens the menu, once', g3);
-  const gRed3 = await scene((s0) => exposeHere(s0.replace('    if (!unlockAsked) { ran = true; off(); }\n', '')), gearScene('elsewhere'));
+  const gRed3 = await scene((s0) => exposeHere(s0.replace('    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);\n', '')), gearScene('elsewhere'));
   ok(gRed3.opened === 1, 'RED control: a wait another device\'s unlock leaves ARMED (cure 2\'s shape) ⇒ a later unlock here pops the menu hours after the press', gRed3);
-  const gRed4 = await scene((s0) => exposeHere(s0.replace('    if (!unlockAsked) { ran = true; off(); }\n', '    { ran = true; off(); }\n')), gearScene('raced'));
+  const gRed4 = await scene((s0) => exposeHere(s0.replace('    if (!unlockAsked) endUnrun(); else raceWaits.add(endUnrun);\n', '    endUnrun();\n')), gearScene('raced'));
   ok(gRed4.opened === 0, 'RED control: the wait dropped on ANY other unlock, this page\'s own in flight included ⇒ the broadcast that lands first kills the press', gRed4);
+  // the restack's readers (cure 3): this page's own unlock that FAILS after another page's unlock raced it ends the ⚙ wait unrun;
+  // a RESET while the dialog is open ends it unrun too (a resume-all's wait goes on: its door comes back)
+  const g5 = await scene(exposeHere, gearScene('missed'));
+  ok(g5.opened === 0, 'the ⚙ press: another device\'s unlock lands while THIS page\'s own is in flight and this page\'s own comes back NOT ok ⇒ the wait ENDS unrun — no menu at a later unlock here (cure 3)', g5);
+  const gRed5 = await scene((s0) => exposeHere(s0.replace('function ownUnlockMissed() { for (const end of [...raceWaits]) end(); raceWaits.clear(); }', 'function ownUnlockMissed() { }')), gearScene('missed'));
+  ok(gRed5.opened === 1, 'RED control: a missed own unlock that ends nothing (cure 2\'s shape) ⇒ the wait stays armed with no dialog and pops the menu at a later unlock here', gRed5);
+  const g6 = await scene(exposeHere, gearScene('reset'));
+  ok(g6.opened === 0, 'the ⚙ press: the vault RESET while the unlock dialog is open ⇒ the wait ends unrun — no menu when it is unlocked here later (cure 3)', g6);
+  const gRed6 = await scene((s0) => exposeHere(s0.replace("    if (f.state === 'not_set_up') { if (here) endUnrun(); else once(); return; }", '')), gearScene('reset'));
+  ok(gRed6.opened === 1, 'RED control: a reset that ends nothing (cure 2\'s shape) ⇒ the wait stays armed and pops the menu at the later unlock here', gRed6);
+  const resetGo = (p) => (async () => { p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick(); let ran = 0; p.M.unlockThen(() => { ran++; }); const rp = p.M.refreshVaultFacts(); p.answer({ state: 'not_set_up' }); await rp; await new Promise((r) => setTimeout(r, 5)); await tick(); return { ran }; })();
+  const g7 = await scene(null, resetGo);
+  ok(g7.ran === 1, 'a resume-all\'s wait (unlockThen, not `here`) at a RESET runs ONCE — the offer\'s finally gives its door back (the restack reader\'s nit 2)', g7);
   // the dialog's submit is THIS page's road (source pin — the leg's shell stub draws no form): its unlock is counted in flight and applied as here
   const VUs = fs.readFileSync(path.join(REPO, 'src/lib/vault-unlock.js'), 'utf8');
-  const submitHere = (x) => /unlockAsked\+\+;[^\n]*\n\s*let r; try \{ r = await post\('\/api\/vault\/unlock', \{ password: pw\.value \}\); \} finally \{ unlockAsked--; \}/.test(x) && /if \(r && r\.ok\) \{ pw\.value = ''; applyUnlockHere\(r\); close\(\);/.test(x);
+  const submitHere = (x) => /unlockAsked\+\+;[^\n]*\n\s*let r; try \{ r = await post\('\/api\/vault\/unlock', \{ password: pw\.value \}\); \} finally \{ unlockAsked--; \}/.test(x) && /if \(r && r\.ok\) \{ pw\.value = ''; applyUnlockHere\(r\); close\(\);/.test(x) && /applyUnlockHere\(r\); close\(\); showToast\(t\('Vault unlocked'\)\); return; \}\n    if \(!unlockAsked\) ownUnlockMissed\(\);/.test(x);   // cure 3 (its own read): the failure branch ends a raced `here` wait — pinned, the legs call the exposed road
   ok(submitHere(VUs), 'the unlock dialog\'s submit counts its own unlock in flight and applies its answer as THIS page\'s');
   ok(!submitHere(VUs.replace("applyUnlockHere(r); close();", "applyVaultFacts(r); close();")), 'RED control: a submit that applies its answer plainly ⇒ the pin is red (a real unlock in the dialog would never open the ⚙ menu)');
+  ok(!submitHere(VUs.replace('    if (!unlockAsked) ownUnlockMissed();', '   ')), 'RED control: a submit whose failure branch ends nothing (cure 2\'s shape) ⇒ the pin is red (a raced `here` wait would stay armed)');
   const gRed = await scene((s0) => exposeHere(s0.replace('  if (vaultLoudState({ facts }).mark) { unlockThen(open, { here: true }); return; }', '  if (vaultLoudState({ facts }).mark) { showUnlock({ then: open }); return; }')), gearScene('here'));   // stale-pins: kept — a RED control: the pre-cure ⚙ press restored on purpose
   ok(gRed.opened === 0, 'RED control: the ⚙ press on `then` alone (the release\'s shape) ⇒ the menu never opens after an unlock in its dialog', gRed);
   const gRed2 = await scene((s0) => exposeHere(s0.replace('unlockThen(open, { here: true })', 'unlockThen(open)')), gearScene('elsewhere'));   // stale-pins: kept — a RED control: cure 1's ⚙ press (any unlock) restored on purpose

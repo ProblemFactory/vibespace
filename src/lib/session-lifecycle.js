@@ -372,7 +372,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           const archivedAtAsk = !!this.sidebar?.isArchived?.(convOf);
           const again = () => turnOf(() => new Promise((done) => {
             if (!this._winIs(winInfo)) { done(); return; } // closed or re-made while it waited
-            if (!archivedAtAsk && this.sidebar?.isArchived?.(convOf)) { this.sessions.get(winInfo.id)?._renderers?.appendSystem(t('Not resumed \u2014 this conversation was archived while it waited for the vault.')); done(); return; }
+            if (!archivedAtAsk && this.sidebar?.isArchived?.(convOf)) { const typed = typeof createArgs.initialMessage === 'string' ? createArgs.initialMessage.trim() : ''; this.sessions.get(winInfo.id)?._renderers?.appendSystem(typed ? t('Not resumed \u2014 this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»', { text: typed }) : t('Not resumed \u2014 this conversation was archived while it waited for the vault.')); done(); return; }   // the restack read: the window had promised to send it — its text comes back
             const re = this._reopenWin(winInfo.id); // the row, re-opened (r2 N1)
             const { onCreateResult: _r, onCreateEnd: _e, syncId: _s, winBounds: _w, recreateCwd: _c, ...asked } = createArgs;
             this.createSession({ ...asked, winBounds: winBounds || re?.place, syncId: re?.id, onCreateEnd: () => done() });

@@ -258,6 +258,12 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   ok(arRed.after === 6, 'RED control: the replay without the archive check (cure 1\'s shape) ⇒ the archived conversation is resumed', arRed);
   const aaRed = await waitsLeg(await lifeOf((x) => x.replace('if (!archivedAtAsk && this.sidebar?.isArchived?.(convOf))', 'if (this.sidebar?.isArchived?.(convOf))')), { archivedAtAsk: CID(2) });
   ok(aaRed.after === 5, 'RED control: «archived NOW» (cure 2\'s shape) ⇒ a resume the person asked of an archived conversation is dropped at the unlock, its message with it', aaRed);
+  // the restack read (cure 3): the window of an archived-while-waiting conversation had promised to send the message the person
+  // typed — the skip line gives its text back (source pin: the rig draws no window renderer; RED: cure 2's line, the text dropped)
+  { const LS = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+    const quotes = (x) => x.includes("const typed = typeof createArgs.initialMessage === 'string' ? createArgs.initialMessage.trim() : '';") && x.includes("appendSystem(typed ? t('Not resumed \\u2014 this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»', { text: typed })");
+    ok(quotes(LS), 'an archived-while-waiting window that carried a typed message says it was NOT sent and gives its text back (cure 3)');
+    ok(!quotes(LS.replace("appendSystem(typed ? t('Not resumed \\u2014 this conversation was archived while it waited for the vault. The message you wrote was not sent: «{text}»', { text: typed }) : ", "appendSystem((")), 'RED control: cure 2\'s line (the message dropped unsaid) ⇒ the pin is red'); }
   const r1 = await waitsLeg(await lifeOf((x) => x.replace('        if (msg.resumesAtUnlock) {\n', '        if (false) {\n')));
   ok(r1.after === 3, 'RED control: the window that waits taken out (the .407 shape) ⇒ nothing resumes after the unlock', r1);
   const flood = (x) => x.replace('const turnOf = (fn) => inTurn(fn);', 'const turnOf = (fn) => fn();');
