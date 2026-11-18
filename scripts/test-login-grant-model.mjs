@@ -244,6 +244,8 @@ console.log('⑦ THE WALK (主开发 00:28Z): for EVERY small case of the three 
           const page = Mod.pageSays(plan, s);
           const ownHere = (rows[scope].to || []).map(M.principalKeyOf).includes(s.key);
           let good = page.admitted === (verdict.length > 0) && (!page.admitted || page.through === verdict[0]);
+          // the drawing ticks as THIS row's own exactly what the row holds — never a member admitted through its Task Group / Everyone
+          if (good) good = plan.selected.includes(s.key) === ownHere;
           // a subject this row holds says ALSO the narrowest wider row that admits it — Everyone included (MUST 1)
           if (good && ownHere) good = (page.also || null) === (verdict.filter((sc) => sc !== scope)[0] || null);
           // Everyone admitted wider: the drawing names THAT row's exceptions (on its line, or beside its own chip)
@@ -267,6 +269,9 @@ console.log('⑦ THE WALK (主开发 00:28Z): for EVERY small case of the three 
   const F2 = await esMutant('src/lib/login-grant-model.js', "if (k !== 'everyone' && !outHere && plan.everyone", "if (k !== 'everyone' && plan.everyone");
   const r2 = walk(F2);
   ok(r2.wrong > 0 && r2.first.some((f) => f.page.admitted === false && f.verdict.length > 0), `RED CONTROL (MUST 2 — a conversation THIS row leaves out folded away while a wider row admits it): the page says «left out», the fill admits it (${r2.wrong} wrong)`, r2.first[0]);
+  const F3 = await esMutant('src/lib/login-grant-model.js', "const held = new Set(keys(here.to)), exceptHere", "const held = new Set(Object.keys(byWhat).filter((x) => (byWhat[x] || []).includes(scope))), exceptHere");
+  const r3 = walk(F3);
+  ok(r3.wrong > 0, `RED CONTROL (the «also» test as it was — «by what»'s own scope stands for the row's own grant): a member admitted through its Task Group is drawn as this row's own chip; the walk names it (${r3.wrong} wrong)`, r3.first[0]);
   // the dialog draws from the plan and nothing else
   const G2 = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-grants.js'), 'utf8');
   ok(/const plan = drawPlan\(\{ byWhat: byWhat \|\| \{\}, scope, rows: rowsBy, subjects \}\);/.test(G2) && /hint: hintOf\.get\(EVERYONE_KEY\) \|\|/.test(G2) && !/lockedFor\(|lockedPlan\(/.test(G2)
