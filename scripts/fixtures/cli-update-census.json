@@ -143,6 +143,26 @@
    "sites": 2
   },
   {
+   "id": "strip-faces-family",
+   "file": "src/lib/strip-faces.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a DISPLAY face only (lane mask-value-shape, the strip's step two): a known family's word on the chip («Opus 5.5»); a family the words do not know is drawn as its raw id — never hidden, never guessed, and no behaviour keys on it (the value sent, stored and in the menu stays the protocol's)",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
+  },
+  {
+   "id": "strip-faces-1m",
+   "file": "src/lib/strip-faces.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a DISPLAY face only: the [1m] mark of a known token worded «1M» on the chip; any other spelling stays raw (the id itself one hover away) — no behaviour keys on it",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 3
+  },
+  {
    "id": "anchors-split",
    "file": "src/usage-anchors.js",
    "keyedOn": "model",

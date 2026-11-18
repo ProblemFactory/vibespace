@@ -161,8 +161,8 @@
 /* A DOOR LOOKS LIKE A DOOR (page §3, the artboard the owner accepted): a hairline border, then ▾ (it opens a menu) or › (it
    opens a place) — the glyph is the stylesheet's, never in the chip's words; a status (the cache, a turn's time) has neither */
 .chat-status-bar > .chat-status-clickable:is(.chat-status-model, .chat-status-perm, .chat-status-autoresume-armed, .chat-status-ctx, .chat-status-artifacts, .chat-status-outbox, .chat-status-browser, .chat-status-channels, .chat-status-tasks, .chat-status-settings, .chat-status-turnstate) { border: 1px solid color-mix(in srgb, var(--text-dim) 45%, transparent); border-radius: var(--radius); padding: 0 6px; background-clip: padding-box; }
-.chat-status-bar > .chat-status-clickable:is(.chat-status-model, .chat-status-perm, .chat-status-autoresume-armed, .chat-status-artifacts, .chat-status-outbox, .chat-status-settings)::after { content: '\25BE'; margin-left: 4px; opacity: 0.7; }
-.chat-status-bar > .chat-status-clickable:is(.chat-status-ctx, .chat-status-browser, .chat-status-channels, .chat-status-tasks, .chat-status-turnstate)::after { content: '\203A'; margin-left: 4px; opacity: 0.7; }
+.chat-status-bar > .chat-status-clickable:is(.chat-status-model, .chat-status-perm, .chat-status-autoresume-armed, .chat-status-artifacts, .chat-status-outbox, .chat-status-settings)::after { content: '\25BE'; content: '\25BE' / ""; margin-left: 4px; opacity: 0.7; }
+.chat-status-bar > .chat-status-clickable:is(.chat-status-ctx, .chat-status-browser, .chat-status-channels, .chat-status-tasks, .chat-status-turnstate)::after { content: '\203A'; content: '\203A' / ""; margin-left: 4px; opacity: 0.7; }
 .chat-status-bar > .chat-status-model.chat-status-clickable { border-color: var(--border-active); }
 .chat-status-bar > .chat-status-turnstate.chat-status-needs-action { border-color: var(--yellow); }
 .chat-status-bar .chat-status-model .chat-status-effort, .chat-status-bar .chat-status-model .chat-status-door-sep { color: var(--text-secondary); }
