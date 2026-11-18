@@ -417,9 +417,20 @@ const metaPatchChain = new Map();   // fp → the newest patch in flight: the pa
  *  of one file are CHAINED (ON then OFF pressed fast: OFF lands last, whichever read answers first); never rejects.
  *  → Promise<boolean> */
 const PATCH_LINK_MS = 10 * 1000;   // a link whose read never answers (a hung mount) lets the chain move on after this; its late answer writes nothing
+// A PATCH THE STORE GAVE UP ON IS NOT LOST (主开发 10:30Z, «as if a must»: a dropped clear of a stop fact let a restart restore
+// the old stop, and the restored-reset arm could continue a finished conversation — a turn nobody typed): it is kept here,
+// merged (the newest keys win), and written WITH the next patch of that file; the next patch's own keys win over it
+const owedPatch = new Map();   // fp → the owed keys
 function patchSessionMeta(sockName, patch, { owner = null } = {}) {
   const fp = path.join(META_DIR, sockName + '.json');
-  const link = () => { const tok = { dead: false }; let t = null; return Promise.race([patchMetaOnce(sockName, fp, patch, 3, owner, tok), new Promise((r) => { t = setTimeout(() => { tok.dead = true; console.warn(`[session] ${sockName}: a meta patch's read gave no answer in ${PATCH_LINK_MS / 1000} s — dropped (the next patch goes on)`); r(false); }, PATCH_LINK_MS); if (t.unref) t.unref(); })]).finally(() => clearTimeout(t)); };
+  const link = () => {
+    const owed = owedPatch.get(fp) || null;
+    const full = owed ? { ...owed, ...patch } : patch;   // never an older value over a newer one: this patch's keys last
+    const tok = { dead: false }; let t = null;
+    return Promise.race([patchMetaOnce(sockName, fp, full, 3, owner, tok), new Promise((r) => { t = setTimeout(() => { tok.dead = true; console.warn(`[session] ${sockName}: a meta patch's read gave no answer in ${PATCH_LINK_MS / 1000} s — dropped (its keys ride the next patch)`); r(false); }, PATCH_LINK_MS); if (t.unref) t.unref(); })])
+      .finally(() => clearTimeout(t))
+      .then((ok) => { if (ok) { if (owedPatch.get(fp) === owed) owedPatch.delete(fp); } else owedPatch.set(fp, full); return ok; });
+  };
   const p = (metaPatchChain.get(fp) || Promise.resolve()).then(link, link);
   metaPatchChain.set(fp, p);
   p.then(() => { if (metaPatchChain.get(fp) === p) metaPatchChain.delete(fp); }, () => { if (metaPatchChain.get(fp) === p) metaPatchChain.delete(fp); });
@@ -433,7 +444,9 @@ function patchMetaOnce(sockName, fp, patch, tries, owner, tok = null) {
   const flagOnly = Object.keys(patch || {}).every((k) => META_FLAG_KEYS.has(k));
   // THE OWNER, by the patcher's own id (the read's should): a file another session owns is never patched with this one's
   // choice — the collision is said, as writeSessionMeta's own check says it
-  const mine = (m) => { if (!owner || !m || !m.webuiSessionId || m.webuiSessionId === owner) return true; console.error(`[session] META COLLISION on ${sockName}: owned by ${m.webuiSessionId}, patched for ${owner} — not written`); try { global.__vsMetric?.('session-meta-collision', 1); } catch { } return false; };
+  // refused only when ANOTHER LIVE session owns the file (a restored conversation whose id was derived from its socket's name is
+  // still the file's — the readers' should: a plain id comparison refused its own patches)
+  const mine = (m) => { if (!owner || !m || !m.webuiSessionId || m.webuiSessionId === owner || !(activeSessions && typeof activeSessions.has === 'function' && activeSessions.has(m.webuiSessionId))) return true; console.error(`[session] META COLLISION on ${sockName}: owned by ${m.webuiSessionId}, patched for ${owner} — not written`); try { global.__vsMetric?.('session-meta-collision', 1); } catch { } return false; };
   const owed = pendingMeta.get(fp);
   if (owed !== undefined) { let m = null; try { m = JSON.parse(owed); } catch { m = null; } return m && typeof m === 'object' && mine(m) ? writeSessionMeta(sockName, { ...m, ...patch }, { prev: m, flagOnly }) : Promise.resolve(false); }
   const seq0 = metaSeq.get(fp) || 0;
@@ -556,7 +569,7 @@ function deleteSessionMeta(sockName) {
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   const fp = path.join(META_DIR, sockName + '.json');
-  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp);   // (the patch's counter goes with the file)
+  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp); owedPatch.delete(fp);   // (the patch's counter and owed keys go with the file)
   try { storeWriter().forget(fp); } catch {}   // its pending write dropped; one in flight lands BEFORE the unlink, never after
   try { fs.unlinkSync(fp); } catch {}
 }

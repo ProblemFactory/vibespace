@@ -1620,6 +1620,38 @@ await (async () => {
   const chainLine = '  const p = (metaPatchChain.get(fp) || Promise.resolve()).then(link, link);';
   const red = ssSrc.includes(chainLine) ? await scene(MUTX.load(SS, ssSrc.replace(chainLine, '  const p = link();   // PRE-CURE: no chain'))) : 'needle-missing';
   ok('16d. RED: the patch without its chain — the late first read writes the cleared fact BACK', !!red && typeof red === 'object' && red.at === 2, red);
+  // the restack cure 2 («as if a must», 10:30Z): a clear the store DROPPED is written with the next patch; the newest wins
+  const owedScene = async (mod, second) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-owe-')); const { META, so } = storeOf(mod, tmp);
+    const fsp = fs.promises, orig = fsp.readFile; let failNext = true;
+    fsp.readFile = function (p, ...a) { if (failNext && String(p).endsWith('two-1.json')) { failNext = false; return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); } return orig.call(this, p, ...a); };   // the store gives up on the first
+    let out = null, firstOk = null;
+    try {
+      firstOk = await so.patchSessionMeta('two-1', { stoppedBy: null }, { owner: 'w-two' });   // a clear the store DROPS
+      await so.patchSessionMeta('two-1', second, { owner: 'w-two' });                          // the conversation's next patch
+      const SWm = require(path.join(REPO, 'src/store-writer.js'));
+      await Promise.race([SWm.storeWriter().durable(path.join(META, 'two-1.json')), new Promise((r) => setTimeout(r, 8000))]);
+      out = JSON.parse(fs.readFileSync(path.join(META, 'two-1.json'), 'utf8'));
+    } finally { fsp.readFile = orig; fs.rmSync(tmp, { recursive: true, force: true }); }
+    return { firstOk, out };
+  };
+  const ow = await owedScene(require(path.join(REPO, SS)), { autoResume: true });
+  ok('16d. A CLEAR THE STORE DROPPED IS NOT LOST: the patch it gave up on rides the next patch of that file to disk (the stop gone, the next patch\'s key there too)', ow.firstOk === false && !!ow.out && ow.out.stoppedBy === null && ow.out.autoResume === true, JSON.stringify(ow));
+  const owLine = '    const full = owed ? { ...owed, ...patch } : patch;   // never an older value over a newer one: this patch\'s keys last';
+  const owRed = ssSrc.includes(owLine) ? await owedScene(MUTX.load(SS, ssSrc.replace(owLine, '    const full = patch;   // PRE-CURE 2: a dropped patch is gone')), { autoResume: true }) : 'needle-missing';
+  ok('16d. RED: the store without the owed keys keeps the OLD stop on disk (a restart would restore it)', !!owRed && typeof owRed === 'object' && !!owRed.out && !!owRed.out.stoppedBy && owRed.out.stoppedBy.at === 1, JSON.stringify(owRed));
+  const nw = await owedScene(require(path.join(REPO, SS)), { stoppedBy: { kind: 'quota', at: 3 } });
+  ok('16d. …the NEWEST wins: a new stop in the next patch is not undone by the older owed clear', !!nw.out && !!nw.out.stoppedBy && nw.out.stoppedBy.at === 3, JSON.stringify(nw));
+  { const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-own-')); const live = new Map();
+    const META = path.join(tmp, 'meta'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(path.join(tmp, 'buf'), { recursive: true });
+    fs.writeFileSync(path.join(META, 'own-1.json'), JSON.stringify({ sockName: 'own-1', webuiSessionId: 'sess-old-name', stoppedBy: { kind: 'quota', at: 1 } }));
+    const so2 = require(path.join(REPO, SS)).create({ rootDir: tmp, BUFFERS_DIR: path.join(tmp, 'buf'), META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmp, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: live, engine: new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true }), checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn() });
+    const ce = console.error; console.error = () => { };
+    let restored = null, foreign = null;
+    try { restored = await so2.patchSessionMeta('own-1', { stoppedBy: null }, { owner: 'sess-own-1' });   // the restore derived its id from the socket's name
+      live.set('sess-old-name', {}); foreign = await so2.patchSessionMeta('own-1', { stoppedBy: null }, { owner: 'sess-own-1' }); }   // …now ANOTHER LIVE session owns that file
+    finally { console.error = ce; fs.rmSync(tmp, { recursive: true, force: true }); }
+    ok('16d. the owner check refuses only a file ANOTHER LIVE session owns — a restored conversation whose id came from its socket\'s name still patches its own meta', restored === true && foreign === false, JSON.stringify({ restored, foreign })); }
   ok('16d. the owner check runs on the copy already read (no second read of the mount); a patch that gives up writes nothing', /writeSessionMeta\(sockName, \{ \.\.\.m, \.\.\.patch \}, \{ prev: m, flagOnly \}\)/.test(ssSrc) && /sessionMetaOwnerConflict\(sockName, meta, prev\)/.test(ssSrc) && /tries > 0 \? patchMetaOnce\(sockName, fp, patch, tries - 1, owner, tok\) : false/.test(ssSrc));
 })();
 

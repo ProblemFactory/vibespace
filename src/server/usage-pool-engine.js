@@ -2815,7 +2815,7 @@ function persistStoppedBy(session) {
     if (!session || !session.sockName) return;
     // the stream's road reads NOTHING from the mount: the store patches its own pending copy, or reads off the loop (and
     // never writes a stub for a socket with no meta of its own) — session-stdout.js patchSessionMeta
-    if (typeof sessionMetaStore.patchSessionMeta === 'function') { Promise.resolve(sessionMetaStore.patchSessionMeta(session.sockName, { stoppedBy: session._stoppedBy || null }, { owner: session._webuiId || null })).then((ok) => { if (ok === false) console.warn(`[stopped-by] ${session._webuiId || session.sockName}: the stop fact is in memory but NOT on disk (the patch gave up) — a restart would restore the old one`); }, () => { }).then(() => null).catch((e) => console.warn('[stopped-by] not persisted:', e && e.message)); return; }
+    if (typeof sessionMetaStore.patchSessionMeta === 'function') { Promise.resolve(sessionMetaStore.patchSessionMeta(session.sockName, { stoppedBy: session._stoppedBy || null }, { owner: session._webuiId || null })).then((ok) => { if (ok === false) console.warn(`[stopped-by] ${session._webuiId || session.sockName}: the stop fact is in memory but NOT on disk yet (the store gave up on this patch) — it is written with this conversation's next meta patch`); }, () => { }).then(() => null).catch((e) => console.warn('[stopped-by] not persisted:', e && e.message)); return; }
   } catch (e) { console.warn('[stopped-by] not persisted:', e.message); }
 }
 /** Write the stop fact (a verdict from stoppedBy.stopVerdict; null = nothing to write). */
