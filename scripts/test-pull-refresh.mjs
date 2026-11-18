@@ -654,6 +654,22 @@ try {
           return { raced: before.length !== 1 || before.includes('mount'), before, live: mm._live.has('mm-y'), evs };
         } finally { clearInterval(mm._sweep); }
       };
+      // cure 4 (the readers' should): the person removes the pull while the mount it ASKED for waits — mountPull / remount
+      // refuse by name (mount_removed), never a 200 with live:false for a record that is gone
+      // `hold`: 'release' (held inside the heal, the mount lands after the removal), 'hung' (the held release then HANGS: the
+      // road throws first — cure-4 read #3), 'mark' (the boot's mark on the folder holds it — read #6)
+      const removedAsk = async (MM, road, hold = 'release') => {
+        const g = held(), mp = path.join(tmp, 'fcc7', 'mini-g'), events = [];
+        const mm = mini(MM, { online: true, release: async (m) => { if (hold === 'mark') return []; g.at++; await g.p; if (hold === 'hung') throw Object.assign(new Error(`could not release the folder ${m} — its unmount did not answer in 10 s`), { code: 'unmount_hung' }); return []; }, mount: async ({ mountpoint }) => ({ mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } }) });
+        if (hold === 'mark') { mm._releasing = new Map([[path.resolve(mp), g.p]]); g.at = 1; }
+        const ev0 = global.__vsEvent; global.__vsEvent = (n) => events.push(n);
+        try {
+          const asked = (road === 'remount' ? mm.remount('mm-g') : mm.mountPull('h2', { remotePath: '/g', mountpoint: mp })).then((v) => ({ live: v && v.live }), (e) => ({ code: e && e.code, err: e && e.message }));
+          await until(() => g.at === 1); await mm.unmount('mm-g'); g.open();
+          const out = await asked; out.failedEvent = events.includes('machine-mount-pull-failed'); out.live2 = mm._live.has('mm-g');
+          return out;
+        } finally { global.__vsEvent = ev0; clearInterval(mm._sweep); }
+      };
       // the controls: ONE patched copy of machine-mounts.js, each cut behind its own flag (one compile — the fast tier's cap);
       // every anchor found exactly once or the control is red by name (no older object is read — §2j)
       const MSRC = fs.readFileSync(path.join(SRC, 'machine-mounts.js'), 'utf8');
@@ -667,6 +683,9 @@ try {
         ['gone2', "      if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }", "      if (!globalThis.__mmCut.gone2 && !this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }"],
         ['words1', "      if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said", "      if (e && e.code === 'unmount_hung' && (globalThis.__mmCut.words1 || this._state.mounts.some((m) => m.id === rec.id))) { const said"],
         ['words2', "        if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors", "        if (e && e.code === 'unmount_hung' && (globalThis.__mmCut.words2 || this._state.mounts.some((m) => m.id === rec.id))) { (this._pullErrors"],
+        ['asked', "    if (gone()) throw removedWhileMounting();\n  }", "    if (!globalThis.__mmCut.asked && gone()) throw removedWhileMounting();\n  }"],
+        ['asked throw', "catch (e) { if (gone()) throw removedWhileMounting(); throw e; }", "catch (e) { if (!globalThis.__mmCut.askedThrow && gone()) throw removedWhileMounting(); throw e; }"],
+        ['asked quiet', "      if (e && e.code === 'mount_removed') {", "      if (!globalThis.__mmCut.quiet && e && e.code === 'mount_removed') {"],
       ];
       const mmiss = mcuts.filter(([, a]) => MSRC.split(a).length !== 2).map(([k]) => k);
       let MG = null;
@@ -687,6 +706,9 @@ try {
       check('B: cure 2 (as if a must) — a pull the person REMOVED while its heal waited for the boot release is never mounted (no rclone, no live entry for a gone record)', !br.mountedE && !br.liveE && br.waited, JSON.stringify(br));
       check('B: cure 3 (the cure-2 read #3, #6) — the same folder added again meanwhile (a NEW record) waits for the boot\'s step on that folder, then mounts; the removed record\'s hung step leaves no words', !br.racedF && br.liveF && br.fAfter && !br.wordsE, JSON.stringify(br));
       const lg = await landGone(MM3), wh = await wordsGone(MM3, 'heal'), wb = await wordsGone(MM3, 'boot'), tw = await twin(MM3);
+      const ap = await removedAsk(MM3, 'pull'), ar = await removedAsk(MM3, 'remount'), ah = await removedAsk(MM3, 'pull', 'hung'), am = await removedAsk(MM3, 'remount', 'mark');
+      check('B: cure 4 (the readers\' should) — the person removes the pull while the mount it asked for waits: mountPull and remount refuse with the removal\'s words (mount_removed), never a 200 with live:false — and nothing of it stays mounted', ap.code === 'mount_removed' && ar.code === 'mount_removed' && !ap.live2 && !ar.live2, JSON.stringify({ ap, ar }));
+      check('B: cure 4 (its read #3, #4, #6) — the same when the road THREW first (a hung release: never the stale «could not release» words) and when the boot\'s mark held the folder; the person\'s own removal is no failure event', ah.code === 'mount_removed' && am.code === 'mount_removed' && !ap.failedEvent && !ah.failedEvent, JSON.stringify({ ah, am }));
       check('B: cure 3 (the cure-3 read #2) — every offline mark is set BEFORE a linked machine heals: its pull on the same folder waits for the offline record\'s step, then mounts', tw.raced === false && tw.live === true, JSON.stringify(tw));
       check('B: cure 3 (the cure-2 read #4) — a pull removed WHILE its mount is being made: the mount lets go when it lands, no live entry for a gone record', lg.torn === 1 && lg.live === false, JSON.stringify(lg));
       check('B: cure 3 (the cure-2 read #6) — a pull removed WHILE its release hangs gets no «could not release» words back, on the heal\'s road and on the boot\'s', wh === false && wb === false, JSON.stringify({ wh, wb }));
@@ -694,6 +716,10 @@ try {
         const bc = await mcut('gone1', () => boot(MG, { removeE: true })), bi = await mcut('byId', () => boot(MG, { removeE: true, readd: true }));
         const lc = await mcut('gone2', () => landGone(MG)), w1 = await mcut('words1', () => wordsGone(MG, 'heal')), w2 = await mcut('words2', () => wordsGone(MG, 'boot')), to = await mcut('order', () => twin(MG));
         check('CONTROL (the linked machines heal before the offline marks are set): the heal releases the folder while the offline record\'s step still runs (red)', to.raced === true, JSON.stringify(to));
+        const cp = await mcut('asked', () => removedAsk(MG, 'pull')), cr = await mcut('asked', () => removedAsk(MG, 'remount'));
+        const ct = await mcut('askedThrow', () => removedAsk(MG, 'pull', 'hung')), cq = await mcut('quiet', () => removedAsk(MG, 'pull'));
+        check('CONTROL (no check after the asked mount / the road\'s own throw passed on / the removal logged as a failure): live:false for the removed pull / the stale «could not release» refusal / a failure event (red)',
+          !cp.code && cp.live === false && !cr.code && cr.live === false && ct.code === 'unmount_hung' && cq.code === 'mount_removed' && cq.failedEvent === true, JSON.stringify({ cp, cr, ct, cq }));
         check('CONTROL (no record check after the wait): the removed pull is mounted anyway (red)', bc.mountedE === true, JSON.stringify(bc));
         check('CONTROL (the boot\'s mark keyed by the record id, at the mark and at the wait): the pull added again on the same folder releases it while the boot still holds it — the removed record\'s own heal still waits (red)', bi.racedF === true && !bi.raced, JSON.stringify(bi));
         check('CONTROL (no record check when the mount lands): a live entry for the removed pull (red)', lc.live === true && lc.torn === 0, JSON.stringify(lc));

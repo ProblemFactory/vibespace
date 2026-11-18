@@ -25,6 +25,11 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const DM = require('./device-mount'); // the pull chain (B-fcc7: read at each call — test-pull-refresh §15 drives the manager over a stub chain)
+// cure 4 (the readers' should): a pull the person REMOVED while the mount it was asked for waited is refused to the caller
+// that asked (mountPull / remount) with these words — whatever road the removal took (the boot's mark, the release, the
+// mount landing, a throw on the way) — never a 200 with live:false for a record that is gone. The code names it in-process
+// (logs, the suite); the routes answer the words (server.js takes no line)
+const removedWhileMounting = () => Object.assign(new Error('this pull mount was removed while it was being mounted — nothing of it stays mounted'), { code: 'mount_removed' });
 const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-argv.js');   // THE mount argv (B-069b: the push mount's too)
 
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
@@ -436,6 +441,7 @@ class MachineMounts {
       console.log(`[machine-mounts] pull mount OK in ${Date.now() - t0}ms → ${r.mountpoint}`);
       return r;
     } catch (e) {
+      if (e && e.code === 'mount_removed') { console.log(`[machine-mounts] pull mount request ended after ${Date.now() - t0}ms: ${e.message}`); throw e; }   // the person's own removal: no failure event
       console.warn(`[machine-mounts] pull mount FAILED after ${Date.now() - t0}ms: ${e.message}`);
       global.__vsEvent?.('machine-mount-pull-failed', { detail: String(e.message).slice(0, 160) });
       throw e;
@@ -469,9 +475,17 @@ class MachineMounts {
       this._state.mounts.push(rec);
       this._save();
     }
-    await this._up(rec);
+    await this._upAsked(rec);
     this._notify();
     return { ...rec, live: this._live.has(rec.id) };
+  }
+
+  /** cure 4: the mount a caller ASKED for (mountPull / remount) — a removal meanwhile is said as itself, even when the road
+   *  threw first (the link closing, a hung release: their words would be stale for a record that is gone) */
+  async _upAsked(rec) {
+    const gone = () => !this._state.mounts.some((m) => m.id === rec.id);
+    try { await this._up(rec); } catch (e) { if (gone()) throw removedWhileMounting(); throw e; }
+    if (gone()) throw removedWhileMounting();
   }
 
   async _up(rec) {
@@ -544,7 +558,7 @@ class MachineMounts {
     }
     const live = this._live.get(id);
     if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
-    await this._up(rec);
+    await this._upAsked(rec);
     this._notify();
     return { ...rec, live: this._live.has(id) };
   }
