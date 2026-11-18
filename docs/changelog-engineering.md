@@ -923,6 +923,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - **CURE 2 (主开发 09:20Z, NOT TAKEN on one must — THE LAW):** the hold is LIFTED — the note marked done, «nothing was lost» (`records-read-again`), the job-logs clean-up resumed — ONLY on a WHOLE read (`data`). A file GONE (`missing`) ends the hold with its own sentence `records-gone` (high: what is gone; the note STANDS and holds the clean-up until a person moves it); TORN bytes end it as a boot would (`_unreadEnded`: set aside before the load, rebuilt from the job logs, `store-corrupt` names the set-aside, which holds the clean-up across a restart; the failure's note marked done). ONE IN FLIGHT A STORE now covers the read AND its prefetch (a slow one said once and waited on, never doubled, never dropped — a set-aside it made is loaded); the prefetch reads ONE file at a time (r2 fanned out). Shoulds taken: the legacy cron collapse's stamps prefetched; a read-only engine lists the job logs off the loop; the set-aside said where it is done; a note that lands after its failure ended is marked done at once (`_unreadLiftedOwed`). Left: the person's «Clear content…» never shows `archiveUnread` — the clear routes reshape the engine's answer to counts (route + seam + dialog: a row to open). Legs: test-jobs-triage cure 2 (gone, torn, a slow prefetch with a second try — each against r2 in a copy).
 
 
+
 ## 2.369.409 — 2026-11-17
 
 ### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
