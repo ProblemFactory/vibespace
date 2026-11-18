@@ -2013,6 +2013,7 @@ const I_RECV = {
   'src/spawn/ssh.js|h': ['host', 'a machine name'], 'src/spawn/dial.js|h': ['host', 'a machine name'], 'src/ws-handler.js|data': ['caller', 'the owner\'s own queued text (a refusal echoes its LENGTH to the owner who typed it)'],
   'src/ws-handler.js|h': ['host', 'a machine name'], 'src/ws-handler.js|wcaps': ['harness', 'a wrapper capability\'s reason'],
   'src/ws-handler.js|w': ['words', 'the withheld-signal sentence (B-5ee1, proc-identity withheldWords): the killed session\'s name or its machine, a pid number and a start minute — never a record\'s words'],
+  'src/ws-handler.js|tn': ['words', 'the stop\'s notice to the person (B-c134 cure, PURE proc-identity treeNotice): the ended conversation\'s own name and the kernel\'s process names (comm), counted — never a record\'s words'],
   // ── verify r8 ③: the journal's receivers (every server console / log line rides the incident ring) ──
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],

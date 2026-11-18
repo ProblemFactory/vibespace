@@ -49,6 +49,7 @@ function queueVerbRefusal(op, label) {
 }
 const crypto = require('crypto');
 const fs = require('fs');
+const fsp = require('fs').promises; // B-c134 cure: the device agent's pid file, read off the loop (the ctx's fs is a harness's own in tests)
 const path = require('path');
 const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: the witness's storage roots
 const { execFile } = require('child_process');
@@ -381,13 +382,28 @@ function registerWsHandler(wss, ctx) {
     pickCodexThreadCandidate, getSessionKey, normalizeComparablePath,
   });
 
+  // B-c134 cure (MUST A): no stop's walk enters another conversation's holder — every live conversation's process the hub holds
+  // (its pty's pid: a terminal conversation's attach client, a local chat conversation's own process, a shim's), by that pid
+  PI.keepOut('conversations', () => { const out = []; for (const s of activeSessions.values()) { const p = Number(s && s.pty && s.pty.pid); if (p > 1 && !s.host) out.push([p, 0]); } return out; });   // a remote shim's pid is another machine's
+  // …nor the DEVICE AGENT of this machine (its state/agentd.pid, written at its start): read off the loop, at most once a minute
+  let devPid = 0, devAt = 0;
+  const devRead = () => {   // the modules themselves (never the ctx's fs / os: a harness's ctx may hand neither) — and it never throws
+    if (Date.now() - devAt < 60_000) return; devAt = Date.now();
+    try { fsp.readFile(require('path').join(require('os').homedir(), '.vibespace', 'agentd', 'state', 'agentd.pid'), 'utf8').then((t) => { devPid = Number(String(t).trim()) || 0; }, () => { devPid = 0; }); } catch { devPid = 0; }
+  };
+  devRead();
+  PI.keepOut('device-agent', () => { devRead(); return devPid > 1 ? [[devPid, 0]] : []; });
+
   // THE CONVERSATION VERBS' BODIES (design q-046): the kill body, moved VERBATIM out of the switch into a named function (lane
   // automation-verbs — the only edits: the case-level `break` gone, the requester's socket became `reply` (its `killed`
   // answer) and `actBy` (the subject its device teardown audits)); the rename body lives in src/server/conversation-ops.js
   // (`renameSession`, moved there whole by lane automation-keys-core). Both are handed with the create handler to the
   // seams: the ws cases below, the routes and an automation key all go through them — a seam answers without a socket,
   // and names who asked.
-  const endSessionBody = async (data, { reply, actBy } = {}) => {
+  // B-c134 cure (the coordinator's question): the background tree ends ONLY when the end asks — a person's Terminate and an archive
+  // (the page's kill carries endTree: true; the automation archive verb passes it). An end a resume follows (a restart, an account
+  // or permission switch, a pool's cold restart), a setup flow's own terminal and the automation end verb keep it, as the release did
+  const endSessionBody = async (data, { reply, actBy, endTree = false } = {}) => {
     // Stale-serverId robustness (2.179.0): after a server restart the
     // client can hold an OLD webui id — a kill that silently no-ops
     // leaves the session alive, and the follow-up resume (billing
@@ -424,8 +440,8 @@ function registerWsHandler(wss, ctx) {
       // a shim: the device agent's / the serve's — the remainder), or a plain shell's (a person's `nohup` there is the person's to keep)
       const treeRoots = [];
       let treeCut = false;
-      const readTree = (pid) => { const t = PI.treeOf([pid], { since: Number((PI.identityOf(pid) || {}).starttime) || 0 }); if (t.cut) treeCut = true; treeRoots.push(...t); };   // procfs, the tree's own cost, bounded
-      const ownTree = !capsOf(session.backend).terminalOnly;   // a plain shell's leftovers are the person's (the declared row, never an id)
+      const readTree = (pid) => { const t = PI.treeOf([pid], { since: Number((PI.identityOf(pid) || {}).starttime) || 0 }); if (t.cut) treeCut = true; if (t.pruned) console.log(`[session] ${data.sessionId}: its tree walk left alone ${t.pruned} process${t.pruned === 1 ? '' : 'es'} it does not own (the hub's, another conversation's or job's, the device agent's)`); treeRoots.push(...t); };   // procfs, the tree's own cost, bounded
+      const ownTree = (endTree === true || data.endTree === true) && !capsOf(session.backend).terminalOnly;   // a plain shell's leftovers are the person's (the declared row, never an id); only an end that asks (above)
       const localPty = ownTree && session.pty && Number(session.pty.pid) > 1 && session.pty.constructor && session.pty.constructor.name !== 'Object' && !session.socketPath ? Number(session.pty.pid) : 0;
       // Kill the dtach session process (which kills claude as its child)
       // The dtach process is the parent of our attach PTY's target
@@ -451,10 +467,17 @@ function registerWsHandler(wss, ctx) {
       if (localPty) readTree(localPty);   // B-c134: read before the pty's kill
       if (treeRoots.length) {
         const name = session.name || data.sessionId;
+        // cure (MUST B): what could not be ended — or a walk CUT, even when all it read has ended — is told to the PERSON through the
+        // end path's notice (every page toasts it, in the person's words), the journal line kept
+        const say = (r) => {
+          const line = PI.treeLine(r, { cut: treeCut }); if (line) console.log(`[session] ${data.sessionId} "${name}": its end ${line}`);
+          const tn = PI.treeNotice(r, { cut: treeCut }, name);
+          if (tn) { try { ctx.serverNotice?.(`tree-left:${data.sessionId}`, tn.text, { level: 2, i18n: { key: tn.key, params: tn.params } }); } catch { } }   // level 2: the page's warning toast; one key a conversation
+        };
         const t = setTimeout(() => {
           const left = treeRoots.filter((m) => PI.aliveIdentity(m) === true);
-          if (!left.length) return;
-          PI.endTree(left, { graceMs: 5000 }).then((r) => { const line = PI.treeLine(r, { cut: treeCut }); if (line) console.log(`[session] ${data.sessionId} "${name}": its end ${line}`); }).catch(() => { });
+          if (!left.length && !treeCut) return;
+          (left.length ? PI.endTree(left, { graceMs: 5000 }) : Promise.resolve({ ended: [], left: [], stale: 0 })).then(say).catch(() => { });
         }, 3000);
         t.unref?.();
       }

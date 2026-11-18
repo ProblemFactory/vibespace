@@ -329,18 +329,20 @@ function opsOver(getDeps) {
   }
 
   /** END. The ws case hands its frame and its reply (`killed`); without a reply the answer is returned. */
-  async function endConversation(target, by, { reply = null } = {}) {
+  // B-c134 cure: `endTree` — the end also ends what the conversation left running in the background (a person's Terminate, an
+  // archive); an automation key's own kill frame never asks it (the verb decides: the archive verb does, the end verb does not)
+  async function endConversation(target, by, { reply = null, endTree = false } = {}) {
     if (typeof D().endSession !== 'function') return refusal('not_ready', 'the end path is not wired yet');
     if (by && by.kind === 'automation') {
       const t = SPEC.targetVerdict(target); if (!t.ok) return t;
       const hit = liveOf(t.target);
       if (!hit) return refusal('not_found', 'no live conversation by that id');
       const answers = [];
-      await D().endSession({ sessionId: hit.id }, { reply: (m) => answers.push(m), actBy: SPEC.actByOf(by) });
+      await D().endSession({ sessionId: hit.id }, { reply: (m) => answers.push(m), actBy: SPEC.actByOf(by), endTree: endTree === true });
       const a = answers[answers.length - 1] || null;
       return a && a.ok ? { ok: true, sessionId: hit.id } : refusal('not_found', 'no live conversation by that id');
     }
-    return D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by) });
+    return D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by), endTree: endTree === true });
   }
 
   /** INVITE INTO AN AGENT GROUP — the groups engine's invite, the inviter `by.cid` (a member of the group, as for its own
@@ -479,7 +481,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (asks.length) { try { resolved = (resolveAsks(asks, `automation:${keyId}`) || {}).changed || []; } catch { resolved = []; } }
       let ended = false;
       if (f.s) {
-        const r = await O().endConversation({ webuiId: f.id }, byOf(caller, keyId));
+        const r = await O().endConversation({ webuiId: f.id }, byOf(caller, keyId), { endTree: true });   // B-c134 cure: an archive ends the background tree
         if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && r.why) || 'the conversation could not be ended', target: label };
         ended = true;
       }

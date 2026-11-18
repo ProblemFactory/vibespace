@@ -595,7 +595,7 @@ export function installSidebarWorkbench(Sidebar) {
         // s.host is MANDATORY for a remote pid — the host-less local route
         // 400s silently (the exact bug fixed on the card's own Terminate in
         // 2.191.0); killPid surfaces its own failure toast either way.
-        if (s.webuiId) this.app.killSession(s.webuiId);
+        if (s.webuiId) this.app.killSession(s.webuiId, undefined, { endTree: true });   // B-c134: a person's terminate-and-archive ends the background tree
         else if (s.pid) this.app.killPid(s.pid, s.host);
       }
       // archive as a batch — toggle the set directly, single state push + render

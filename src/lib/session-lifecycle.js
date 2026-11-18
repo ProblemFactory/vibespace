@@ -516,7 +516,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           chatView._applyLiveMeta?.(msg);
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.killSession(msg.sessionId);
+            if (shouldKill) this.killSession(msg.sessionId, undefined, { endTree: this._personClose() });   // the person's setting: a close IS their Terminate — never a resume's or a record's close
             // pending name/fork-title entries otherwise only clear on identity
             // adoption — a window closed before that leaked them forever
             this._pendingForkTitles?.delete(msg.sessionId);
@@ -600,7 +600,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // otherwise honor the global close-behavior (default: detach — user
       // directive, no per-type exceptions; sessions stay re-attachable)
       const shouldKill = ephemeral || (killOnClose && this.settings.get('window.closeBehavior') === 'terminate');
-      if (shouldKill) this.killSession(sessionId);
+      if (shouldKill) this.killSession(sessionId, undefined, { endTree: !ephemeral && this._personClose() });   // an automation helper's own terminal is no person's Terminate, nor a resume's or a record's close
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
@@ -637,10 +637,17 @@ export function installSessionLifecycle(App, ctx = {}) {
   // asked for (requestedId), so a remapped kill still resolves the request.
   // The 3-minute watchdog DISARMS the request (ws.request's timer alone
   // leaves the handler live) — nothing chases a kill for the page's lifetime.
+  // B-c134 cure: `endTree` — the end ALSO ends what the conversation left running in the background (the hub reads its process tree
+  // before the kill and ends what survived): ONLY a person's Terminate and an archive ask it. A kill a resume follows (a restart in
+  // place, an account or permission switch, a pool's cold restart) and a setup flow's own terminal keep what runs, as before
+  // B-c134 cure: a window close is a person's Terminate only when a PERSON closed it — never a resume's own close (the fence:
+  // _reopenWin / _closeSecondView) nor a record's (a layout apply, a desktop's restore: layoutManager._applying / _restoring)
+  _personClose() { return !((this._fenceOpen || 0) > 0 || this.layoutManager?._restoring || this.layoutManager?._applying); },
   killSession(webuiId, backendSessionId) {
     if (!webuiId) return;
-    if (backendSessionId) this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId });
-    const msg = { type: 'kill', sessionId: webuiId };
+    const tree = arguments[2] && arguments[2].endTree === true ? { endTree: true } : {};   // the door's { endTree } (the signature stays the seam's)
+    if (backendSessionId) this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId, ...tree });
+    const msg = { type: 'kill', sessionId: webuiId, ...tree };
     const cancel = this.ws.request(msg, (m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === webuiId,
       { resend: true, timeoutMs: 180000, onTimeout: () => cancel() });
   },
@@ -926,7 +933,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.killSession(serverId);
+            if (shouldKill) this.killSession(serverId, undefined, { endTree: this._personClose() });   // the person's setting: a close IS their Terminate — never a resume's or a record's close
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();

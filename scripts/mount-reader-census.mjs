@@ -236,7 +236,7 @@ export const ROWS = [
   ['src/window-targets.js', 'own-tree', 2, null, PROC],
   ['src/workflow-usage-tailer.js', 'own-tree', 4, null, CLI],
   ['src/ws-create.js', 'own-tree', 4, null, CLI],
-  ['src/ws-handler.js', 'own-tree', 8, null, CLI],
+  ['src/ws-handler.js', 'own-tree', 9, null, `${CLI}; lane bl-jobs B-c134 cure +1: the device agent's own pid file (~/.vibespace/agentd/state/agentd.pid) — kept out of a stop's tree walk, read off the loop at most once a minute`],
 ];
 // SafeFs: the pool's door is asked before a worker is picked (a blocked path is never queued)
 // lane file-preview-mount (userW inc-mvq4hn9x): a LIBRARY that reads by PATH does its own fs on the main thread — the

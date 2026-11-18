@@ -11,6 +11,7 @@ const path = require('path');
 const net = require('net');
 const http = require('http');
 const PI = require('./proc-identity.js'); // B-1cc6: a pid is never an identity
+const WRAPPER_HELD = new Set(['up', 'starting', 'awaiting-user']);   // B-c134 cure: a job state whose wrapper the engine holds (an «unverified» one is a previous boot's pid: never kept out)
 const crypto = require('crypto');
 const { withoutNoticeHead } = require('./notification-senders.js'); // lane notify-retry: a parked frame carries the ladder's head; the floor's digest is of the raw text
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
@@ -244,6 +245,7 @@ class JobManager {
       if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
       this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
+      this._goneSaid = new Set(); this._keepOutOff = PI.keepOut('jobs', () => this._wrappersHeld());   // B-c134 cure (MUST A): no stop's walk enters another job's wrapper
       // boot sweep (triage §13 rule 5): housekeeping happens as soon as the
       // store is trustworthy again, isolated like every other init step
       try { this.archiveSweep({ why: 'boot' }); } catch (e) { this.d.log('[jobs] archive sweep at boot failed:', e.message); }
@@ -263,7 +265,7 @@ class JobManager {
       this._forYou(null, M.forYouCopy(null, 'engine-failed', { error: e.message }));
     }
   }
-  shutdown() { this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
+  shutdown() { if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
 
   _takeLock() {
     try {
@@ -1510,10 +1512,33 @@ class JobManager {
    *  SIGKILL of the group / the scope, in the same tick. A SIGTERM is never sent here (the wrapper's stop step delivers a stop's). */
   _killTree(job, stamp) {
     const t = PI.treeOf([Number(stamp.pid)], { since: Number(stamp.starttime) || 0 }), tree = t.filter((m) => m.pgid !== Number(stamp.pid));   // the group dies with the group's SIGKILL
-    let n = 0;
-    for (const m of tree) if (PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }).ok) n++;
-    if (n || t.cut) this.d.log(`[jobs] ${job.id}: its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(tree.map((m) => m.comm))].join(', ')})${t.cut ? ' — its tree was read only in part' : ''}`);
+    const killed = [], refused = [];
+    let unjudged = 0;
+    for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale') unjudged++; }
+    // B-c134 cure (MUST B): said where the person reads — the job's OWN log (a force stop's wrapper is dead: nobody else writes it),
+    // a refused signal named, a cut walk said; and in the hub's log as before
+    const n = killed.length, line = `its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`
+      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '');
+    if (n || refused.length || unjudged || t.cut) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
     return n;
+  }
+  /** B-c134 cure: the latest run's own log file (the path alone) */
+  _runLogFile(job) {
+    const run = job.runs && job.runs[job.runs.length - 1];
+    return run ? run.log || path.join(this._ctlDir(job, run.startedAt), 'current.log') : null;
+  }
+  /** B-c134 cure: one line into a run's own log (off the loop, appended — the wrapper's lines and ours, in order); the words are the
+   *  stop's own (counts, kernel process names), never a record's */
+  _runLogLine(file, text) {
+    if (!file) return;
+    fs.promises.appendFile(file, `\n${text}\n`).catch(() => { });
+  }
+  /** B-c134 cure (MUST A): the wrappers this engine holds — each live job's, by the pid it spawned or adopted — kept out of every
+   *  stop's walk but their own job's (a recycled pid only makes a stop end less) */
+  _wrappersHeld() {
+    const out = [];
+    for (const j of this.jobs.values()) if (j && j.proc && Number(j.proc.pid) > 1 && WRAPPER_HELD.has(j.state)) out.push([Number(j.proc.pid), 0]);
+    return out;
   }
   // A STOP ENDS THE JOB (lane jobs-memory-bound, acceptance round 4): on the cgroup rung the job's group is its SCOPE — every
   // process it started, in its process group or not, and whether or not its wrapper still lives (the base killed nothing once
@@ -1611,9 +1636,14 @@ class JobManager {
       // step delivers it through its ONE table (one SIGTERM a process — the engine sends the tree none). Synchronous, as the release's
       // member walk: procfs, the tree's own cost, bounded — the stop's signal stays in this same tick
       const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json');
-      const st = this._readStamp(job), tree = st && this._verifyAlive(st) ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false });
-      const rows = tree.filter((m) => m.pgid !== Number(st && st.pid)).slice(0, 256).map((m) => [m.pid, m.starttime, m.pgid, m.comm]);
-      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}), ...(rows.length ? { tree: rows } : {}), ...(tree.cut ? { treeCut: true } : {}) }); } catch { }
+      const st = this._readStamp(job), live = !!(st && this._verifyAlive(st)), tree = live ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false, keptOut: [] });
+      const all = tree.filter((m) => m.pgid !== Number(st && st.pid)), rows = all.slice(0, 256).map((m) => [m.pid, m.starttime, m.pgid, m.comm]);
+      const treeCut = tree.cut || all.length > rows.length;   // cure: the intent's row cap is a cut too — said by the wrapper
+      // cure (MUST A): the intent names what the wrapper's walk must not enter (the hub, the conversations' holders, the other jobs' wrappers)
+      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}), ...(rows.length ? { tree: rows } : {}), ...(treeCut ? { treeCut: true } : {}), ...(tree.keptOut && tree.keptOut.length ? { keepOut: tree.keptOut.slice(0, 512) } : {}) }); } catch { }
+      // cure r2 (its own read F6): said only of a wrapper PROVEN gone — a stamp of this boot whose process is not there, no end record — once a run
+      if (st && !live && st.bootId === bootId() && PI.aliveIdentity(st) === false && !this._ctlJson(job, run, 'exit.json') && !(this._goneSaid || (this._goneSaid = new Set())).has(ctl)) { this._goneSaid.add(ctl); this._runLogLine(this._runLogFile(job), '[jobs] stop: its wrapper had already ended — what the job started could not be read, and may still be running'); }
+      if (tree.pruned) this._runLogLine(this._runLogFile(job), `[jobs] stop: its tree walk left alone ${tree.pruned} process${tree.pruned === 1 ? '' : 'es'} it does not own (the hub's, another conversation's or another job's)`);
       if (alone) { const stamp = this._readStamp(job); return this._verifyAlive(stamp) && PI.signalIdentity(stamp, 'SIGTERM', { what: `job ${job.id}'s wrapper` }).ok; }
     }
     return this._killGroup(job, 'SIGTERM');
