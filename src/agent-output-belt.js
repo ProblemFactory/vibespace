@@ -93,7 +93,8 @@ function compiledFor(v, vr) {
  * value under its MIN, which we filter out first).
  * lane bl-msg B-3e61 (THE LAW of its cure): `message: true` = a MESSAGE another agent reads (the group log, the msg stash, the
  * prose sinks) — the shape census in its message mode: a masked value's region is the line rule's own, and inside it only PLAIN
- * WORDS stay (the first chunk is always masked; a value that opens on a mark, a stop or an open pair takes the line rule whole);
+ * WORDS stay (the first chunk is masked unless it is the mask itself or a member's @ under a `:` head; a value that opens on a mark,
+ * a stop or an open pair takes the line rule whole);
  * `mentions` = the members' names / ids — a member's @ alone is never a value; `said: []` collects what triggered each mask (the
  * gap filter's too), so the sender's answer names it instead of reading a shorter count as a cut ⇒ kb-file-structure.md
  * («src/secret-shapes.js», THE MESSAGE MODE).

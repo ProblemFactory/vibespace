@@ -168,9 +168,12 @@ const groupAt = (c) => groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\]}"'»�
 /** The message mode's rewrite of a value region [s, e) → { out, end } (end = where a head inside the region begins, else e) — or null:
  *  the LINE RULE (the region masked whole). Chunks split at blanks and CJK stops (both kept). THE FIRST CHUNK: the mask itself, or a
  *  member's @ under a `:` head, is kept; a pair closed on its line has its inside masked (the pair kept); anything opening on a mark, a
- *  stop or an open pair is no value this mode recognises ⇒ null; otherwise masked — and after a scheme or credential word the next
- *  chunk too, after a grouped first chunk every chunk of its group. EVERY LATER CHUNK: masked unless plainChunk; ASCII glued to the
- *  value through a stop or a pair (no blank between) is the value's own; masked chunks that only blanks part become ONE mask. */
+ *  stop or an open pair is no value this mode recognises ⇒ null; a chunk opening on a letter or a digit of ANY script (cure 2) is
+ *  masked — and after a scheme or credential word the next chunk too, after a grouped first chunk every chunk of its group. EVERY
+ *  LATER CHUNK goes through ONE judgement, `keeps` (cure 2): a MEMBER's @ is kept first (never glued, never the word after a credential
+ *  word); else it is masked by the next-chunk, glued (ASCII glued to the value through a stop or a pair, no blank between) and group
+ *  rules (`groupAt`: the chunk without its trailing prose marks), and kept only when plainChunk. THE PIECE BEFORE AN INNER HEAD goes
+ *  through `keeps` too (its own opener stays). Masked chunks that only blanks part become ONE mask. */
 function messageValue(text, s, e, { sepColon = false, mentions = null, twin = '', later = false } = {}) {
   let out = '', i = s, first = !later, takeNext = false, masking = false, glued = false, group = null, prevWord = '';
   // cure 2 (主开发 08:42Z): ONE judgement of a later chunk `c` (its word `w`) — MUST 1: a MEMBER's @ is never a value, not glued, not the
