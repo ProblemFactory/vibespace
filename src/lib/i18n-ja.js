@@ -13573,6 +13573,7 @@ export default {
   "may ask for it — the request comes to you": "申請できます — 申請はあなたに届きます",
   "{n} more it may ask for": "ほかに申請できるもの {n} 件",
   "{n} more left out or unknown": "ほかに除外・不明 {n} 件",
+  "{n} more not open to it": "ほかに開かれていないもの {n} 件",
   "its access list could not be read": "アクセスリストを読み込めません",
   "“{name}” has no tick of this conversation’s own to take back — it comes through a Task Group or every agent (the Channels window)": "「{name}」にはこの会話自身のチェックがありません — タスクグループかすべてのエージェント経由です（チャンネルウィンドウで変更）",
   "Could not read what it may use: {why}": "使えるものを読み込めませんでした：{why}",

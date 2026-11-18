@@ -724,8 +724,6 @@ export async function showConnectAccountDialog(app, kinds, { kind = null, flowId
   return ctx;
 }
 
-// ── RE-AUTHORIZE (§8.1 #3: the storage re-authorize dialog, verbatim + the client select) ──
-/** `preselect` = `{client, appId, appSecret}` (Edit's switched client). */
 /** B-e630 (主开发's ruling 2026-11-18): opened FOR a conversation (the chat's «Connect <type>»), a type whose capability row says
  *  a browser sign-in can stand for it says so when this conversation may not use at least one of the person's browser profiles —
  *  the grant facts only (the may-use view; PURE browserSignInFold), no profile named or guessed; its door is the conversation's own
@@ -746,6 +744,8 @@ function browserSignInNode(app, k, conversation, mayUseFacts) {
   return box;
 }
 
+// ── RE-AUTHORIZE (§8.1 #3: the storage re-authorize dialog, verbatim + the client select) ──
+/** `preselect` = `{client, appId, appSecret}` (Edit's switched client). */
 export async function showReauthAccountDialog(app, a, { kinds = null, preselect = null } = {}) {
   const spec = { ...specOf(a, kinds), mountClients: await mountClientsOf(a.kind) };
   const provider = providerOf(a);

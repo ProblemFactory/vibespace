@@ -24,7 +24,7 @@
  * TWO DOORS ARE NOT SHOWN (NOT_SHOWN): automation-key-reach and group-visibility judge this conversation as a TARGET (which
  * conversations a key may act on; how far a group shows its members to outside agents) — «who may reach it», a later unit.
  *
- * viewOf({ facts, answers, accounts }) → { facts, kinds: [{ kind, rows, more, moreRequest, moreOut }] } in THE OWNER'S ORDER
+ * viewOf({ facts, answers, accounts }) → { facts, kinds: [{ kind, rows, more, moreRequest, moreOut, moreClosed }] } in THE OWNER'S ORDER
  * (KINDS: sessions, channels first among the resources, browser, vault, keys, exits, windows, the built-ins last). A list
  * that can run to hundreds shows NAMED_MAX rows of each standing by name — what it may use, what it may ask for, what a
  * 「除了」 takes out or cannot be judged (cure r1, SHOULD e: a row left out is SAID even when three granted rows come
@@ -74,14 +74,16 @@ function rowOf(a) {
  *  「除了」 takes out; the unknown last — each by name. */
 const rankOf = (r) => (r.state === 'ok' ? RANK[r.via] : r.state === 'request' ? 3 : r.state === 'excepted' ? 4 : r.state === 'closed' ? 6 : 5);   // B-e630: a closed one after the unknown (an unreadable row stays named)
 function byRank(a, b) { return rankOf(a) - rankOf(b) || (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0) || (a.resource < b.resource ? -1 : a.resource > b.resource ? 1 : 0); }
-/** Each standing bounded on its own — NAMED_MAX of what it may use, of what it may ask for, of what is left out or unknown —
+/** Each standing bounded on its own — NAMED_MAX of what it may use, of what it may ask for, of what is left out or unknown,
+ *  of what is not open to it (B-e630: its own bucket, so unknown rows never hide it and it is never counted as unknown) —
  *  the rest of each counted; `max` Infinity ⇒ never cut. */
 function bounded(rows, max = NAMED_MAX) {
   const s = rows.slice().sort(byRank);
-  const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), out = s.filter((r) => r.state !== 'ok' && r.state !== 'request');
+  const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), closed = s.filter((r) => r.state === 'closed');
+  const out = s.filter((r) => r.state !== 'ok' && r.state !== 'request' && r.state !== 'closed');
   const cut = (l) => (Number.isFinite(max) ? l.slice(0, max) : l);
   const rest = (l) => (Number.isFinite(max) ? Math.max(0, l.length - max) : 0);
-  return { rows: [...cut(ok), ...cut(ask), ...cut(out)], more: rest(ok), moreRequest: rest(ask), moreOut: rest(out) };
+  return { rows: [...cut(ok), ...cut(ask), ...cut(out), ...cut(closed)], more: rest(ok), moreRequest: rest(ask), moreOut: rest(out), moreClosed: rest(closed) };
 }
 
 /** The channel accounts (the form's 频道 tick rows, `accounts` in new-session-model accountRows' shape + `state`: granted |
@@ -106,6 +108,8 @@ function channelsOf(answers, accounts) {
   return { accounts: out, orphans: bounded(orphans) };
 }
 
+const notUsable = (r) => !!r && (r.state === 'closed' || r.state === 'excepted');   // KNOWN not usable — an unknown row (a part that failed, groups unreadable) claims nothing
+
 function viewOf({ facts = {}, answers = [], accounts = [] } = {}) {
   const rows = (Array.isArray(answers) ? answers : []).map(rowOf).filter(Boolean);
   const of = (kind) => rows.filter((r) => DOOR_KIND[r.door] === kind);
@@ -119,9 +123,12 @@ function viewOf({ facts = {}, answers = [], accounts = [] } = {}) {
     if (f.noAgent) continue;   // a Terminal with no agent: the form's one sentence, no resource lists
     if (kind === 'channels') { kinds.push({ kind, ...channelsOf(rows, accounts) }); continue; }
     if (kind === 'browser') {
-      const profiles = bounded(of('browser').filter((r) => r.door === 'browser-profile'));
+      const all = of('browser').filter((r) => r.door === 'browser-profile');
+      const profiles = bounded(all);
       const logins = bounded(of('browser').filter((r) => r.door === 'browser-login'));
-      kinds.push({ kind, remote: f.remote, profiles: profiles.rows, profilesMore: profiles.more, profilesMoreOut: profiles.moreOut, logins: logins.rows, loginsMore: logins.more, loginsMoreOut: logins.moreOut });
+      // profilesNotUsable: how many profiles it is KNOWN it may not use (not open + taken out), counted before the cut — the Connect form's fold
+      kinds.push({ kind, remote: f.remote, profiles: profiles.rows, profilesMore: profiles.more, profilesMoreOut: profiles.moreOut, profilesMoreClosed: profiles.moreClosed,
+        profilesNotUsable: all.filter(notUsable).length, logins: logins.rows, loginsMore: logins.more, loginsMoreOut: logins.moreOut });
       continue;
     }
     if (kind === 'vault') {
@@ -131,7 +138,7 @@ function viewOf({ facts = {}, answers = [], accounts = [] } = {}) {
       continue;
     }
     const b = bounded(of(kind), UNCUT.includes(kind) ? Infinity : NAMED_MAX);
-    kinds.push({ kind, rows: b.rows, more: b.more, moreOut: b.moreOut, ...(UNCUT.includes(kind) ? { uncut: true } : {}) });
+    kinds.push({ kind, rows: b.rows, more: b.more, moreOut: b.moreOut, moreClosed: b.moreClosed, ...(UNCUT.includes(kind) ? { uncut: true } : {}) });
   }
   return { facts: f, kinds };
 }
@@ -144,7 +151,8 @@ function browserSignInFold(browserSignIn, view) {
   if (browserSignIn !== true || !view || !Array.isArray(view.kinds)) return null;
   const br = view.kinds.find((k) => k && k.kind === 'browser');
   if (!br || br.remote || !Array.isArray(br.profiles)) return null;
-  const n = br.profiles.filter((r) => r && (r.state === 'closed' || r.state === 'excepted')).length;   // KNOWN not usable — an unknown row (a part that failed, groups unreadable) claims nothing
+  // the count before the cut (three unknown rows must not hide a closed one); a view without it: its drawn rows
+  const n = Number.isFinite(br.profilesNotUsable) ? br.profilesNotUsable : br.profiles.filter(notUsable).length;
   return n > 0 ? { n } : null;
 }
 

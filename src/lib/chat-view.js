@@ -4641,14 +4641,14 @@ class ChatView {
     const ids = this._getSessionIds?.() || {};
     return conversationKeys({ claudeId: ids.claudeId || null, backendSessionId: ids.backendSessionId || null, webuiId: this.sessionId });
   }
-  /** THE filter the chip opens the Outbox with: this conversation's keys + its name (the window's view state, never persisted).
-   *  A subagent's viewer has none of its own (it drafts under its parent's id): null — the window shows the drafter of the row pressed. */
   /** B-e630: the conversation a «Connect <type>» row is asked in (its may-use facts: the Connect form's browser-profile fold). */
   _connectConversation() {
     const s = (this.app.sidebar?._allSessions || []).find((x) => x && x.webuiId === this.sessionId);
     const key = s && this.app.sidebar?._getSessionStateKey ? this.app.sidebar._getSessionStateKey(s) : null;
     return key ? { sessionKey: key, webuiId: this.sessionId } : null;
   }
+  /** THE filter the chip opens the Outbox with: this conversation's keys + its name (the window's view state, never persisted).
+   *  A subagent's viewer has none of its own (it drafts under its parent's id): null — the window shows the drafter of the row pressed. */
   _outboxFilter() {
     if (typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-')) return null;
     const name = String((this.winInfo && (this.winInfo.name || this.winInfo.title)) || '').split(' — ')[0];

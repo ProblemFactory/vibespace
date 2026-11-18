@@ -68,7 +68,8 @@ export function mountMayUse(app, getRef) {
   const line = (r, door = '', extra = '') => `<div class="ns-pv-via mu-line${r.state === 'ok' ? '' : ' dim'}" data-mu-row="${escHtml(r.door + '|' + r.resource)}"><b>${escHtml(r.name)}</b> · ${escHtml(how(r))}${extra ? ' · ' + escHtml(extra) : ''}${door ? ' ' + door : ''}</div>`;
   const more = (n, door) => (n > 0 ? `<div class="ns-pv-via dim mu-more">${escHtml(t('{n} more', { n }))} ${door}</div>` : '');
   // the rest of each standing, counted with the same door: what it may ask for, what is left out or unknown (a 「除了」 is SAID)
-  const moreOf = (x, door) => [more(x.more || 0, door), (x.moreRequest || 0) > 0 ? `<div class="ns-pv-via dim mu-more">${escHtml(t('{n} more it may ask for', { n: x.moreRequest }))} ${door}</div>` : '', (x.moreOut || 0) > 0 ? `<div class="ns-pv-via dim mu-more">${escHtml(t('{n} more left out or unknown', { n: x.moreOut }))} ${door}</div>` : ''].join('');
+  const moreOf = (x, door) => [more(x.more || 0, door), (x.moreRequest || 0) > 0 ? `<div class="ns-pv-via dim mu-more">${escHtml(t('{n} more it may ask for', { n: x.moreRequest }))} ${door}</div>` : '', (x.moreOut || 0) > 0 ? `<div class="ns-pv-via dim mu-more">${escHtml(t('{n} more left out or unknown', { n: x.moreOut }))} ${door}</div>` : '',
+    (x.moreClosed || 0) > 0 ? `<div class="ns-pv-via dim mu-more">${escHtml(t('{n} more not open to it', { n: x.moreClosed }))} ${door}</div>` : ''].join('');   // B-e630: never counted as unknown
   const granted = (rows) => rows.filter((r) => r.state === 'ok').length;
   const none = (words) => `<div class="ns-pv-via dim mu-none">${escHtml(words)}</div>`;
 
@@ -127,7 +128,7 @@ export function mountMayUse(app, getRef) {
     const br = kinds.browser;
     if (br) {
       const lines = br.remote ? none(t('Sessions on {host} cannot use this machine’s browser profiles', { host: f.host || '' }))
-        : [...br.profiles.map((r) => line(r, doorBtn('bprof', t('Who can use it'), `data-id="${escHtml(r.resource)}" data-label="${escHtml(r.name)}"`))), moreOf({ more: br.profilesMore, moreOut: br.profilesMoreOut }, doorBtn('bprofs', t('Agent browser')))].join('') || none(t('No browser profile is open to it'));
+        : [...br.profiles.map((r) => line(r, doorBtn('bprof', t('Who can use it'), `data-id="${escHtml(r.resource)}" data-label="${escHtml(r.name)}"`))), moreOf({ more: br.profilesMore, moreOut: br.profilesMoreOut, moreClosed: br.profilesMoreClosed }, doorBtn('bprofs', t('Agent browser')))].join('') || none(t('No browser profile is open to it'));
       const logins = [...br.logins.map((r) => line(r, doorBtn('vault', t('Vault'), `data-focus="${escHtml(r.resource)}"`))), moreOf({ more: br.loginsMore, moreOut: br.loginsMoreOut }, doorBtn('vault', t('Vault')))].join('');
       res.push({ key: 'browser', data: 'data-row="bprof"', icon: ic('globe'), name: t('Browser'), what: t('Opens a browser with a profile'), sub: lines + (logins ? `<div class="mu-kids">${logins}</div>` : ''),
         sum: br.remote ? t('not on this machine') : t('{n} profile(s) · {m} saved login(s)', { n: granted(br.profiles) + br.profilesMore, m: granted(br.logins) + br.loginsMore }) });   // SHOULD e: the GRANTED ones only

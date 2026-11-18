@@ -455,7 +455,7 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
     'B-e630 THE FOLD: no profile — no line; every profile usable — no line; one it may not use — the line (n 1) whatever its name; a type without browserSignIn, a conversation on another machine, rows only UNKNOWN (a part that failed, groups unreadable) — no line; one left out by an Except — the line', cases);
   // RED: a fold drawn from a profile's LABEL (the ruling's named wrong road) answers the label, not the grant
   const src = fs.readFileSync(path.join(REPO, 'src/may-use-model.js'), 'utf8');
-  const cut = "  const n = br.profiles.filter((r) => r && (r.state === 'closed' || r.state === 'excepted')).length;   // KNOWN not usable — an unknown row (a part that failed, groups unreadable) claims nothing";
+  const cut = '  const n = Number.isFinite(br.profilesNotUsable) ? br.profilesNotUsable : br.profiles.filter(notUsable).length;';
   ok(src.includes(cut), 'control setup (B-e630): the grant count is where the control cuts');
   const MCe = mutantCopies('may-use-e630', REPO);
   const Ml = require(MCe.write('src/may-use-model.js', src.replace(cut, "  const n = br.profiles.filter((r) => /lark|飞书/i.test(String(r.name || ''))).length;"), 'by-label'));
@@ -475,6 +475,38 @@ console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority 
   const others = BP.mayAttach({ id: 'bp-0000e631', label: 'Lark (company login)', grantUse: { to: ['claude:someone-else'], except: [] } }, { browserKey: 'bk-0000e630', conversationKeys: ['claude:e630'] });
   ok(unread && unread.code === 'not_owner' && unread.unknown === true && others && others.ok === false && others.code === 'not_owner' && !others.unknown,
     'B-e630: an unreadable «Who can use it» answers not_owner WITH unknown (the keeper says it unknown); a readable row naming others answers not_owner without it (the keeper lists it «not open»)', { unread, others });
+  // the cure (主开发 07:51Z): the fold counts PAST the cut, and a closed profile has its own count — never «left out or unknown»
+  const unk = ['A', 'B', 'C'].map((n) => row('Unread ' + n, false, 'unknown_shape'));
+  const fiveClosed = ['P', 'Q', 'R', 'S', 'T'].map((n) => row('Shut ' + n, false, 'not_open'));
+  const fourOut = ['K', 'L', 'M', 'N'].map((n) => row('Kept ' + n, false, 'excepted'));
+  const past = {
+    unk1: bOf(view([...unk, row('Work', false, 'not_open')])),
+    shut5: bOf(view([...unk, ...fiveClosed])),
+    out4: bOf(view(fourOut)),
+  };
+  const fold = { unk1: F(true, view([...unk, row('Work', false, 'not_open')])), shut5: F(true, view([...unk, ...fiveClosed])), out4: F(true, view(fourOut)) };
+  const pv = (b) => ({ rows: b.profiles.map((r) => r.state).join(), more: b.profilesMore, moreOut: b.profilesMoreOut, moreClosed: b.profilesMoreClosed, notUsable: b.profilesNotUsable });
+  ok(fold.unk1 && fold.unk1.n === 1 && fold.shut5 && fold.shut5.n === 5 && fold.out4 && fold.out4.n === 4,
+    'B-e630 cure: the fold counts every profile it may not use, before the cut — three unreadable rows and one closed: n 1; five closed (three drawn): n 5; four taken out (three drawn): n 4', fold);
+  ok(pv(past.unk1).rows === 'unknown,unknown,unknown,closed' && past.unk1.profilesMoreOut === 0 && past.unk1.profilesMoreClosed === 0
+    && pv(past.shut5).rows === 'unknown,unknown,unknown,closed,closed,closed' && past.shut5.profilesMoreOut === 0 && past.shut5.profilesMoreClosed === 2
+    && past.out4.profilesMoreOut === 1 && past.out4.profilesMoreClosed === 0,
+    'B-e630 cure: a closed profile stands in its OWN bucket — three unreadable rows never hide it, and the ones past the cut are counted «not open to it», never «left out or unknown»', { unk1: pv(past.unk1), shut5: pv(past.shut5), out4: pv(past.out4) });
+  const sec = fs.readFileSync(path.join(REPO, 'src/lib/may-use-section.js'), 'utf8');
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(/\(x\.moreClosed \|\| 0\) > 0 \? `<div class="ns-pv-via dim mu-more">\$\{escHtml\(t\('\{n\} more not open to it', \{ n: x\.moreClosed \}\)\)\} \$\{door\}<\/div>`/.test(sec)
+    && sec.includes('moreOf({ more: br.profilesMore, moreOut: br.profilesMoreOut, moreClosed: br.profilesMoreClosed }, ') && zh.includes('"{n} more not open to it": "') && ja.includes('"{n} more not open to it": "'),
+    'B-e630 cure: the section says the closed ones past the cut by their own words (zh / ja entries), with the browser list\'s own door');
+  // RED ×2: a fold that counts only the drawn rows misses the closed past the cut; a bounded() with closed back in the «left out» bucket counts it unknown
+  const MCc = mutantCopies('may-use-e630-cure', REPO);
+  const Md = require(MCc.write('src/may-use-model.js', src.replace(cut, '  const n = br.profiles.filter(notUsable).length;'), 'drawn-only'));
+  const drawn = Md.browserSignInFold(true, Md.viewOf({ facts: { live: true }, answers: [...unk, ...fiveClosed], accounts: [] }));
+  const oldB = "const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), closed = s.filter((r) => r.state === 'closed');\n  const out = s.filter((r) => r.state !== 'ok' && r.state !== 'request' && r.state !== 'closed');";
+  ok(src.includes(oldB), 'control setup (B-e630 cure): the bucket split is where the control cuts');
+  const Mo = require(MCc.write('src/may-use-model.js', src.replace(oldB, "const ok = s.filter((r) => r.state === 'ok'), ask = s.filter((r) => r.state === 'request'), closed = [];\n  const out = s.filter((r) => r.state !== 'ok' && r.state !== 'request');"), 'one-out-bucket'));
+  const oneB = Mo.viewOf({ facts: { live: true }, answers: [...unk, row('Work', false, 'not_open')], accounts: [] }).kinds.find((k) => k.kind === 'browser');
+  ok(drawn && drawn.n === 3 && oneB.profilesMoreOut === 1 && !oneB.profiles.some((r) => r.state === 'closed'),
+    'CONTROL (B-e630 cure): the drawn-rows fold says 3 of 5; one «left out» bucket hides the closed profile behind three unreadable rows and counts it «left out or unknown» (RED for the two legs above)', { drawn, moreOut: oneB.profilesMoreOut });
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
