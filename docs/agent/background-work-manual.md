@@ -304,7 +304,7 @@ it, a limit on the user slice does (`show` names which).
 
 view/control scopes: `session` (owner conversation only) / `group` (sessions in
 a Task Group the creator was in WHEN IT CREATED the job — the default view; never
-refreshed, so a job created outside any group is its owner's and the user's alone) /
+refreshed, so under `group` a job created outside any group is its owner's and the user's alone) /
 `all`. An id you
 can't view behaves as NONEXISTENT (uniform not-found — don't retry, it's not
 an error in your call). Owner = conversation lineage (survives resume).

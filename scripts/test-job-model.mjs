@@ -2,6 +2,7 @@
 // PURE model gate for Background Work (docs/design-background-work.md M1).
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // lane int361 (.367): the schedule legs run in a PINNED zone — America/Los_Angeles, the box's, which has both DST edges — set
@@ -46,22 +47,27 @@ ok(!M.isOwner(mk(9), { conversationId: 'zzz', sessionId: 'sess-A', sessionCreate
   // user's (none); a cron's child carries its parent's owner whole. A writer anywhere else (a refresh on a mutation or a sweep)
   // is a new site here. Over src/ and the agent CLIs (data/bin).
   const SNAP = /groupsSnapshot\s*(?::(?!\s*\[\])|=(?!=))|groupsSnapshot\s*:\s*\[\]/;
-  const files = [], walk = (d) => { for (const e of fs.readdirSync(path.join(__dirname_jm, '..', d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.(m?js|cjs)$/.test(e.name) || d === 'data/bin') files.push(r); } };
-  walk('src'); walk('data/bin');
+  // the TRACKED tree (git ls-files), so a scratch file a developer leaves under src/ is not a site; no git ⇒ the walk of the dirs
+  const root = path.join(__dirname_jm, '..');
+  const ls = spawnSync('git', ['ls-files', '-z', '--', 'src', 'data/bin'], { cwd: root, encoding: 'utf8' });
+  const files = ls.status === 0 ? ls.stdout.split('\0').filter((f) => f && (/\.(m?js|cjs)$/.test(f) || f.startsWith('data/bin/'))) : [];
+  if (ls.status !== 0) { const walk = (d) => { for (const e of fs.readdirSync(path.join(root, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (/\.(m?js|cjs)$/.test(e.name) || d === 'data/bin') files.push(r); } }; walk('src'); walk('data/bin'); }
   const sites = files.flatMap((f) => fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8').split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => SNAP.test(l) && !/^\s*(\/\/|\*)/.test(l)));
   const shape = sites.map(([f, , l]) => f + ': ' + (l.match(/groupsSnapshot\s*[:=][^,}\n]*/) || [''])[0].trim());
   ok(shape.length === 2 && shape.includes('src/agent-routes.js: groupsSnapshot: [...a.caller.groups]') && shape.includes('src/server/jobs-wiring.js: groupsSnapshot: []')
     && SNAP.test('    job.owner.groupsSnapshot = [...caller.groups];') && SNAP.test("  owner: { createdBy: 'agent', groupsSnapshot: groupsNow() },") && !SNAP.test('(job.owner && job.owner.groupsSnapshot || [])'),
     `B-b461: owner.groupsSnapshot is written only at creation — ${shape.join(' · ')} (CONTROL: a planted refresh assignment and a recomputed create are caught, a read is not)`);
   const doc = fs.readFileSync(path.join(__dirname_jm, '..', 'docs/design-background-work.md'), 'utf8');
+  // the same words are read by agents (the manual is served at runtime) and by engineers (kb-features): neither promises them
+  const others = ['docs/agent/background-work-manual.md', 'docs/kb-features.md'].map((f) => [f, fs.readFileSync(path.join(__dirname_jm, '..', f), 'utf8')]);
   // a promise may wrap across `//` comment lines inside the doc's code block: read it with the continuation markers folded
   const promises = (t) => /fallback\s+`?all`?\s+when\s+ungrouped|refreshed eagerly|surfaced for re-owning/i.test(t.replace(/\n\s*(?:\/\/)?\s*/g, ' '));
-  ok(!promises(doc)
+  ok(!promises(doc) && others.every(([, txt]) => !promises(txt))
     && promises('    "groupsSnapshot": ["T-…"]        // refreshed eagerly on every mutation + periodic sweep')
     && promises('                                     // agent defaults: view=group (fallback all when\n                                     // ungrouped), control=session; user locks stick (§7)')
     && promises('- `view`/`control` ∈ session|group|all; agent defaults view=group (fallback\n  `all` when ungrouped), control=session. Owner = conversation-lineage match,')
     && promises('  verified on the fast path; mismatch ⇒ surfaced for re-owning in the panel.'),
-    'B-b461: docs/design-background-work.md promises no eager groupsSnapshot refresh, no fallback to all and no re-own in the panel (CONTROL: each of the four removed lines is caught)');
+    'B-b461: docs/design-background-work.md, the agent manual and kb-features promise no eager groupsSnapshot refresh, no fallback to all and no re-own in the panel (CONTROL: each of the four removed lines is caught)');
 }
 
 // ── vendor vet (negative controls) ──

@@ -219,4 +219,4 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 ### Bug Fixes Applied — INDEX
 
-**Every incident line lives in docs/kb-bugfix-invariants.md `## INDEX` head, newest LAST, the essays below it (ancient one-liners in docs/history-archive.md) — search there before re-diagnosing a familiar symptom. A new incident adds its line THERE, not here.** ⇒ kb-bugfix-invariants.md
+**Every incident line lives in docs/kb-bugfix-invariants.md `## INDEX` head, the essays below it (ancient one-liners in docs/history-archive.md) — search there before re-diagnosing a familiar symptom. A new incident adds its line THERE, not here.** ⇒ kb-bugfix-invariants.md
