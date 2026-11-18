@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(condition, name): the name is no string — a swapped call'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(20); } return !!(await fn()); };
 const mine = [];   // every identity this suite made or found under its own children — ended at exit, by identity
@@ -249,13 +249,15 @@ console.log('§7 B-c134 cure MUST B — A STOP THAT COULD NOT END EVERYTHING TEL
   ok(Object.values(PI.TREE_NOTICE).every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), 'the three sentences have their zh and ja rows');
   const ws = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8');
   const PIN = (t) => /if \(treeRoots\.length \|\| treeCut\) \{/.test(t) && /if \(!left\.length && !treeCut\) return;/.test(t) && /const tn = PI\.treeNotice\(r, \{ cut: treeCut \}, name\);\s*if \(tn\) \{ try \{ ctx\.serverNotice\?\.\(`tree-left:\$\{data\.sessionId\}`, tn\.text, \{ level: 2, i18n: \{ key: tn\.key, params: tn\.params \} \}\); \} catch \{ \} \}/.test(t);
-  const rel = spawnSync('git', ['-C', ROOT, 'show', 'f12c94d6c:src/ws-handler.js'], { encoding: 'utf8' });
   ok(PIN(ws), 'the conversation\'s door: what is left — or a cut walk with nothing left — goes to the PERSON through the end path\'s notice (every page toasts it, in the person\'s words), the journal line kept');
-  if (rel.status !== 0 || !rel.stdout) console.log('  · CONTROL skipped by name: this checkout has no f12c94d6c (a shallow copy)');
-  else ok(!PIN(rel.stdout), 'CONTROL (f12c94d6c, the unit as lined): the line went to the journal only, and a cut walk with nothing left returned unsaid');
-  const c1 = spawnSync('git', ['-C', ROOT, 'show', '37ebd5f54:src/ws-handler.js'], { encoding: 'utf8' });
-  if (c1.status !== 0 || !c1.stdout) console.log('  · CONTROL skipped by name: this checkout has no 37ebd5f54 (a shallow copy)');
-  else ok(!PIN(c1.stdout) && /if \(treeRoots\.length\) \{/.test(c1.stdout), 'CONTROL (37ebd5f54, the cure as taken): a walk CUT before its first row reached nothing — the timer ran only for a read row');   // stale-pins: kept — the control reads the cure AS TAKEN (37ebd5f54), whose line it was
+  // RED CONTROLS from the source itself (never a sha off this branch — test-ci-gate's sha law), each proving its plant first:
+  const CUT_A = 'if (treeRoots.length || treeCut) {', LEFT_A = 'if (!left.length && !treeCut) return;', NOTE_A = "ctx.serverNotice?.(`tree-left:${data.sessionId}`";
+  const plants = [CUT_A, LEFT_A, NOTE_A].map((a) => ws.split(a).length === 2);
+  ok(plants.every(Boolean), 'control setup: the three lines the controls cut are each in ws-handler once', plants);
+  const journalOnly = ws.replace(NOTE_A, 'void (`tree-left:${data.sessionId}`').replace(LEFT_A, 'if (!left.length) return;');   // the unit as first lined   // stale-pins: kept — the control writes the OLD form back into a copy of the source
+  ok(journalOnly !== ws && !journalOnly.includes(NOTE_A) && !PIN(journalOnly), 'CONTROL (the unit as first lined, from the source): the line went to the journal only, and a cut walk with nothing left returned unsaid');
+  const rowsOnly = ws.replace(CUT_A, 'if (treeRoots.length) {');   // the cure as taken   // stale-pins: kept — the control writes the OLD form back into a copy of the source
+  ok(rowsOnly !== ws && rowsOnly.includes('if (treeRoots.length) {') && !PIN(rowsOnly), 'CONTROL (the cure as taken, from the source): a walk CUT before its first row reached nothing — the timer ran only for a read row');   // stale-pins: kept — the control writes the OLD form back into a copy of the source
   // the job's door: a refused signal named, a cut said, the line into the job's own log (the force stop's wrapper is dead)
   const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
   const drive = (fn) => {
@@ -282,13 +284,16 @@ console.log('§8 B-c134 cure — WHICH END ENDS THE BACKGROUND TREE (the coordin
   // THE DOORS of a conversation's end on the page: each killSession call, judged. END = a person's Terminate or an archive (the
   // kill carries endTree: true); KEEP = an end a resume follows, or a helper's own terminal — what runs in the background stays
   const DOORS = [
-    ['src/lib/session-card.js', "if (s.webuiId) c.app.killSession(s.webuiId, undefined, { endTree: true })", 'END', 'the card menu\'s Terminate (a confirm dialog first)'],
-    ['src/lib/session-card.js', "if (s.webuiId) app.killSession(s.webuiId, undefined, { endTree: true })", 'END', 'the card detail\'s Terminate button (a confirm dialog first)'],
-    ['src/lib/taskbar.js', "c.app.killSession(c.s.webuiId, undefined, { endTree: true })", 'END', 'the taskbar\'s Terminate session'],
+    // restacked on 2.369.410 with B-70f9: a person's end goes through endConversation (the kill + its jobs' notice), carrying the door's { endTree }
+    ['src/lib/session-card.js', "if (s.webuiId) c.app.endConversation(s.webuiId, undefined, { endTree: true })", 'END', 'the card menu\'s Terminate (a confirm dialog first)'],
+    ['src/lib/session-card.js', "if (s.webuiId) app.endConversation(s.webuiId, undefined, { endTree: true })", 'END', 'the card detail\'s Terminate button (a confirm dialog first)'],
+    ['src/lib/taskbar.js', "c.app.endConversation(c.s.webuiId, undefined, { endTree: true })", 'END', 'the taskbar\'s Terminate session'],
     ['src/lib/sidebar-workbench.js', "this.app.killSession(s.webuiId, undefined, { endTree: true })", 'END', 'the batch bar\'s terminate-and-archive'],
-    ['src/lib/session-lifecycle.js', "this.killSession(msg.sessionId, undefined, { endTree: this._personClose() })", 'END', 'a chat window\'s close under window.closeBehavior = terminate (the person\'s own setting: the close IS their Terminate) — a RESUME\'s own close (the fence: _reopenWin / _closeSecondView) KEEPS'],
-    ['src/lib/session-lifecycle.js', "this.killSession(serverId, undefined, { endTree: this._personClose() })", 'END', 'an attached chat window\'s close, the same setting and the same fence'],
-    ['src/lib/session-lifecycle.js', "this.killSession(sessionId, undefined, { endTree: !ephemeral && this._personClose() })", 'END', 'a terminal window\'s close under the same setting — an automation helper\'s own (ephemeral) terminal and a resume\'s own close KEEP'],
+    ['src/lib/session-lifecycle.js', "this.endConversation(msg.sessionId, undefined, { endTree: this._personClose() })", 'END', 'a chat window\'s close under window.closeBehavior = terminate (the person\'s own setting: the close IS their Terminate) — a RESUME\'s or a RECORD\'s close KEEPS (_personClose)'],
+    ['src/lib/session-lifecycle.js', "this.endConversation(serverId, undefined, { endTree: this._personClose() })", 'END', 'an attached chat window\'s close, the same setting and rule'],
+    ['src/lib/session-lifecycle.js', "this.endConversation(sessionId, undefined, { endTree: !ephemeral && this._personClose() })", 'END', 'a terminal window\'s close under the same setting — an automation helper\'s own (ephemeral) terminal, a resume\'s or a record\'s close KEEP'],
+    ['src/lib/session-lifecycle.js', 'this.killSession(webuiId, backendSessionId, opts);', 'END', 'endConversation\'s kill: it carries the door\'s own { endTree } (each END door above)'],
+    ['src/lib/session-lifecycle.js', 'if ((this._fenceOpen || 0) > 0) { this.killSession(webuiId, backendSessionId); return; }', 'KEEP', 'endConversation inside a resume\'s fence: the kill as before, no tree, no notice'],
     ['src/lib/session-lifecycle.js', 'this.killSession(webuiId, cid);', 'KEEP', 'restartConversationInPlace: kill → resume of the same conversation'],
     ['src/lib/session-lifecycle.js', 'this.killSession(live.webuiId, backendSessionId);', 'KEEP', 'the account switch: kill → resume on the other account'],
     ['src/lib/chat-view.js', 'this.app.killSession(this.sessionId, backendSessionId);', 'KEEP', 'the permission switch: kill → resume with the new mode'],
@@ -301,12 +306,12 @@ console.log('§8 B-c134 cure — WHICH END ENDS THE BACKGROUND TREE (the coordin
   const pageFiles = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? pageFiles(`${dir}/${e.name}`) : /\.m?js$/.test(e.name) ? [`${dir}/${e.name}`] : []));
   for (const rel of ['src/client.js', ...pageFiles('src/lib')].filter((f) => fs.existsSync(path.join(ROOT, f)))) {   // every page file — a new door anywhere is judged
     const t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    for (const line of t.split('\n')) if (/\bkillSession(\?\.)?\(/.test(line) && !/^\s*killSession\(webuiId, backendSessionId/.test(line) && !/^\s*(\/\/|\*)/.test(line)) sites.push({ rel, line });   // an optional call (?.) is a door too (its own read F9)
+    for (const line of t.split('\n')) if (/\b(killSession|endConversation)(\?\.)?\(/.test(line) && !/^\s*(killSession|endConversation)\(webuiId, backendSessionId/.test(line) && !/^\s*(\/\/|\*)/.test(line)) sites.push({ rel, line });   // a kill or a person's end (restack: B-70f9's endConversation)   // an optional call (?.) is a door too (its own read F9)
   }
   const judge = (ss) => { const unknown = [], used = new Set(); for (const s of ss) { const d = DOORS.filter(([f, snip]) => f === s.rel && s.line.includes(snip)); if (d.length !== 1) unknown.push(`${s.rel}: ${s.line.trim().slice(0, 100)}`); else used.add(d[0]); } return { unknown, dead: DOORS.filter((d) => !used.has(d)).map((d) => d[1]) }; };
   const j = judge(sites), ends = DOORS.filter((d) => d[2] === 'END').length;
-  ok(sites.length === 14 && !j.unknown.length && !j.dead.length && ends === 7, `every page door of a conversation's end is judged (14: ${ends} END the background tree — a person's Terminate, a close under the terminate setting, the terminate-and-archive; ${14 - ends} KEEP it — a restart in place, an account / permission / pool switch, the sign-in wall's resend, a setup flow's terminal)`, j);
-  ok(DOORS.filter((d) => d[2] === 'KEEP').every((d) => !/endTree/.test(d[1])) && DOORS.filter((d) => d[2] === 'END').every((d) => /endTree: (true|!ephemeral && this\._personClose\(\)|this\._personClose\(\))/.test(d[1])) && DOORS.filter((d) => d[0] === 'src/lib/session-lifecycle.js' && d[2] === 'END').every((d) => d[1].includes('this._personClose()')), 'an END door passes endTree; a KEEP door never does');
+  ok(sites.length === 16 && !j.unknown.length && !j.dead.length && ends === 8, `every page door of a conversation's end is judged (16: ${ends} END the background tree — a person's Terminate, a close under the terminate setting, the terminate-and-archive, endConversation's kill carrying them; ${16 - ends} KEEP it — a restart in place, an account / permission / pool switch, the sign-in wall's resend, a setup flow's terminal, a resume's fence)`, j);
+  ok(DOORS.filter((d) => d[2] === 'KEEP').every((d) => !/endTree|, opts\)/.test(d[1])) && DOORS.filter((d) => d[2] === 'END').every((d) => /endTree: (true|!ephemeral && this\._personClose\(\)|this\._personClose\(\))|backendSessionId, opts\);/.test(d[1])) && DOORS.filter((d) => d[0] === 'src/lib/session-lifecycle.js' && d[2] === 'END' && /^this\.endConversation/.test(d[1])).every((d) => d[1].includes('this._personClose()')), 'an END door passes endTree; a KEEP door never does');
   ok(judge([...sites, { rel: 'src/lib/session-card.js', line: '      this.app.killSession(x.webuiId);' }]).unknown.length === 1, 'CONTROL: a NEW kill door no row judges is red by name');
   const L = fs.readFileSync(path.join(ROOT, 'src/lib/session-lifecycle.js'), 'utf8'), ws = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8'), ops = fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8');
   ok(/_personClose\(\) \{ return !\(\(this\._fenceOpen \|\| 0\) > 0 \|\| this\.layoutManager\?\._restoring \|\| this\.layoutManager\?\._applying\); \}/.test(L), 'a window close is a person\'s Terminate only when a PERSON closed it: never inside a resume\'s fence, never a record\'s close (a layout apply, a desktop\'s restore)');

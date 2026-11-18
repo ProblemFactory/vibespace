@@ -545,7 +545,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const sess = { status: 'live', webuiId: 'w1', sessionId: 'abc', name: 'N' };
   const items = menuItems('window', { app, id: 'win-1', win: app.wm.windows.get('win-1'), s: sess, switchSubmenu: false, closeLabel: '✕ Close' });
   for (const l of ['✥ Move', '□ Restore', 'Rename…', '⟳ Restart session', 'Terminate session', 'Locate in sidebar', 'Session properties…', '✕ Close']) items.find((i) => i.label === l).action();
-  ok(J(calls) === J([['wm.startMoveMode', 'win-1'], ['wm.witnessGeometry', 'win-1'], ['wm.restore', 'win-1'], ['renameSession', 'N', 'N'], ['restartConversationInPlace', sess], ['killSession', 'w1', undefined, { endTree: true }], ['locateSessionInSidebar', 'abc'], ['openSessionProps', sess], ['wm.requestClose', 'win-1']] /* round 3 A2: the menu's Close asks the veto point */),
+  ok(J(calls) === J([['wm.startMoveMode', 'win-1'], ['wm.witnessGeometry', 'win-1'], ['wm.restore', 'win-1'], ['renameSession', 'N', 'N'], ['restartConversationInPlace', sess], ['endConversation', 'w1', undefined, { endTree: true }], ['locateSessionInSidebar', 'abc'], ['openSessionProps', sess], ['wm.requestClose', 'win-1']] /* round 3 A2: the menu's Close asks the veto point */),
     'window actions call the same wm/app handlers with the same arguments (session ops via the shared session.* commands; the Restore / Minimize row stamps the geometry witness first — desktop-move verify r4 ③)', J(calls));
   ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'fork', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
 
