@@ -505,6 +505,27 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const td7 = read('src/lib/task-detail.js');
     ok(/const r = await patch\(\{ parents: next \}\); const m = r && r\.task \? \(sidebar\._tasks \|\| \[\]\)\.find\(\(g\) => g\.id === task\.id\) : null; if \(m\) m\.parents = Array\.isArray\(r\.task\.parents\) \? \[\.\.\.r\.task\.parents\] : \[\];/.test(td7), 'cure (A): the page sets its copy\'s parents from the store\'s answer at once (an absent list is the empty list)');
   }
+  // the chain's cure (E): every group a change rewrote or touched is NAMED in the change notice (a reader of the code need not
+  // know the fan-out to trust it — the U2 / U4 reads)
+  {
+    const d8 = path.join(SCR, `data-${++dirSeq}`); fs.mkdirSync(d8, { recursive: true });
+    const seen8 = []; const s8 = new TaskGroupManager({ dataDir: d8, onChange: (e) => seen8.push(...((e && e.ids) || [])) });
+    const P8 = s8.create({ title: 'P8' }), C8 = s8.create({ title: 'C8', parents: [P8.id] }), G8 = s8.create({ title: 'G8', parents: [C8.id] });
+    seen8.length = 0; s8.update(P8.id, { objective: 'the parent\'s rules' }); const onEdit = seen8.slice();
+    seen8.length = 0; s8.remove(P8.id); const onRemove = seen8.slice();
+    ok(onEdit.includes(P8.id) && onEdit.includes(C8.id) && onEdit.includes(G8.id) && onRemove.includes(C8.id) && onRemove.includes(G8.id) && s8.get(C8.id).parents === undefined, 'cure (E): a parent\'s edit and its removal name every descendant they touched or rewrote in the change notice', { onEdit, onRemove });
+  }
+  // the chain's cure (E): the parent refusals carry their CODE — every code the store throws is in the ONE list the routes hand on
+  {
+    const s9 = freshStore();
+    const A9 = s9.create({ title: 'A9' }), B9 = s9.create({ title: 'B9', parents: [A9.id] });
+    const codeOf = (f) => { try { f(); return null; } catch (e) { return (e && e.code) || null; } };
+    const codes = [codeOf(() => s9.update(A9.id, { parents: [B9.id] })), codeOf(() => s9.update(A9.id, { parents: [A9.id] })), codeOf(() => s9.update(A9.id, { parents: ['T-nobody'] })), codeOf(() => s9.update(A9.id, { parents: 'x' })), codeOf(() => s9.update(A9.id, { parents: [B9.id] }, { bearer: true }))];
+    const { PARENT_REFUSALS } = require(path.join(ROOT, 'src/task-groups.js'));
+    ok(same(codes, ['parent_cycle', 'parent_self', 'unknown_parent', 'bad_parents', 'parents_owner_only']) && codes.every((c) => PARENT_REFUSALS.includes(c)), 'cure (E): every parent refusal the store throws carries a code in PARENT_REFUSALS', codes);
+    const srv = read('src/server/task-groups-wiring.js');   // restack 411: the routes live in the wiring (the release's «make room» move)
+    ok((srv.match(/require\('\.\.\/task-groups\.js'\)\.PARENT_REFUSALS\.includes\(e\.code\)/g) || []).length === 2 && /catch \(e\) \{ res\.status\(e\.code === 'parents_owner_only' \? 403 : 400\)\.json\(\{ error: e\.message, \.\.\.\(require\('\.\.\/task-groups\.js'\)\.PARENT_REFUSALS/.test(srv), 'cure (E): both /api/tasks routes hand a parent refusal\'s code on; a bearer\'s create naming parents answers 403, as the update does');
+  }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
   try {

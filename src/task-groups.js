@@ -274,6 +274,8 @@ const PARENTS_MAX = 8;
 // lane lg-group-parents U4: the parents' standing rules a child's injection tells — each at most, and in all at most (bytes)
 const INHERITED_RULE_MAX = 1500, INHERITED_RULES_MAX = 3000;
 // the U2 read (7): a parent WIDENS what a child may use — a bearer (an agent, a job, an automation key) never sets one, sign-in on or off
+// the chain's cure (E): the parent refusals by CODE — a route hands the code on (a client keys on it, never on the words)
+const PARENT_REFUSALS = Object.freeze(['bad_parents', 'unknown_parent', 'parent_self', 'too_many_parents', 'parent_cycle', 'parents_owner_only']);
 const PARENTS_OWNER_ONLY = () => Object.assign(new Error("a Task Group's parents are the owner's to set (the group's settings, signed in) — a bearer never sets them"), { code: 'parents_owner_only' });
 function sanitizeBrowserProfileId(v) { const s = typeof v === 'string' ? v.trim() : ''; return /^bp-[0-9a-f]{8}$/.test(s) ? s : null; }
 /** MULTIVIEW D4 (docs/design-browser-multiview.zh.md): the group's default PER-CONVERSATION browser cap, 1..6, or null (follow the instance setting). */
@@ -370,7 +372,7 @@ class TaskGroupManager {
     this._primeMemberRows();   // B-55dc: the boot STARTS every Context row's first read, once, off the loop (no refresh loop)
     // lane lg-group-parents (the U2 read, MAJOR 1): the lineage as the writer would take it — a gone id, a built-in name, a cycle a
     // hand edit (or an older build) left are dropped at load, in memory; written with the store's next save
-    try { const dropped = this._healParents(); if (dropped.length) console.log(`[task-groups] load: ${dropped.length} parent link(s) dropped (a gone group, itself, or a cycle)`); } catch { /* a heal never blocks the boot */ }
+    try { const dropped = this._healParents(); if (dropped.length) console.log(`[task-groups] load: ${dropped.length} parent link(s) dropped (a gone group, itself, or a cycle): ${dropped.slice(0, 5).map(([child, parent]) => `${child} › ${parent}`).join(', ')}`); } catch { /* a heal never blocks the boot */ }
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
     let migrated = false;
@@ -1047,7 +1049,7 @@ class TaskGroupManager {
     while (queue.length) for (const c of this.childrenOf(queue.shift())) if (!seen.has(c)) { seen.add(c); out.push(c); queue.push(c); }
     return out;
   }
-  _touchDescendants(id, at) { for (const d of this._descendantsOf(id)) { const g = this._state.tasks[d]; if (g) g.contentUpdatedAt = Math.max(g.contentUpdatedAt || 0, at); } }
+  _touchDescendants(id, at) { const out = []; for (const d of this._descendantsOf(id)) { const g = this._state.tasks[d]; if (g) { g.contentUpdatedAt = Math.max(g.contentUpdatedAt || 0, at); out.push(d); } } return out; }   // the chain's cure (E): → the ids it touched (each named in the change notice)
   /** lane lg-group-parents U4: the standing instructions of every ANCESTOR (nearest first) — [{ id, title, objective }], only
    *  those that hold any (the owner's «继承自 X»). */
   inheritedRulesOf(tOrId, { skip = null } = {}) {
@@ -2751,7 +2753,9 @@ class TaskGroupManager {
     this._refuseUnread('a new Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
-    if (parents !== undefined && parents !== null && bearer) throw PARENTS_OWNER_ONLY();   // lane lg-group-parents (the U2 read, 7)
+    // lane lg-group-parents (the U2 read, 7): a bearer never NAMES a parent; `parents: null` on a create is «none», what a new group has
+    // anyway — the update refuses a bearer's null on purpose (clearing a parent can let a descendant out of an ancestor's «除了»)
+    if (parents !== undefined && parents !== null && bearer) throw PARENTS_OWNER_ONLY();
     const cleanParents = parents !== undefined ? this._sanitizeParents(parents, null) : [];   // lane lg-group-parents: refused before anything is made
     const id = this._genId(cleanTitle);
     const now = Date.now();
@@ -2788,9 +2792,10 @@ class TaskGroupManager {
     this._state.tasks[id] = t;
     // lane lg-group-parents (the U2 read, MAJOR 1): an id given out fresh never inherits an edge left on disk by a group of the
     // same id that is gone (a hand edit, an older build's remove) — no child is adopted without the owner choosing it
-    for (const c of Object.values(this._state.tasks)) if (c && c !== t && Array.isArray(c.parents) && c.parents.includes(id)) { const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }
+    const purged = [];   // the chain's cure (E): each child rewritten is named in the change notice
+    for (const c of Object.values(this._state.tasks)) if (c && c !== t && Array.isArray(c.parents) && c.parents.includes(id)) { purged.push(c.id); const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }
     this._save();
-    this._notify(id);
+    this._notify(purged.length ? [id, ...purged] : id);
     return this._out(t);
   }
 
@@ -2951,10 +2956,10 @@ class TaskGroupManager {
     // lane lg-group-parents U4 (the read, MAJOR 2): what every DESCENDANT is told moves with this group's lineage, its archive, its
     // standing rules and its table — each one's own instant moves (an archived or removed parent is no longer an ancestor the
     // child's gate could read)
-    if (parents !== undefined || patch.archived !== undefined || patch.objective !== undefined || patch.title !== undefined || ctxChanged) this._touchDescendants(t.id, t.updatedAt);
+    const touched = (parents !== undefined || patch.archived !== undefined || patch.objective !== undefined || patch.title !== undefined || ctxChanged) ? this._touchDescendants(t.id, t.updatedAt) : [];
     if (ctxChanged) t.ctxUpdatedAt = t.updatedAt;
     this._save();
-    this._notify(id);
+    this._notify(touched.length ? [id, ...touched] : id);   // the chain's cure (E, the U4 should): every descendant touched is named in the notice
     return this._out(t);
   }
 
@@ -2967,13 +2972,13 @@ class TaskGroupManager {
     // group made again under the same id would inherit.
     // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
     if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
-    this._touchDescendants(id, Date.now());   // lane lg-group-parents U4: the descendants are told without it
+    const touched = this._touchDescendants(id, Date.now());   // lane lg-group-parents U4: the descendants are told without it (the cure (E): each named in the notice)
     delete this._state.tasks[id];
-    for (const c of Object.values(this._state.tasks)) if (c && Array.isArray(c.parents) && c.parents.includes(id)) { const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }   // lane lg-group-parents: a gone parent leaves every child's list
+    for (const c of Object.values(this._state.tasks)) if (c && Array.isArray(c.parents) && c.parents.includes(id)) { if (!touched.includes(c.id)) touched.push(c.id); const left = c.parents.filter((p) => p !== id); if (left.length) c.parents = left; else delete c.parents; }   // lane lg-group-parents: a gone parent leaves every child's list
     try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
     this._legacy.delete(id);
     this._save();
-    this._notify(id);
+    this._notify(touched.length ? [id, ...touched] : id);
   }
   /** this store's owed write waited for (a named wait — test-store-write-census WAITS): {ok, why} — under the writer's own bound
    *  (the moved2 cure 3: a ten-minute hold of the main thread is not taken; a held unbind stays owed, said, and the writer lands it) */
@@ -3543,4 +3548,4 @@ class TaskGroupManager {
 }
 
 // B-31d7: the item's line + detail caps, for the route that REFUSES past them before a write (never a silent clip)
-module.exports = { TaskGroupManager, MEMBER_RESULTS_MAX, DECIDE_BOUND_MS, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };
+module.exports = { TaskGroupManager, PARENT_REFUSALS, MEMBER_RESULTS_MAX, DECIDE_BOUND_MS, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };

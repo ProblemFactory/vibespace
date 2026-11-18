@@ -598,6 +598,11 @@ function create(engineCtx) {
   function inheritedOfSession(cid) {
     try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.inherited) ? s.inherited.slice() : []; } catch { return []; }
   }
+  /** the chain's cure (E): a RUNNING conversation's own groups and their ancestors NOW (`{groups, inherited}`), null when it is
+   *  not running — a principal stored earlier (an API proposal's) is judged with the live lineage while its conversation runs */
+  function liveGroupsOf(cid) {
+    try { const s = (liveSessions() || []).find((x) => x && x.cid === String(cid)); return s ? { groups: Array.isArray(s.groups) ? s.groups.map(String) : [], inherited: Array.isArray(s.inherited) ? s.inherited.map(String) : [] } : null; } catch { return null; }
+  }
   function convFor(adapterId, convId) {
     const en = store.index.peek(`${adapterId}/${convId}`);   // B-f32b: a copy of THAT row, never of the index
     const rec = en ? adapterRecords().adapters.find((r) => r.id === adapterId) || null : null;
@@ -3106,7 +3111,7 @@ function create(engineCtx) {
     mayUseFor,   // unit what-it-may-use
     policyFor, policyRequiresReview, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal,
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
-    wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession,
+    wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession, liveGroupsOf,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,

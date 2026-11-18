@@ -569,6 +569,22 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       ok(seen.length === 4 && seen[0].groupsUnreadable === true && J(seen[0].inherited) === '[]' && !seen[1].groupsUnreadable && J(seen[1].inherited) === '["tg-p"]' && J(seen[2].inherited) === '["tg-p"]' && !seen[2].groupsUnreadable && seen[3].groupsUnreadable === true, 'conversation-ops: a lineage read that throws hands the reach an UNREADABLE target; a stopped target is judged with the lineage the wiring read (its own, never re-read), and one read as null is unreadable', seen);
     }
   }
+  // the chain's cure (E, the U3c read): an API proposal's approve judges the LIVE lineage while its conversation runs — the real
+  // engine's ONE tier judge (apiTierFor), a parent group's grant, the recorded principal of a proposal filed earlier
+  {
+    const ENGL = require('../src/server/channels-engine.js'), FA = require('../src/channel-api.js');
+    const dE = dirOf(`api-live-${++worldN}`); fs.mkdirSync(dE, { recursive: true });
+    let liveL = [{ cid: 'k1', name: 'Child', groups: ['tg-c'], inherited: ['tg-p'] }];
+    const engL = ENGL.create({ dataDir: dE, log: { log() {}, info() {}, warn() {}, error() {} }, fetch: async () => { throw new Error('no network in this suite'); }, liveSessions: () => liveL });
+    const wL = await engL.setApiGrants('lark-y', [FA.apiGrant({ principal: { kind: 'group', id: 'tg-p', name: 'Parent' }, cred: 'lark-y', tier: 'write-ask', at: 1 })], { by: 'user' });
+    const recorded = { kind: 'agent', id: 'k1', name: 'Child', groups: ['tg-c'], inheritedGroups: ['tg-p'] };   // as the proposal recorded it at filing
+    const tFiled = engL.apiTierFor(recorded, 'lark-y').tier;
+    liveL = [{ cid: 'k1', name: 'Child', groups: ['tg-c'], inherited: [] }];   // the owner took P away as C's parent
+    const tLive = engL.apiTierFor(recorded, 'lark-y').tier;
+    liveL = [];   // the conversation ended: the recorded lineage is all there is
+    const tEnded = engL.apiTierFor(recorded, 'lark-y').tier;
+    ok(wL.ok && tFiled === 'write-ask' && tLive === 'none' && tEnded === 'write-ask', 'cure (E): the API tier of a recorded principal is judged with the LIVE lineage while its conversation runs (a parent removed since ⇒ none); an ended one keeps the recorded lineage', { wL: wL.ok, tFiled, tLive, tEnded });
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",

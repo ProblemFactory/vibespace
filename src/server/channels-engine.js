@@ -9195,7 +9195,7 @@ function create(deps = {}) {
     mayUseFor,   // unit what-it-may-use (channels-access)
     policyFor, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal, statsView, wakeLatencyFor,
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
-    storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession, convFor,
+    storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession, liveGroupsOf, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
@@ -9508,7 +9508,10 @@ function create(deps = {}) {
     return { ok: true, rows: apiGrants().filter((g) => g.scope && g.scope.id === id) };
   }
   /** The tier of a principal on a credential — asked BEFORE and AGAIN after every await of a call (a revoke lands at once). */
-  function apiTierFor(ctx, cred) { return ACL.effectiveApi(ctx, String(cred || ''), apiGrants()); }
+  // the chain's cure (E, the U3c read): an agent principal whose conversation RUNS is judged with its groups and lineage NOW — an API
+  // proposal's approve / redirect press carries the ones recorded at filing (a parent removed since must not run the call); an
+  // ended conversation keeps the recorded ones
+  function apiTierFor(ctx, cred) { const live = ctx && ctx.kind === 'agent' ? liveGroupsOf(ctx.id) : null; return ACL.effectiveApi(live ? { ...ctx, groups: live.groups, inheritedGroups: live.inherited } : ctx, String(cred || ''), apiGrants()); }
   /** A Channels account as a raw-API credential: its kind, its adapter's DECLARED raw-API row (`api`), its label, its
    *  bearer, the account's meter. `null` = no such account. */
   function apiCredential(adapterId) {
