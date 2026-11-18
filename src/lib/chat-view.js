@@ -20,8 +20,6 @@ const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
 /** the cure: a row by a KEY that outlives a re-render — a channel row's own key, else its record and its words (a peer's name is
  *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
 const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
-/** the paging keys whose scroll is the person's own (a choice of where to point) */
-const PAGING_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' ']);
 import { stampAt as when, num, span, stampSpan } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
@@ -722,13 +720,12 @@ class ChatView {
     const aim = (e) => { this._aimAt = performance.now(); this._aimX = e.clientX; this._aimY = e.clientY; this._aimKey = pressKeyOf(e.target?.closest?.(MOVED_PRESS_ROWS)); };
     this._messageList.addEventListener('pointermove', aim, { passive: true });
     this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });
-    const chose = () => { clearTimeout(this._reaimT); this._reaimT = setTimeout(() => { this._reaimT = 0; this._reaim(); }, 160); };
-    this._messageList.addEventListener('wheel', chose, { passive: true });
-    this._messageList.addEventListener('touchmove', chose, { passive: true });
-    this._messageList.addEventListener('keydown', (e) => { if (PAGING_KEYS.has(e.key)) chose(); }, { passive: true });
+    // (cure 2, 主开发's verdict on 3b196bfae: the re-aim is armed from THE ONE note of the person's positioning — _notePositioning →
+    // _chooseAim: a wheel, a touch, a paging key from the list OR from the message box, a scrollbar drag, one road; its end flushes it)
     this._messageList.addEventListener('scrollend', () => { if (!this._reaimT) return; clearTimeout(this._reaimT); this._reaimT = 0; this._reaim(); }, { passive: true });
     this._messageList.addEventListener('click', (e) => {
       const row = e.detail === 0 ? null : e.target?.closest?.(MOVED_PRESS_ROWS);
+      if (row && this._reaimT) { clearTimeout(this._reaimT); this._reaimT = 0; this._reaim(); } // cure 2: a press inside the re-aim's window flushes it first
       if (!row || !this._pressMovedUnder(pressKeyOf(row))) return;
       e.stopPropagation(); e.preventDefault();
       showToast(t('That button moved under the pointer just now — read it, then press it again'));
@@ -2905,6 +2902,14 @@ class ChatView {
     if (via && (this._resumeSettleUntil || this._pinnedAtSuspend)) this._trace?.('userPos', { via });
     this._cancelForcedScroll(via);   // our own 10-frame scroll chain loses to the reader (B-9702)
     this._endResumeSettle();
+    this._chooseAim(); // B-ef04 cure 2: the person's own positioning is a choice of where to point — re-aim when it ends
+  }
+
+  /** B-ef04 cure 2: arm the re-aim — 160 ms after the person's LAST positioning act (or at the scroll's end, or at a press —
+   *  whichever comes first), the aim is the row then under the pointer (_reaim) */
+  _chooseAim() {
+    clearTimeout(this._reaimT);
+    this._reaimT = setTimeout(() => { this._reaimT = 0; this._reaim(); }, 160);
   }
 
   /** Did this press land on the list's own SCROLLBAR GUTTER? That is the whole
