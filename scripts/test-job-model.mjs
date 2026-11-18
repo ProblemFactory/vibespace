@@ -855,5 +855,13 @@ console.log('B-70f9 ② the notice at a person\'s end / archive; the stop-with-c
   ok(!/stopWithOwner/.test(js) && !/stopWithOwner/.test(cli) && (cli.match(/stop-with-owner/g) || []).length === 2 && /if \(flags\['stop-with-owner'\] !== undefined\) \{ console\.error\('--stop-with-owner was retired: /.test(cli) && /if \(b\.stopWithOwner === true\) return res\.status\(400\)\.json\(\{ error: '--stop-with-owner was retired:[^']*', code: 'retired-flag' \}\);/.test(ar) && /'notifyOk', 'stopWithOwner'\]\);/.test(ar), 'THE FLAG RETIRED (0 of 2 950 stored jobs carried it): no engine line stores or shows it, the CLI has no such flag, an older CLI\'s false passes, true is refused by name with its door');
 }
 
+// ── B-c488 (batch 8): the announce route's comment says what its code requires — control, never «any viewer» ──
+{
+  const ar = fs.readFileSync(path.join(__dirname_jm, '..', 'src/agent-routes.js'), 'utf8');
+  const says = (t) => /else if \(act === 'announce'\) r = a\.jm\.announce\(job, req\.body\?\.text\); \/\/ in-job \(jbt_\) or a holder of CONTROL/.test(t) && /const needsControl = \[[^\]]*'announce'[^\]]*\];/.test(t) && !/announce[^\n]*any viewer/.test(t);
+  ok(says(ar), 'B-c488: the announce verb\'s comment names CONTROL, as its gate (needsControl) requires — never «any viewer»');
+  const STALE = "// in-job (jbt_) or any viewer";   // stale-pins: kept — the control writes the stale comment back into a copy
+  ok(!says(ar.replace(/\/\/ in-job \(jbt_\) or a holder of CONTROL[^\n]*/, STALE + ' — the watch-job "found something" verb')), 'CONTROL: the stale comment («any viewer») fails the check');
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -2857,7 +2857,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     }
     else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller, { filter: req.body?.filter });   // canView already proven by findVisible
     else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
-    else if (act === 'announce') r = a.jm.announce(job, req.body?.text); // in-job (jbt_) or any viewer — the watch-job "found something" verb
+    else if (act === 'announce') r = a.jm.announce(job, req.body?.text); // in-job (jbt_) or a holder of CONTROL (needsControl above — view alone never puts text in front of the owner) — the watch-job "found something" verb
     else if (act === 'notify') {
       // owner-only post-create override (2.344.2 — field report: changing
       // notify used to require rm + recreate)
