@@ -213,7 +213,8 @@ const memberOf = (hit, entryHosts, now = 0) => {
  *  r4: judged on the LIVE scopes only — a scope past its end admits nothing, whatever its member's other scopes hold. */
 function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, entryHosts = [], tool = null, command = null, now = 0 } = {}) {
   const v = GM.admits(rows, facts);
-  if (!v.ok) return { ok: false, code: v.code, ...(v.entry ? { except: GM.principalKey(v.entry) } : {}) };
+  // the chain's cure (B): a refusal keeps what the lineage decided — an exception reached through a parent, the «仅本组» entry that held a child out
+  if (!v.ok) return { ok: false, code: v.code, ...(v.entry ? { except: GM.principalKey(v.entry) } : {}), ...(v.inherited ? { inherited: true } : {}), ...(v.code === 'not_granted' && v.only ? { only: GM.principalKey(v.only) } : {}) };
   const alive = v.hits.filter((h) => live(h.entry, now));
   if (!alive.length) return { ok: false, code: 'expired', expired: memberOf(v.hits[0], entryHosts, now) };
   const run = runHostsOf(hosts);
@@ -228,6 +229,7 @@ function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, en
   }
   if (win) { const m = memberOf(win, entryHosts, now); return { ok: true, id: m.id, via: win.entry.kind, entry: win.entry, hosts: m.hosts, scope: 'window', until: m.window, member: m }; }   // r7: THE WINDOW — any run, whatever the destination or the token, until its end
   const member = memberOf(best, entryHosts, now);
+  if (member && best && best.inherited) member.inherited = true;   // the chain's cure (B): a member held through a PARENT says so (the model's hit says it)
   if (destinationKnown !== true || !run.length) return { ok: false, code: 'destination_unknown', member };
   return { ok: false, code: 'outside_hosts', member, missing: bestMissing };
 }
@@ -466,14 +468,19 @@ function publicGrants(row, { now = 0 } = {}) {
 // ── THE CARD'S WORDS (English keys — src/server/vault-run-door.js files them; the page says them in its language) ──
 /** The lines a run card adds about a STANDING APPROVAL the caller holds but this run is outside of (`verdicts` = one per
  *  entry, useVerdict's). [] when none holds one. */
-function standingLines(verdicts, { always = false } = {}) {
+function standingLines(verdicts, { always = false, nameOf = null } = {}) {
   const out = [];
+  // the chain's cure (B): a group's name in the words (the store's belted name door; the id when it answers none)
+  const nm = (pk) => { const id = String(pk || '').replace(/^group:/, ''); let n = null; try { n = typeof nameOf === 'function' ? nameOf(id) : null; } catch { n = null; } return String(n || id); };
   for (const v of Array.isArray(verdicts) ? verdicts : []) {
+    // the chain's cure (B): a «仅本组» entry that holds this conversation (a child) out — told THAT, with the door that changes it
+    if (v && !v.ok && v.code === 'not_granted' && v.only) { out.push(`A standing approval names this conversation's parent Task Group "${nm(v.only)}" as "this group only" — its child groups (this conversation's among them) are not included; the owner can switch that on the entry's row in the Vault window.`); continue; }
     if (!v || v.ok || !v.member) continue;
+    const via = v.member.inherited ? `Through its parent Task Group "${nm(v.member.principal)}" — ` : '';   // the chain's cure (B): leads the line (the line's own words stay whole)
     const cw = (v.member.commands || []).map((c) => commandWords(c)).join(', ');
     const on = [v.member.hosts.length ? v.member.hosts.join(', ') : '', cw ? `the command ${cw}` : ''].filter(Boolean).join('; ') || 'no host';
-    if (v.code === 'outside_hosts') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — this run is outside it: ${v.missing.join(', ')}.`);   // r3b: «Always» no longer widens it — the door's replace / add line says what it does
-    else if (v.code === 'destination_unknown') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — where this run sends it cannot be told${cw ? ' and it is not that command' : ''}, so it asks.`);
+    if (v.code === 'outside_hosts') out.push(`${via}A standing approval exists for this conversation (${v.member.id}: ${on}) — this run is outside it: ${v.missing.join(', ')}.`);   // r3b: «Always» no longer widens it — the door's replace / add line says what it does
+    else if (v.code === 'destination_unknown') out.push(`${via}A standing approval exists for this conversation (${v.member.id}: ${on}) — where this run sends it cannot be told${cw ? ' and it is not that command' : ''}, so it asks.`);
   }
   return [...new Set(out)];
 }

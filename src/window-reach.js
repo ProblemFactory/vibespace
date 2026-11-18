@@ -302,11 +302,19 @@ function reachFor(record, ctx = {}) {
   const v = GM.admits([rowOfRecord(rec)], { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], inheritedGroupIds: Array.isArray(ctx.inheritedGroupIds) ? ctx.inheritedGroupIds : [], groupsUnreadable: !!ctx.unreadable });   // lane lg-group-parents U3a: + the lineage
   if (!v.ok) {
     if (v.code === 'groups_unreadable') return { level: 'hidden', via: null, row: null, unreadable: true };
-    if (v.code === 'excepted') return { level: 'hidden', via: null, row: null, excepted: true, except: v.entry ? fromGrantPrincipal(v.entry) : null };
-    return { level: 'hidden', via: null, row: null };
+    if (v.code === 'excepted') return { level: 'hidden', via: null, row: null, excepted: true, except: v.entry ? fromGrantPrincipal(v.entry) : null, ...(v.inherited ? { inherited: true } : {}) };
+    return { level: 'hidden', via: null, row: null, ...(v.only ? { only: { kind: 'group', id: v.only.id } } : {}) };   // the chain's cure (B): + the «仅本组» entry that held a child out
   }
   const best = rec.rows.find((r) => principalKey(r.principal) === principalKey(fromGrantPrincipal(v.entry))) || null;
-  return { level: 'exposed', via: v.via === 'group' ? 'group' : v.via === 'everyone' ? 'everyone' : best && best.by === 'self-open' ? 'self-open' : 'session', row: best };
+  return { level: 'exposed', via: v.via === 'group' ? 'group' : v.via === 'everyone' ? 'everyone' : best && best.by === 'self-open' ? 'self-open' : 'session', row: best, ...(v.inherited ? { inherited: true, throughId: v.entry.id } : {}) };   // the chain's cure (B): + through a parent
+}
+/** the chain's cure (B): a reachFor answer → the grant model's lineage words ('' when the lineage decided nothing) — «through its
+ *  parent Task Group X», «left out through …», a «仅本组» refusal; `nameOf` = the Task Group store's belted name door. */
+function lineageOfReach(r, nameOf = null) {
+  if (!r) return '';
+  if (r.level === 'exposed') return r.inherited ? GM.lineageWords({ ok: true, inherited: true, entry: { kind: 'group', id: r.throughId } }, nameOf) : '';
+  if (r.excepted) return r.inherited && r.except ? GM.lineageWords({ ok: false, code: 'excepted', inherited: true, entry: { kind: 'group', id: r.except.id } }, nameOf) : '';
+  return r.only ? GM.lineageWords({ ok: false, code: 'not_granted', only: r.only }, nameOf) : '';
 }
 const isExposed = (record, ctx) => RANK[reachFor(record, ctx).level] >= RANK.exposed;
 
@@ -637,7 +645,7 @@ module.exports = {
   unshownFrames, windowOfNode, // lane window-dialog-member
   LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, EXCEPTED_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey, sessionKeyNow,
-  emptyRecord, normRecord, recordOfRows, rowOfRecord, setExcept, grant, revoke, setMode, openerGrant, reachFor, isExposed,
+  emptyRecord, normRecord, recordOfRows, rowOfRecord, setExcept, grant, revoke, setMode, openerGrant, reachFor, lineageOfReach, isExposed,
   usableNodes, resolveMode, REASON_MAX, verbGate, launchModeVerdict,
   pixelPlan, visibilityVerdict, mapPoint,
   requestText, viewOf, shareSummary, pickerModel, proposalOf, setProposal, launchShare, launchSummary, principalsNow, rememberedCount, normShare,

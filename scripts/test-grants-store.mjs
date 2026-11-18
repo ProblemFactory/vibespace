@@ -468,6 +468,30 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const xc = xp.ctxFor({ claudeSessionId: 'k1', backend: 'claude' }, 'w-k1');
   const xbad = new ExitProxyManager({ hosts: { list: () => [], get: () => null }, log: () => { }, groupsOf: () => [{ id: 'tg-c' }], lineageOf: () => { throw new Error('store gone'); }, grants: GS.create({ memory: true }) }).ctxFor({ claudeSessionId: 'k1', backend: 'claude' }, 'w-k1');
   ok(J(xc.groupIds) === J(['tg-c']) && J(xc.inheritedGroupIds) === J(['tg-p']) && xbad.unreadable === true, 'exit: ctxFor hands the lineage (own groups stay own); a lineage that throws is UNREADABLE, never «no parents»', { xc, xbad });
+  // the chain's cure (B): the U3a doors SAY what the lineage decided — exit, window, vault-use, each through ONE mapper over the
+  // model's words (GM.lineageWords); the doors hand them (the store's belted name door, tasks.lineageNameOf)
+  {
+    const nm = (id) => ({ 'tg-p': 'Parent' })[id] || null;
+    const W3 = [GM.LINEAGE_WORDS.through('Parent'), GM.LINEAGE_WORDS.excepted('Parent'), GM.LINEAGE_WORDS.only('Parent'), ''];
+    const xw = (acc, c) => E.lineageOfVerdict(E.exitVerdict(acc, 'use', c), nm);
+    const xs = [xw(ex([P]), kid), xw(ex([EV], [P]), kid), xw(ex([PO]), kid), xw(ex([P]), par)];
+    ok(J(xs) === J(W3), 'exit: through the parent / left out through it / held out by «仅本组» — and nothing for the parent\'s own member', xs);
+    const sNot = E.refusalText('not_granted', { machine: 'box', grant: 'use', lineage: xs[2] }), sExc = E.refusalText('excepted', { machine: 'box', grant: 'use', lineage: xs[1] });
+    ok(sNot.includes('as "this group only"') && sNot.includes('Who can use it') && sExc.includes('left out through its parent Task Group "Parent"') && !/parent/i.test(E.refusalText('not_granted', { machine: 'box', grant: 'use' })), 'exit: the refusal names the «仅本组» entry / the parent\'s exception AND the door that changes it (the machine row\'s «Who can use it»)', [sNot, sExc]);
+    const ww = (rec, c) => R.lineageOfReach(R.reachFor(rec, c), nm);
+    const ws = [ww(wr([P]), kid), ww(wr([EV], [P]), kid), ww(wr([PO]), kid), ww(wr([P]), par)];
+    ok(J(ws) === J(W3), 'window: the same three words, nothing for the parent\'s own member', ws);
+    const VU2 = require('../src/vault-use-grant.js');
+    const vrow = (to) => [{ door: 'vault-use', resource: 'secrets:secret:abc1234567#secret', to, except: [] }];
+    const vm = { kind: 'group', id: 'tg-p', hosts: ['api.example.com'] };
+    const vOut = VU2.useVerdict(vrow([vm]), kid, { hosts: ['other.example.org'], destinationKnown: true, now: 1 });
+    const vOnly = VU2.useVerdict(vrow([{ ...vm, only: true }]), kid, { hosts: ['api.example.com'], destinationKnown: true, now: 1 });
+    const vOwn = VU2.useVerdict(vrow([vm]), par, { hosts: ['other.example.org'], destinationKnown: true, now: 1 });
+    const vl = VU2.standingLines([vOut, vOnly], { nameOf: nm }), vlOwn = VU2.standingLines([vOwn], { nameOf: nm });
+    ok(vOut.code === 'outside_hosts' && vOut.member && vOut.member.inherited === true && vOnly.code === 'not_granted' && vOnly.only === 'group:tg-p' && vl.some((l) => /through its parent Task Group "Parent"/i.test(l)) && vl.some((l) => l.includes('as "this group only"') && l.includes('Vault window')) && vlOwn.length === 1 && !/parent/i.test(vlOwn[0]), 'vault-use: the card\'s standing line says a standing approval held through the parent, and names the «仅本组» entry that holds the child out with its door — nothing of a parent for the parent\'s own member', [vl, vlOwn]);
+    const xpSrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf-8'), weSrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8'), srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), vrSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf-8');
+    ok((xpSrc.match(/lineage: E\.lineageOfVerdict\(j\.verdict, this\.groupNameOf\)/g) || []).length === 2 && /\.map\(\(x\) => E\.lineageOfVerdict\(x, this\.groupNameOf\)\)/.test(xpSrc) && (weSrc.match(/R\.lineageOfReach\((?:v|rv), groupNameOf\)/g) || []).length === 3 && (srvSrc.match(/groupNameOf: \(id\) => tasks\.lineageNameOf\(id\)/g) || []).length === 2 && /VUG\.standingLines\(\[\.\.\.standing\.values\(\)\], \{ always: !!shape\.always, nameOf: groupNameOf \}\)/.test(vrSrc), 'the doors hand the words: exit\'s two refusals and its list, window\'s two refusals and its list, the vault card\'s standing lines — wired to the store\'s ONE name door');
+  }
   // rule ④: the group-visibility door never inherits
   const st = GS.create({ memory: true });
   st.set('group-visibility', 'tg-p', { to: [{ ...P, level: 'messageable' }] });

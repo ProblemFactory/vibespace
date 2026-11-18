@@ -2702,6 +2702,9 @@ class TaskGroupManager {
    *  nothing ITSELF but the road runs THROUGH it (the U3a read, MAJOR 4: a grandparent's «除了» must still cover a grandchild
    *  whose middle group was archived — rule ③ fails closed); a parent this store no longer holds is skipped; a cycle
    *  hand-written on disk ends the walk (visited set). */
+  /** the chain's cure (B): a group's NAME as a grant door's lineage words say it to an agent (GM.lineageWords' nameOf) — ONE LINE
+   *  PIECE of the peer-text belt (a member wrote it); null for an id this store does not hold (the words then say the id). */
+  lineageNameOf(id) { const g = this._has(id) ? this._state.tasks[id] : null; return g ? agentLine(String(g.title || ''), 200) : null; }
   ancestorsOf(ids) {
     const start = new Set((Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === 'string' && x));
     // the U2 read (9): a start this store does not hold, or an ARCHIVED one, gives nothing (as an archived group's members get nothing)

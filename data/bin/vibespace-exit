@@ -133,7 +133,7 @@ async function main() {
     if (!exits.length) { console.log('  (no machine is open to this conversation — ask the user: Remote tab → the machine row\'s «Exit: network — … · commands — …» line → "Who can use it")'); return; }
     for (const e of exits) {
       const g = e.grants || {};
-      console.log(`  ${e.name}${e.online ? '' : ' (offline)'}   network: ${g.use ? 'yes' : 'no'} · commands: ${g.run ? (g.runAsk ? 'ask' : 'yes') : 'no'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);
+      console.log(`  ${e.name}${e.online ? '' : ' (offline)'}   network: ${g.use ? 'yes' : 'no'} · commands: ${g.run ? (g.runAsk ? 'ask' : 'yes') : 'no'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}${e.through ? `  (${e.through})` : ''}   id=${e.id}`);
     }
     return;
   }

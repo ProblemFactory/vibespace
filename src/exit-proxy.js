@@ -105,7 +105,7 @@ function socksAuth(sock, check) {
 
 class ExitProxyManager {
   /** @param deps { hosts, log, groupsOf(session, webuiId), userTodos, emitCard(session, card), dataDir, now, sessionsMap(), bcastAll } */
-  constructor({ hosts, log, groupsOf = null, lineageOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
+  constructor({ hosts, log, groupsOf = null, lineageOf = null, groupNameOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
     grants = null,   // lane grants-unify: THE grants store (or a getter); absent ⇒ the instance's installed one
     storeWriter = null,   // B-48a4: the store writer the audit's appender hands its lines to (absent ⇒ the process's own)
     timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
@@ -115,6 +115,7 @@ class ExitProxyManager {
     this.log = log || (() => {});
     this.groupsOf = groupsOf;
     this.lineageOf = lineageOf;   // lane lg-group-parents U3a: (own group ids) → their ancestors (tasks.grantGroupsOf — the ONE reader)
+    this.groupNameOf = groupNameOf;   // the chain's cure (B): a group id → its belted name (tasks.lineageNameOf) for the lineage words
     this.userTodos = userTodos;
     this.emitCard = emitCard;
     this.dataDir = dataDir;
@@ -530,7 +531,9 @@ class ExitProxyManager {
     for (const h of this._hosts()) {
       const v = E.agentView(this.accessOf(this._raw(h.id) || h), ctx);
       if (!v.use.you && !v.run.you) continue;
-      out.push({ id: h.id, name: h.name || h.id, transport: h.transport || 'ssh', online: this._online(h), active: this._live.has(h.id), localPort: this._live.get(h.id)?.localPort || null, grants: { use: v.use.you, run: v.run.you, runAsk: v.run.ask } });
+      const acc = this.accessOf(this._raw(h.id) || h);
+      const through = [E.exitVerdict(acc, 'use', ctx), E.exitVerdict(acc, 'run', ctx)].map((x) => E.lineageOfVerdict(x, this.groupNameOf)).find(Boolean) || null;   // the chain's cure (B): «through its parent Task Group X»
+      out.push({ id: h.id, name: h.name || h.id, transport: h.transport || 'ssh', online: this._online(h), active: this._live.has(h.id), localPort: this._live.get(h.id)?.localPort || null, grants: { use: v.use.you, run: v.run.you, runAsk: v.run.ask }, ...(through ? { through } : {}) });
     }
     return out;
   }
@@ -550,9 +553,9 @@ class ExitProxyManager {
     const has = { [other]: !!E.exitVerdict(access, other, ctx).ok };
     return { h, access, verdict, ctx, has };
   }
-  _refused(session, sessionId, { code, grant, h = null, has = {}, cmd = '', error = '', where = '', same = false, verb = null, line = null }) {
+  _refused(session, sessionId, { code, grant, h = null, has = {}, cmd = '', error = '', where = '', same = false, verb = null, line = null, lineage = '' }) {
     const machine = h ? (h.name || h.id) : '';
-    const sentence = E.refusalText(code, { machine, grant, has, cmd, error, where, same });
+    const sentence = E.refusalText(code, { machine, grant, has, cmd, error, where, same, lineage });
     // lane exit-transfer: a pull / push refusal is a row of the machine's list too (`verb` + its paths in `line`)
     this.audit({ hostId: h ? h.id : null, machine, sessionId, sessionKey: this.keyOf(session, sessionId), name: session && session.name || null, grant, verb: verb || grant, ...(cmd ? { cmd } : {}), ...(line || {}), ok: false, refusal: code });
     return namedError(code, sentence, { grant, has });
@@ -561,7 +564,7 @@ class ExitProxyManager {
   async use(session, sessionId, ref) {
     const j = this._judge(session, sessionId, ref, 'use');
     if (j.refusal) throw this._refused(session, sessionId, { code: j.refusal.code, grant: 'use', error: j.refusal.error });
-    if (!j.verdict.ok) throw this._refused(session, sessionId, { code: j.verdict.code, grant: 'use', h: j.h, has: j.has });
+    if (!j.verdict.ok) throw this._refused(session, sessionId, { code: j.verdict.code, grant: 'use', h: j.h, has: j.has, lineage: E.lineageOfVerdict(j.verdict, this.groupNameOf) });   // the chain's cure (B)
     const h = j.h;
     // verify-r4 F2 — WHOSE FACT IS THE URL: `use` hands back socks5h://…@127.0.0.1:<port>, a port on THIS machine's
     // loopback. A conversation running on another machine (session.host — ws-create stamps it on every ssh / dial
@@ -707,7 +710,7 @@ class ExitProxyManager {
     const card = (rec) => this._card(session, machine, rec);
     if (!j.verdict.ok) {
       if (j.verdict.code === 'not_granted') card({ outcome: 'not_granted', cmd });
-      throw this._refused(session, sessionId, { code: j.verdict.code, grant: 'run', h, has: j.has, cmd });
+      throw this._refused(session, sessionId, { code: j.verdict.code, grant: 'run', h, has: j.has, cmd, lineage: E.lineageOfVerdict(j.verdict, this.groupNameOf) });   // the chain's cure (B)
     }
     if (h.transport === 'dial' && !h.online) { card({ outcome: 'offline', cmd }); throw this._refused(session, sessionId, { code: 'offline', grant: 'run', h, cmd }); }
     // B-f169: cmd.exe reads no POSIX quoting — words that needed it are refused BY NAME before anyone is asked (a machine known

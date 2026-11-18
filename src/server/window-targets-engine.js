@@ -193,7 +193,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // takeover r2 (T6): the running app process's own executable — the name a wrapper the human typed execs
   // INTO (x-www-browser → chrome). One readlink; injectable for the suite; null = no evidence
   procExe = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } },
-  groupsOf = null, lineageOf = null, modeProbeMs = MODE_PROBE_MS, grants = null } = {}) {
+  groupsOf = null, lineageOf = null, groupNameOf = null, modeProbeMs = MODE_PROBE_MS, grants = null } = {}) {   // the chain's cure (B): + groupNameOf (tasks.lineageNameOf)
   if (!keeper) throw new Error('window-targets engine: keeper required');
   const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   const leaseFile = path.join(dataDir, LEASE_FILE);
@@ -371,7 +371,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const lx = leases.get(rec.id);
       if (lx && lx.sessionId === facts.sessionId) { dropLease(rec.id, 'left out of the share by the user', { by: 'user' }); commit(); }
       audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, verb, by: 'reach', ok: false, code: 'excepted' });
-      throw namedError('excepted', `${rec.label || rec.id} (${rec.id}): ${R.EXCEPTED_SENTENCE}`, { handle: rec.id });
+      const lwx = R.lineageOfReach(v, groupNameOf);   // the chain's cure (B): «left out through its parent Task Group X»
+      throw namedError('excepted', `${rec.label || rec.id} (${rec.id}): ${R.EXCEPTED_SENTENCE}${lwx ? `; ${lwx}` : ''}`, { handle: rec.id });
     }
     if (v.unreadable) {
       // lane E verify r2 (L4): the store that decides a group row could not be read — the verb is refused by NAME and
@@ -382,7 +383,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const l = leases.get(rec.id);
     if (l && l.sessionId === facts.sessionId) { dropLease(rec.id, 'exposure revoked by the user', { by: 'user' }); commit(); }
     audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, verb, by: 'reach', ok: false, code: 'not_exposed' });
-    throw namedError('not_exposed', `${rec.label || rec.id} (${rec.id}) is not shared with this session — ${R.NOT_EXPOSED_SENTENCE}`, { handle: rec.id });
+    const lwn = R.lineageOfReach(v, groupNameOf);   // the chain's cure (B): a «仅本组» entry that held this child out, named
+    throw namedError('not_exposed', `${rec.label || rec.id} (${rec.id}) is not shared with this session — ${R.NOT_EXPOSED_SENTENCE}${lwn ? `; ${lwn}` : ''}`, { handle: rec.id });
   }
   /** The mode facts a row / an attach prints: the share's mode, what it resolved to, why. */
   function modeInfo(handle) {
@@ -652,12 +654,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const rows = wt.targetRows(shared, { a11yApps, sessionPids: (rec) => pidsOf(rec) }).map((r) => {
       const l = leases.get(r.handle);
       const rec = shared.find((x) => x.id === r.handle);
-      const via = R.reachFor(reachRecord(r.handle), ctx).via;
+      const rv = R.reachFor(reachRecord(r.handle), ctx), via = rv.via;
+      const viaWords = R.lineageOfReach(rv, groupNameOf);   // the chain's cure (B): «through its parent Task Group X»
       const mi = modeInfo(r.handle);
       // auto not probed yet: a window absent from the accessibility bus will resolve to pixels — said, never guessed as tree
       const hint = mi.mode === 'auto' && !mi.resolved && !r.a11y ? 'not on the accessibility bus — attach resolves it (pixel mode, unless its tree appears)' : null;
       const browser = isHumanBrowser(rec);
-      return { ...r, lease: leaseView(l), mine: !!(l && facts && l.sessionId === facts.sessionId), via, mode: mi.mode, resolvedMode: mi.resolved, modeWhy: hint || mi.why, ...(browser ? { browser: true, note: BROWSER_NOTE } : {}) };
+      return { ...r, lease: leaseView(l), mine: !!(l && facts && l.sessionId === facts.sessionId), via, ...(viaWords ? { viaWords } : {}), mode: mi.mode, resolvedMode: mi.resolved, modeWhy: hint || mi.why, ...(browser ? { browser: true, note: BROWSER_NOTE } : {}) };
     });
     return { rows, reachUnreadable };
   }

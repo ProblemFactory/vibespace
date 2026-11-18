@@ -371,7 +371,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   spawnPriority = () => null,   // B-7f18: () → src/server/spawn-priority.js priorityFor's answer (its `priority.by` = the step below the hub); none = the hub's own
   lowerImpl = lowerRun,   // B-7f18: the run's child set `by` below the hub (a suite's seam)
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
-  useGrants = null, useFacts = () => null,
+  useGrants = null, useFacts = () => null, groupNameOf = null,   // the chain's cure (B): a group id → its belted name (tasks.lineageNameOf)
   entryMax = 256,   // B-be21: the run list's bound (a suite seam — the product keeps 256)
   notice = () => 0,   // r7: server.js serverNotice (key, text, {level, i18n}) → how many open clients got it — the 1-hour window's per-use toast
   policyJudge = null, policyOn = () => false,   // lane vault-use-grants (R4): (parts, {policy, memo}) → the decision engine's judge answer; the switch vault.policyJudge   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
@@ -2243,7 +2243,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // B-d868: who started the turn this ask came from — the conversation's kept fact, copied AFTER the window's own bound (a
         // short line of its own size: it never withdraws «Allow for 1 hour»); a conversation it cannot read ⇒ «unrecorded»
         if (wfacts) { let tb = null; try { tb = (useFacts(caller) || {}).turnBy; } catch { tb = null; } wfacts.turnBy = tb && typeof tb === 'object' && typeof tb.by === 'string' ? { by: tb.by.slice(0, 20), ...(typeof tb.name === 'string' && tb.name ? { name: tb.name.slice(0, 80) } : {}), ...(tb.why === 'background' ? { why: 'background' } : {}) } : { by: 'unrecorded' }; }
-        const lead = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : [])];
+        const lead = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always, nameOf: groupNameOf }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : [])];
         const trail = [...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes];
         const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...trail].join('\n');   // r8 (MINOR 3): no window line — its words ride facts.window   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry
         if (shown.length > DETAIL_MAX) return named('card_too_long');

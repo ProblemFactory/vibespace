@@ -237,10 +237,18 @@ function exitVerdict(access, grant, ctx = {}) {
   const v = GM.admits([rowOfGrant(g)], factsOf(ctx || {}));
   if (v.ok) {
     if (g.mode === 'everyone') return { ok: true, via: 'everyone', row: null };
-    return { ok: true, via: v.via === 'conversation' ? 'session' : 'group', row: v.entry };
+    return { ok: true, via: v.via === 'conversation' ? 'session' : 'group', row: v.entry, ...(v.inherited ? { inherited: true } : {}) };   // the chain's cure (B): + through a parent
   }
-  if (v.code === 'excepted') return refuse('excepted', { grant, except: v.entry ? GM.bareOf(v.entry) : null });
-  return refuse(REFUSALS.includes(v.code) ? v.code : 'not_granted', { grant });
+  if (v.code === 'excepted') return refuse('excepted', { grant, except: v.entry ? GM.bareOf(v.entry) : null, ...(v.inherited ? { inherited: true } : {}) });
+  return refuse(REFUSALS.includes(v.code) ? v.code : 'not_granted', { grant, ...(v.code === 'not_granted' && v.only ? { only: GM.bareOf(v.only) } : {}) });   // the chain's cure (B): + the «仅本组» entry that held a child out
+}
+/** the chain's cure (B): an exitVerdict answer → the grant model's lineage words ('' when the lineage decided nothing) —
+ *  «through its parent Task Group X», «left out through …», a «仅本组» refusal; `nameOf` = the store's belted name door. */
+function lineageOfVerdict(v, nameOf = null) {
+  if (!v) return '';
+  if (v.ok) return GM.lineageWords({ ok: true, inherited: !!v.inherited, entry: v.row }, nameOf);
+  if (v.code === 'excepted') return GM.lineageWords({ ok: false, code: 'excepted', inherited: !!v.inherited, entry: v.except }, nameOf);
+  return GM.lineageWords({ ok: false, code: v.code, only: v.only || null }, nameOf);
 }
 /** What an AGENT sees of a machine: its own two answers — never another principal, never a name. */
 function agentView(access, ctx = {}) {
@@ -721,7 +729,8 @@ const head = (cmd, n = 80) => { const c = cleanCmd(cmd, 100000).replace(/`/g, "'
  * never another conversation's name, a Task Group title or a key (the words census poisons all three).
  * `has` = the other grant this caller DOES hold (`{use}` / `{run}`) — the sentence offers it.
  */
-function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, hidden = null, encoded = null, spawnError = null, interpreter = null, platform = null, agentVersion = null, verb = 'run', path: tp = '', side = 'remote', why = '', size = 0, max = 0 } = {}) {
+function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, lineage = '', hidden = null, encoded = null, spawnError = null, interpreter = null, platform = null, agentVersion = null, verb = 'run', path: tp = '', side = 'remote', why = '', size = 0, max = 0 } = {}) {
+  const LW = lineage ? `; ${lineage}` : '';   // the chain's cure (B): the lineage words a door hands (GM.lineageWords)
   const M = q(machine);
   const at = side === 'local' ? 'here' : `on ${M}`;
   switch (code) {
@@ -753,12 +762,12 @@ function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', er
     }
     case 'not_granted':
       if (grant === 'run') return has && has.use
-        ? `machine ${M} is not open to this conversation for running commands — ${WAY_OUT}; you may still borrow its network (vibespace-exit use ${String(machine).slice(0, 60)})`
-        : `machine ${M} is not open to this conversation — ${WAY_OUT}`;
-      return `this conversation may not borrow ${M}'s network — ${WAY_OUT}${has && has.run ? '; you may run commands on it (vibespace-exit run)' : ''}`;
+        ? `machine ${M} is not open to this conversation for running commands — ${WAY_OUT}; you may still borrow its network (vibespace-exit use ${String(machine).slice(0, 60)})` + LW
+        : `machine ${M} is not open to this conversation — ${WAY_OUT}` + LW;
+      return `this conversation may not borrow ${M}'s network — ${WAY_OUT}${has && has.run ? '; you may run commands on it (vibespace-exit run)' : ''}` + LW;
     case 'groups_unreadable': return `whether ${M} is open to you through a Task Group could not be judged — the Task Group list could not be read; run the same command again once`;
     // lane grants-unify: the user LEFT THIS CONVERSATION OUT of the list (an exception on a Task Group's / everyone's grant)
-    case 'excepted': return `the user left this conversation out of who may ${grant === 'run' ? 'run commands on' : 'borrow the network of'} ${M} (an exception under "Who can use it" on the machine row, Remote tab) — ask the user to lift the exception or to add this conversation itself`;
+    case 'excepted': return `the user left this conversation out of who may ${grant === 'run' ? 'run commands on' : 'borrow the network of'} ${M} (an exception under "Who can use it" on the machine row, Remote tab) — ask the user to lift the exception or to add this conversation itself` + LW;
     case 'unknown_shape': return `${M}'s exit access could not be read — nothing is allowed until the user saves it again under "Who can use it" on the machine row (Remote tab)`;
     case 'fork_pending': return 'this conversation is a fork that has not announced its own id yet — run the same command again in a moment';
     case 'ask_pending': return `your previous command on ${M} still waits for the user — wait for it, then try again`;
@@ -846,7 +855,7 @@ module.exports = {
   agentVersionOf, reinstallStep,
   GRANTS, MODES, HUB_MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
   OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP, CMD_FOLD_LINES, CMD_FOLD_CHARS,
-  sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
+  sessionKeyOf, callerKeys, principalsNow, lineageOfVerdict, cmdBytes, hiddenOrderOf, askDetailOf,
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold
   exitAccessOf, accessOfView, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit, exitRows, exitView, whoPrincipal, rekeyForkExcept,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, grantedOf, migrateExitAccess,

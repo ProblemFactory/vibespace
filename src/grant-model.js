@@ -527,6 +527,7 @@ function verdictOf(judged, F) {
     // decided by a parent's entry says so (`inherited: true` — the door's words: «through its parent group …»)
     const viaParent = (e) => (e.kind === 'group' && !F.groups.has(e.id) ? 1 : 0);
     hits.sort((a, b) => SPECIFIC[b.entry.kind] - SPECIFIC[a.entry.kind] || viaParent(a.entry) - viaParent(b.entry));
+    for (const h of hits) if (viaParent(h.entry)) h.inherited = true;   // the chain's cure (B): each hit a parent's entry made says so (a door names it, never re-reads the groups)
     return { ok: true, via: hits[0].entry.kind, row: hits[0].row, entry: hits[0].entry, hits, ...(viaParent(hits[0].entry) ? { inherited: true } : {}) };
   }
   if (unreadable) return { ok: false, code: 'groups_unreadable', row: unreadable.row };
