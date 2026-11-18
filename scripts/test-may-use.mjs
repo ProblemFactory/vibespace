@@ -22,6 +22,9 @@
 //      tick — RED: the whole-row rule), MUST 2 «may request» is its own answer (RED: a lister that drops the level), MUST 3 exits
 //      and windows never cut, SHOULD e a 「除了」 said behind three granted rows + sums of the granted only, SHOULD a a stopped
 //      conversation from the KEPT rows inside the budget (a sweep only when none; paused said), SHOULD b an untick says why
+//   ⑮–⑰ THE MOVE ONTO int411 8cef0006a (the meetings of logic): ⑮ the Task Groups are asked with the conversation's machine, as
+//      every door asks since B-df5f (RED: the copy without it); ⑯ the exit lister answers as the door does after B-48a4 (RED: a lister
+//      that drops the groups); ⑰ Session Properties holds B-460d's CPU priority row and the «What it may use» section, each once
 //   ⑭ THE RESTACK ONTO 2.369.410: the key lister reads the door's LIVE grants (a once-grant from before a restart is not
 //      listed; RED: a lister over the raw store) — the release's B-3190 follow-up made the key door read them
 //   ⑧ THE FORM'S ROWS BYTE FOR BYTE: src/lib/may-use-rows.js renders what the released form's closures rendered (a frozen copy of
@@ -95,15 +98,15 @@ function omitted(model) {
   for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: '② ' })) ok(r.pass, r.name, r.detail);
 }
 
-function rig({ sessions = [], stored = [], groupsThrow = false, doors = {}, noAgent = () => false } = {}) {
+function rig({ sessions = [], stored = [], groupsThrow = false, doors = {}, noAgent = () => false, onGroups = null, mod = MU } = {}) {
   const activeSessions = new Map(sessions.map((s) => [s.id, s]));
   const seen = [];
   const mk = (name) => ({ [name === 'browser' ? 'admitsFor' : 'mayUseFor']: (f) => { seen.push({ name, f }); return []; } });
   const D = { channels: { mayUseFor: (f) => { seen.push({ name: 'channels', f }); return { accounts: [], answers: [] }; } }, browser: mk('browser'), logins: mk('logins'), vaultUse: mk('vaultUse'), automation: mk('automation'), exits: mk('exits'), windows: mk('windows'), ...doors };
-  const mu = MU.create({
+  const mu = mod.create({
     activeSessions, sessionKeyOf: (s, id) => (s.backendSessionId ? `${s.backend}:${s.backendSessionId}` : `webui:${id}`), addressableId: (s) => s.backendSessionId || null,
     storedRow: async (key) => stored.find((r) => r.sessionKey === key) || null,
-    groupsOf: (q) => { if (groupsThrow) throw new Error('tasks.json unreadable'); return q.sessionKey === 'codex:c1' || q.cwd === '/w/lane' ? [{ id: 'g1', title: 'Lane' }] : []; },
+    groupsOf: (q) => { if (onGroups) onGroups(q); if (groupsThrow) throw new Error('tasks.json unreadable'); return q.sessionKey === 'codex:c1' || q.cwd === '/w/lane' ? [{ id: 'g1', title: 'Lane' }] : []; },
     noAgentOf: noAgent, browserKeyOf: (cid) => (cid === 'c9' ? 'bk-0000beef' : ''), grants: null, doors: D, log: () => { },
   });
   return { mu, seen };
@@ -372,6 +375,57 @@ console.log('— ⑭ THE KEY DOOR, LIVE (restack onto 2.369.410): a once-grant f
   const red = planted ? listed(boot(MC14.load('src/server/automation-engine.js', planted, 'keys-store'))) : null;
   ok(!!red && red.includes('once14'), '⑭ RED CONTROL: a lister over the raw store lists the dead once-grant as granted (the door refuses it)', red);
   for (const r of copiesCensus(MC14.files, MC14.dir, REPO, { minCopies: 1, label: '⑭ ' })) ok(r.pass, r.name, r.detail);
+}
+
+// ── ⑮–⑰ THE MOVE ONTO THE int411 CHECKPOINT 8cef0006a (主开发 20:45Z): the meetings of logic, each with its leg ──
+console.log('— ⑮ B-df5f: the Task Groups are asked with the conversation\'s machine (hostId), as every door asks them');
+{
+  const S15 = [{ id: 'sess-r', backend: 'codex', backendSessionId: 'cr', cwd: '/w/lane', host: 'm-2' }, { id: 'sess-l', backend: 'codex', backendSessionId: 'cl', cwd: '/w/lane' }];
+  const asked = async (mod) => { const qs = []; const R15 = rig({ sessions: S15, onGroups: (q) => qs.push(q), mod }); await R15.mu.factsOf('codex:cr'); const r = qs.length; await R15.mu.factsOf('codex:cl'); return { remote: qs.slice(0, r), local: qs.slice(r) }; };
+  const a = await asked(MU);
+  ok(a.remote.length > 0 && a.remote.every((q) => q.hostId === 'm-2') && a.local.length > 0 && a.local.every((q) => q.hostId === null),
+    '⑮ a conversation of another machine is judged with ITS machine (hostId m-2, its folder resolved there, never by the hub\'s realpath); a local one with none', { remote: a.remote.map((q) => q.hostId), local: a.local.map((q) => q.hostId) });
+  const SRC15 = fs.readFileSync(path.join(REPO, 'src/server/may-use.js'), 'utf8');
+  const PLANT15 = "hostId: str(s.host || s.hostId) || null, ";
+  const planted15 = SRC15.split(PLANT15).length === 2 ? SRC15.replace(PLANT15, '') : null;
+  ok(!!planted15 && !planted15.includes('hostId: str(s.host'), '⑮ CONTROL plant: the machine fact stands once in may-use.js, and the copy asks without it');
+  const MC15 = mutantCopies('may-use-host', REPO);
+  const red15 = planted15 ? await asked(MC15.load('src/server/may-use.js', planted15, 'no-host')) : null;
+  ok(!!red15 && red15.remote.length > 0 && red15.remote.every((q) => q.hostId === undefined), '⑮ RED CONTROL: the copy asks the remote conversation\'s groups with no machine — the hub would read its folder', red15 && red15.remote.map((q) => q.hostId));
+  for (const r of copiesCensus(MC15.files, MC15.dir, REPO, { minCopies: 1, label: '⑮ ' })) ok(r.pass, r.name, r.detail);
+}
+console.log('— ⑯ B-48a4: the exit lister answers as the door does — the same verdict over the same context, the membership asked when a list names a group');
+{
+  const { ExitProxyManager: XPM } = require(path.join(REPO, 'src/exit-proxy.js'));
+  const ER = require(path.join(REPO, 'src/exit-reach.js'));
+  const access16 = { use: { mode: 'only', who: [{ kind: 'group', id: 'g8' }], except: [] }, run: { mode: 'only', who: [{ kind: 'group', id: 'g7' }], except: [] } };
+  const host16 = { id: 'm16', name: 'Build box' };
+  const self16 = { _hosts: () => [host16], _raw: () => host16, accessOf: () => access16, groupsOf: () => ['g7'], log: () => { } };
+  self16.ctxFor = (...a) => XPM.prototype.ctxFor.apply(self16, a);   // _ctxAgain asks the door's own ctxFor
+  const sess16 = { cwd: '/w' };
+  const ctx = XPM.prototype.ctxFor.call(self16, sess16, 'sess-16');
+  const again = XPM.prototype._ctxAgain.call(self16, sess16, 'sess-16', { groupIds: [] }, access16.run);   // the run list names a group ⇒ asked again
+  const door = { use: ER.exitVerdict(access16, 'use', ctx), run: ER.exitVerdict(access16, 'run', again) };
+  const lister = (mod) => Object.fromEntries(mod.prototype.mayUseFor.call(self16, { sessionKeys: ctx.sessionKeys, conversationKeys: ctx.conversationKeys, groupIds: ['g7'], groupsUnreadable: false }).map((r) => [r.detail.grant, r]));
+  const L = lister(XPM);
+  ok(door.run.ok === true && door.run.via === 'group' && door.use.ok === false && !!L.run && L.run.ok === true && L.run.via === 'group' && L.run.groupId === 'g7' && !(L.use && L.use.ok),
+    '⑯ the machine whose run list names Task Group g7: the door (its context asked again, B-48a4) and the unit\'s lister both admit run through g7, and neither admits use (g8)', { door: { use: door.use.ok, run: [door.run.ok, door.run.via] }, lister: Object.keys(L) });
+  const SRC16 = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
+  const PLANT16 = 'groupIds: (facts.groupIds || []).map(String),';   // stale-pins: kept — ⑯'s plant, proven to stand once in exit-proxy.js before the copy drops it
+  const planted16 = SRC16.split(PLANT16).length === 2 ? SRC16.replace(PLANT16, 'groupIds: [],') : null;
+  ok(!!planted16 && planted16.split(PLANT16).length === 1, '⑯ CONTROL plant: the lister\'s groups stand once in exit-proxy.js, and the copy drops them');
+  const MC16 = mutantCopies('may-use-exit', REPO);
+  const red16 = planted16 ? lister(MC16.load('src/exit-proxy.js', planted16, 'drop-groups').ExitProxyManager) : null;
+  ok(!!red16 && !(red16.run && red16.run.ok), '⑯ RED CONTROL: a lister that drops the groups does not list the run grant the door admits', red16 && Object.keys(red16));
+  for (const r of copiesCensus(MC16.files, MC16.dir, REPO, { minCopies: 1, label: '⑯ ' })) ok(r.pass, r.name, r.detail);
+}
+console.log('— ⑰ B-460d + B-70f9: Session Properties holds the CPU priority row AND the «What it may use» section, each once');
+{
+  const sp = fs.readFileSync(path.join(REPO, 'src/lib/session-props.js'), 'utf8');
+  const once = (s) => sp.split(s).length === 2;
+  ok(once("import { cpuPriorityWords } from './cpu-priority-words.js';") && once("import { mountMayUse } from './may-use-section.js';") && once("if (cpuWords) row(idSec, t('CPU priority'), escHtml(cpuWords));")
+    && once('if (!winInfo._mayUse) winInfo._mayUse = mountMayUse(') && once("muSec.classList.add('session-props-may-use');") && sp.indexOf("row(idSec, t('CPU priority')") < sp.indexOf("muSec.classList.add('session-props-may-use')"),
+    '⑰ both units stand in Session Properties: the CPU priority row in the identity section (B-460d), the may-use section of its own after it, mounted once per window');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

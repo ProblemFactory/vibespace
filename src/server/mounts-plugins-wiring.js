@@ -1598,7 +1598,7 @@ function createSessionMessages(session, sessionId) {
       // when it kept none, never while discovery is paused (then said by name)
       storedRow: (key) => { const S = require('../routes/sessions'); const k = S.keptSessions(); const find = (rows) => (rows || []).find((x) => x && x.sessionKey === key) || null;
         if (k.rows) return find(k.rows); if (k.paused) return { paused: true }; return S.warmSessions().then((r) => find(r && r.sessions)); },
-      groupsOf: (q) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.groupsForSession(q); },
+      groupsOf: ({ sessionKey, cwd, hostId = null, initialGroupId, initialGroupIds } = {}) => { const tasks = getTasks ? getTasks() : null; if (!tasks) throw new Error('the Task Group store is not ready'); return tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }); },   // B-df5f: the conversation's machine, as every caller hands it
       noAgentOf: (b) => !!require('../backend-caps.js').capsOf(b).terminalOnly,
       browserKeyOf: (cid) => { bindingsMemo = bindingsMemo || require('./browser-bindings.js').create({ dataDir: path.join(rootDir, 'data'), log: console }); return bindingsMemo.lookup(String(cid)) || ''; },
       grants: () => require('./grants-store.js').store(),

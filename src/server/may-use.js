@@ -10,7 +10,7 @@
  *
  *  · ITS FACTS (cure r1, SHOULD a: a stopped conversation is read from the rows the sessions route KEPT — no sweep per read; a
  *    sweep only when it kept none, never while discovery is paused, then said: list_paused) — LIVE: the keys the live doors build (its conversation id — claude-lock-capture addressableId —, webui:<id>,
- *    its browser key), its groups by the Task Group store's groupsForSession({sessionKey, cwd, initialGroupIds}) (the
+ *    its browser key), its groups by the Task Group store's groupsForSession({sessionKey, cwd, hostId, initialGroupIds}) (the
  *    crosswalk taskIdsFor uses). NOT LIVE: its STORED facts — the sessions list's own row for its key (its conversation id,
  *    folder, machine, mode), its browser key from the durable binding (data/browser-env/bindings.json), its groups by the
  *    same groupsForSession over its key and folder; never a webui key. The group store unreadable ⇒ `groupsUnreadable`:
@@ -61,7 +61,7 @@ function create({
     const sessionKeys = [...new Set([...(cid ? [`${backend}:${cid}`] : []), ...(live ? [`webui:${live.id}`] : [])])];
     let groups = [], groupsUnreadable = false;
     try {
-      groups = (groupsOf({ sessionKey: key, cwd: s.cwd || '', initialGroupId: live ? s._initialGroupId : undefined, initialGroupIds: live ? s._initialGroupIds : undefined }) || [])
+      groups = (groupsOf({ sessionKey: key, cwd: s.cwd || '', hostId: str(s.host || s.hostId) || null, initialGroupId: live ? s._initialGroupId : undefined, initialGroupIds: live ? s._initialGroupIds : undefined }) || [])
         .filter((g) => g && g.id).map((g) => ({ id: str(g.id), name: groupName(g) }));
     } catch (e) { groupsUnreadable = true; log(`[may-use] ${key}: the Task Group list could not be read (${e && e.message}) — group grants said «unknown»`); }
     return { ok: true, ms: swept ? null : ms(t0), swept, facts: { key, live: !!live, webuiId: live ? live.id : null, cid, browserKey: bk, conversationKeys, sessionKeys, groups, groupIds: groups.map((g) => g.id), groupsUnreadable,
