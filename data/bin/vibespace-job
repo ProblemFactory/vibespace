@@ -28,11 +28,15 @@ if (!API || (!SESS && !JOBT)) { console.error('vibespace-job: not inside a VibeS
 const args = process.argv.slice(2);
 const flags = {};
 const pos = [];
+// B-0bda (its adversarial read r1): a flag that takes NO value never eats the next word — `run --notify-ok bash /srv/gate.sh` made
+// notify-ok «bash», left ONE positional word and ran /srv/gate.sh alone, unrefused
+const BOOL_FLAGS = new Set(['stdin-open', 'notify-user', 'notify-ok', 'keep-up', 'publish']);
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a.startsWith('--')) {
     const k = a.slice(2);
     if (k === 'vault') { if (i + 1 < args.length && !args[i + 1].startsWith('--')) (flags.vault = flags.vault || []).push(args[++i]); else flags.vault = true; } // repeatable (lane vault-job-road)
+    else if (BOOL_FLAGS.has(k)) flags[k] = true;
     else if (i + 1 < args.length && !args[i + 1].startsWith('--')) { flags[k] = args[++i]; }
     else flags[k] = true;
   } else pos.push(a);
@@ -216,7 +220,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const cmdStr = pos[1];
       // B-0bda (fb-dd15343aa4): a command line with MORE positional words than the ONE command string ran its first word alone — 0 s, «ok»,
       // a gate believed passed. Refused by name, with the quoted form to type; nothing is sent
-      if (!isNotify && pos.length > 2) { const q = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"; console.error(`vibespace-job run: the command must be ONE quoted string — ${pos.length - 1} words were given (${pos.slice(1, 4).map((w) => JSON.stringify(w)).join(' ')}${pos.length > 4 ? ' …' : ''}) and only the first would run. Type: vibespace-job run ${q(pos.slice(1).join(' '))} [flags] — nothing was sent`); process.exit(2); }
+      if (!isNotify && pos.length > 2) { const q = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'", word = (w) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(String(w)) ? String(w) : q(w));   /* each word quoted as a shell needs it, THEN the whole line (the adversarial read r1: a bare join suggested `bash -c cd …`) */ console.error(`vibespace-job run: the command must be ONE quoted string — ${pos.length - 1} words were given (${pos.slice(1, 4).map((w) => JSON.stringify(w)).join(' ')}${pos.length > 4 ? ' …' : ''}) and only the first would run. Type: vibespace-job run ${q(pos.slice(1).map(word).join(' '))} [flags] — nothing was sent`); process.exit(2); }
       if (!isNotify && !cmdStr) { console.error('usage: vibespace-job run "CMD" --name NAME [flags] — run with no args for full usage'); process.exit(1); }
       // --at forms: epoch ms | RELATIVE "+2m"/"+1h30m" (unambiguous — prefer
       // this) | ISO with Z/offset (exact) | bare datetime = SERVER-LOCAL time.

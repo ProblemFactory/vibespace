@@ -1121,7 +1121,7 @@ const PRINTS = {
     // a run's end left or killed (runEndWords: fixed words + counts + a scope's unit name VibeSpace built)
     'b.words': `${V}:the hub's words for the rung that held the last run (boundWords — fixed vocabulary, a size, b.why)`, 'run.endWords': `${V}:the hub's words for what the run's job left running or the kill the hub made (runEndWords — fixed vocabulary, counts, a unit name VibeSpace built)`, 'j.run.endWords': `${V}:the same words, on show's last-run line`,
     // verify r3 F2: the subscribe / unsubscribe echo is ONE print whose arguments span three lines — r2's line-based walker saw none of these six
-    'r.updated': `${V}:a flag`, 'r.already': `${V}:a flag`, 'r.filter': `${O}:the caller's own subscription filter (echoed)`, 'r.count': `${V}:a count`, 'r.removed': `${V}:a flag`, 'pos': `${O}:the job the caller named (its positional argument)`,
+    'r.updated': `${V}:a flag`, 'r.already': `${V}:a flag`, 'r.filter': `${O}:the caller's own subscription filter (echoed)`, 'r.count': `${V}:a count`, 'r.removed': `${V}:a flag`, 'pos': `${O}:the job the caller named (its positional argument)`, 'word': `${O}:the caller's own command words, each quoted for a shell (the B-0bda refusal's form to type — bl-jobs batch 8)`,
     // verify r3 F4: the REACH of the prints — the records behind `j`, the run behind `dur_`, the request behind call()
     'r.job': 'judged:agentJobView — the job record printJob / show / logs print (its fields: j.*)', 'r.jobs': 'judged:agentJobView — the job records visible to this session (list)', 'run.startedAt': `${V}:an instant`, 'run.endedAt': `${V}:an instant`,
     'JSON.stringify(body)': `${O}:the caller's own request body — reached through call()'s fetch (sent, never printed)`,

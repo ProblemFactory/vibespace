@@ -870,15 +870,30 @@ console.log('B-70f9 ② the notice at a person\'s end / archive; the stop-with-c
   const run0 = (file, args) => spawnSync(process.execPath, [file, ...args], { env: env0, encoding: 'utf8' });
   const r1 = run0(CLI0, ['run', '--name', 'gate', 'bash', '/srv/lane/gate.sh']);
   ok(r1.status === 2 && /the command must be ONE quoted string — 2 words were given \("bash" "\/srv\/lane\/gate\.sh"\) and only the first would run\. Type: vibespace-job run 'bash \/srv\/lane\/gate\.sh' \[flags\] — nothing was sent/.test(r1.stderr), 'B-0bda: an unquoted multi-word command is REFUSED by name (exit 2, nothing sent) with the quoted form to type — never a 0-second «ok» of its first word', r1.stderr);
+  // the form to type is PROVEN by a shell (the adversarial read r1: a bare join of `bash -c 'cd /x && npm test'` suggested a line that
+  // runs `bash -c cd`): the outer shell reads it as ONE word, and sh -c reads that word back into exactly the words given
+  const formOf = (stderr) => { const m = /Type: vibespace-job run (.*) \[flags\] — nothing was sent/.exec(stderr || ''); return m ? m[1] : null; };
+  const shWords = (text) => { const r = spawnSync('sh', ['-c', 'eval "set -- $1"; for w in "$@"; do printf "%s\\0" "$w"; done', 'sh', text], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.split('\0').slice(0, -1) : null; };
+  const roundTrip = (stderr) => { const f = formOf(stderr), outer = f && shWords(f); return outer && outer.length === 1 ? shWords(outer[0]) : null; };
   const r2 = run0(CLI0, ['run', '--name', 'q', "it's", 'here']);
-  ok(r2.status === 2 && r2.stderr.includes("Type: vibespace-job run 'it'\\''s here' [flags]"), 'B-0bda: the form to type quotes a quote as a shell needs it', r2.stderr);
+  ok(r2.status === 2 && JSON.stringify(roundTrip(r2.stderr)) === JSON.stringify(["it's", 'here']), 'B-0bda: the form to type quotes a quote as a shell needs it — read back by sh, the same two words', { stderr: r2.stderr, back: roundTrip(r2.stderr) });
+  const r2b = run0(CLI0, ['run', '--name', 'g', 'bash', '-c', 'cd /x && npm test']);
+  ok(r2b.status === 2 && JSON.stringify(roundTrip(r2b.stderr)) === JSON.stringify(['bash', '-c', 'cd /x && npm test']), 'B-0bda: `bash -c \'cd /x && npm test\'` unquoted — the form quotes EACH word, then the line: sh reads back bash, -c and the one script (never `bash -c cd`)', { stderr: r2b.stderr, back: roundTrip(r2b.stderr) });
+  const r2c = run0(CLI0, ['run', '--name', 'g', '--notify-ok', 'bash', '/srv/gate.sh']);
+  ok(r2c.status === 2 && JSON.stringify(roundTrip(r2c.stderr)) === JSON.stringify(['bash', '/srv/gate.sh']), 'B-0bda: a flag that takes no value (--notify-ok) never eats the next word — the two words are refused, with their form', r2c.stderr);
   const CSRC = fs.readFileSync(CLI0, 'utf8'), REF = '      if (!isNotify && pos.length > 2) {';
   ok(CSRC.split(REF).length === 2, 'B-0bda control setup: the refusal is one line in the CLI (the plant the control cuts)');
   const MJ0 = mutantCopies('cli-multiword-0bda', ROOT0);
   const copy = MJ0.write('data/bin/vibespace-job', CSRC.replace(REF, '      if (false /* MUTANT: the release — no refusal */) {'), 'release');
   const r3 = run0(copy, ['run', '--name', 'gate', 'bash', '/srv/lane/gate.sh']);
+  // the boolean flags' control: the line that keeps them valueless cut — `--notify-ok bash /srv/gate.sh` sends /srv/gate.sh alone
+  const BOOL = "    else if (BOOL_FLAGS.has(k)) flags[k] = true;\n";
+  ok(CSRC.split(BOOL).length === 2, 'B-0bda control setup: the anchor of the control «a valueless flag» is in the source');
+  const copyB = MJ0.write('data/bin/vibespace-job', CSRC.replace(BOOL, '    /* MUTANT: a valueless flag eats the next word */\n'), 'bool-eats');
+  const r3b = run0(copyB, ['run', '--name', 'g', '--notify-ok', 'bash', '/srv/gate.sh']);
+  ok(!/the command must be ONE quoted string/.test(r3b.stderr) && /server unreachable|ECONNREFUSED|unreachable/.test(r3b.stderr), 'B-0bda CONTROL (valueless flags cut, in a copy): --notify-ok takes «bash» and the line goes on to SEND /srv/gate.sh alone (here it meets no hub)', r3b.stderr.slice(0, 200));
   ok(!/the command must be ONE quoted string/.test(r3.stderr) && /server unreachable|ECONNREFUSED|unreachable/.test(r3.stderr), 'B-0bda CONTROL (the release\'s CLI, in a copy): the same line goes on to SEND «bash» alone (here it meets no hub)', r3.stderr.slice(0, 200));
-  for (const r of copiesCensus(MJ0.files, MJ0.dir, ROOT0, { minCopies: 1, label: 'B-0bda ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MJ0.files, MJ0.dir, ROOT0, { minCopies: 2, label: 'B-0bda ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
