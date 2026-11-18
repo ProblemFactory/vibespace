@@ -693,10 +693,18 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
     const mw = PM.dialStateText({ state: 'refused', at: new Date().setHours(17, 9, 0, 0), n: 1, reason: 'token-mismatch', host: '', mintedAt: new Date().setHours(17, 8, 0, 0) });
     ok(/PM/.test(mw), 'CONTROL (m): the browser\'s own clock (an en-US browser) prints "05:09 PM" inside the zh sentence — the L-time cell goes red', mw);
     // verify-r4 F8: what Generate does to a device NOT dialed in — said before the button (zh)
-    const T8 = now - 120000;
-    const cons = (x) => PK.generateConsequenceText({ transport: 'dial', deviceId: 'mac', ...x });
+    // B-8e47: the F8 fixture is read at ONE PINNED instant (a local noon) — «two minutes ago» from a real 00:01 is yesterday,
+    // and the product then prints a date (the fast tier flaked at midnight, 524/525). The product's clock is Date.now (page-time).
+    const NOON = new Date(2026, 5, 15, 12, 0, 0, 0).getTime(), realNow = Date.now;
+    const at = (t, f) => { Date.now = () => t; try { return f(); } finally { Date.now = realNow; } };
+    const T8 = NOON - 120000;
+    const cons = (x, t = NOON) => at(t, () => PK.generateConsequenceText({ transport: 'dial', deviceId: 'mac', ...x }));
+    const NEVER = (t8) => `生成新命令会替换 ${hm(t8)} 生成的那条：那条随即失效 — 请在设备上运行新的这条。`;
+    const PAST_MIDNIGHT = new Date(2026, 5, 15, 0, 1, 0, 0).getTime();
+    ok(cons({ online: false, dial: { tokenMintedAt: PAST_MIDNIGHT - 120000 } }, PAST_MIDNIGHT) !== NEVER(PAST_MIDNIGHT - 120000),
+      'CONTROL (B-8e47): the same fixture read at 00:01 crosses midnight — the sentence carries a date, the bare-time words do not match; the legs below pin the clock');
     ok(cons({ online: false, dial: { tokenMintedAt: T8, firstConnectAt: T8 + 5, lastConnectAt: T8 + 5, lastDisconnectAt: T8 + 9 } }) === '这台设备现在离线。生成新命令会替换它手上的那条：它回来时会被拒绝，直到你在它上面运行新命令。', 'F8 (zh): an OFFLINE device that worked (silent) hears it will be refused when it comes back until the new command runs on it — BEFORE the button');
-    ok(cons({ online: false, dial: { tokenMintedAt: T8 } }) === `生成新命令会替换 ${hm(T8)} 生成的那条：那条随即失效 — 请在设备上运行新的这条。`, 'F8 (zh): a never-connected device hears the command made at <time> stops working (naive L-generate-before)');
+    ok(cons({ online: false, dial: { tokenMintedAt: T8 } }) === NEVER(T8), 'F8 (zh): a never-connected device hears the command made at <time> stops working (naive L-generate-before)');
     ok(/^生成新命令会替换 .* 生成的那条/.test(cons({ online: false, dial: { tokenMintedAt: T8, lastConnectAt: T8 - 5000, lastRefusal: { code: 'token-mismatch', at: T8 + 60 } } })), 'F8 (zh): a refused device (it holds an older one already) hears the NEWEST command stops working');
     ok(cons({ online: true, dial: { tokenMintedAt: T8, lastConnectAt: T8 + 5 } }) === '' && PK.generateConsequenceText({ transport: 'ssh', graduated: true, dialLive: true, dial: { lastConnectAt: 5 } }) === '', 'F8: a device dialed in NOW gets no sentence here — the "send it over its link" choice and its note speak');
     const smF8 = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
