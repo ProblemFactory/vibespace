@@ -698,6 +698,12 @@ function initNames(msg, seen) {
 function noteInitNames(msg) {
   if (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length) initNamesSeen = true;
 }
+/** …and every record the CLI writes on stdout INSIDE the Stop window that carries a rider's stamp — a user record's own uuid,
+ *  an attachment's source_uuid (a queued_command: never seen on stdout so far) — says the CLI still held that rider: it is named,
+ *  so kept, whatever an init omitted (主开发 11:12Z, the row's condition (1)). The judgment itself stays at the settle. */
+function noteWindowRecord(msg) {
+  for (const u of [msg.uuid, msg.attachment && msg.attachment.source_uuid]) if (typeof u === 'string' && u) stopping.named.add(u);
+}
 /** A follow-up the Stop window interrupted on its init: remember who it named (every follow-up's, judged once at the settle). */
 function noteFollowUpNames(msg) {
   const names = initNames(msg, initNamesSeen);
@@ -1038,6 +1044,7 @@ function processLine(line) {
     const busyWord = cliState === 'running' || cliState === 'requires_action';
     const starts = msg.type === 'system' && msg.subtype === 'init' && busyWord;
     if (msg.type === 'system' && msg.subtype === 'init') noteInitNames(msg); // B-fcd6: the witness that this CLI names the frames a turn took
+    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg); // B-fcd6: a record carrying a rider's stamp keeps it
     const idle = msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle';
     // THE WITNESS (2.369.361): a handed frame rides the request the CLI builds after a tool result (not one Stop
     // rejected), and the model speaking after it is that request answered
@@ -1169,6 +1176,7 @@ function processLine(line) {
 
 function startChild() {
   reconnectTimer = null;
+  if (!OFFSET_MODE) initNamesSeen = false;   // B-fcd6 (its reader): a freshly spawned CLI proves its own names (an offset reconnect is the same keeper's CLI)
   // Remote reconnect: substitute the consumed-bytes offset so the keeper
   // replays exactly what we missed (__VS_OFFSET__ rides inside the ssh
   // inner-command string).

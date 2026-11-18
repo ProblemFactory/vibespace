@@ -476,7 +476,7 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
     return w.slice(a, b);
   };
   const SRC = cut('let initNamesSeen = false;', '/** EVERY FRAME A STOP TOUCHED SETTLES ONCE', 'the wrapper slice');
-  const build = (src) => new Function('stopping', 'copies', 'record', 'settleCopies', 'log', src + '\nreturn { initNames, noteInitNames, noteFollowUpNames, landRiding };');
+  const build = (src) => new Function('stopping', 'copies', 'record', 'settleCopies', 'log', src + '\nreturn { initNames, noteInitNames, noteFollowUpNames, noteWindowRecord, landRiding };');
   const swap = (src, from, to, name) => { if (!src.includes(from)) throw new Error(`the anchor of the control «${name}» is not in the source`); return src.replace(from, to); };
   // THE MEASUREMENT FIRST — the real CLI, recorded through the real wrapper (lane claude-steer-inject r5): the init of a turn that
   // took a stamped frame names it; the init of a turn that took none leaves the field OUT (never []); read IN ORDER, as the
@@ -489,7 +489,10 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
     for (const r of inits) { read2.push(S(f.initNames(r, seen))); f.noteInitNames(r); if (Array.isArray(r.user_message_uuids) && r.user_message_uuids.length) seen = true; seenAt.push(seen); }
     const first = inits.findIndex((r) => Array.isArray(r.user_message_uuids));
     const want = inits.map((r, i) => Array.isArray(r.user_message_uuids) ? S(r.user_message_uuids) : (first >= 0 && i > first ? '[]' : 'null'));
-    ok(inits.length >= 2 && inits.every((r) => !Array.isArray(r.user_message_uuids) || r.user_message_uuids.length > 0) && S(read2) === S(want),
+    // the reader's should: a recording that lost its naming init would make every expected value «null» and still agree — the
+    // stamped recordings MUST witness and then omit (the post-witness «[]» half on real data); the frames recording names nothing
+    const proves = v.endsWith('-stamped') ? first >= 0 && read2.slice(first + 1).includes('[]') : first === -1 && read2.every((x) => x === 'null');
+    ok(proves && inits.length >= 2 && inits.every((r) => !Array.isArray(r.user_message_uuids) || r.user_message_uuids.length > 0) && S(read2) === S(want),
       `${v} (the real CLI, recorded): no init writes an empty list; read in order, an omission before the first naming init cannot say, after it says «none» (${read2.join(' ')})`, { read2, want });
   }
   const PURE = [[{}, false, 'null'], [{}, true, '[]'], [{ user_message_uuids: ['u-1', 2] }, false, '["u-1","2"]'], [{ user_message_uuids: [] }, false, '[]'], [{ claude_code_version: '2.1.312' }, false, 'null']];
@@ -498,11 +501,12 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
   ok(!pureBad.length, 'PURE initNames(init, witnessed): a list is read as written; no list ⇒ [] only with the witness, else null — a version alone proves nothing', pureBad);
   // the Stop window's judgment, the REAL helpers over the wrapper's state (stubbed): rider m-b (its copy stamped u-b) rode the
   // tool result at Stop, the CLI started follow-up(s) the window interrupted on the init, the window settles
-  const judge = (src, inits, { witness = true } = {}) => {
+  const judge = (src, inits, { witness = true, witnessWith = ['u-a'], records = [] } = {}) => {
     const recs = [];
     const stopping = { riding: ['m-b'], follows: inits.length, namesSaid: false, named: new Set(), kept: [] };
     const f = build(src)(stopping, new Map([['m-b', { cliUuid: 'u-b' }]]), (type, o) => recs.push({ type, ...o }), () => { }, () => { });
-    if (witness) f.noteInitNames({ type: 'system', subtype: 'init', claude_code_version: '2.1.312', user_message_uuids: ['u-a'] });   // the session's first turn: a stamped frame, named
+    if (witness) f.noteInitNames({ type: 'system', subtype: 'init', claude_code_version: '2.1.312', user_message_uuids: witnessWith });   // the session's first turn: a stamped frame, named
+    for (const r of records) f.noteWindowRecord(r);   // records the CLI wrote on stdout inside the Stop window
     for (const m of inits) { f.noteInitNames(m); f.noteFollowUpNames(m); }
     f.landRiding('idle');
     return recs.filter((r) => r.type === 'input_handover' && r.state === 'landed').flatMap((r) => r.msg_ids);
@@ -512,16 +516,24 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
   ok(S(judge(SRC, [TASK], { witness: false })) === '[]', 'a CLI that never named a frame (scripts/fixtures/claude-race-cli.cjs: 2.1.312 by its word, no names — test-claude-steer-chrome ⑮ «riding is not landed») ⇒ the rider stays kept');
   ok(S(judge(SRC, [{ ...TASK, user_message_uuids: ['u-b'] }])) === '[]', 'a follow-up that NAMES the rider (the CLI still held it) ⇒ kept, as before');
   ok(S(judge(SRC, [TASK, { ...TASK, user_message_uuids: ['u-b'] }])) === '[]', 'two follow-ups, one naming none and one naming the rider ⇒ kept (every follow-up\'s names are judged together)');
+  ok(S(judge(SRC, [TASK], { witnessWith: [] })) === '[]', 'the reader\'s should: an init with an EMPTY list is no witness — the follow-up that names nothing keeps the rider');
+  ok(S(judge(SRC, [TASK], { records: [{ type: 'user', uuid: 'u-b', message: { role: 'user', content: '[Request interrupted by user]' } }] })) === '[]' && S(judge(SRC, [TASK], { records: [{ type: 'attachment', attachment: { type: 'queued_command', source_uuid: 'u-b' } }] })) === '[]',
+    '主开发 11:12Z, the row\'s condition (1): a user record or an attachment the CLI writes inside the Stop window carrying the rider\'s stamp keeps it, whatever the follow-up\'s init omitted');
   // RED CONTROLS, each anchored on a line of the slice (a missing anchor fails by name)
   const r4 = swap(SRC, '  return seen ? [] : null;\n', '  return null;\n', 'the r4 rule');
   ok(S(judge(r4, [TASK])) === '[]', 'RED CONTROL the midturn-order r4 rule (no list ⇒ unknown) leaves the read rider kept');
   const noWitness = swap(SRC, '  return seen ? [] : null;\n', '  return [];\n', 'no witness');
   ok(S(judge(noWitness, [TASK], { witness: false })) === '["m-b"]', 'RED CONTROL a rule without the witness (every omission = none — this commit\'s first cut, keyed on the version) calls the race CLI\'s still-held rider read');
+  const emptyWitness = swap(SRC, '  if (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length) initNamesSeen = true;\n', '  if (Array.isArray(msg.user_message_uuids)) initNamesSeen = true;\n', 'an empty list witnesses');
+  ok(S(judge(emptyWitness, [TASK], { witnessWith: [] })) === '["m-b"]', 'RED CONTROL a witness that takes an EMPTY list lands the rider');
+  const blindWindow = swap(SRC, "  for (const u of [msg.uuid, msg.attachment && msg.attachment.source_uuid]) if (typeof u === 'string' && u) stopping.named.add(u);\n", '', 'the window records');
+  ok(S(judge(blindWindow, [TASK], { records: [{ type: 'user', uuid: 'u-b' }] })) === '["m-b"]', 'RED CONTROL a wrapper blind to the window\'s records lands a rider the CLI wrote it still held');
   // THE WIRING: every init line feeds the witness; the Stop window's follow-up branch asks noteFollowUpNames(msg) — the ONE
   // writer of namesSaid (dropHeldForStop only carries the flag over into a second Stop's window)
   const branch = cut('      if (stopping && stopping.held > 0) {', '      } else if (cliOwesTurn) {', 'the follow-up branch');
   ok(/\n\s+noteFollowUpNames\(msg\);/.test(branch) && (w.match(/noteFollowUpNames\(msg\);/g) || []).length === 1 && (w.match(/stopping\.namesSaid = true/g) || []).length === 1
-    && (w.match(/namesSaid = /g) || []).length === 1 && (w.match(/if \(msg\.type === 'system' && msg\.subtype === 'init'\) noteInitNames\(msg\);/g) || []).length === 1,
+    && (w.match(/namesSaid = /g) || []).length === 1 && (w.match(/if \(msg\.type === 'system' && msg\.subtype === 'init'\) noteInitNames\(msg\);/g) || []).length === 1
+    && w.includes("    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg);") && /function startChild\(\) \{\n  reconnectTimer = null;\n  if \(!OFFSET_MODE\) initNamesSeen = false;/.test(w),
     'the wiring: every init feeds the witness; the follow-up branch (inside the Stop window, before the owed-turn branch) calls noteFollowUpNames(msg), the ONE writer of namesSaid');
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
