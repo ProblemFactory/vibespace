@@ -1500,7 +1500,10 @@ class WindowManager {
    *  (and every singleton's re-open, §62c) to this door. */
   revealWindow(id, { replay = false, raise = true, _switched = false } = {}) {
     const win = this.windows.get(id); if (!win) return false;
-    if (replay) { this.focusWindow(id); return true; }
+    // A REPLAY RAISES ONLY WHAT IS ON SHOW (B-2dbe — the storm r8 acceptance: a replay's raise of a window its desktop hides left
+    // activeWindowId on it, and Ctrl+\ x acted on a window nobody saw); a PERSON's reveal goes there first (below) — the raise of a
+    // window whose switch is still queued must stay (it is in front when that switch lands)
+    if (replay) { if (!(win._hiddenByDesktop && !this._app?.stage?.isActive)) this.focusWindow(id); return true; }
     const ch = win._tabChain;
     const frame = (ch && this.windows.get(ch.tabs[0])) || win, dm = this._app?.desktopManager, stage = this._app?.stage;
     const go = dm ? revealDesktop({ raise, desktopId: frame._desktopId || null, activeId: dm.activeDesktopId, stageId: STAGE_ID, stageActive: !!stage?.isActive, stageEnabled: !!stage?.enabled,

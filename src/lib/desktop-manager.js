@@ -956,6 +956,28 @@ export class DesktopManager {
     return false;
   }
 
+  /** THE FOCUS STANDS ON THE DESKTOP SHOWN (B-2dbe — the storm r8 acceptance: the active window could be one nobody sees, and
+   *  Ctrl+\ x acted on it): called when the active window may have just been hidden — a switch (step 6), the Stage leaving, a move
+   *  of a window to a desktop not on show, a late retag. A shown active window keeps the focus (a reveal that raised a window whose
+   *  switch was queued lands on it); else the shown desktop's front frame takes it (window.js _focusMostRecent's own pick), or none is
+   *  active. An agent's window that arrived unasked (window-arrived — the agent-window-no-steal rule) is never focused for the
+   *  person: then no window is active. A phone keeps its own view state (mobile-nav _showOnDesk). */
+  _refocusShown() {
+    const wm = this.app.wm;
+    if (!wm || this.app.isMobile || !wm.windows) return;
+    const shown = (w) => w && !w._hiddenByDesktop && !w._hiddenByStage;
+    const cur = wm.activeWindowId != null ? wm.windows.get(wm.activeWindowId) : null;
+    if (shown(cur)) return;
+    let top = null, z = -1;
+    for (const [, w] of wm.windows) {
+      if (!shown(w) || w.isMinimized || (w._tabChain && w._tabChain.tabs[0] !== w.id)) continue;
+      const wz = parseInt(w.element?.style?.zIndex) || 0;
+      if (wz > z) { top = w; z = wz; }
+    }
+    if (top && !top.element?.classList?.contains?.('window-arrived') && typeof wm._focusMostRecent === 'function') { wm._focusMostRecent(); return; }
+    wm.activeWindowId = null; wm._notify?.();
+  }
+
   /** A person named window `id`, which `desk`'s held record lists and this page has not built (revealHeldSession's open; the ⧉ window
    *  list's «Other desktops» row — taskbar goOtherDesk, r8): the switch builds it, then it is revealed — THE deferred reveal (r4 L, r6 R:
    *  it waits for as long as the window is still coming, retires by the person's next act, and a failure is said ONCE with `name`). */
@@ -1033,7 +1055,7 @@ export class DesktopManager {
       const restoring = Promise.resolve(this.app.layoutManager?.restoreState?.({ windows: bySession }));
       for (const id of sids) this._opening(id, desktopId, restoring); // its reads still out: a sign of life (r6 R)
       restoring.then(() => {
-        for (const id of sids) { const w = this.app.wm.windows.get(id); if (w && w._desktopId !== desktopId) { w._desktopId = desktopId; if (desktopId !== this._activeId) this._hideWin(w); } }
+        for (const id of sids) { const w = this.app.wm.windows.get(id); if (w && w._desktopId !== desktopId) { w._desktopId = desktopId; if (desktopId !== this._activeId) { this._hideWin(w); this._refocusShown(); } } } // (B-2dbe: it may have been made the active one)
       }).catch(() => {});
     }
     // the record's tab groups (lane split-restore-hidden, userW inc-muundq37-cjay): a first visit after a reload built
@@ -1252,6 +1274,7 @@ export class DesktopManager {
       if (targetState?.windows) {
         if (this._replayMissing(desktopId, targetState)) hasWindows = true;
       }
+      this._refocusShown(); // the focus stands on the desktop shown (B-2dbe)
 
       // 7. Update UI
       this._renderSwitcher();
@@ -1319,6 +1342,7 @@ export class DesktopManager {
     // If moving to a non-active desktop, hide (host element carries the group)
     if (desktopId !== this._activeId) {
       this._hideWin(win);
+      this._refocusShown(); // the moved window may have been the active one (B-2dbe)
     }
 
     // The two held records: the target ADDS the moved windows (so its preview shows them), the source drops them —

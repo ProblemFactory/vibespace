@@ -386,6 +386,7 @@ export class StageManager {
       if (win._desktopId === target && win._hiddenByDesktop) dm._showWin(win);
     }
     this.app.wm._reflowWindows();
+    dm._refocusShown?.(); // the hero handed back to a desktop not on show, or parked by the Stage, is never left the active window (B-2dbe)
     if (targetState?.windows) {
       // Sessions already open locally under a DIFFERENT winId must not be
       // replayed: attachSession's same-session dedup would silently create

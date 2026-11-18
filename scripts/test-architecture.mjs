@@ -3013,8 +3013,10 @@ console.log('§62 every path where the user names a window goes through wm.revea
   const wj = read('src/lib/window.js');
   const body = (src, name) => { const i = src.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = src.indexOf('\n  }\n', i); return src.slice(i, j); };
   const rw = body(wj, 'revealWindow'), fp = body(wj, '_focusFromPointer');
-  ok(/const i = revealTab\(ch, id\);/.test(rw) && /if \(i >= 0\) this\.switchTab\(ch, i\);/.test(rw) && !/\.active\s*=/.test(rw) && /if \(replay\) \{ this\.focusWindow\(id\); return true; \}/.test(rw),
+  ok(/const i = revealTab\(ch, id\);/.test(rw) && /if \(i >= 0\) this\.switchTab\(ch, i\);/.test(rw) && !/\.active\s*=/.test(rw) && /if \(replay\) \{ if \(!\(win\._hiddenByDesktop && !this\._app\?\.stage\?\.isActive\)\) this\.focusWindow\(id\); return true; \}/.test(rw),
     '§62 revealWindow = PURE revealTab → switchTab (the tab click\'s own persisted, synced path — never a hand-written `active`); a replay only raises');
+  ok(/this\._refocusShown\(\);/.test(body(read('src/lib/desktop-manager.js'), 'async switchTo')) && /dm\._refocusShown\?\.\(\);/.test(read('src/lib/stage-manager.js')) && /const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop;/.test(body(read('src/lib/session-lifecycle.js'), '_focusExistingSession')),
+    '§62 B-2dbe: a replay raises only what is on show (revealWindow\'s replay branch above, _focusExistingSession\'s restore and keyboard focus), and every road that may hide the active window hands the focus to the desktop shown (switchTo, the Stage leaving → _refocusShown)');
   const pointerPin = (b) => b.length > 40 && /pressTab\(ch, /.test(b) && !/revealWindow|revealTab/.test(b);
   ok(pointerPin(fp), '§62 _focusFromPointer (a PRESS) asks PURE pressTab and never the door — a press keeps the tab on show');
   const pin = (f, name, re) => { const b = body(read(f), name); return b.length > 40 && re.test(b) && !/\.focusWindow\(/.test(strip(b)); };
