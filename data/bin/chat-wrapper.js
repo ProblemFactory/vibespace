@@ -1487,6 +1487,9 @@ try {
         }
         // A user frame: forwarded, or HELD while a turn runs (the prompt queue). Anything else passes through as-is.
         if (parsed.type === 'user') { submitUser(line, parsed); continue; }
+        // B-437e: OUR rewind request (vsr-), said as it reaches the CLI — the hub's «one at a time» mark is read back from
+        // this buffer after a hub restart (src/server/rewind-requests.js rewindOut); a dropped frame is never said
+        if (parsed.type === 'control_request' && /^vsr-/.test(String(parsed.request_id || '')) && ((child && !childDead && child.stdin && child.stdin.writable) || OFFSET_MODE)) record('rewind_out', { request_id: String(parsed.request_id), at: Date.now() });
         sendChild(line);
       } catch (e) {
         log(`stdin frame not handled (${e && e.message}) — a parsed frame is never re-sent as text`);

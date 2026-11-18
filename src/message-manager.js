@@ -1063,6 +1063,7 @@ class MessageManager extends MessageWindow {
       // B-437e: the CLI's persisted rewind anchor (rewound:true) cuts on a reload; any other last-prompt row is bookkeeping
       case 'last-prompt': return this._processLastPrompt(raw, emit);
       case 'frame_stamp': return this._processFrameStamp(raw, emit); // the wrapper's stamp on a person's frame (B-437e)
+      case 'rewind_out': if (typeof raw.request_id === 'string') this._rewindAsked = { id: raw.request_id, at: Number(raw.at) || 0 }; return;
       // the WRAPPER's own records (2.369.354 — the CLI never writes these): its mid-turn queue
       case 'queued_input': return this._processQueuedInput(raw, emit);
       case 'queue_changed': return this._processQueueChanged(raw, emit);
@@ -1117,6 +1118,7 @@ class MessageManager extends MessageWindow {
 
   // B-437e: which of OUR requests the CLI answered (the server's one-at-a-time mark reads it; a rebuild replays the answers)
   rewindAnswered(requestId) { return !!this._rewindAnswers && this._rewindAnswers.includes(String(requestId)); }
+  rewindAskedOut() { const a = this._rewindAsked; return a && !this.rewindAnswered(a.id) ? a : null; }
 
   // B-437e: the CLI's answer to OUR request (vsr-): the cut at its echo when held, ONE rewind-answer with the reply as it came ⇒ kb-file-structure «rewind-door.js»
   _processRewindAnswer(resp, emit) {

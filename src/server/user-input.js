@@ -83,6 +83,11 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     const session = activeSessions.get(sessionId);
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
+    // B-437e: a rewind is out — the CLI would run it FIRST and this message after it: the person's words wait, refused by
+    // name with their door (the answer, at most the seconds left of the stated expiry; or Stop) — never past the expiry;
+    // nothing written; an agent's dispatch is not the person's mistake
+    const fence = origin !== 'dispatch' ? require('./rewind-requests.js').rewindFenceLeft(session) : 0;
+    if (fence > 0) { const left = Math.ceil(fence / 1000); return { ok: false, code: 'rewind_out', left, i18n: { key: 'A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', params: { s: left } }, error: `A rewind is on its way — this message was not sent. Send it after the rewind answers (in ${left} s at the latest), or stop the conversation.` }; }
     const handing = origin === 'group-handover';   // B-02a3: the group messages a person's press hands to the RUNNING turn
     if (handing) {
       // the turn the CLI is RUNNING by its own records (claude-stream-json: init … result — a permission wait inside it counts;

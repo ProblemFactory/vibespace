@@ -812,6 +812,7 @@ const STORAGE = {
   'src/lib/channel-outbox.js|localStorage|DELIVER_KEY': ['pref', 'next-turn | wake-now (the Approve button\'s remembered delivery)'],
   'src/lib/code-editor.js|localStorage|\'editorSettings\'': ['pref', 'editor settings'],
   'src/lib/desktop-app-window.js|sessionStorage|prevKey': ['ids', 'a desktop-app pane key per app (this tab)'],
+  'src/lib/chat-view.js|sessionStorage|key': ['ids', 'B-437e one life: this tab\'s rewind presses still waiting for the CLI\'s answer (`vs-rewind:<session>`) — request id → the target message\'s id, the row\'s granularity, when; never words (they come from the answer or the message)'],
   'src/lib/desktop-manager.js|localStorage|\'toolbarScale\'': ['pref', 'toolbar scale'],
   'src/lib/desktop-manager.js|localStorage|\'taskbarHeight\'': ['pref', 'taskbar height'],
   'src/lib/docx-viewer.js|localStorage|ZOOM_PREF_KEY': ['pref', 'the Word viewer\'s zoom'],

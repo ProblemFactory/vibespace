@@ -25,7 +25,7 @@ import { valueWord } from './value-words.js'; // lane ui-language: the message d
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
 import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor, BACKEND_META } from './agent-meta.js';
-import { rewindPointOf, rewindPlanOf, rewindAnswerOf, REWIND_LIFE_MS, POINT_FIELDS, REWIND_REQUEST_PREFIX } from '../rewind-door.js'; // PURE (B-437e): the rewind door's static half + its plan (the confirm's count)
+import { rewindPointOf, rewindPlanOf, rewindAnswerOf, REWIND_LIFE_MS, POINT_FIELDS, REWIND_REQUEST_PREFIX, textOf } from '../rewind-door.js'; // PURE (B-437e): the rewind door's static half + its plan (the confirm's count)
 import { registerCommand, registerKeybinding, runCommand, hasCommand } from './contributions.js';
 // The verb list a wrapper that publishes a queue WITHOUT naming verbs serves —
 // the SAME array the server maps a verb-less sidecar onto (src/server/
@@ -2183,13 +2183,15 @@ class ChatView {
       // the hub's mark and the stated expires_at read): none by then is SAID, and an answer after it still binds
       const bind = (id) => {
         if (!this._rewindBound) this._rewindBound = new Map();
-        this._rewindBound.set(id, { text: (now.ok ? now : plan).prefillText || '', granularity: row && row.granularity });
+        const entry = { text: (now.ok ? now : plan).prefillText || '', granularity: row && row.granularity };
+        this._rewindBound.set(id, entry);
+        this._keepRewind(id, { msgId: msg.id, granularity: entry.granularity });   // the tab keeps its ids: a page reloaded before the answer binds it
         this._rewindLive = id;
         clearTimeout(this._rewindAnswerTimer);
         this._rewindAnswerTimer = setTimeout(() => {
           if (this._disposed || this._rewindLive !== id) return;
           settle();
-          showToast(t('No answer to the rewind within a minute — nothing has been taken back yet. If the agent answers later, this window says so.'), { type: 'error' });
+          showToast(t('The rewind did not answer within a minute — nothing has been taken back yet. Messages can be sent again; a new rewind waits until this one answers.'), { type: 'error' });
         }, REWIND_LIFE_MS);
       };
       const ourId = REWIND_REQUEST_PREFIX + reqId;
@@ -2201,9 +2203,9 @@ class ChatView {
         { type: 'rewind', sessionId: this.sessionId, msgId: msg.id, reqId, lastSeenUuid: now.ok ? now.lastSeenUuid : plan.lastSeenUuid, expectTaken: said.taken },
         (m) => {
           if (!m || m.type !== 'rewind-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
-          if (!m.ok) { this._rewindBound.delete(ourId); settle(); this._sayRewindRefusal(m.reason, m.cls); return true; }
+          if (!m.ok) { this._rewindBound.delete(ourId); this._keepRewind(ourId, null); settle(); this._sayRewindRefusal(m.reason, m.cls); return true; }
           // the request went out under the id the CLI answers with (an older server names its own: bound there instead)
-          if (m.requestId && m.requestId !== ourId) { this._rewindBound.delete(ourId); bind(m.requestId); }
+          if (m.requestId && m.requestId !== ourId) { this._rewindBound.delete(ourId); this._keepRewind(ourId, null); bind(m.requestId); }
           return true;
         },
         { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => cancel() },
@@ -2213,9 +2215,10 @@ class ChatView {
 
   /** The CLI's answer to THIS view's rewind (every open view receives the op; only the one that pressed speaks). */
   _onRewindAnswer(d) {
-    const bound = d && this._rewindBound?.get(d.requestId);   // THIS view's press, early or late (one life, then still bound)
+    const bound = d && (this._rewindBound?.get(d.requestId) || this._keptRewind(d.requestId)); // THIS tab's press — early, late, or from before a reload
     if (!bound) return;
-    this._rewindBound.delete(d.requestId);
+    this._rewindBound?.delete(d.requestId);
+    this._keepRewind(d.requestId, null);
     if (this._rewindLive === d.requestId) { this._rewindLive = null; this._rewindInFlight = false; clearTimeout(this._rewindAnswerTimer); }
     const a = rewindAnswerOf(bound.granularity, d.answer); // the CLI's reply as it came, read by the row's granularity
     if (!a.ok) { this._sayRewindRefusal(a.reason, a.cls, a.text, a.retry); return; }
@@ -2246,12 +2249,47 @@ class ChatView {
     if (put === 'restored') this._chatInput?.focus?.();
   }
 
+  /** A send refused while a rewind is out (B-437e): what happened to the words and the door (the answer, at most `left` s — then
+   *  the send goes through — or Stop), one whole sentence each. */
+  _sayRefusedSend(put, left) {
+    const s = Math.max(1, Math.ceil(Number(left) || 60));   // the seconds the fence has left (the hub says them)
+    showToast(put === 'restored' ? t('A rewind is on its way — your message was not sent; it is back in the box. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s })
+      : put === 'kept' ? t('A rewind is on its way — your message was not sent (the box already had text, so it was left alone). Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s })
+        : t('A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s }), { type: 'error' });
+  }
+
+  /** The press's binding in THIS TAB's sessionStorage (B-437e): a page reloaded before the CLI's answer binds it again —
+   *  the success said, the words back. IDS ONLY (the target message's id, the row's granularity, when — never words: the
+   *  words come from the CLI's answer or the message itself). An entry no answer ever met leaves after a day. */
+  _keepRewind(id, entry) {
+    try {
+      const key = 'vs-rewind:' + this.sessionId, all = JSON.parse(sessionStorage.getItem(key) || '{}');
+      if (entry) all[id] = { msgId: String(entry.msgId || ''), granularity: entry.granularity || null, at: Date.now() }; else delete all[id];
+      for (const k of Object.keys(all)) if (!(Date.now() - Number(all[k] && all[k].at) < 86400000)) delete all[k];
+      if (Object.keys(all).length) sessionStorage.setItem(key, JSON.stringify(all)); else sessionStorage.removeItem(key);
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {   // another session's entries a day old (an ended conversation's)
+        const k2 = sessionStorage.key(i);
+        if (!k2 || k2 === key || !k2.startsWith('vs-rewind:')) continue;
+        let o = null; try { o = JSON.parse(sessionStorage.getItem(k2) || '{}'); } catch { o = null; }
+        if (!o || !Object.values(o).some((v) => Date.now() - Number(v && v.at) < 86400000)) sessionStorage.removeItem(k2);
+      }
+    } catch { }
+  }
+  _keptRewind(id) {
+    let e = null;
+    try { e = JSON.parse(sessionStorage.getItem('vs-rewind:' + this.sessionId) || '{}')[id]; } catch { return null; }
+    if (!e || typeof e !== 'object' || typeof e.msgId !== 'string') return null;
+    const m = (this._messages || []).find((x) => x && x.id === e.msgId);
+    return { text: m ? textOf(m) : '', granularity: e.granularity };
+  }
+
   /** Every refusal by its name (src/rewind-door.js REWIND_REFUSALS / CLAUDE_REWIND_REASONS — the class words it). */
   _sayRewindRefusal(reason, cls, text, retry = true) {
     const r = String(reason || '');
     const line = r === 'queued' || r === 'commands_queued' ? t('Messages are waiting in the queue — send or remove them first, then rewind.')
       : r === 'compacting' ? t('The conversation is being compacted — rewind when it is done.')
         : r === 'no-target-id' ? t('The agent does not know this message by an id yet — it gets one after VibeSpace restarts or this conversation is resumed; then try again.')
+          : r === 'pending-long' ? t('The last rewind has had no answer for over a minute — wait for it, or stop the conversation to rewind again.')
           : r === 'pending' ? t('A rewind is already on its way — wait for its answer.')
             : r === 'not-the-person' ? t('Only you can rewind a conversation, from its own window.')
               : r === 'changed-since' ? t('The conversation changed while you decided — nothing was taken back. Look again, then rewind.')
@@ -7148,6 +7186,8 @@ class ChatView {
     // never read, so the user saw a dead-looking window with no reason).
     if (isScopedRefusal(msg)) {
       this._hideTyping();
+      // B-437e: a send the hub refused while a rewind is out — the words back in the box, said once (no ✗ line)
+      if (msg.code === 'rewind-out') { this._sayRefusedSend(this._chatInput?.refusedSend?.(msg.msgId) || 'none', msg.left); return; }
       // A refused LIVE style switch can be a FACT about this session: only
       // 'style-wrapper-old' means THIS wrapper will never serve the verb, so
       // only it flips the flag — the chip's menu then offers the restart row

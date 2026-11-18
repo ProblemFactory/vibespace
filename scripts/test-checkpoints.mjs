@@ -279,7 +279,9 @@ const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const H = require(path.join(REPO, 'src/harnesses/index.js'));
 const HUMAN = Object.freeze({ kind: 'human', actBy: null });
-const { requestRewind, rewindOut } = require(path.join(REPO, 'src/server/rewind-requests.js'));
+const { requestRewind, rewindOut, rewindFenceLeft } = require(path.join(REPO, 'src/server/rewind-requests.js'));
+const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input.js'));
+const DOOR = { requestRewind, rewindOut, rewindFenceLeft, createUserInputSender };
 const U = (n) => `e2e00000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const REC = {
   send: (text, msgId) => ({ type: 'user', message: { role: 'user', content: text }, msgId, timestamp: '2026-11-17T23:00:00.000Z', _fromWebui: true }),
@@ -290,6 +292,7 @@ const REC = {
   answer: (requestId, body) => ({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: body } }),
   error: (requestId, text) => ({ type: 'control_response', response: { subtype: 'error', request_id: requestId, error: text } }),
   anchor: (fields) => ({ type: 'last-prompt', lastPrompt: 'x', explicit: true, sessionId: 's', ...fields }),
+  rewindOut: (id, at) => ({ type: 'rewind_out', request_id: id, at }),
 };
 const struck = (mm) => mm.messages.filter((m) => m.rewound === 'rollback').map((m) => m.id);
 const notices = (mm) => mm.messages.filter((m) => m.noticeKind === 'rewound');
@@ -302,7 +305,8 @@ function liveTwo(MM = createMessageManager, id = 'cp-live') {
     REC.send('second ask', 'm-2'), REC.stamp('m-2', U(3)), REC.said('reply two', U(4)), REC.result()]) mm.processLive(r);
   return { mm, ops };
 }
-function roadLaws(MM = createMessageManager) {
+function roadLaws(MM = createMessageManager, D = DOOR) {
+  const { requestRewind, rewindOut, rewindFenceLeft, createUserInputSender } = D;
   const bad = [];
   const { mm, ops } = liveTwo(MM);
   const p1 = mm.messages.find((m) => m.webuiMsgId === 'm-1'), p2 = mm.messages.find((m) => m.webuiMsgId === 'm-2');
@@ -401,6 +405,18 @@ function roadLaws(MM = createMessageManager) {
   const sw = { ...session, _rewindOut: null, pty: { write() { throw new Error('EPIPE'); } } };
   const rNoPipe = requestRewind({ by: HUMAN, session: sw, msgId: p2 && p2.id, lastSeenUuid: U(3) });
   if (rNoReq.ok || rNoReq.reason !== 'no-target-id' || sx._rewindOut || rNoPipe.ok || rNoPipe.reason !== 'stopped' || sw._rewindOut) bad.push(`door:an-unwritable-press-notes-nothing (${rNoReq.reason}, ${rNoPipe.reason})`);
+  // ONE LIFE FOR A REQUEST (lg-rewind on 2.369.410): the WRAPPER'S RECORD holds the hub's mark while the request lives —
+  // past the minute, across a hub restart (the session's own mark gone, a new normalizer fed the buffer), until the CLI's
+  // answer; a new wrapper (its buffer starts empty) holds nothing
+  mm.processLive(REC.rewindOut(r.requestId, T0));
+  const heldIn = dryAt(LIFE - 1), heldPast = dryAt(LIFE);   // inside the minute: wait; AT it and past: wait OR stop the conversation
+  if (heldIn.ok || heldIn.reason !== 'pending' || heldPast.ok || heldPast.reason !== 'pending-long') bad.push(`door:held-while-the-request-lives (${heldIn.reason}, ${heldPast.reason})`);
+  const restarted = { ...session, _rewindOut: null, _normalizer: MM('claude', 'cp-restart') };
+  restarted._normalizer.processLive(REC.rewindOut(r.requestId, T0));
+  if (!rewindOut(restarted, T0 + 10 * LIFE)) bad.push('door:a-hub-restart-reads-the-mark-back');
+  if (rewindOut({ ...session, _rewindOut: null, _normalizer: MM('claude', 'cp-new-wrapper') }, T0 + 5)) bad.push('door:a-new-wrapper-holds-nothing');
+  restarted._normalizer.processLive(REC.answer(r.requestId, { rewound: false, reason: 'state_changed', error: 'state changed' }));
+  if (rewindOut(restarted, T0 + 10 * LIFE)) bad.push('door:the-answer-ends-it-after-a-restart');
   // the CLI's answer
   const before = ops.length;
   mm.processLive(REC.answer(r.requestId, { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask', precedingAssistantUuid: U(2) }));
@@ -483,6 +499,38 @@ function roadLaws(MM = createMessageManager) {
   if (struck(hx).length !== 2 || notices(hx).length !== 1) bad.push('reload:an-explicit-row-outside-the-cut-is-no-heal');
   const h6 = MM('claude', 'cp-h6'); h6.convertHistory([...rows, REC.anchor({ leafUuid: U(4) })]);
   if (struck(h6).length || notices(h6).length || cards(h6).length || h6.messages.length !== 4) bad.push('reload:plain-last-prompt-is-no-card');
+  // THE PERSON'S FENCE (主开发 20:05Z): while a rewind is out the person's send is refused by name — only inside the stated
+  // expiry, with its door — and nothing is written; after the expiry it goes through (the hub's mark still holds a rewind);
+  // the WINDOW between the press's write and the wrapper's record is the press's own mark (proven by a stall: the record held
+  // back while a send arrives); an agent's dispatch is not fenced
+  const { mm: msd } = liveTwo(MM, 'cp-send');
+  const typed = [];
+  const sendS = { mode: 'chat', backend: 'claude', pty: { write: (l) => typed.push(l) }, _normalizer: msd, _isStreaming: false, _turnState: 'idle' };
+  const typing = createUserInputSender({ activeSessions: new Map([['cp-send', sendS]]), adapterRegistry: { get: () => null }, BUFFERS_DIR: os.tmpdir(), broadcastToSession() { }, feedLive() { }, autoResume: null, reattachLocalPty: () => false, ptyQuietSince: () => null, log() { } });
+  const typeIt = (text, opts = {}) => typing.send('cp-send', text, { msgId: 'mx-' + text, ...opts });
+  const s0 = typeIt('before');                         // nothing out: past the fence (no adapter here, so send_failed)
+  const p2s = msd.messages.find((m) => m.webuiMsgId === 'm-2');
+  const ps = requestRewind({ by: HUMAN, session: sendS, msgId: p2s && p2s.id, lastSeenUuid: U(3) });
+  const s1 = typeIt('in-the-window');                  // THE STALL: the wrapper's record is held back — the press's own mark
+  msd.processLive(REC.rewindOut(ps.requestId, Date.now()));
+  const s2 = typeIt('with-the-record');
+  msd.processLive(REC.rewindOut(ps.requestId, Date.now() + 10 * LIFE));     // a clock that stepped: the fence still ends in a minute
+  if (!(rewindFenceLeft(sendS) > 0 && rewindFenceLeft(sendS) <= LIFE)) bad.push(`send:the-fence-never-exceeds-the-minute (${rewindFenceLeft(sendS)})`);
+  msd.processLive(REC.rewindOut(ps.requestId, Date.now()));
+  const s3 = typeIt('/compact', { origin: 'dispatch' });
+  if (s0.code !== 'send_failed') bad.push(`send:free-before-a-rewind (${s0.code})`);
+  if (!ps.ok || typed.length !== 1) bad.push(`send:the-press-wrote-one-request (${ps.reason}, ${typed.length})`);
+  if (s1.code !== 'rewind_out' || !(s1.left > 0 && s1.left <= LIFE / 1000) || !/at the latest\), or stop the conversation\.$/.test(s1.error || '')
+    || !s1.i18n || s1.i18n.key !== 'A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.' || s1.i18n.params.s !== s1.left) bad.push(`send:the-window-before-the-record (${s1.code}, ${s1.left})`);
+  if (s2.code !== 'rewind_out' || typed.length !== 1) bad.push(`send:refused-inside-the-minute (${s2.code}, ${typed.length})`);
+  if (s3.code === 'rewind_out') bad.push('send:an-agent-dispatch-is-not-fenced');
+  // the stated expiry has passed (the press and its record a minute ago): the person's send goes through, the hub's mark holds
+  if (sendS._rewindOut) sendS._rewindOut.at = Date.now() - LIFE - 1;   // (a mutant may mark nothing: never a throw)
+  msd.processLive(REC.rewindOut(ps.requestId, Date.now() - LIFE - 1));
+  const s4 = typeIt('after-the-minute');
+  if (s4.code === 'rewind_out' || !rewindOut(sendS) || rewindFenceLeft(sendS) !== 0) bad.push(`send:goes-through-after-the-expiry (${s4.code})`);
+  msd.processLive(REC.answer(ps.requestId, { rewound: false, reason: 'state_changed', error: 'state changed' }));
+  if (typeIt('after-the-answer').code !== 'send_failed' || rewindOut(sendS)) bad.push('send:free-after-the-answer');
   return bad;
 }
 const rewindPlan = (mm, target) => door.rewindPlanOf(caps.capsOf('claude').checkpoints, mm.messages, target && target.id, { live: true });
@@ -507,13 +555,19 @@ say('— §6 the claude road');
   const callers = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', 'requestRewind(', '--', 'src', 'server.js'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
   const wsCase = read('src/ws-handler.js').split("case 'rewind': {")[1]?.split('break;')[0] || '';
   const verbs = require(path.join(REPO, 'src/automation-keys.js')).VERBS || [];
-  const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-i', '-F', 'rewind', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
+  // a road that PRESSES one (the door, its module, the CLI verb, the ws frame) — the For-you reply route only maps the typing
+  // path's refusal code `rewind_out` (one life), it presses nothing
+  const routeHits = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', '-e', 'requestRewind', '-e', 'rewind-requests', '-e', 'rewind_conversation', '-e', "type: 'rewind'", '-e', 'type: "rewind"', '-e', 'rewindRoad', '-e', 'rewindRequest', '-e', 'buildRewind', '-e', 'REWIND_REQUEST_PREFIX', '--', 'src/routes', 'src/server/automation-engine.js', 'data/bin/vibespace-msg', 'data/bin/vibespace-task'], { encoding: 'utf8' }).stdout.trim();
   ok(JSON.stringify(callers.sort()) === JSON.stringify(['src/server/rewind-requests.js', 'src/ws-handler.js']) && /by: ws\._personPage === true \? byOfWs\(ws\) : null/.test(wsCase)
     && /reqId: typeof data\.reqId === 'string' \? data\.reqId : null/.test(wsCase)
     && /ws\._personPage = require\('\.\/server\/rewind-requests\.js'\)\.personOfUpgrade\(req\)/.test(read('src/ws-handler.js'))
     && verbs.length > 5 && !verbs.some((v) => /rewind/i.test(v)) && routeHits === '',
     'the door\'s ONE caller is the owner\'s /ws case with the socket\'s person (byOfWs, only on a socket personOfUpgrade proved at its handshake); no automation verb, no route and no agent CLI names a rewind', `${callers.join(',')} | verbs ${verbs.filter((v) => /rewind/i.test(v))} | ${routeHits}`);
 }
+
+ok(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js')) && /fail\(res, code, \(r && r\.error\) \|\| 'the reply was not sent', r && r\.i18n \? \{ i18n: r\.i18n \} : null\)/.test(read('src/routes/user-todos-reply.js'))
+  && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\), reopened: true/.test(read('src/routes/user-todos-reply.js')),
+  'the claude stream knows the wrapper\'s two rewind records (frame_stamp, rewind_out: no «unhandled type» breadcrumb); BOTH For-you reply roads (a live conversation, a reopened one) carry the refusal\'s words as an i18n key');
 
 say('— §7 the real wrapper stamps every person frame');
 async function wrapperLaws(wrapperFile) {
@@ -563,6 +617,18 @@ async function wrapperLaws(wrapperFile) {
       await until(() => fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"frame_stamp"'), 2600);
       if (!(fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"frame_stamp"'))) bad.push('wrapper:stamp-in-the-buffer');
     }
+    // ONE LIFE: OUR rewind request (vsr-) is SAID as it reaches the CLI — on stdout and in the buffer (a hub restart reads it
+    // back); another control request is not (last: the stand-in answers every line with a result)
+    // a NEW wrapper says nothing is out (its buffer starts empty): no rewind_out before our request
+    if (outRecs().some((x) => x.type === 'rewind_out') || (fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"rewind_out"'))) bad.push('wrapper:a-new-wrapper-says-nothing-out');
+    const nCap = capLines().length;
+    await send({ type: 'control_request', request_id: 'vsr-rw-wrap1', request: { subtype: 'rewind_conversation', target_message_uuid: '00000000-0000-4000-8000-000000000001' } }, nCap + 1);
+    await send({ type: 'control_request', request_id: 'other-ctl-1', request: { subtype: 'set_permission_mode', mode: 'default' } }, nCap + 2);
+    await until(() => outRecs().some((x) => x.type === 'rewind_out'), 3000);
+    const ro = outRecs().filter((x) => x.type === 'rewind_out');
+    if (ro.length !== 1 || ro[0].request_id !== 'vsr-rw-wrap1' || !Number.isFinite(ro[0].at) || capLines().length !== nCap + 2) bad.push(`wrapper:rewind-out-said (${JSON.stringify(ro)})`);
+    await until(() => fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"rewind_out"'), 2600);
+    if (!(fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"rewind_out"'))) bad.push('wrapper:rewind-out-in-the-buffer');
   } finally {
     try { w.stdin.end(); } catch { }
     killGroup();
@@ -593,7 +659,9 @@ say('— §8 red controls (U2)');
     fs.symlinkSync(path.join(REPO, 'src'), path.join(T, 'old/src'));
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(T, 'old/node_modules'));
     const bad = await wrapperLaws(path.join(T, 'old/data/bin/chat-wrapper.js'));
-    ok(bad.some((b) => b.startsWith('wrapper:idle-frame-stamped')) && bad.some((b) => b.startsWith('wrapper:frame_stamp-says-it')) && bad.some((b) => b.startsWith('wrapper:a-held-frame')), `RED CONTROL the release ${BASE}'s wrapper sends an idle frame unstamped and says no stamp`, bad.join(' | ') || 'all green');
+    // the control proves its plant first: the release's wrapper says no rewind_out
+    if (/record\('rewind_out'/.test(g.stdout)) bad.length = 0;
+    ok(bad.some((b) => b.startsWith('wrapper:idle-frame-stamped')) && bad.some((b) => b.startsWith('wrapper:frame_stamp-says-it')) && bad.some((b) => b.startsWith('wrapper:a-held-frame')) && bad.some((b) => b.startsWith('wrapper:rewind-out-said')), `RED CONTROL the release ${BASE}'s wrapper sends an idle frame unstamped, says no stamp and no rewind_out`, bad.join(' | ') || 'all green');
   } else { skipped++; say(`  - SKIP the release ${BASE} wrapper control: not in this clone`); }
   // normalizer mutants: a scratch copy of src/ with one line changed
   const MSRC = read('src/message-manager.js');
@@ -602,6 +670,12 @@ say('— §8 red controls (U2)');
     ['last-prompt left ignored', "      case 'last-prompt': return this._processLastPrompt(raw, emit);", "      case 'last-prompt-x': return this._processLastPrompt(raw, emit);", 'reload:cuts-from-cutUuid'],
     ['the CLI\'s heal row not read', "    if (this._pendingRowCut && raw.explicit === true && raw.rewound !== true && this._namesThePendingCut(raw.leafUuid)) { this._pendingRowCut = null; return; }", '', 'reload:heal-row-cancels'],
     ['the stamp is not read', "      case 'frame_stamp': return this._processFrameStamp(raw, emit);", "      case 'frame_stamp-x': return this._processFrameStamp(raw, emit);", 'stamp:uuid-on-bubble'],
+    ['the wrapper\'s record is not read', "      case 'rewind_out': if (typeof raw.request_id === 'string') this._rewindAsked = { id: raw.request_id, at: Number(raw.at) || 0 }; return;", '', 'door:a-hub-restart-reads-the-mark-back'],
+    ['the hub\'s mark lapses at the minute', "  if (said) return said;", "  if (said && now - said.at < REWIND_LIFE_MS) return said;", 'door:held-while-the-request-lives', 'src/server/rewind-requests.js'],
+    ['the press marks nothing before its record', "  session._rewindOut = { id: out.requestId, at: now }; // one rewind at a time (rewindOut)", '', 'send:the-window-before-the-record', 'src/server/rewind-requests.js'],
+    ['the person\'s send is not fenced', "    if (fence > 0) { const left = Math.ceil(fence / 1000); return { ok: false, code: 'rewind_out', left, i18n: { key: 'A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', params: { s: left } }, error: `A rewind is on its way — this message was not sent. Send it after the rewind answers (in ${left} s at the latest), or stop the conversation.` }; }", '', 'send:refused-inside-the-minute', 'src/server/user-input.js'],
+    ['the person\'s fence outlives the expiry', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now)) : 0;", "  return o ? 1 : 0;", 'send:goes-through-after-the-expiry', 'src/server/rewind-requests.js'],
+    ['the fence follows a stepped clock past the minute', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now)) : 0;", "  return o ? Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now) : 0;", 'send:the-fence-never-exceeds-the-minute', 'src/server/rewind-requests.js'],
     ['an earlier rewind\'s struck run reads as a twin', "  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
       "  if (targetUuid == null && list.slice(from).some((m) => m && m.rewound)) return { ids: [], placed: true, already: true };", 'reload:a-second-rewind-to-the-same-leaf', 'src/rewind-cut.js'], // stale-pins: kept — the mutant PLANTS the old rule
     ['a card after the cut reads as a second rewind', "  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
@@ -618,9 +692,12 @@ say('— §8 red controls (U2)');
     for (const key of Object.keys(mreq.cache)) if (key.startsWith(M + path.sep)) delete mreq.cache[key];
     for (const f of new Set(NM.map((x) => x[4] || 'src/message-manager.js'))) fs.writeFileSync(path.join(M, f), read(f)); // the others as they are
     fs.writeFileSync(path.join(M, file), FSRC.split(from).join(to));
+    // A RED CONTROL PROVES ITS PLANT FIRST: the copy holds the planted line and no longer the anchor
+    const planted = fs.readFileSync(path.join(M, file), 'utf8');
+    if (planted.includes(from) || (to && !planted.includes(to))) { ok(false, `mutant «${name}»: its plant is where it claims (in the scratch ${file})`); continue; }
     const MM = mreq('./src/normalizers.js').createMessageManager;
     let bad;
-    try { bad = roadLaws(MM); } catch (e) { bad = [`threw: ${e.message}`]; }
+    try { bad = roadLaws(MM, { ...mreq('./src/server/rewind-requests.js'), ...mreq('./src/server/user-input.js') }); } catch (e) { bad = [`threw: ${e.message}`]; }
     ok(bad.some((b) => b.startsWith(law)), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
   }
 }
@@ -681,9 +758,10 @@ say('— §9 the page\'s door');
   const stubClear = (id) => { clock.timers = clock.timers.filter((x) => x.id !== id); };
   const advance = (ms) => { clock.now += ms; for (const x of clock.timers.filter((y) => y.at <= clock.now)) { stubClear(x.id); x.fn(); } };
   let held = null;   // view._yes === 'hold': the confirm stays open until held(yes)
+  const store = { m: new Map(), dead: false, getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }, setItem(k, v) { if (!this.dead) this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); }, get length() { return this.m.size; }, key(i) { return [...this.m.keys()][i] ?? null; } };
   const V = lift('src/lib/chat-view.js', '  _rewindFromMessage(msg) {', '  // Fork a new session from a specific assistant message (the chat fork button).',
     { backendFeatureCaps: metaCaps, rewindPointOf: door.rewindPointOf, rewindPlanOf: door.rewindPlanOf, rewindAnswerOf: door.rewindAnswerOf, t: T,
-      REWIND_LIFE_MS: door.REWIND_LIFE_MS, POINT_FIELDS: door.POINT_FIELDS, REWIND_REQUEST_PREFIX: door.REWIND_REQUEST_PREFIX, setTimeout: stubSet, clearTimeout: stubClear,
+      REWIND_LIFE_MS: door.REWIND_LIFE_MS, POINT_FIELDS: door.POINT_FIELDS, REWIND_REQUEST_PREFIX: door.REWIND_REQUEST_PREFIX, textOf: door.textOf, setTimeout: stubSet, clearTimeout: stubClear, sessionStorage: store,
       showToast: (m, o) => said.push([m, o && o.type]),
       showConfirmDialog: (o) => { said.push(['confirm', o]); return view._yes === 'hold' ? new Promise((res) => { held = res; }) : Promise.resolve(view._yes); } });
   const reqs = [];
@@ -740,7 +818,7 @@ say('— §9 the page\'s door');
   const WORDS = {
     'not-offered': /cannot be rewound/, 'not-a-point': /cannot be rewound/, 'already-rewound': /cannot be rewound/, 'no-target-id': /does not know this message by an id/,
     'target-not-found': /changed meanwhile/, stopped: /Resume this conversation first/, 'turn-running': /Stop the current answer first/, queued: /waiting in the queue/,
-    compacting: /being compacted/, pending: /already on its way/, rebuilding: /still loading/, 'page-behind': /not shown the newest messages/,
+    compacting: /being compacted/, pending: /already on its way/, 'pending-long': /no answer for over a minute — wait for it, or stop the conversation to rewind again\.$/, rebuilding: /still loading/, 'page-behind': /not shown the newest messages/,
     commands_queued: /waiting in the queue/, prompt_pending: /Answer what the agent is asking/, turn_running: /Stop the current answer first/,
     target_not_found: /changed meanwhile/, stale_target: /changed meanwhile/, unseen_later_turn: /changed meanwhile/, state_changed: /changed meanwhile/,
     poll_tool_result_target: /cannot be rewound/, target_splits_tool_call: /cannot be rewound/, delivered_poll_events_in_range: /cannot be rewound/,
@@ -801,7 +879,7 @@ say('— §9 the page\'s door');
   said.length = 0; advance(door.REWIND_LIFE_MS - 1);
   if (said.length || !view._rewindInFlight) bad.push('view:no-word-before-the-life-ends');
   advance(1);
-  if (!said.some((x) => /No answer to the rewind within a minute — nothing has been taken back yet/.test(x[0])) || view._rewindInFlight || !view._rewindBound.has('vsr-late')) bad.push('view:the-life-ends-said-and-still-bound');
+  if (!said.some((x) => /^The rewind did not answer within a minute — nothing has been taken back yet\. Messages can be sent again; a new rewind waits until this one answers\.$/.test(x[0])) || view._rewindInFlight || !view._rewindBound.has('vsr-late')) bad.push('view:the-life-ends-said-and-still-bound');
   said.length = 0; box._textarea.value = '';
   view._onRewindAnswer({ requestId: 'vsr-late', answer: { rewound: true, targetMessageUuid: U(31), prefillText: 'ask' }, taken: 3 });
   if (box._textarea.value !== 'ask' || !said.some((x) => /Rewound — 3 messages taken back\. Your words are back in the box\./.test(x[0])) || view._rewindBound.has('vsr-late')) bad.push('view:a-late-answer-binds');
@@ -840,6 +918,58 @@ say('— §9 the page\'s door');
   view._onRewindAnswer({ requestId: 'vsr-turn', answer: { error: { message: 'boom' } }, taken: 0 });
   if (!said[0] || !/refused the rewind: boom/.test(said[0][0])) bad.push(`view:read-by-the-row-granularity (${said[0] && said[0][0]})`);
   view._getSessionIds = keepIds; view._messages = keepMsgs;
+  // ONE LIFE (3): THE TAB KEEPS THE BINDING — a page reloaded before the CLI's answer (a NEW view, nothing in memory) binds
+  // it: the success said, the words back, the tab's entry gone. Its RED CONTROL: a storage that keeps nothing (its plant
+  // proven first: nothing kept after the press) leaves the reloaded page silent
+  const reloadLaw = async (id) => {
+    const out = [];
+    await press(id, 3);
+    const keptRaw = store.getItem('vs-rewind:sess-1');
+    const view2 = new V(), box2 = new CI();
+    box2._textarea = { value: '', dispatchEvent() { } }; box2.focus = () => { };
+    Object.assign(view2, { sessionId: 'sess-1', _readOnly: false, _disposed: false, _chatInput: box2, _getSessionIds: () => ({ backend: 'claude' }), ws: view.ws, _messages: view._messages });
+    said.length = 0;
+    view2._onRewindAnswer({ requestId: id, answer: { rewound: true, targetMessageUuid: U(31), prefillText: null }, taken: 3 });   // no words from the CLI: the message's own
+    if (box2._textarea.value !== 'ask' || !said.some((x) => /^Rewound — 3 messages taken back\. Your words are back in the box\.$/.test(x[0]))) out.push('view:a-reloaded-page-binds-the-answer');
+    const left = store.getItem('vs-rewind:sess-1');
+    if (left && JSON.parse(left)[id]) out.push('view:the-answer-leaves-the-tab');
+    view._onRewindAnswer({ requestId: id, answer: { rewound: true, prefillText: 'ask' }, taken: 3 }); box._textarea.value = ''; said.length = 0;   // the first page settles
+    return { out, kept: keptRaw ? JSON.parse(keptRaw) : {} };
+  };
+  { const lr = await reloadLaw('vsr-reload');
+    if (lr.out.length || !lr.kept['vsr-reload'] || lr.kept['vsr-reload'].msgId !== 'p1' || lr.kept['vsr-reload'].granularity !== 'message' || Object.keys(lr.kept['vsr-reload']).some((k) => !['msgId', 'granularity', 'at'].includes(k))) bad.push(`view:the-tab-keeps-the-binding-ids-only (${lr.out.join(',')} ${JSON.stringify(lr.kept)})`);
+    store.dead = true;
+    const dead = await reloadLaw('vsr-reload-dead');
+    store.dead = false;
+    if (Object.keys(dead.kept).includes('vsr-reload-dead')) bad.push('view:RED CONTROL its plant (a storage that keeps nothing) is not in place');
+    else if (!dead.out.includes('view:a-reloaded-page-binds-the-answer')) bad.push('view:RED CONTROL a dead storage left the reloaded page binding (the leg proves nothing)'); }
+  // ONE LIFE (4): a send THE HUB REFUSED while a rewind is out comes back into an EMPTY box, with its door and the seconds
+  // the hub said; a box in use is never overwritten
+  box._textarea.value = ''; box._pendingSend = { text: 'my next ask' }; said.length = 0;
+  view._sayRefusedSend(box.refusedSend(), 42);
+  if (box._textarea.value !== 'my next ask' || box._pendingSend || !said.some((x) => /^A rewind is on its way — your message was not sent; it is back in the box\. Send it after the rewind answers \(in 42 s at the latest\), or stop the conversation\.$/.test(x[0]))) bad.push(`view:a-refused-send-comes-back-with-its-door (${said.map((x) => x[0])})`);
+  box._textarea.value = 'typing'; box._pendingSend = { text: 'other' }; said.length = 0;
+  view._sayRefusedSend(box.refusedSend(), 7);
+  if (box._textarea.value !== 'typing' || !said.some((x) => /box already had text, so it was left alone\)\. Send it after the rewind answers \(in 7 s at the latest\)/.test(x[0]))) bad.push('view:a-refused-send-never-overwrites');
+  // ITS words by its msgId: a later send's words never stand in for a refused earlier one; a pictures-only send's pictures come back
+  box._textarea.value = ''; box._attachments = []; box._renderAttachments = () => { };
+  box._pendingSend = { text: 'B words', msgId: 'mB' }; said.length = 0;
+  view._sayRefusedSend(box.refusedSend('mA'), 9);
+  if (box._textarea.value !== '' || !box._pendingSend || box._pendingSend.msgId !== 'mB' || !said.some((x) => /^A rewind is on its way — your message was not sent\. Send it after/.test(x[0]))) bad.push('view:a-refused-send-is-matched-by-its-msgId');
+  box._pendingSend = { text: '', msgId: 'mP', attachments: [{ mediaType: 'image/png', base64: 'AAAA' }] }; said.length = 0;
+  view._sayRefusedSend(box.refusedSend('mP'), 9);
+  if (box._attachments.length !== 1 || box._pendingSend || !said.some((x) => /it is back in the box/.test(x[0]))) bad.push('view:a-refused-send-brings-its-pictures-back');
+  box._attachments = []; box._textarea.value = 'new typing'; box._pendingSend = { text: 'old words', msgId: 'mQ', attachments: [{ mediaType: 'image/png', base64: 'BBBB' }] }; said.length = 0;
+  view._sayRefusedSend(box.refusedSend('mQ'), 9);
+  if (box._attachments.length !== 0 || box._textarea.value !== 'new typing') bad.push('view:a-refused-send-pictures-never-join-new-typing');
+  box._attachments = []; box._textarea.value = '';
+  // the tab prunes EVERY session's day-old entries on a write — never this session's, never a fresh one
+  store.setItem('vs-rewind:sess-old', JSON.stringify({ 'vsr-o': { msgId: 'x', granularity: 'message', at: Date.now() - 2 * 86400000 } }));
+  store.setItem('vs-rewind:sess-new', JSON.stringify({ 'vsr-n': { msgId: 'y', granularity: 'message', at: Date.now() } }));
+  view._keepRewind('vsr-prune', { msgId: 'p1', granularity: 'message' });
+  if (store.getItem('vs-rewind:sess-old') || !store.getItem('vs-rewind:sess-new') || !JSON.parse(store.getItem('vs-rewind:sess-1') || '{}')['vsr-prune']) bad.push('view:the-tab-prunes-old-entries-only');
+  view._keepRewind('vsr-prune', null); store.removeItem('vs-rewind:sess-new');
+  box._textarea.value = ''; said.length = 0;
   // while the confirm stands open the door is one in flight: a second door opens no second dialog
   view._yes = 'hold'; view._rewindInFlight = false; said.length = 0; view._rewindFromMessage(person); await tick();
   const qh = reqs[reqs.length - 1]; qh.match({ type: 'rewind-result', sessionId: 'sess-1', reqId: qh.msg.reqId, ok: true, dryRun: true, taken: 3, turns: 2, files: false }); await tick();
@@ -862,6 +992,9 @@ say('— §9 the page\'s door');
   const wires = [
     ['the renderer draws the door with the other message buttons', /this\.addForkBtn\(el, msg\);\n    this\.addRewindBtn\(el, msg\);/.test(cr)],
     ['the view hands the renderer its click and its live gate', /onRewind: \(msg\) => this\._rewindFromMessage\(msg\)/.test(cv) && /canRewind: \(\) => !this\._readOnly/.test(cv)],
+    ['a send the hub refused while a rewind is out comes back to the box (ITS words, by its msgId) with the seconds left', /if \(msg\.code === 'rewind-out'\) \{ this\._sayRefusedSend\(this\._chatInput\?\.refusedSend\?\.\(msg\.msgId\) \|\| 'none', msg\.left\); return; \}/.test(cv)],
+    ['the composer keeps a send\'s msgId and pictures until the hub takes it', /Object\.assign\(this\._pendingSend, \{ msgId, attachments: this\._attachments\.slice\(\) \}\);/.test(read('src/lib/chat-input.js'))],
+    ['the ws case answers the refusal by name, scoped to the action, with the seconds left', /if \(!r\.ok && r\.code === 'rewind_out'\) \{ try \{ ws\.send\(JSON\.stringify\(\{ type: 'error', code: 'rewind-out', scope: 'action',[^\n]*left: r\.left/.test(read('src/ws-handler.js'))],
     ['the stream\'s answer reaches the view', /if \(op\.subtype === 'rewind-answer'\) \{ this\._onRewindAnswer\(op\.data\); return; \}/.test(cv)],
     ['an edit to a field a point is judged on (a uuid, a batch, …) redraws the door', /if \(POINT_FIELDS\.some\(\(k\) => k in fields\)\) this\._renderers\.patchRewindBtn\(this\._elements\.get\(id\), msg\);/.test(cv)],
     ['a struck message loses its door', /_markRewoundEl\(el, kind\) \{\n    el\?\.querySelector\?\.\(':scope > \.chat-rewind-btn'\)\?\.remove\(\);/.test(cv)],

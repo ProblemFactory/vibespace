@@ -62,7 +62,7 @@ const STATUS = Object.freeze({
   agent_forbidden: 403, not_found: 404,
   empty: 400, too_long: 400, input_rejected: 400, too_large: 400, bad_image: 400,
   no_session: 409, job_item: 409, card_item: 409, exit_ask: 409, no_live_session: 409, not_chat: 409, host_unreachable: 409,
-  resume_failed: 409, send_failed: 500,
+  resume_failed: 409, rewind_out: 409, send_failed: 500,
 });
 // who pressed it (a sign-in's handle, never the cookie) — the act a reopen starts on a device names it (src/device-audit.js)
 const byOf = (req) => { try { return require('../device-audit.js').byOfReq(req); } catch { return null; } };
@@ -131,7 +131,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
     const r = await sendWhenReady(o.sessionId, frame);   // ONE send, once the fresh wrapper can take a big frame
     // (batch 20 cure: the frame the just-started conversation cannot take yet is ALSO said as words the page translates)
     const tooLarge = r && r.code === 'too_large' && r.reason === 'no-sidecar' ? { words: { key: REPLY_WORDS.reopenTooLarge, params: { mb: (frame.length / 1048576).toFixed(1) } } } : {};   // only «still starting» is a wait (an old wrapper needs Terminate + Resume: its English stays)
-    if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ ...tooLarge, error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
+    if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ ...tooLarge, error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', ...(r && r.i18n ? { i18n: r.i18n } : {}), reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
     const updated = userTodos.resolveByReply(item.id, text, undefined, { pictures });
     res.json({ ok: true, reopened: true, sessionId: o.sessionId, conversation: o.conversation || null, msgId: r.msgId, item: updated });
   }).catch((e) => { if (!res.headersSent) fail(res, 'resume_failed', 'the conversation could not be reopened: ' + e.message); });
@@ -160,7 +160,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
       const r = sendUserInput(hit[0], frame, { msgId: Date.now() + '-reply', origin: 'inbox-reply', door: 'enter' });   // the conversation's own Enter door (lane reply-door-follows-enter)
       if (!r || !r.ok) {
         const code = r && r.code === 'no_session' ? 'no_live_session' : (r && r.code) || 'send_failed';
-        return fail(res, code, (r && r.error) || 'the reply was not sent');
+        return fail(res, code, (r && r.error) || 'the reply was not sent', r && r.i18n ? { i18n: r.i18n } : null);   // B-437e: a refusal in the reader's language
       }
       const updated = userTodos.resolveByReply(item.id, t.text, undefined, { pictures: pics.blocks.length });   // B-51dd: the reply keeps how many pictures it carried
       res.json({ ok: true, msgId: r.msgId, item: updated });

@@ -33,17 +33,29 @@ function personOfUpgrade(req) {
   return !WO.pressBearer(h) && WO.pageVerdict(h, WO.ownOriginOf(h, { encrypted: !!(req && req.socket && req.socket.encrypted) })).ok;
 }
 
+/** ONE REWIND AT A TIME — the request out, WHILE IT LIVES: the wrapper says it as it reaches the CLI (`rewind_out`, in its
+ *  buffer, so a hub restart reads it back) and it holds until the CLI's answer; a new process is a new wrapper whose buffer
+ *  starts empty. A press whose record is not read yet (or a wrapper older than the record) holds REWIND_LIFE_MS. The
+ *  person's send waits on it too (src/server/user-input.js). ⇒ docs/kb-file-structure.md «rewind-door.js» */
+function rewindOut(session, now = Date.now()) {
+  const n = session && session._normalizer, o = session && session._rewindOut;
+  const said = n && n.rewindAskedOut?.();          // the wrapper's record: it lives until its answer, across a hub restart
+  if (said) return said;
+  if (!o || (n && n.rewindAnswered?.(o.id))) return null;
+  return now - o.at < REWIND_LIFE_MS ? o : null;   // pressed, its record not read yet (or a wrapper that says none): one life
+}
+
+/** THE PERSON'S FENCE (主开发 20:05Z): while a rewind is out the person's send waits — never past the stated expiry
+ *  (REWIND_LIFE_MS from the press): the ms left, 0 = the send goes through. Only this fence is bounded; the hub's own mark
+ *  (rewindOut) lives as long as the request. */
+function rewindFenceLeft(session, now = Date.now()) {
+  const o = rewindOut(session, now);
+  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now)) : 0;
+}
+
 /** One press — or its DRY RUN (`dryRun`: the plan's words for the confirm, nothing written). Returns the frame for the
  *  page that pressed: `{ ok: true, requestId?, dryRun?, taken, turns, files }`, or `{ ok: false, reason, cls }`. Writes
  *  nothing on a refusal or a dry run. `by` = who asks (only the person: {kind:'human'}). */
-/** ONE REWIND AT A TIME: the request out, until its answer or REWIND_LIFE_MS. On the session — a history rebuild (a new
- *  normalizer) and a re-attached client keep it, a new spawn is a new session; a hub restart forgets it (docs/kb-features.md). */
-function rewindOut(session, now = Date.now()) {
-  const o = session && session._rewindOut;
-  if (!o || now - o.at >= REWIND_LIFE_MS) return null;
-  return session._normalizer && session._normalizer.rewindAnswered?.(o.id) ? null : o;
-}
-
 function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expectTaken = null, roadOf = rewindRoad, now = Date.now(), reqId = null }) {
   const no = (reason) => ({ ok: false, reason, cls: REWIND_REFUSALS[reason] || 'cannot' });
   // WHO: the person's own press through the owner's road (/ws takes the owner's cookie only). A rewind destroys later
@@ -56,7 +68,8 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   const messages = session._normalizer && Array.isArray(session._normalizer.messages) ? session._normalizer.messages : null;
   if (!messages) return no('stopped');
   if (session._rebuildPromise) return no('rebuilding');  // the history is being rebuilt: the array is not whole yet
-  if (rewindOut(session, now)) return no('pending');     // one rewind at a time
+  const out0 = rewindOut(session, now);                 // one rewind at a time — past the minute the words name the Stop door
+  if (out0) return no(now - (Number(out0.at) || 0) >= REWIND_LIFE_MS ? 'pending-long' : 'pending');
   // the page names the newest message IT shows: a conversation that moved past it is refused, never cut unseen
   const plan = rewindPlanOf(row, messages, String(msgId || ''), { ...rewindStateOf(session), pageLastSeenUuid: typeof lastSeenUuid === 'string' ? lastSeenUuid : null });
   if (!plan.ok) return no(plan.reason);
@@ -75,4 +88,4 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   return { ok: true, requestId: out.requestId, ...said };
 }
 
-module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut };
+module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut, rewindFenceLeft };

@@ -1161,6 +1161,18 @@ export class ChatInput {
     return 'restored';
   }
 
+  /** The hub refused this send by name while a rewind is out (B-437e `rewind-out`): THAT send's own words (matched by its
+   *  msgId) come back into an EMPTY box, its pictures into an empty tray. Answers like putBack. */
+  refusedSend(msgId) {
+    const p = this._pendingSend && (!msgId || !this._pendingSend.msgId || this._pendingSend.msgId === msgId) ? this._pendingSend : null;
+    if (p) this._pendingSend = null;
+    const put = this.putBack(p ? p.text : '');
+    // the pictures come back WITH the words (never beside someone else's new text — the next Enter would send them)
+    const pics = put !== 'kept' && !!(p && p.attachments && p.attachments.length && !(this._attachments && this._attachments.length));
+    if (pics) { this._attachments = p.attachments; this._renderAttachments(); }
+    return put === 'none' && pics ? 'restored' : put;
+  }
+
   setDisconnected(disconnected) {
     // Keep the textarea fully editable — the user must be able to select/copy
     // (a disabled textarea blocks selection) and keep drafting; only SENDING
@@ -1545,6 +1557,7 @@ export class ChatInput {
     if (text) saveDraft('chat', this._sessionId, text);
     this._pendingSend = { text, storeBefore };
     this._judgeHeldDraft();   // the emptied box: this send's pin supersedes a held draft; a send without text lets it land
+    Object.assign(this._pendingSend, { msgId, attachments: this._attachments.slice() });   // B-437e: a refused send gets ITS words and pictures back
     if (this._expanded) {
       this._expanded = false;
       this._textarea.classList.remove('chat-input-expanded');

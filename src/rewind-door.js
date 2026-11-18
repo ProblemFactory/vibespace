@@ -42,13 +42,14 @@ const REWIND_REFUSALS = Object.freeze({
   'queued': 'busy',            // messages wait in the queue — they would run against a conversation that is no longer there
   'compacting': 'busy',        // a compaction rewrites the history while it runs
   'pending': 'busy',           // a rewind of this conversation is out and not answered yet — one at a time
+  'pending-long': 'busy',      // …for over a minute (a local CLI never expires it): wait, or stop the conversation to rewind again
   'rebuilding': 'busy',        // the server is rebuilding this conversation's history — its array is not whole yet
   'page-behind': 'moved',      // the page that pressed has not seen the conversation's newest message
   'not-the-person': 'cannot',  // only the person's own press (a conversation, a job or an automation key never rewinds)
   'changed-since': 'moved',    // the conversation changed between the confirm's words and the press
 });
 // The door's own reasons (the server's, the plan's) — never a verdict over one message
-const DOOR_REASONS = Object.freeze(['target-not-found', 'pending', 'rebuilding', 'page-behind', 'not-the-person', 'changed-since']);
+const DOOR_REASONS = Object.freeze(['target-not-found', 'pending', 'pending-long', 'rebuilding', 'page-behind', 'not-the-person', 'changed-since']);
 
 // The 13 refusal reasons of 2.1.322's rewind_conversation (its `jv` table), with the binary's own «may be sent again»
 // (its `Kv` table) and our class. A reason missing here is answered as 'cli-other' with the CLI's own text — never

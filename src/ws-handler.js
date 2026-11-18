@@ -924,6 +924,7 @@ function registerWsHandler(wss, ctx) {
           if (!r.ok && (r.code === 'input_rejected' || r.code === 'too_large')) {
             try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: r.error, message: r.error })); } catch { }
           }
+          if (!r.ok && r.code === 'rewind_out') { try { ws.send(JSON.stringify({ type: 'error', code: 'rewind-out', scope: 'action', sessionId: data.sessionId, msgId: data.msgId ?? null, left: r.left, error: r.error, message: r.error })); } catch { } } // B-437e: the words come back to the box
           break;
         }
 
