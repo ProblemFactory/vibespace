@@ -38,13 +38,16 @@ import { spawn } from 'node:child_process';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, cpuMs = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const ok = (c, n, d) => { siteArmed = false; if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 // B-1409: a leg the BOX could not feed (the watchdog thread itself late on two shared cores: too few asks inside a native
 // call) ends as a NAMED and COUNTED skip — never a green: the summary line prints the count, and the release's self-hosted
 // claim runs the same legs on a box that can
 const skipped = [];
-const skip = (n, why) => { skipped.push(`${n} — ${why}`); console.log(`  ⊘ SKIP ${n} — ${why}`); };
-let floorSites = 0; const site = () => { floorSites++; };   // (cure 3) every leg with a sample floor counts itself, judged or not: a skip is not a green
+// (its readers' should 9) EVERY SKIP SITS BEHIND A COUNTED SITE: site() arms, the skip that follows it disarms, ok() disarms — a
+// skip with no armed site is an orphan, red by name at the close (and the source is read: every skip call follows «site(); if»)
+const orphanSkips = [];
+const skip = (n, why) => { if (!siteArmed) orphanSkips.push(n); siteArmed = false; skipped.push(`${n} — ${why}`); console.log(`  ⊘ SKIP ${n} — ${why}`); };
+let floorSites = 0, siteArmed = false; const site = () => { floorSites++; siteArmed = true; };   // (cure 3) every leg with a sample floor counts itself, judged or not: a skip is not a green
 // cure 3 (主开发 2026-11-18 19:25Z) — THE STARVED-RUNNER FAMILY: a leg judges what a hold's own numbers and samples carry; an ask
 // the box put to sleep is judged by ITS true forms; a floor not met is a NAMED, COUNTED non-verdict, never a red (the closing
 // line counts both)
@@ -67,6 +70,12 @@ const kernelTrue = (a) => {
 // collection»; «in the kernel (on the CPU)» only when its own numbers carry it (src/loop-hold.js askOf / partsOf / verdict)
 const asleepTrue = (verdict, a) => String(verdict || '').split(', then ').every((v) => v !== LH.V.js && v !== LH.V.native && (v !== LH.V.kernel || kernelTrue(a)));
 const reEsc = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// (its readers' should 3) THE ASLEEP WORDS ARE THE PRODUCT'S: src/loop-hold.js askOf words an ask posted asleep «asleep: <its wait
+// channel>», or LH.WOKE_WORDS («asleep at the ask, …») when the syscall read a moment later said running; the suite reads them
+// off the line — a product that stopped wording them so would drop every asleep ask into the strict sets unseen, so legRound4
+// PINS both forms against askOf itself
+const ASLEEP_IN_LINE = /(?:samples?|where it was \(\d+ samples?\)): [^;]*\basleep(?:: | at the ask)/;
+const samplesIn = (l) => { const m = /(?:(\d+) samples?|where it was \((\d+) samples?\)): /.exec(String(l || '')); return m ? Number(m[1] || m[2]) : 0; };
 const oneAsleep = (l) => new RegExp(` 1 sample: (?:${reEsc(LH.WOKE_WORDS)}|asleep: [^;×]+?) ×1(?:;|$)`).test(String(l || ''));   // a hold whose ONE sample found the thread asleep (LH read at call time: it is declared below)
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lh-live-'));
 fs.mkdirSync(path.join(ROOT, 'src'));
@@ -129,6 +138,9 @@ if (!isMainThread) {
     for (const k of ['readFileSync', 'statSync', 'realpathSync']) { const o = fs[k]; fs[k] = function (p, ...a) { if (under(p)) Atomics.wait(nap, 0, 0, ms); return o.call(this, p, ...a); }; }
     for (const k of ['readFile', 'stat', 'realpath']) { const o = fs.promises[k]; fs.promises[k] = async function (p, ...a) { if (under(p)) await new Promise((r) => setTimeout(r, ms)); return o.call(this, p, ...a); }; }
   }
+  if (process.env.LH_POSTLOG) { const insp = require('inspector'), fs = require('fs'), orig = insp.Session.prototype.post;   // (主开发 20:19Z) each post, its thread state, on fd 2
+    const st = () => { try { const t = fs.readFileSync('/proc/self/task/' + process.pid + '/stat', 'utf8'); return t.charAt(t.lastIndexOf(')') + 2) || '?'; } catch { return '?'; } };
+    insp.Session.prototype.post = function (m, ...a) { if (m === 'Runtime.evaluate') { try { fs.writeSync(2, '[lh-post] ' + st() + ' ' + mono().toFixed(3) + '\\n'); } catch { } } return orig.call(this, m, ...a); }; }
   if (process.env.LH_POSTWATCH) { const insp = require('inspector'), b = new BroadcastChannel('lh-posts'); b.unref(); const orig = insp.Session.prototype.post;
     insp.Session.prototype.post = function (m, ...a) { if (m === 'Runtime.evaluate') b.postMessage({ ev: 'post', at: mono() }); return orig.call(this, m, ...a); }; }
 }
@@ -138,6 +150,23 @@ const LH_KEYS_DEEP = '(deep recursion)';
 const LATE_D = [-30, -15, -8, -5, -3, -2, -1, 0, 1, 2, 4];   // round 3 (1): the late watchdog's release around the hog's end (measured: ≤ −5 JS inside, 0 asked at its end, ≥ 5 unseen)
 const HEAP_PER_EVAL_B = 400;   // round 3 (3): main-thread heap kept per REAL evaluate, at most (a constant text: measured ~? B; round 2: ~3 500)
 const LH = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/loop-hold.js'));
+// (its readers' should 7) THE ASKS' TIMES, named once and read off the product's own schedule (LH.sampleDue with the first ask one
+// beat before the bar, LH.firstAskMs — B-7c97) at the children's injected hold 100 / beat 20: 80 / 200 / 400 ms of the hold
+const askDue = (k) => { for (let ms = 0; ms <= 100 * 2 ** k; ms++) if (LH.sampleDue(k, ms, 100, LH.SAMPLES_PER_HOLD, LH.firstAskMs(100, 20))) return ms; return null; };
+const FIRST_ASK_MS = askDue(0), SECOND_ASK_MS = askDue(1), THIRD_ASK_MS = askDue(2);
+// (主开发 2026-11-18 20:19Z's sharper form — with NO product seam; its readers' S1 / S2) WHICH ASK MET THE EXIT: the sweep preload
+// (LH_POSTLOG, the watchdog's own thread) stamps every Runtime.evaluate the watchdog posts on fd 2 with the main thread's kernel
+// state read at that post (the read the product makes a moment before it — src/server/sync-fs-witness-worker.js ask()), and the
+// child stamps its call's end. A «Waiting for the debugger…» line is THE STATED RESIDUAL only when an ask was posted with the
+// thread RUNNING within SESSION_MS (+ 5 ms) of the call's end — its session kept, the exit inside it (post(), docs/kb-design-
+// lessons.md «NO SESSION ACROSS AN EXIT»); a line with no such post is THE LAW BROKEN (an asleep ask kept a session): red
+const exitJudge = (err) => {
+  const e = String(err || ''), line = e.includes('Waiting for the debugger'), end = Number((/\[kid\] call end ([\d.]+)/.exec(e) || [])[1]);
+  const posts = [...e.matchAll(/\[lh-post\] ([A-Z?]) ([\d.]+)/g)].map((m) => ({ st: m[1], at: Number(m[2]) }));
+  const last = posts.length ? posts[posts.length - 1] : null;   // the LAST ask before the exit (主开发 20:19Z's form; its second reader's N2)
+  const onCpu = Number.isFinite(end) && !!last && last.st === 'R' && last.at >= end - LH.SESSION_MS - 5;
+  return { line, residual: line && onCpu, broken: line && !onCpu, posts: posts.length, asleepPosts: posts.filter((p) => p.st === 'S' || p.st === 'D').length, stamped: Number.isFinite(end) };
+};
 // THE BOOT through the REAL boot-trace start (server.js's 6th line): the off switch read from data/settings.json BEFORE anything is asked
 const BOOTKID = path.join(ROOT, 'bootkid.js');
 fs.writeFileSync(BOOTKID, `'use strict';
@@ -178,7 +207,7 @@ const H = require(${JSON.stringify(path.join(ROOT, 'src/hogs.js'))});
 const SPANS = [];
 const SS0 = () => { try { const t = require('fs').readFileSync('/proc/self/task/' + process.pid + '/schedstat', 'utf8').split(' '); return [Number(t[0]), Number(t[1])]; } catch (e) { return [0, 0]; } };
 const kmono0 = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
-for (const k of ['busyHog', 'monoHog', 'pbkdfHog', 'parseHog', 'jsonHog', 'zlibHog', 'regexHog', 'gcHog']) if (typeof H[k] === 'function') {
+for (const k of ['busyHog', 'bootHog', 'monoHog', 'pbkdfHog', 'parseHog', 'jsonHog', 'zlibHog', 'regexHog', 'gcHog']) if (typeof H[k] === 'function') {   // bootHog: its readers' M3 (a starved boot needs its span)
   const f = H[k];
   H[k] = function (...a) { const s0 = SS0(), w0 = Date.now(), m0 = kmono0(); try { return f.apply(this, a); } finally { const s1 = SS0(); SPANS.push({ fn: k, wall: w0, ms: kmono0() - m0, waitMs: (s1[1] - s0[1]) / 1e6, ranMs: (s1[0] - s0[0]) / 1e6 }); } };
 }
@@ -218,7 +247,7 @@ else if (plan === 'nativeSweep') {   // round 4 (A): a native call + a JavaScrip
   };
   later(300, next);
 }
-else if (plan === 'slowNames') {   // round 4 MUST 2: a 700 ms hold, then a 400 ms one — every repo source read 300 ms
+else if (plan === 'slowNames') {   // round 4 MUST 2: a 700 ms hold, then a 400 ms one — every repo source read LH_SLOW_SRC_MS
   const { BroadcastChannel } = require('worker_threads'); const posts = [], bc = new BroadcastChannel('lh-posts'); bc.onmessage = (e) => posts.push(e.data);
   const holds = [];
   later(250, () => { const s1 = kmono(), w1 = Date.now(); H.busyHog(700); holds.push({ start: s1, wall: w1, end: kmono() });
@@ -275,7 +304,8 @@ else if (plan === 'stopRow') later(500, () => {
   if (row === 'exitAfter') { H.busyHog(330); setImmediate(() => process.exit(0)); return; }
   if (row === 'throwInside') { H.busyHog(330); throw new Error('a fatal throw inside the hold'); }
   if (row === 'throwAfter') { H.busyHog(330); setImmediate(() => { throw new Error('a fatal throw right after the hold'); }); return; }
-  if (row === 'exitNative') { H.sleepHog(0.35); process.exit(0); }
+  if (row === 'exitNative') { H.sleepHog(0.35); require('fs').writeSync(2, '[kid] call end ' + kmono().toFixed(3) + '\\n'); process.exit(0); }   // the leg runs it with ONE ask a hold
+  if (row === 'exitNativeCross') { H.sleepHog(0.35); require('fs').writeSync(2, '[kid] call end ' + kmono().toFixed(3) + '\\n'); process.exit(0); }   // the release's schedule: the second ask's door
 });
 else if (plan === 'openSameTick') later(500, () => { require('inspector').open(0, '127.0.0.1'); H.busyHog(330); setTimeout(() => { require('inspector').close(); done(); }, 50); });
 else if (plan === 'sigusr1') later(500, () => { process.stderr.write('[kid] ready\\n'); H.busyHog(600); done(); });
@@ -361,7 +391,7 @@ else if (plan === 'names') later(500, () => {
     () => new H.Hogs().member(320), () => H.arrowHog(320), () => H.hogObj.methodHog(320), () => H.anonHog(320),
   ];
   let i = 0; const next = () => { if (i >= steps.length) return done(); steps[i++](); setTimeout(next, 250); }; next(); });
-else if (plan === 'exitNativeX') later(500, () => { cp.execFileSync('sleep', [String(cfg.x / 1000)]); process.exit(0); });
+else if (plan === 'exitNativeX') later(500, () => { cp.execFileSync('sleep', [String(cfg.x / 1000)]); require('fs').writeSync(2, '[kid] call end ' + kmono().toFixed(3) + '\\n'); process.exit(0); });
 else if (plan === 'exitParseX') { const s = '[' + new Array(cfg.n || 600000).fill('{"a":1,"b":"vvvvvv"}').join(',') + ']'; later(500, () => { JSON.parse(s); process.exit(0); }); }
 else if (plan === 'pressSameTick') later(400, () => { require('inspector').open(0, '127.0.0.1'); out.checks.press = W.holds().startProfile(); require('inspector').close(); done(100); });
 else if (plan === 'deadPress') later(300, () => { out.checks.press = W.holds().startProfile(3000); W.stop(); setTimeout(() => { out.checks.mid = W.holds().report().profile; out.checks.press2 = W.holds().startProfile(3000); done(10); }, 200); });
@@ -393,7 +423,12 @@ function starveOf(r) {
     return { h, share, waiting, also, outside: waiting && share != null && share >= SUITE_CLEAR };
   });
 }
-function account(rows, plan) {
+// (its second reader's M1 / S3) THE BOOT'S HOLD IS LEFT OUT of the agreement and the floor: its span (bootHog, wrapped since
+// 2.369.411 so ② can say a starved boot) starts before the watchdog thread has booted, so the product's window cannot cover it
+// (before, it had no span at all); ② judges it alone, and a starved boot is ②'s named non-verdict — never a red here
+const notBoot = (rs) => rs.filter((x) => !(x.h && x.h.boot));
+function account(rows0, plan) {
+  const rows = notBoot(rows0);
   for (const x of rows) {
     STARVE.holds++; if (x.waiting) STARVE.waiting++; if (x.outside) STARVE.outside++;
     if (x.share == null) continue;
@@ -407,7 +442,7 @@ function account(rows, plan) {
 async function run(cfg, opts = {}) {
   let r = await run1(cfg, opts), rows = starveOf(r);
   account(rows, cfg.plan);
-  const under = (rs) => rs.length > 0 && (rs.length - rs.filter((x) => x.outside).length) / rs.length < ASKED_FLOOR;
+  const under = (rs0) => { const rs = notBoot(rs0); return rs.length > 0 && (rs.length - rs.filter((x) => x.outside).length) / rs.length < ASKED_FLOOR; };
   if (under(rows)) {
     STARVE.reruns.push(`${cfg.plan}: ${rows.filter((x) => x.outside).length} of ${rows.length}`);
     r = await run1(cfg, opts); rows = starveOf(r); account(rows, cfg.plan);
@@ -471,7 +506,11 @@ async function legBootCapSwitch() {
   console.log('② the boot is a hold (outside the cap)');
   const b = await run({ plan: 'boot', boot: 350, budget: 0 });
   const bl = holdLines(b).find((l) => l.startsWith('[loop-hold] the boot held the main loop'));
-  ok(bl && /before its first turn — JavaScript: /.test(bl) && /bootHog \(src\/hogs\.js:3\)/.test(bl) && b.out && b.out.report.counts.boot === 1, `the main module busy before its first turn is sampled and said as the boot's, with a time budget of 0: ${bl}`, b.lines);
+  // (its readers' should 8) the same family as B-1409's: «it also waited N s for a CPU» is a TRUE suffix; a boot the box starved
+  // («waiting for a CPU», the suite's own count agreeing) is a NAMED, COUNTED non-verdict
+  const bStarved = (b.starve || []).some((x) => x.outside && x.h && x.h.boot);
+  site(); if (bStarved) skip('② the boot is a hold, sampled and said as the boot\'s', `the box starved the boot: «${LH.V.waiting}», the suite\'s own count agreeing`);
+  else ok(bl && new RegExp(`before its first turn — JavaScript${WAITED}: `).test(bl) && /bootHog \(src\/hogs\.js:3\)/.test(bl) && b.out && b.out.report.counts.boot === 1, `the main module busy before its first turn is sampled and said as the boot's, with a time budget of 0: ${bl}`, b.lines);
   const late = await run({ plan: 'late' });
   const ll = holdLines(late);
   ok(ll.length === 1 && new RegExp(`^\\[loop-hold\\] the main loop was held 0\\.[2-4] s — JavaScript${WAITED}: `).test(ll[0]) && late.out && late.out.report.counts.boot === 0, `a witness started AFTER the loop's first turn (2 s into the process) then held at once: an ordinary hold timed from its own start, never «the boot» of the process's age: ${ll[0]}`, late.lines);
@@ -483,11 +522,13 @@ async function legBootCapSwitch() {
   const hl = holdLines(c), named = hl.filter((l) => / \d samples?: [^;]*busyHog \(src\/hogs\.js:\d+\)/.test(l));
   ok(hl.length === 30 && named.length === 30 && !hl.some((l) => /not sampled/.test(l)), `30 holds in a row: ${named.length} of ${hl.length} named by their function (busyHog), none «not sampled»`, hl.filter((l) => !named.includes(l)).slice(0, 2));
   let c0 = await run({ plan: 'cap', budget: 0 }), h0 = holdLines(c0);
-  if (h0.length === 4 && h0.every(oneAsleep)) { c0 = await run({ plan: 'cap', budget: 0 }); h0 = holdLines(c0); }   // (cure 3) once more when every first ask found the thread asleep
-  const asleep0 = h0.filter(oneAsleep), awake0 = h0.filter((l) => !oneAsleep(l));
-  site(); if (h0.length === 4 && !awake0.length) skip('③ a budget of 0: each hold its FIRST sample only', `no sample this run: all 4 first asks found the thread asleep in 2 runs (${asleep0.map(verdictOfLine).join(' · ')})`);
-  else ok(h0.length === 4 && h0.every((l) => /later samples not asked: the samples used their time budget/.test(l)) && awake0.every((l) => / 1 sample: busyHog \(src\/hogs\.js:\d+\)/.test(l)) && asleep0.every((l) => asleepTrue(verdictOfLine(l), l)),
-    `a budget of 0: each of the 4 holds its FIRST sample only, the later ones said as not asked (${asleep0.length} first asks found the thread asleep — judged by their own true forms, counted)`, h0);
+  if (h0.length === 4 && h0.every((l) => oneAsleep(l) || (c0.starve || []).some((x) => x.outside && x.h.line === l))) { c0 = await run({ plan: 'cap', budget: 0 }); h0 = holdLines(c0); }   // (cure 3) once more when every first ask found the thread asleep
+  // (its readers' should 8) a hold the box starved («waiting for a CPU», the suite's own count agreeing) is outside the asks' law: counted, said
+  const out0 = new Set((c0.starve || []).filter((x) => x.outside).map((x) => x.h.line));
+  const asleep0 = h0.filter(oneAsleep), starved0 = h0.filter((l) => !oneAsleep(l) && out0.has(l)), awake0 = h0.filter((l) => !oneAsleep(l) && !out0.has(l));
+  site(); if (h0.length === 4 && !awake0.length) skip('③ a budget of 0: each hold its FIRST sample only', `no sample this run: all 4 first asks found the thread asleep or the box starved them (${asleep0.length} asleep, ${starved0.length} «${LH.V.waiting}») in 2 runs (${h0.map(verdictOfLine).join(' · ')}) — a child the box starved past the suite's floor twice is ALSO red at the close («the box starved the suite»)`);
+  else ok(h0.length === 4 && h0.filter((l) => !starved0.includes(l)).every((l) => /later samples not asked: the samples used their time budget/.test(l)) && awake0.every((l) => / 1 sample: busyHog \(src\/hogs\.js:\d+\)/.test(l)) && asleep0.every((l) => asleepTrue(verdictOfLine(l), l)),
+    `a budget of 0: each of the 4 holds its FIRST sample only, the later ones said as not asked (${asleep0.length} first asks found the thread asleep — judged by their own true forms, counted; ${starved0.length} the box starved — «${LH.V.waiting}», the suite's own count agreeing, counted)`, h0);
   console.log('④ the off switch, the debugger');
   // the off switch asks NOTHING: the real evaluates that reached the main thread, counted (a session is now connected only
   // for one ask at a time, so an exit no longer shows one — the count is the evidence)
@@ -556,11 +597,12 @@ async function legAcceptance() {
   ok(nl && / — on the CPU in user mode — JavaScript or native code, not sampled: /.test(nl) && /not sampled \(sampling is off in Settings\)/.test(nl) && ns.out.report.table[0].verdict === LH.V.unsampled,
     `2 — a JavaScript loop nobody sampled: the verdict says «not sampled» (the line, the table key) — never «native code or garbage collection»: ${nl}`, ns.lines);
   let cap = await run({ plan: 'cap', budget: 0 });
-  if (holdLines(cap).length === 4 && holdLines(cap).every(oneAsleep)) cap = await run({ plan: 'cap', budget: 0 });   // (cure 3) once more when every first ask found the thread asleep
-  const cl = holdLines(cap), clAsleep = cl.filter(oneAsleep), clAwake = cl.filter((l) => !oneAsleep(l));
-  site(); if (cl.length === 4 && !clAwake.length) skip('2 — past the time budget: every JavaScript hold says «JavaScript» from its first sample', 'no sample this run: all 4 first asks found the thread asleep in 2 runs');
+  const capOut = (r) => new Set((r.starve || []).filter((x) => x.outside).map((x) => x.h.line));   // (its readers' should 8) the box starved it: counted, said
+  if (holdLines(cap).length === 4 && holdLines(cap).every((l) => oneAsleep(l) || capOut(cap).has(l))) cap = await run({ plan: 'cap', budget: 0 });   // (cure 3) once more when every first ask found the thread asleep
+  const clOut = capOut(cap), cl = holdLines(cap), clAsleep = cl.filter(oneAsleep), clStarved = cl.filter((l) => !oneAsleep(l) && clOut.has(l)), clAwake = cl.filter((l) => !oneAsleep(l) && !clOut.has(l));
+  site(); if (cl.length === 4 && !clAwake.length) skip('2 — past the time budget: every JavaScript hold says «JavaScript» from its first sample', `no sample this run: all 4 first asks found the thread asleep or the box starved them (${clAsleep.length} asleep, ${clStarved.length} «${LH.V.waiting}») in 2 runs — a child the box starved past the suite's floor twice is ALSO red at the close («the box starved the suite»)`);
   else ok(cl.length === 4 && cl.every((l) => !/native code or garbage collection/.test(l)) && clAwake.every((l) => /^\[loop-hold\] the main loop was held [\d.]+ s — JavaScript/.test(l)) && clAsleep.every((l) => asleepTrue(verdictOfLine(l), l)),
-    `2 — past the time budget: every JavaScript hold still says «JavaScript» from its first sample, none «native» (${clAsleep.length} first asks found the thread asleep — their own true forms, counted)`, cl);
+    `2 — past the time budget: every JavaScript hold still says «JavaScript» from its first sample, none «native» (${clAsleep.length} first asks found the thread asleep — their own true forms, counted; ${clStarved.length} the box starved — «${LH.V.waiting}», the suite's own count agreeing, counted)`, cl);
   // 3. no name forges a frame; a vm script with a repo-looking name is not a repo frame
   const fg = await run({ plan: 'forge', record: true });
   const fl = holdLines(fg), sinks = JSON.stringify({ lines: fl, table: fg.out && fg.out.report.table, recs: fg.out && fg.out.checks.recs });
@@ -571,14 +613,33 @@ async function legAcceptance() {
   const onBoot = await new Promise((r) => { const c = spawn(process.execPath, [BOOTKID, JSON.stringify({})], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir() } }); let o = ''; c.stdout.on('data', (d) => { o += d; }); c.on('exit', () => { let j = null; try { j = JSON.parse(o); } catch { } if (j) cpuMs += j.cpuMs; r(j); }); });
   ok(offBoot && offBoot.evals === 0 && /the boot held the main loop/.test(offBoot.line || '') && /not sampled \(sampling is off in Settings\)/.test(offBoot.line) && onBoot && onBoot.evals >= 1 && /\d samples?: /.test(onBoot.line || ''),
     `4 — the setting OFF in data/settings.json: a 1.35 s boot through the REAL boot-trace start is asked NOTHING (${offBoot && offBoot.evals} evaluates; the control with no setting: ${onBoot && onBoot.evals}) and still said: ${offBoot && offBoot.line}`, { offBoot, onBoot });
-  // 5. no «Waiting for the debugger to disconnect…» at a stop — also the stop of a held hub (the verifier's seven rows)
-  const rows = ['exitInside', 'exitAfter', 'throwInside', 'throwAfter', 'sigterm', 'sigtermFlush', 'exitNative'];
+  // 5. no «Waiting for the debugger to disconnect…» at a stop — also the stop of a held hub (the verifier's rows; six strict, two by exitJudge)
+  // (主开发 2026-11-18 20:20Z, the shard's red at 58e8087fc: exitNative 1 of 2) THE SECOND ASK'S DOOR: a hold still open past a sync
+  // call (process.exit comes before any beat) meets its second ask (SECOND_ASK_MS of the hold) while the thread runs its exit — ON
+  // THE CPU, its session kept ≤ SESSION_MS: the stated residual. exitNative (0.35 s) runs ONE ask a hold (samplesPerHold 1): its ask,
+  // posted asleep inside the call, keeps no session and no second ask exists. exitNativeCross (0.35 s, the release's schedule)
+  // crosses the second ask. BOTH are judged by exitJudge (above): a line excused only by an ask posted on the CPU within
+  // SESSION_MS of the call's end (counted, said), any other line red; both exit by themselves (code 0). Its harm — one line, the
+  // exit not waiting — is pinned by test-fs-canary §11
+  const rows = ['exitInside', 'exitAfter', 'throwInside', 'throwAfter', 'sigterm', 'sigtermFlush'];
   const seen = {};
   for (const row of rows) for (let i = 0; i < 2; i++) {
     const r = await run({ plan: 'stopRow', row }, { onReady: (c) => { setTimeout(() => { try { c.kill('SIGTERM'); } catch { } }, 120); } });
     seen[row] = (seen[row] || 0) + (r.err.includes('Waiting for the debugger') ? 1 : 0);
   }
-  ok(rows.every((r) => seen[r] === 0), `5 — the seven stop rows, twice each (exit / throw inside and right after a sampled hold, SIGTERM inside one, a SIGTERM handler's 1.1 s flush, an exit right after a native hold with an ask abandoned): no «Waiting for the debugger…» line (${JSON.stringify(seen)})`);
+  ok(rows.every((r) => seen[r] === 0), `5 — the six stop rows, twice each (exit / throw inside and right after a sampled hold, SIGTERM inside one, a SIGTERM handler's 1.1 s flush): no «Waiting for the debugger…» line (${JSON.stringify(seen)})`);
+  const nat = [];
+  for (const row of ['exitNative', 'exitNativeCross']) for (let i = 0; i < 2; i++) {
+    const r = await run({ plan: 'stopRow', row, ...(row === 'exitNative' ? { samplesPerHold: 1 } : {}) }, { args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' } });
+    nat.push({ row, code: r.code, ...exitJudge(r.err) });
+  }
+  const natSay = (row) => { const L = nat.filter((x) => x.row === row); return `${row} ${L.filter((x) => x.residual).length} of ${L.length}`; };
+  // (its second reader's S1) exitJudge's PLANT and RED CONTROL: the stamp reads the MAIN thread's state — an ask posted inside a
+  // 0.35 s call is stamped asleep (S / D) in at least one of the four runs, never «R» always; a line whose last ask was posted asleep
+  // is «broken», one whose last ask was posted running at the call's end is the residual
+  const jB = exitJudge('[lh-post] S 100.000\n[kid] call end 400.000\nWaiting for the debugger to disconnect...\n'), jR = exitJudge('[lh-post] S 100.000\n[lh-post] R 401.000\n[kid] call end 400.000\nWaiting for the debugger to disconnect...\n');
+  ok(nat.some((x) => x.asleepPosts >= 1) && jB.broken && !jB.residual && jR.residual && !jR.broken, `5 — exitJudge reads what it claims: ${nat.reduce((n, x) => n + x.asleepPosts, 0)} asks stamped asleep inside the calls (the main thread's state, not the poster's); RED CONTROL: a line whose last ask was posted asleep is «broken», one posted running at the call's end the residual`, nat.map((x) => ({ row: x.row, posts: x.posts, asleep: x.asleepPosts })));
+  ok(nat.every((x) => x.code === 0 && x.stamped && x.posts >= 1 && !x.broken), `5 — an exit right after a 0.35 s native hold, twice each: exitNative (ONE ask a hold, abandoned asleep) and exitNativeCross (the second ask met in the exit) exit by themselves (code 0), each with its asks stamped; NO line without an ask posted on the CPU within SESSION_MS of the call's end — the stated residual counted: ${natSay('exitNative')}, ${natSay('exitNativeCross')}`, nat);
   // 6. a debugger that arrives DURING the hold stands the sampler down (the sample checks it on the main thread)
   // ROUND 5 (law A): AN ASK THE SAMPLER WITHDREW IS NOT A SAMPLE — each of the three stand-downs, three times, over a PURE
   // JavaScript hog: «not sampled (why)», or «JavaScript» from ANOTHER ask that was really answered — never «native» / «on the
@@ -709,9 +770,14 @@ async function legRound3(node, tag) {
       '(6) HONEST NAMES STAY: a class member, an arrow assigned to a const, a method, an anonymous function — each a real repo function whose name its own line spells', hl.filter((l) => /member|arrowHog|methodHog|anonymous/.test(l))); }
   // (7) NO DEBUGGER LINE: a sync child held the loop and the process exited right after it — swept across the ask (round 2: 28 of 56 inside the session's 50 ms)
   { const hits = [];
-    const F7 = LH.firstAskMs(100, 20), X0 = F7 - 20; let nX = 0;   // (cure 3) across the FIRST ASK, one beat before the bar since B-7c97
-    for (let x = X0; x <= 220; x += 10) { nX++; const r = await run({ plan: 'exitNativeX', x }, { node }); if (/Waiting for the debugger/.test(r.err)) hits.push(x); }
-    ok(!hits.length, `(7) a sync child of X ms (X = ${X0} … 220, across the first ask at ~${F7} ms and its old 50 ms window) then process.exit(): «Waiting for the debugger to disconnect…» 0 of ${nX} — an ask of a main thread asleep in a call keeps NO session`, hits); }
+    const F7 = FIRST_ASK_MS, X0 = F7 - 20; let nX = 0;   // (cure 3) across the FIRST ASK, one beat before the bar since B-7c97
+    // (主开发 20:20Z; its readers' S2) BOTH ASKS' DOORS meet this sweep — at its low end the call can return before the first ask is
+    // posted, at its high end past the second's due — so every point is judged by exitJudge: a line excused only by an ask posted
+    // on the CPU within SESSION_MS of the call's end (counted, said), any other line red
+    const resid = [], unstamped = [];
+    for (let x = X0; x <= 220; x += 10) { nX++; const r = await run({ plan: 'exitNativeX', x }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' } }); const j = exitJudge(r.err); if (!j.stamped) unstamped.push(x); if (j.broken) hits.push(x); if (j.residual) resid.push(x); }
+    console.log(`  · (7) the stated residual (an ask posted on the CPU within SESSION_MS of the call's end): ${resid.length} of ${nX}${resid.length ? ' at X = ' + resid.join(' / ') + ' ms' : ''} — counted, never asserted`);
+    ok(!hits.length && !unstamped.length, `(7) a sync child of X ms (X = ${X0} … 220, across the first ask at ~${F7} ms and its old 50 ms window, and past the second at ${SECOND_ASK_MS} ms) then process.exit(): «Waiting for the debugger to disconnect…» without an ask posted on the CPU within SESSION_MS of the call's end 0 of ${nX} — an ask of a main thread asleep in a call keeps NO session`, hits); }
   // (8) THE PRESS: a debugger port opened in the same tick, and a watchdog that died
   { const r = await run({ plan: 'pressSameTick' }, { node });
     const pr = r.out && r.out.checks.press;
@@ -765,8 +831,12 @@ async function sweepA(node, tag, tree = null, sets = null) {
       const gc = !!post && (c.gcs || []).some(([gs, gd]) => gs < winEnd && gs + gd > post.at);
       // B-1409: the ask's kernel state AT THE POST, as the product's own line says it — an ask posted ASLEEP (state S / D) is
       // not on the product's road to «native» (that road is an ask posted in state R) and stays out of the strict set
-      const asleepAsk = !!(h && h.line && /(?:samples?|where it was \(\d+ samples?\)): [^;]*\basleep(?:: | at the ask)/.test(h.line));
-      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc, asleepAsk });
+      // (its readers' should 4) ONLY a hold whose ONE sample found the thread asleep is the asleep leg's; a hold of several samples
+      // with an asleep one among them says the PARTS' verdict — judged by neither the strict sets nor the asleep leg, counted and said.
+      // The sweep runs samplesPerHold 1, so none is expected: the (A) leg ASSERTS none (a harness change that ran more would trip it)
+      const nS = h && h.line ? samplesIn(h.line) : 0, anyAsleep = !!(h && h.line && ASLEEP_IN_LINE.test(h.line));
+      const asleepAsk = anyAsleep && nS === 1, partAsleep = anyAsleep && nS > 1;
+      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc, asleepAsk, partAsleep });
     }
   }
   return A;
@@ -786,7 +856,7 @@ async function legRound4(node, tag, tree = null) {
   // then it is red by name «the collector took the suite». «Never JavaScript» holds for BOTH kinds in native code (the
   // collection's true forms exclude it): the count floors (8 asks, 6 of them 5–55 ms) are over all of them
   const STRICT_FLOOR = 0.25;
-  const judged = (a) => a.x != null && a.verdict && !a.outside;
+  const judged = (a) => a.x != null && a.verdict && !a.outside && !a.partAsleep;
   // (cure 3) the collector's share is judged ALONE (the tail's own floor is LEG 4's, below); its one rerun is ADDED to the holds
   const strictShare = (L) => { const j = L.filter(judged); return j.length ? j.filter((a) => !a.gc).length / j.length : 0; };
   let rerunA = false;
@@ -794,14 +864,14 @@ async function legRound4(node, tag, tree = null) {
   // B-1409: THE COUNT FLOORS (8 asks inside the native call, 6 of them 5–55 ms before its end) — the watchdog thread
   // itself can be late on a box of two shared cores (its asks land in the tail): the sweep runs AGAIN, at most twice,
   // its holds added, until the floors are met; else the count is a named, counted SKIP (the laws on what was asked still run)
-  const inNativeOf = (L) => L.filter((a) => a.x != null && a.x >= LH.JS_FAST_MS + 1 && a.verdict && !a.outside && !a.asleepAsk);
+  const inNativeOf = (L) => L.filter((a) => a.x != null && a.x >= LH.JS_FAST_MS + 1 && a.verdict && !a.outside && !a.partAsleep && !a.asleepAsk);
   const floorOf = (L) => { const nat = inNativeOf(L); return { n: nat.length, band: nat.filter((a) => a.x >= 5 && a.x <= 55).length }; };
   let fl = floorOf(A), extraA = 0;
   while (!tree && (fl.n < 8 || fl.band < 6) && extraA < 2) { extraA++; say(`(A) ${fl.n} of 8 asks posted inside the native call (${fl.band} of 6 in 5–55 ms) — the watchdog was late on this box: the sweep runs again (${extraA} of 2), its holds added`); A = A.concat(await sweepA(node, tag, tree)); fl = floorOf(A); }
   // LEG 4's FLOOR (cure 3): 3 asks inside the JavaScript tail that found the thread running — the first ask now comes one beat
   // before the bar (B-7c97), so a tail set DERIVED from it (native calls that end before it, a 50 ms tail) runs once, its holds
   // ADDED; else LEG 4 is a NAMED, COUNTED non-verdict
-  const F = LH.firstAskMs(100, 20), TAIL_SETS = [['pbkdf2', [F - 20, F - 15, F - 10, F - 5], [50]]];
+  const F = FIRST_ASK_MS, TAIL_SETS = [['pbkdf2', [F - 20, F - 15, F - 10, F - 5], [50]]];
   const tailOf = (L) => L.filter((a) => judged(a) && !a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
   let extraT = 0;
   if (!tree && tailOf(A).length < 3) { extraT = 1; say(`(A) ${tailOf(A).length} of 3 asks inside the JavaScript tail found the thread running — the tail set (native ${TAIL_SETS[0][1].join(' / ')} ms, the first ask at ${F} ms) runs once, its holds added`); A = A.concat(await sweepA(node, tag, tree, TAIL_SETS)); }
@@ -815,8 +885,9 @@ async function legRound4(node, tag, tree = null) {
   // «in the kernel (on the CPU)» is then its TRUE form too — checked against the hold's OWN numbers in its line, never admitted blind
   const trueOf = (forms) => (a) => forms.includes(a.verdict) || (a.verdict === LH.V.kernel && kernelTrue(a));
   const gcLies = [...gcNative.filter((a) => !trueOf(TRUE_NATIVE)(a)), ...gcTail.filter((a) => !trueOf(TRUE_TAIL)(a))];
+  const kernelBy = (L) => L.filter((a) => a.verdict === LH.V.kernel && kernelTrue(a)).length;   // (should 1) the kernel form, counted where admitted
   say(`(A) the child's own record: ${gcHolds.length} of ${A.filter(judged).length} judged holds had a collection in the ask's window — ${gcNative.length} posted in native code, ${gcTail.length} in the tail — judged by their TRUE forms`);
-  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}»; either: «${LH.V.kernel}» when the hold's own numbers put the kernel at or above user time (${gcNative.length} + ${gcTail.length} holds; ${gcAsleep.length} more found the thread asleep at the ask — not a sample, not judged)`, gcLies.slice(0, 3));
+  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}»; either: «${LH.V.kernel}» when the hold's own numbers put the kernel at or above user time (${gcNative.length} + ${gcTail.length} holds; ${gcAsleep.length} more found the thread asleep at the ask — judged by the asleep leg below; ${kernelBy([...gcNative, ...gcTail])} «${LH.V.kernel}» admitted by the hold's own numbers)`, gcLies.slice(0, 3));
   // THE ASLEEP ASKS' OWN LEG (主开发 19:25Z — cure 2 judged them by no leg): an ask that found the thread asleep sampled no frame —
   // its hold, collection or not, native or tail, says one of ITS true forms (asleepTrue: never a sampled one)
   const asleepAll = A.filter((a) => judged(a) && a.asleepAsk), asleepLies = asleepAll.filter((a) => !asleepTrue(a.verdict, a));
@@ -835,24 +906,36 @@ async function legRound4(node, tag, tree = null) {
     ok(asleepTrue(real.verdict, { userMs: 470, kernelMs: 10 }) && lie && !asleepTrue(lie.verdict, { userMs: 470, kernelMs: 10 }),
       `(A) the asleep leg's RED CONTROL: the canonical asleep hold folds to «${real.verdict}» (passes); a product that words the asleep ask as sampled folds it to «${lie && lie.verdict}» — refused`, { real: real.verdict, lie: lie && lie.verdict });
   }
+  { // (its readers' should 3) THE ASLEEP WORDS THE SUITE READS ARE askOf's OWN — both forms, through both of the suite's readers
+    const w1 = LH.askOf({ postedAt: 1, state: 'asleep', kernel: 'pipe_read in read', beat0: 7 }).words, w2 = LH.askOf({ postedAt: 1, state: 'asleep', kernel: LH.RUNNING_KERNEL_WORDS, beat0: 7 }).words;
+    // the line is the PRODUCT'S (judgeAsks → holdLine), never one the suite types: a product that reworded the samples part fails here too
+    const lineOf = (state, kernel) => { const J = LH.judgeAsks([{ postedAt: 1000, answeredAt: null, state, kernel, answer: null, beat: null }], { beat0: 7, holdEnd: 1400 }); return LH.holdLine({ from: 900, to: 1400, fromM: 900, toM: 1400, ms: 500, samples: J.samples, outside: J.outside, d: null }); };
+    const one = (w) => lineOf('asleep', w === w2 ? LH.RUNNING_KERNEL_WORDS : 'pipe_read in read');
+    ok(w1 === 'asleep: pipe_read in read' && w2 === LH.WOKE_WORDS && [w1, w2].every((w) => ASLEEP_IN_LINE.test(one(w)) && oneAsleep(one(w)) && samplesIn(one(w)) === 1) && !ASLEEP_IN_LINE.test(lineOf('running', null)),
+      `(A) the asleep words the suite reads off a line are the product's own: askOf says «${w1}» and «${w2}» (LH.WOKE_WORDS), both read as ONE asleep sample; a native ask is not`, { w1, w2 });
+  }
 
   // THE STRICT LEGS: the holds the box did not starve AND the child's own record shows no collection for
-  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), tailAsleep = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc && a.asleepAsk);
-  say(`(A) the box starved ${A.filter((a) => a.outside).length} of ${A.length} holds («waiting for a CPU», the suite's own count agreeing) — outside the asks' law`);
+  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.partAsleep && !a.gc && !a.asleepAsk), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.partAsleep && !a.gc && !a.asleepAsk), tailAsleep = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.partAsleep && !a.gc && a.asleepAsk);
+  say(`(A) the box starved ${A.filter((a) => a.outside).length} of ${A.length} holds («waiting for a CPU», the suite's own count agreeing) — outside the asks' law; ${A.filter((a) => a.partAsleep).length} carried several samples with an asleep one — the parts' verdict, judged by neither set (counted)`);
+  if (!tree) ok(!A.some((a) => a.partAsleep), `(A) ${tag}: the sweep runs ONE ask a hold (samplesPerHold 1) — no hold of several samples, so none leaves the strict sets unseen`, A.filter((a) => a.partAsleep).slice(0, 2));
   const kernelSaid = (a) => a.verdict === LH.V.kernel && kernelTrue(a);   // (cure 3) a hold whose OWN numbers put the kernel first
   const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native && !kernelSaid(a)), wrongTail = inTail.filter((a) => a.verdict !== LH.V.js && !kernelSaid(a));
   const nativeAll = [...inNative, ...gcNative.filter((a) => !a.asleepAsk)], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
   const named = inNative.filter((a) => a.tail >= 5), namedOk = named.filter((a) => /the first JavaScript after it: [^;]*\b(pbkdfHog|parseHog) \(src\/hogs\.js:\d+\)/.test(a.line || ''));
   const xs = inNative.map((a) => a.x);
-  say(`(A) ${A.length} holds: asked while the native call ran (x = ${xs.length ? Math.min(...xs).toFixed(1) : '–'}…${xs.length ? Math.max(...xs).toFixed(1) : '–'} ms before its end) ${inNative.length} — ${inNative.length - wrongJs.length} «native», ${inNative.filter((a) => a.verdict === LH.V.js).length} «JavaScript»; asked inside the tail ${inTail.length} — ${inTail.length - wrongTail.length} «JavaScript»`);
+  say(`(A) ${A.length} holds: asked while the native call ran (x = ${xs.length ? Math.min(...xs).toFixed(1) : '–'}…${xs.length ? Math.max(...xs).toFixed(1) : '–'} ms before its end) ${inNative.length} — ${inNative.filter((a) => a.verdict === LH.V.native).length} «native», ${inNative.filter(kernelSaid).length} «${LH.V.kernel}» by the hold's own numbers, ${inNative.filter((a) => a.verdict === LH.V.js).length} «JavaScript»; asked inside the tail ${inTail.length} — ${inTail.filter((a) => a.verdict === LH.V.js).length} «JavaScript», ${inTail.filter(kernelSaid).length} «${LH.V.kernel}» by its own numbers`);
   if (!tree) {
     const floorMet = nativeAll.length >= 8 && nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length >= 6;
     site(); if (!floorMet) skip(`(A) ${tag}: the count floor (8 asks inside the native call, 6 of them 5–55 ms)`, `the watchdog was late on this box: ${nativeAll.length} of 8 asks inside the native call (${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} of 6 in 5–55 ms) after ${1 + extraA} sweeps`);
-    ok(!saidJs.length && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${nativeAll.length} holds, x from ${fast + 1} ms up, ${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms) — the ${inNative.length} with NO collection in its window (the child's own record) «native code or garbage collection» exactly, the ${gcNative.length} with one a TRUE form`, [...saidJs, ...wrongJs].slice(0, 3));
+    ok(!saidJs.length && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${nativeAll.length} holds, x from ${fast + 1} ms up, ${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms) — of the ${inNative.length} with NO collection in its window (the child's own record) ${inNative.length - inNative.filter(kernelSaid).length} «native code or garbage collection» exactly and ${inNative.filter(kernelSaid).length} «${LH.V.kernel}», admitted only by the hold's own numbers; the ${gcNative.length} with one a TRUE form`, [...saidJs, ...wrongJs].slice(0, 3));
+    // (its readers' should 6) THE FLOOR IS 5 (cure 3; it was 1): the leg asks 80 % of these late answers named — under 5 holds 80 % is
+    // EVERY one (ceil(0.8 × 4) = 4), so one late answer the box disturbed (a collection, a starved watchdog) would read as a lie; at 5
+    // one miss is allowed, and said by count
     site(); if (named.length < 5) skip(`(A) ${tag}: the late answer's «first JavaScript after it»`, `no sample this run: ${named.length} of 5 asks inside the native call with a tail ≥ 5 ms (${namedOk.length} named)`);
     else ok(namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${named.length - namedOk.length} missed, said; ${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
-    site(); if (inTail.length < 3) skip(`(A) ${tag}: an ask posted INSIDE the JavaScript tail is «JavaScript»`, `no sample this run: ${inTail.length} of 3 asks inside the tail found the thread running${extraT ? ' after the tail set' : ''} (${tailAsleep.length} more found it asleep at the ask — not a sample of it, never judged)`);
-    else ok(!wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds; ${tailAsleep.length} more found the thread asleep at the ask — not a sample of it, not judged) is «JavaScript» — the law cuts both ways`, wrongTail.slice(0, 3));
+    site(); if (inTail.length < 3) skip(`(A) ${tag}: an ask posted INSIDE the JavaScript tail is «JavaScript»`, `no sample this run: ${inTail.length} of 3 asks inside the tail found the thread running${extraT ? ' after the tail set' : ''} (${tailAsleep.length} more found it asleep at the ask — judged by the asleep leg)`);
+    else ok(!wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds; ${tailAsleep.length} more found the thread asleep at the ask — judged by the asleep leg) is «JavaScript»${inTail.some(kernelSaid) ? ` (${inTail.filter(kernelSaid).length} «${LH.V.kernel}», admitted only by the hold's own numbers)` : ''} — the law cuts both ways`, wrongTail.slice(0, 3));
   }
   // (B) the MIXED hold: 0.75 s of JavaScript then 0.75 s in a sync child, the watchdog's thread starting D ms into it (its
   //     scheduler window then covers less than half the hold from D = 750 on — round 3's regression said «native» there)
@@ -881,20 +964,26 @@ async function legRound4(node, tag, tree = null) {
     site(); if (child.length < 4) skip(`(B) ${tag}: the count floor (4 runs with every ask inside the sync child)`, `the watchdog was late on this box: ${child.length} of 4`);
     if (child.length) ok(child.every((b) => b.verdict === LH.V.blocked && /asleep: \S/.test(b.line || '')), `(B) ${tag}: the watchdog started inside the sync child (${child.length} runs, every ask inside the child's own stamps, its window covering less than half the hold) ⇒ «in the kernel (blocked)» with the wait channel the ask found`, child.filter((b) => b.verdict !== LH.V.blocked || !/asleep: \S/.test(b.line || '')).slice(0, 2));
   }
-  // (C) MUST 2 — THE WATCHDOG'S OWN FILE READS NEVER DELAY A CHECK: every read of a repo source takes 300 ms (sync or async,
-  //     in the watchdog's own thread); a 700 ms hold is asked at held ≈ 100, 200, 400 ms ON TIME, the next hold too, and
+  // (C) MUST 2 — THE WATCHDOG'S OWN FILE READS NEVER DELAY A CHECK: every read of a repo source takes SLOW_READ_MS (sync or async,
+  //     in the watchdog's own thread); a 700 ms hold is asked at held ≈ 80, 200, 400 ms ON TIME, the next hold too, and
   //     the frames whose files were not read are said by location, with why
-  const C = await run({ plan: 'slowNames', tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTWATCH: '1', LH_SLOW_SRC_MS: '300', LH_SLOW_ROOT: ROOT }, timeoutMs: 30000 });
+  // (its second reader's S2) the stand-in's read is 500 ms (300 before 2.369.411): a read at ANY ask puts the next one past its own
+  // due + 250 — the asks are due at least 120 ms apart (80 → 200: 80 + 500 = 580 > 450; 200 → 400: 200 + 500 = 700 > 650), and the
+  // next hold's first ask the same (> FIRST_ASK_MS + 250) — so due + 250 alone catches it, with no bound between asks (a 300 ms read
+  // at the first ask would land the second at about 385, under 450)
+  const SLOW_READ_MS = 500;
+  const C = await run({ plan: 'slowNames', tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTWATCH: '1', LH_SLOW_SRC_MS: String(SLOW_READ_MS), LH_SLOW_ROOT: ROOT }, timeoutMs: 30000 });
   const cc = C.out && C.out.checks;
   const lag = cc ? cc.holds.map((x) => cc.posts.filter((p) => p.at >= x.start - 25 && p.at <= x.end).map((p) => Math.round(p.at - x.start))) : [];
   const lines = cc ? (C.out.report.holds || []).map((y) => y.line) : [];
   say(`(C) the asks of the two holds, ms after each began: ${JSON.stringify(lag)}; ${lines.filter((l) => /said by location alone/.test(l)).length} of ${lines.length} lines say frames by location`);
   if (!tree) {
-    // (cure 3) the first ask is due one beat before the bar (LH.firstAskMs, B-7c97); the law is «a 300 ms read never delays a check»:
-    // bounded under the read's own delay (due + 250); a watchdog late on the CPU past due + 60 is counted and said, never red
-    const F = LH.firstAskMs(100, 20), due = [F, 200, 400], first = lag[0] || [];
+    // (cure 3) the first ask is due one beat before the bar (LH.firstAskMs, B-7c97); the law is «a slow read never delays a check»:
+    // each ask bounded under the read's own delay: due + 250, which a SLOW_READ_MS read at any ask overshoots (above); a watchdog late on
+    // the CPU past due + 60 is counted and said, never red
+    const F = FIRST_ASK_MS, due = [F, SECOND_ASK_MS, THIRD_ASK_MS], first = lag[0] || [];
     const lateN = due.filter((d, i) => first[i] != null && first[i] > d + 60).length + ((lag[1] || [])[0] > F + 60 ? 1 : 0);
-    ok(!!cc && first.length >= 3 && due.every((d, i) => first[i] != null && first[i] <= d + 250) && (lag[1] || [])[0] != null && lag[1][0] <= F + 250, `(C) ${tag}: with every source read taking 300 ms, the 700 ms hold is asked at ${first.join(' / ')} ms (due ${due.join(' / ')} + one check; ${lateN} later than due + 60 — the watchdog late on the CPU, said; a 300 ms read would pass due + 250) and the next hold at ${(lag[1] || [])[0]} ms — no read delays a check`, { lag, err: C.err.slice(-400) });
+    ok(!!cc && first.length >= 3 && due.every((d, i) => first[i] != null && first[i] <= d + 250) && (lag[1] || [])[0] != null && lag[1][0] <= F + 250, `(C) ${tag}: with every source read taking ${SLOW_READ_MS} ms, the 700 ms hold is asked at ${first.join(' / ')} ms (due ${due.join(' / ')} + one check; ${lateN} later than due + 60 — the watchdog late on the CPU, said; a ${SLOW_READ_MS} ms read at any ask would put the next past its due + 250) and the next hold at ${(lag[1] || [])[0]} ms — no read delays a check`, { lag, err: C.err.slice(-400) });
     ok(lines.length >= 2 && lines.every((l) => /said by location alone \((the source files answered slowly|the time for reading names was spent)/.test(l)) && lines.every((l) => /src\/hogs\.js:\d+/.test(l) && !/busyHog \(src\/hogs/.test(l)),
       `(C) ${tag}: their frames are said by location alone (src/hogs.js:…, no name), and the line says why`, lines.slice(0, 2));
   }
@@ -1000,11 +1089,11 @@ async function legGcLies(node, tag) {
   };
   // asks land in the tail when the native call ends before the hold's FIRST ASK — LH.firstAskMs(100, 20), one beat before the bar
   // since B-7c97 (was the bar, 100 ms): the sets are DERIVED from it — a native call under it for the tail, over it for the native
-  const F1 = LH.firstAskMs(100, 20);
+  const F1 = FIRST_ASK_MS;
   const fast = LH.JS_FAST_MS, SETS = [['pbkdf2', [F1 - 25, F1 - 20, F1 - 15, F1 - 10, F1 - 5, F1, F1 + 5, F1 + 10, F1 + 40, F1 + 70], [50]], ['json', [F1 + 40, F1 + 55], [50]]];
   const ALWAYS_SETS = [['pbkdf2', [F1 - 20, F1 - 15, F1 - 10, F1 - 5], [50]]];   // the «always» control's own: its lie shows on TAIL asks (native under the first ask, a 50 ms tail: the hold passes the bar)
   const judge = (A) => {
-    const j = A.filter((a) => a.x != null && a.verdict && !a.outside);
+    const j = A.filter((a) => a.x != null && a.verdict && !a.outside && !a.partAsleep);
     const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
     const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
     return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict === LH.V.native).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
@@ -1069,6 +1158,12 @@ console.log(`\nthe children used ${(cpuMs / 1000).toFixed(1)} cpu seconds`);
 if (skipped.length) console.log(`\nSKIPPED BY THE BOX (${skipped.length} — the release's self-hosted claim runs them): ${skipped.join(' · ')}`);
 const sk = skipped.length ? `, ${skipped.length} skipped` : '';
 // (cure 3) A SKIP IS NOT A GREEN: how many legs with a sample floor were judged and how many were not, at a glance
+{ // (its readers' should 9) every skip sits behind a counted site: run-time (the armed site) and in the source (every call)
+  const { fileURLToPath } = await import('node:url');
+  const SRC9 = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)), calls = SRC9.filter((l) => /(?<![\w.])skip\(/.test(l) && !/const skip = /.test(l));
+  const bare = calls.filter((l) => !/site\(\); (?:if \(.+\) )?skip\(/.test(l));
+  ok(!orphanSkips.length && calls.length >= 12 && !bare.length, `every skip sits behind a counted site: ${calls.length} skip calls in the source, each after «site();» (${bare.length} not); ${orphanSkips.length} skipped this run with no armed site`, { orphanSkips, bare: bare.map((l) => l.trim().slice(0, 120)) });
+}
 console.log(`\nLEGS WITH A SAMPLE FLOOR: ${floorSites - skipped.length} judged, ${skipped.length} NOT judged (named above), of ${floorSites}; ${pass + fail} checks judged in all`);
 if (floorSites && skipped.length * 2 > floorSites) console.log(`\n⚠ MOST LEGS WITH A SAMPLE FLOOR WERE NOT JUDGED THIS RUN (${skipped.length} of ${floorSites}) — this run proves little about them`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed${sk})` : `\nALL PASS (${pass}${sk})`);

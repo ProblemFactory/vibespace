@@ -35,6 +35,9 @@
 //      local dirs; an NFS dir answers from the async walk (hostFacts awaits it), its answer spawns; a storage dir is never
 //      read nor an answer; tmuxOnPath stats no mount dir; no refusal. CONTROLS: the old walk (statSyncs into the storage
 //      dir, refused, and the NFS view), the storage dir answered (its spawn's re-stat refused)
+//   §11 A STOP WITH THE WATCHDOG'S SESSION KEPT (主开发 2026-11-18 20:20Z — test-loop-hold-live leg 5's residual): a child whose
+//      exit finds the watchdog's kind of session attached prints Node's one line and does NOT wait; its store's flush stands
+//      before the line; RED CONTROL (an inspector port open: Node waits for the session) proves its plant first
 // Run: node scripts/test-fs-canary.mjs
 // before the first pool use: §3 saturates a pool of TWO — PINNED, never inherited (lane race-sweep, B-2d49: a VibeSpace agent
 // session's env carries UV_THREADPOOL_SIZE=32, the 12-job saturation then never queued the stat — fs 0 ms, 3 FAILED)
@@ -817,6 +820,67 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
   ok(reds.every(([, v]) => v !== null), `RED CONTROLS: each cut put back alone reads its count per call again — ${reds.map(([t, v]) => `${t}: ${v === null ? 'NOT RED' : v + ' over ' + K}`).join('; ')}`, reds);
   LB.setHook(null);
   fs.rmSync(ROOT, { recursive: true, force: true });
+}
+
+console.log('§11 a stop with the watchdog\'s session kept — one line, no wait (主开发 2026-11-18 20:20Z)');
+{
+  // The watchdog keeps its inspector session to the main thread for at most SESSION_MS (20 ms) when an ask finds the thread ON THE
+  // CPU (src/server/sync-fs-witness-worker.js post()); a stop inside those 20 ms meets the session attached and Node prints
+  // «Waiting for the debugger to disconnect…» — the stated residual (test-loop-hold-live leg 5). THE PIN OF ITS HARM, by MECHANISM
+  // and never by a clock: a child whose worker connects the watchdog's kind of session (connectToMainThread + one
+  // Runtime.evaluate) and NEVER closes it; the main thread waits for the session (Atomics.wait, its result checked), writes its
+  // store's flush, and exits. Were Node to wait for that session it would wait forever — so THE LAW is that the child exits by
+  // itself (code 0, never the suite's 15 s kill), with the line printed (PLANT, proved first: a session WAS attached), the flush
+  // whole and its stamp before the line. A NO-SESSION control prints no line. RED CONTROL: an inspector PORT open — its plant
+  // proved (the port open, the line printed) — makes Node WAIT for the session: its worker's closer (CLOSE_MS, there only to end
+  // that wait) speaks after the flush, then the child exits. The worker ticks on fd 2 every 10 ms: the ticks after the flush are
+  // PRINTED for each child, never asserted. MEASURED on the lane's box 2026-11-18 (Node 24.22.1 and 22.23.4): the exit took 5–9 ms
+  // with the session kept, 5–8 ms with none (0 ticks each); with a port open, until the closer. The watchdog stands down on a
+  // debugger at its next step (FLAG_DEBUGGER, re-read every step), so a port opened mid-hold meets a kept session for SESSION_MS at most
+  const { spawn } = await import('node:child_process');
+  const D = fs.mkdtempSync(path.join(os.tmpdir(), 'fscan-exit-')), KID = path.join(D, 'kid.cjs'), WK = path.join(D, 'worker.cjs'), CLOSE_MS = 300;
+  const LINE = 'Waiting for the debugger to disconnect', CLOSER = '[closer] spoke', FLUSHED = '[kid] flushed';
+  try {
+    fs.writeFileSync(WK, [
+      "'use strict';",
+      "const { workerData } = require('worker_threads'); const inspector = require('inspector'); const fs = require('fs');",
+      "const s = new inspector.Session(); s.connectToMainThread();",
+      "s.post('Runtime.evaluate', { expression: '1 + 1', silent: true }, () => { });",
+      "if (workerData.mode === 'closed') s.disconnect();",
+      "if (workerData.mode === 'port') setTimeout(() => { fs.writeSync(2, '[closer] spoke\\n'); try { s.disconnect(); } catch { } }, workerData.closeMs);",
+      "setInterval(() => { fs.writeSync(2, '[tick]\\n'); }, 10);",
+      "Atomics.store(workerData.flag, 0, 1); Atomics.notify(workerData.flag, 0);",
+    ].join('\n'));
+    fs.writeFileSync(KID, [
+      "'use strict';",
+      "const { Worker } = require('worker_threads'); const fs = require('fs');",
+      "const [wk, mode, flushPath, closeMs] = process.argv.slice(2);",
+      "if (mode === 'port') { const insp = require('inspector'); try { insp.open(0, '127.0.0.1'); } catch { } fs.writeSync(2, '[kid] port open: ' + (insp.url() ? 'yes' : 'no') + '\\n'); }",
+      "const flag = new Int32Array(new SharedArrayBuffer(4));",
+      "new Worker(wk, { workerData: { flag, mode, closeMs: Number(closeMs) } });",
+      "fs.writeSync(2, '[kid] wait: ' + Atomics.wait(flag, 0, 0, 5000) + '\\n');",
+      "fs.writeFileSync(flushPath, 'flushed'); fs.writeSync(2, '[kid] flushed\\n');",
+      "process.exit(0);",
+    ].join('\n'));
+    const runKid = (mode) => new Promise((resolve) => {
+      const flush = path.join(D, `flush-${mode}`);
+      const c = spawn(process.execPath, [KID, WK, mode, flush, String(CLOSE_MS)], { stdio: ['ignore', 'ignore', 'pipe'], env: { PATH: process.env.PATH } });
+      let err = '', killed = false;
+      c.stderr.on('data', (d) => { err += d; });
+      const k = setTimeout(() => { killed = true; try { c.kill('SIGKILL'); } catch { } }, 15000);
+      c.on('close', (code) => { clearTimeout(k); let fl = null; try { fl = fs.readFileSync(flush, 'utf8'); } catch { }   // 'close': its stderr read whole
+        const at = err.indexOf(FLUSHED), after = at < 0 ? null : (err.slice(at).match(/\[tick\]/g) || []).length;
+        resolve({ code, killed, err, flush: fl, after, waited: /\[kid\] wait: (?:ok|not-equal)/.test(err) }); });
+    });
+    const kept = await runKid('keep'), none = await runKid('closed'), port = await runKid('port');
+    const before = (e, a, b) => e.indexOf(a) >= 0 && e.indexOf(b) > e.indexOf(a);
+    console.log(`  · the worker's 10 ms ticks after the flush — kept ${kept.after}, no session ${none.after}, port ${port.after} (printed, never asserted)`);
+    ok(kept.waited && kept.err.includes(LINE) && none.waited && !none.err.includes(LINE), `PLANT: the child's exit found the watchdog's kind of session attached — Node printed «${LINE}…»; the no-session control printed none`);
+    ok(kept.code === 0 && !kept.killed && !kept.err.includes(CLOSER) && kept.flush === 'flushed' && before(kept.err, FLUSHED, LINE),
+      `ONE line, NO WAIT: with a session that is NEVER closed the child exited by itself (code ${kept.code}, not the suite's kill) — Node did not wait for it; the store's flush whole («${kept.flush}») and its stamp before the line`);
+    ok(port.waited && port.err.includes('[kid] port open: yes') && port.err.includes(LINE) && port.code === 0 && !port.killed && before(port.err, FLUSHED, CLOSER),
+      `RED CONTROL (an inspector port open${port.err.includes('[kid] port open: no') ? ' — REFUSED: the box allowed no loopback port' : ''}): its plant took (the port open, the line printed) and the exit WAITED for the session — its closer spoke after the flush: a Node that waited would read here`);
+  } finally { fs.rmSync(D, { recursive: true, force: true }); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
