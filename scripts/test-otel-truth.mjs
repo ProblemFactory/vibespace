@@ -101,13 +101,16 @@ const PAYLOAD = (recs) => ({
   await new Promise((r) => srv.on('listening', r));
   const port = srv.address().port;
   const token = ingest.envFor().OTEL_EXPORTER_OTLP_HEADERS.split('=')[1];
-  const post = (payload, tok = token) => new Promise((resolve) => {
+  // usage-cpu U4: the route answers at once, its stash lines owed to the store writer — the suite asks for them on disk before it reads
+  const stashOnDisk = () => require(REPO + '/src/store-writer.js').storeWriter().durable(path.join(dir, 'usage-history', 'otel-truth.ndjson')).catch(() => false);
+  const post0 = (payload, tok = token) => new Promise((resolve) => {
     const body = JSON.stringify(payload);
     const req = http.request({ host: '127.0.0.1', port, path: '/otel/v1/logs', method: 'POST', headers: { 'content-type': 'application/json', 'x-vibespace-otel': tok, 'content-length': Buffer.byteLength(body) } }, (res) => {
       let d = ''; res.on('data', (c) => { d += c; }); res.on('end', () => resolve({ status: res.statusCode, body: d }));
     });
     req.end(body);
   });
+  const post = async (payload, tok) => { const r = await post0(payload, tok); await stashOnDisk(); return r; };
 
   ok((await post(PAYLOAD([REC()]), 'WRONG')).status === 403, 'bad token → 403 (the only gate — cookie middleware exempts /otel/)');
   const r1 = await post(PAYLOAD([REC()]));
@@ -252,6 +255,75 @@ const PAYLOAD = (recs) => ({
       `SLICED REPLAY: the same observation map (${S.stats}), the same counts and the same trimmed stash, byte for byte (${(S.bytes.length / 1048576).toFixed(1)} of ${(body.length / 1048576).toFixed(1)} MB kept) as the one-pass replay`);
     ok(S.parsed === 90000 && S.turns >= 4 && S.perTurnMax * 4 <= S.parsed && O.parsed === 90000 && O.turns === 1 && O.perTurnMax === O.parsed,
       `SLICED REPLAY: it hands the loop back — on the driven slice clock its 90 000 rows are parsed over ${S.turns} loop turns, at most ${S.perTurnMax} in one (≤ a quarter); the one-pass control parses all ${O.perTurnMax} in ONE turn (counted, not timed — the real loop gaps read ${S.maxGap} vs ${O.maxGap} ms)`, JSON.stringify({ S: { turns: S.turns, max: S.perTurnMax, parsed: S.parsed }, O: { turns: O.turns, max: O.perTurnMax, parsed: O.parsed } }));
+  }
+  // usage-cpu U4 — A POST NEVER FINISHES THE REPLAY IN ITS OWN TICK, AND WHAT WAITS IS ON DISK. The release's first OTLP post of
+  // every boot read the whole stash (readFileSync) and parsed it on the loop (4.4 s held). Now a post that comes mid-replay
+  // reads 0 stash bytes on the loop and WAITS behind the replay; meanwhile its records are in data/usage-history/
+  // otel-truth.pending.ndjson (the store writer, written at once); once the map is whole it is taken in order (a duplicate of a
+  // replayed row is not stashed again) and leaves the spill when its stash line is on disk. A hub that stops with a post
+  // waiting: the next boot's replay takes the spilled record ONCE (a second boot adds nothing). Control: the release's
+  // finishReplay() at the top of the ingest (planted) ⇒ the whole stash read on the loop.
+  {
+    const SW = require(REPO + '/src/store-writer.js').storeWriter();
+    const { parseOtlpLogs } = require(REPO + '/src/otel-truth.js');
+    const mod = require(REPO + '/src/server/otel-ingest.js'), now4 = Date.now();
+    const mkDir4 = (tag, extra = '') => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-otel-u4-${tag}-`)); fs.mkdirSync(path.join(d, 'usage-history')); const rows = []; for (let k = 0; k < 40000; k++) rows.push(JSON.stringify({ rid: `req_u4old${k}`, ts: now4 - k * 1000, acct: 'sub-true', acctKnown: true, pad: 'r'.repeat(90) })); fs.writeFileSync(path.join(d, 'usage-history', 'otel-truth.ndjson'), rows.join('\n') + '\n' + extra); return d; };
+    const mk4 = (d, M = mod) => M.create({ dataDir: d, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
+    const stashOf = (d) => fs.readFileSync(path.join(d, 'usage-history', 'otel-truth.ndjson'), 'utf8');
+    const spillOf = (d) => { try { return fs.readFileSync(path.join(d, 'usage-history', 'otel-truth.pending.ndjson'), 'utf8'); } catch { return null; } };
+    const countIn = (t, rid) => t.split('\n').filter((l) => l.includes(`"rid":"${rid}"`)).length;
+    const midPost = (oi, payload) => { let bytes = 0; const rf = fs.readFileSync; fs.readFileSync = function (p0, ...a) { const r = rf.call(this, p0, ...a); if (String(p0).includes('otel-truth')) bytes += r.length; return r; }; let out; try { out = oi._ingest(payload); } finally { fs.readFileSync = rf; } return { out, bytes }; };
+    const spillBytes = [], dirty0 = SW.dirty;
+    SW.dirty = function (f, o) { if (String(f).endsWith('otel-truth.pending.ndjson') && o && typeof o.produce === 'function') spillBytes.push({ text: String(o.produce()), rows: o4 ? o4.stats().rids : -1 }); return dirty0.call(this, f, o); };
+    const settle = async (d, f, ok0) => { for (let k = 0; k < 200 && !ok0(); k++) { await new Promise((r) => setTimeout(r, 10)); await SW.durable(path.join(d, 'usage-history', f)).catch(() => false); } };
+    let o4 = null; const d4 = mkDir4('a'); o4 = mk4(d4);
+    const a = midPost(o4, PAYLOAD([REC({ request_id: { stringValue: 'req_u4new' } }), REC({ request_id: { stringValue: 'req_u4old39990' } })])); // a replayed rid near the stash's END: the post waits for the WHOLE replay
+    ok(a.bytes === 0 && a.out && typeof a.out.then === 'function' && o4.stats().rids < 40000, `U4 a post mid-replay reads ${a.bytes} stash bytes on the loop and waits behind the replay (${o4.stats().rids} rows replayed when it came)`);
+    for (let k = 0; k < 2000 && !spillBytes.length; k++) await new Promise((r) => setImmediate(r));
+    SW.dirty = dirty0;
+    const w0 = spillBytes[0] || { text: '', rows: -1 };
+    ok(countIn(w0.text, 'req_u4new') === 1 && countIn(w0.text, 'req_u4old39990') === 1 && w0.rows < 40000, `U4 where it waits: both records are the bytes handed to the store writer for otel-truth.pending.ndjson (rank 0, written at once) while the replay runs (${w0.rows} rows replayed)`);
+    const res4 = await a.out; await o4.replayed;
+    await settle(d4, 'otel-truth.ndjson', () => countIn(stashOf(d4), 'req_u4new') === 1); await settle(d4, 'otel-truth.pending.ndjson', () => (spillOf(d4) || '') === '');
+    ok(res4.kept === 2 && o4.observedOrgForRid('req_u4new') === 'sub-true' && countIn(stashOf(d4), 'req_u4new') === 1 && countIn(stashOf(d4), 'req_u4old39990') === 1 && (spillOf(d4) || '') === '', `U4 after the replay the post is taken in order: the new rid stashed once, the replayed one (near the stash's end) NOT again (${countIn(stashOf(d4), 'req_u4old39990')} line), the spill empty`);
+    // the stop: a spill a stopped hub left (its record not in the stash) — the next boot takes it once, a second boot adds nothing
+    const rec5 = parseOtlpLogs(PAYLOAD([REC({ request_id: { stringValue: 'req_u4stop' } })])).records[0];
+    const d5 = mkDir4('b'); fs.writeFileSync(path.join(d5, 'usage-history', 'otel-truth.pending.ndjson'), JSON.stringify(rec5) + '\n');
+    const o5 = mk4(d5); await o5.replayed;
+    await settle(d5, 'otel-truth.ndjson', () => countIn(stashOf(d5), 'req_u4stop') === 1); await settle(d5, 'otel-truth.pending.ndjson', () => (spillOf(d5) || '') === '');
+    const once5 = countIn(stashOf(d5), 'req_u4stop'), spill5 = spillOf(d5);
+    const o6 = mk4(d5); await o6.replayed; await new Promise((r) => setTimeout(r, 30)); await SW.durable(path.join(d5, 'usage-history', 'otel-truth.ndjson')).catch(() => false);
+    ok(o5.observedOrgForRid('req_u4stop') === 'sub-true' && once5 === 1 && (spill5 || '') === '' && o6.observedOrgForRid('req_u4stop') === 'sub-true' && countIn(stashOf(d5), 'req_u4stop') === 1, `U4 a hub that stopped with a post waiting: the next boot takes the spilled record ONCE (${once5} stash line), the spill empties, a second boot adds nothing (${countIn(stashOf(d5), 'req_u4stop')})`);
+    { // a post that comes DURING the replay's slices (the buffer read, the map half filled) waits too — never a replay finished in its tick
+      const d8 = mkDir4('e'), o8 = mk4(d8);
+      for (let k = 0; k < 4000 && !(o8.stats().rids > 0); k++) await new Promise((r) => setImmediate(r));
+      const mid = o8.stats().rids, p8 = midPost(o8, PAYLOAD([REC({ request_id: { stringValue: 'req_u4mid' } })]));
+      const right = o8.stats().rids;
+      const out8 = await p8.out; await o8.replayed;
+      ok(mid > 0 && mid < 40000 && right === mid && p8.bytes === 0 && typeof p8.out.then === 'function' && out8.kept === 1 && o8.observedOrgForRid('req_u4mid') === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`);
+      try { SW.forget(path.join(d8, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d8, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d8, { recursive: true, force: true });
+    }
+    { // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN, on a new line
+      const d9 = mkDir4('f'), o9 = mk4(d9); await o9.replayed;
+      let prod = null; const dz = SW.dirty; SW.dirty = function (f, o) { if (String(f).endsWith('otel-truth.ndjson') && o && typeof o.produce === 'function') prod = o.produce; return dz.call(this, f, o); };
+      try { o9._ingest(PAYLOAD([REC({ request_id: { stringValue: 'req_u4again' } })])); } finally { SW.dirty = dz; }
+      const first = prod && prod(), second = prod && prod(); // no onWritten between them: the writer never confirmed the first
+      ok(first && second && countIn(String(first.append), 'req_u4again') === 1 && countIn(String(second.append), 'req_u4again') === 1 && String(second.append).startsWith('\n'), 'U4 a stash write the writer never confirmed is offered again (on a new line: a torn tail never glues the next row to it)');
+      try { await SW.durable(path.join(d9, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d9, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d9, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d9, { recursive: true, force: true });
+    }
+    { // a stop between the stash append and the spill's rewrite: the record is in BOTH — the next boot stashes it no second time
+      const rec10 = parseOtlpLogs(PAYLOAD([REC({ request_id: { stringValue: 'req_u4both' } })])).records[0];
+      const d10 = mkDir4('g', JSON.stringify({ ...rec10, acct: 'sub-true', acctKnown: true }) + '\n'); fs.writeFileSync(path.join(d10, 'usage-history', 'otel-truth.pending.ndjson'), JSON.stringify(rec10) + '\n');
+      const o10 = mk4(d10); await o10.replayed; await settle(d10, 'otel-truth.pending.ndjson', () => (spillOf(d10) || '') === '');
+      ok(countIn(stashOf(d10), 'req_u4both') === 1 && (spillOf(d10) || '') === '' && o10.observedOrgForRid('req_u4both') === 'sub-true', `U4 a record in the stash AND the spill (a stop between the two writes) is stashed no second time (${countIn(stashOf(d10), 'req_u4both')} line); the spill empties`);
+      try { SW.forget(path.join(d10, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d10, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d10, { recursive: true, force: true });
+    }
+    const src4 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
+    const rel4 = src4.replace('    if (replay.done) return take(records, seen);', '    finishReplay(); return take(records, seen);');
+    const R4 = mutantCopies('otel-truth-u4', REPO).load('src/server/otel-ingest.js', rel4, 'sync-finish');
+    const d7 = mkDir4('c'), c7 = midPost(mk4(d7, R4), PAYLOAD([REC({ request_id: { stringValue: 'req_u4ctl' } })]));
+    ok(rel4 !== src4 && c7.bytes > 1048576 && c7.out && typeof c7.out.then !== 'function', `control (the release's finishReplay at the top of the ingest): the post read ${(c7.bytes / 1048576).toFixed(1)} MB of the stash on the loop ⇒ RED`);
+    for (const d of [d4, d5, d7]) { try { SW.forget(path.join(d, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d, { recursive: true, force: true }); }
   }
   srv.close();
 }

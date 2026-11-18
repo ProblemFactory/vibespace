@@ -70,7 +70,9 @@ const KEEP_MS = 30 * 86400e3; // trim horizon
 // the next slice is TWO immediates away (past the next timers phase).
 const REPLAY_SLICE_MS = 20;
 const nextTurn = () => new Promise((r) => setImmediate(() => setImmediate(r)));
+const spillOf = new WeakMap(); // usage-cpu U4: a waited record → its line in the spill (a side table: the record itself carries no mark)
 const NL = Buffer.from('\n');
+const W = () => require('../store-writer.js').storeWriter(); // usage-cpu U4: the stash and the spill are written by THE STORE WRITER's thread
 
 function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, serverSetting }) {
   // PERSISTED token (review-caught): dtach/pipe sessions survive server
@@ -86,6 +88,38 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   }
   let gate403 = 0;
   const file = path.join(dataDir, 'usage-history', 'otel-truth.ndjson');
+  // usage-cpu U4 — THE SPILL: a post that arrives before the replay ended WAITS for it (its dedupe reads the replayed map), and
+  // while it waits its records are on disk HERE (through the store writer, written at once): a hub that stops before the
+  // drain finds them at its next boot — the replay ingests them after the stash, by rid (one the drain already stashed is a
+  // duplicate: nothing twice). A record leaves the spill once its stash line is on disk.
+  const spill = path.join(dataDir, 'usage-history', 'otel-truth.pending.ndjson');
+  const spilled = [];   // the JSON lines of the records waiting (or drained, their stash lines not on disk yet)
+  const waiting = [];   // {records, seen, resolve} behind the replay, in arrival order
+  const produceSpill = () => spilled.join('');
+  let spillRead = false; // the last boot's spill is read before this boot writes one (its lines go first)
+  const writeSpill = () => { if (spillRead) W().dirty(spill, { name: 'otel-truth-pending.write', produce: produceSpill, rank: 0, allowEmpty: true }); };
+  // THE STASH'S APPENDS (usage-cpu U4, the coordinator's note: a mkdirSync + an appendFileSync per post on the main thread): the
+  // lines go to the store writer's thread as ONE append per write; a failed append keeps its lines for the next one, which
+  // starts on a new line (a torn tail never glues the next row to it — a blank line is skipped by the replay)
+  let stashOwed = [], stashWriting = null, stashTorn = false;
+  // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN with what came since — on a new
+  // line (a torn tail never glues the next row to it; a line written twice is one rid twice: the replay keeps one)
+  const produceStash = () => {
+    const again = stashWriting, batch = (again || []).concat(stashOwed);
+    stashOwed = [];
+    if (!batch.length) { stashWriting = null; return null; }
+    stashWriting = batch;
+    return { append: (stashTorn || again ? '\n' : '') + batch.map((x) => x.line).join('') };
+  };
+  const stashWritten = (ok) => {
+    const w = stashWriting; stashWriting = null;
+    if (!w) return;
+    if (!ok) { stashTorn = true; stashOwed = w.concat(stashOwed); return; }
+    stashTorn = false;
+    const done = new Set(w.map((x) => x.spill).filter(Boolean));
+    if (done.size) { for (let k = spilled.length - 1; k >= 0; k--) if (done.has(spilled[k])) spilled.splice(k, 1); writeSpill(); }
+  };
+  const stashLine = (line, spillLine) => { stashOwed.push({ line, spill: spillLine || null }); W().dirty(file, { name: 'otel-truth.append', produce: produceStash, onWritten: stashWritten, allowEmpty: true }); };
   const truth = new Map();      // rid → accountId|null (null = machine global login)
   const order = [];             // rid insertion order (cap pruning)
   let unknownOrgs = new Map();  // orgUuid → count (surfaced, never silently dropped)
@@ -143,24 +177,45 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     const parts = []; for (let k = 0; k < kept.length; k += 2) parts.push(b.subarray(kept[k], kept[k + 1]), NL);
     fs.promises.writeFile(file + '.tmp', Buffer.concat(parts)).then(() => {
       let grew = true; try { grew = fs.statSync(file).size !== b.length; } catch { }
-      if (grew) { fs.promises.unlink(file + '.tmp').catch(() => { }); return; } // an export appended meanwhile: the next boot trims
+      if (grew || stashWriting || stashOwed.length) { fs.promises.unlink(file + '.tmp').catch(() => { }); return; } // an export appended meanwhile, or one owed / on the writer's thread (U4): the next boot trims
       timedSync('otel-truth.write', () => fs.renameSync(file + '.tmp', file)); // the same tick as the size check — no append between
     }).catch((e) => console.warn('[otel] truth stash trim failed:', e.message));
   };
+  // THE DIAGNOSTIC ROAD ONLY (observedOrgForRid — no hub caller): it finishes the replay in its own tick; a post never does
+  // (usage-cpu U4: the first OTLP post of every boot read the whole stash and parsed it on the loop — 4.4 s held)
   const finishReplay = () => {
     if (replay.done) return;
     if (!replay.buf) { try { replay.buf = fs.existsSync(file) ? timedSync('otel-truth.read', () => fs.readFileSync(file)) : Buffer.alloc(0); } catch (e) { replay.buf = Buffer.alloc(0); console.warn('[otel] truth stash load failed:', e.message); } }
-    replayTake(); replayEnd();
+    replayTake(); replayEnd(); drain();
+  };
+  // the posts that waited, in their order, once the map is whole; then the records a stopped hub left in the spill
+  let leftover = null;
+  const drain = () => {
+    if (leftover) { const recs = leftover; leftover = null; try { take(recs, {}); } catch { } }
+    while (waiting.length) { const w = waiting.shift(); let out; try { out = take(w.records, w.seen); } catch (e) { out = { kept: 0, disagreements: 0, seen: w.seen }; } w.resolve(out); }
   };
   const replayed = (async () => {
     let b = Buffer.alloc(0);
+    try { // the records a stopped hub left waiting (U4) — read first: this boot's own spill is written only after
+      const t = await fs.promises.readFile(spill, 'utf8'), recs = [], lines = [];
+      for (const l of t.split('\n')) { if (!l) continue; try { const r = JSON.parse(l); spillOf.set(r, l + '\n'); recs.push(r); lines.push(l + '\n'); } catch { } }
+      if (recs.length) { leftover = recs; spilled.unshift(...lines); }
+      spillRead = true;
+    } catch (e) {
+      if (e && e.code === 'ENOENT') spillRead = true;
+      else console.warn(`[otel] the waiting posts' file could not be read (${e && e.message}) — kept as it is; this boot's waiting posts are taken after the replay but not written beside it`);
+    }
+    if (spillRead && spilled.length) { writeSpill(); W().durable(spill).catch(() => { }); }
     try { b = await fs.promises.readFile(file); } catch (e) { if (e.code !== 'ENOENT') console.warn('[otel] truth stash load failed:', e.message); }
-    if (replay.done) return;
+    if (replay.done) { drain(); return; }
     if (!replay.buf) replay.buf = b;
     await nextTurn();   // never on the tick the read resolved on
     while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) await nextTurn();
     if (!replay.done) replayEnd();
-  })();
+    drain();
+  })().catch((e) => { // a replay that throws still ends: the waiting posts go on over the map as far as it was read, said once
+    console.warn('[otel] truth stash replay failed:', (e && e.message) || e); replay.done = true; replay.buf = null; replay.kept = []; spillRead = true; drain();
+  });
 
   // organization.id → VibeSpace account id. Prefer a NAMED sub over the
   // '__global__' pseudo-id (survives machine-login switches); email fallback
@@ -195,12 +250,20 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     if (order.length > MAX_TRUTH) { const drop = order.splice(0, order.length - MAX_TRUTH); for (const r of drop) truth.delete(r); }
   }
 
+  /** One OTLP payload → {kept, disagreements, seen}, or (before the replay ended) a promise of it: the post waits behind the
+   *  replay, its records in the spill meanwhile. The liveness witness is noted at arrival either way. */
   function ingest(payload) {
-    finishReplay(); // the dedupe below reads the replayed map
     const { records, seen } = parseOtlpLogs(payload);
+    for (const rec of records) noteApi(rec.sid, rec.ts || Date.now());   // the liveness witness first — before any row is dropped for its ledger fields
+    if (replay.done) return take(records, seen);
+    for (const rec of records) if (rec.rid && rec.orgUuid) { const l = JSON.stringify(rec) + '\n'; spillOf.set(rec, l); spilled.push(l); }
+    writeSpill(); W().durable(spill).catch(() => { });
+    return new Promise((resolve) => waiting.push({ records, seen, resolve }));
+  }
+  function take(records, seen) {
     let disagreements = 0;
     for (const rec of records) {
-      noteApi(rec.sid, rec.ts || Date.now());   // the liveness witness first — before any row is dropped for its ledger fields
+      const spillLine = spillOf.get(rec) || null; spillOf.delete(rec); // a waited record's line in the spill (it leaves once its stash line is on disk)
       // A parsed api_request that carries no request id or no organization.id
       // cannot join the ledger, so it is dropped — but SILENTLY dropping it
       // made a quiet truth channel undiagnosable (2.367.2: CI's personal-OAT
@@ -237,13 +300,12 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       }
       if (!dup) {
         try {
-          fs.mkdirSync(path.dirname(file), { recursive: true });
-          timedSync('otel-truth.append', () => fs.appendFileSync(file, JSON.stringify({ ...rec, acct: known ? acct : undefined, acctKnown: known,
-            ...(attributed !== undefined ? { attributed, labelMatchesSlot: attributed === (acct || null) } : {}) }) + '\n'));
+          stashLine(JSON.stringify({ ...rec, acct: known ? acct : undefined, acctKnown: known,
+            ...(attributed !== undefined ? { attributed, labelMatchesSlot: attributed === (acct || null) } : {}) }) + '\n', spillLine);
           arrivals.stashed++;
         } catch { }
         global.__vsMetric?.('otel-truth-req', 1);
-      }
+      } else if (spillLine) { const k = spilled.indexOf(spillLine); if (k >= 0) { spilled.splice(k, 1); writeSpill(); } } // a duplicate leaves the spill at once
     }
     return { kept: records.length, disagreements, seen };
   }
@@ -264,15 +326,19 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
 
   return {
     // POST /otel/v1/logs — the api_request events ride the LOGS signal.
-    logs(req, res) {
+    // usage-cpu U4: the answer comes once the post's stash lines are on disk (the store writer's thread — the loop never waits),
+    // and a post that came before the replay ended waits behind it (its records in the spill meanwhile)
+    async logs(req, res) {
       if (!gate(req)) { arrivals.rejected++; return res.status(403).json({ error: 'forbidden' }); }
       arrivals.posts++;
-      try {
-        const out = ingest(req.body || {});
-        arrivals.kept += out.kept || 0;
-        for (const [k, n] of Object.entries(out.seen || {})) arrivals.events[k] = (arrivals.events[k] || 0) + n;
-        res.json({ partialSuccess: {} });
-      } catch (e) { res.status(400).json({ error: e.message }); }
+      let out;
+      try { out = await ingest(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+      arrivals.kept += out.kept || 0;
+      for (const [k, n] of Object.entries(out.seen || {})) arrivals.events[k] = (arrivals.events[k] || 0) + n;
+      // usage-cpu U4 (the second read): the answer goes at once — the post's stash lines are owed to the store writer at ITS pace
+      // (a stop writes them; a kill inside the pace loses them, where the release's append was on disk before the answer — said);
+      // never an urgent write per post (the writer's one thread is shared with a person's acts), never a ½ s wait per post
+      res.json({ partialSuccess: {} });
     },
     // Metrics/traces are not consumed (exporter set to 'none'), but a tolerant
     // 200 keeps any misconfigured exporter from retry-spamming logs.

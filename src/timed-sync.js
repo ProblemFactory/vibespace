@@ -69,7 +69,8 @@ const STORES = Object.freeze({
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js
   // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)
   'otel-truth.write': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
-  'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
+  'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),   // through the store writer (usage-cpu U4: was an appendFileSync per post)
+  'otel-truth-pending.write': row('write', 'usage-history/otel-truth.pending', 'src/server/otel-ingest.js', ['create']),   // the spill: posts waiting behind the boot replay (usage-cpu U4), through the store writer
   'otel-truth.read': row('read', 'usage-history/otel-truth', 'src/server/otel-ingest.js'),
   'telemetry.read': row('read', 'telemetry/events-<month>', 'src/telemetry.js'),
 });
