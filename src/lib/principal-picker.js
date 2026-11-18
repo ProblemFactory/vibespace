@@ -98,7 +98,9 @@ export function rosterFromApp(app, { agents = true, groups = true } = {}) {
  * the roster's broadcasts when `app` is given). Returns
  * `{el, selected(), setSelected(keys), refresh(), focus(), close()}`.
  */
-export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '', locked = null, only = null } = {}) {
+// the chain's cure (B1): the words of what a group entry admits (PM.entryReach) — the switch's face where a door offers it
+const reachWords = (reach) => (reach === 'always' ? t('and its child groups, always') : reach === 'children' ? t('and its child groups') : t('this group only'));
+export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '', locked = null, only = null, exceptChips = false } = {}) {
   const id = `pp-${++seq}`;
   const raw = typeof items === 'function' ? items : () => items;
   // THE ALL-AGENTS ROW (the caller's key and words; the device's words by default) — first, unless the roster
@@ -150,18 +152,20 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     if (chipPrefix) c.appendChild(el('span', 'pp-chip-prefix', chipPrefix));   // lane grants-unify: «除了：» on an exception chip
     c.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: glyphOf(r) }, 18, 'pp-chip-av'));
     c.appendChild(el('span', 'pp-chip-name', r.name));
-    if (onlyOffered && r.kind === 'group') {
+    // the chain's cure (B1): a Task Group chip SAYS what the entry admits, as the grant model judges it (an exception chip: always)
+    const reach = PM.entryReach(r, { except: exceptChips, only: onlyOffered && onlySet.has(String(r.key)) });
+    if (onlyOffered && r.kind === 'group' && !exceptChips) {
       const k = String(r.key), on = onlySet.has(k);
       const o = document.createElement('button');
       o.type = 'button'; o.className = 'pp-chip-only' + (on ? ' on' : '');
-      o.textContent = on ? t('this group only') : t('+ child groups');
+      o.textContent = reachWords(reach);
       o.title = on ? t('Only conversations in this group itself — its child groups are not included (press to include them)') : t('This group and every child group under it (press for this group only)');
       // the U5b read, 7: ONE accessible name whatever the face («this group only», pressed or not) — and the focus follows the
       // redrawn chip's switch (a press never drops it to the page)
       o.setAttribute('aria-label', t('this group only')); o.setAttribute('aria-pressed', on ? 'true' : 'false');
       o.onclick = (ev) => { ev.stopPropagation(); if (onlySet.has(k)) onlySet.delete(k); else onlySet.add(k); chipNodes.delete(k); drawChips(); fire(null); const n = chipNodes.get(k); const b = n && n.querySelector('.pp-chip-only'); if (b) { try { b.focus({ preventScroll: true }); } catch { } } };
       c.appendChild(o);
-    }
+    } else if (reach) c.appendChild(el('span', 'pp-chip-reach', reachWords(reach)));
     const x = document.createElement('button');
     x.type = 'button'; x.className = 'pp-chip-x';
     x.title = t('Remove {name}', { name: r.name }); x.setAttribute('aria-label', x.title);
@@ -448,7 +452,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       items: () => { const cand = PM.exceptCandidates(source(), sel, { ownHint: t('has its own grant') }); const seen = new Set(cand.map((r) => String(r.key))); const left = (r) => r && !seen.has(String(r.key)) && exSel.includes(String(r.key)) && (seen.add(String(r.key)), true); return [...cand, ...(source() || []).filter((r) => !PM.isEveryone(r) && left(r)), ...extra().filter(left)]; },   // lane held-except-doors (e): one left out from outside the picked groups is named by its roster row
       multi: true, selected: exSel, placeholder: t('Search members to leave out…'), label: t('Except (optional)'), emptyText: t('No member of the picked Task Groups is running'),
       // r4: a held one ✕-ed on its chip is TAKEN AWAY (it stays away when the row folds or the list turns to Nobody)
-      cls: 'pp-except-picker', chipPrefix: t('Except: '), onChange: (keys) => { for (const k of exSel) if (!keys.includes(k) && heldAtOpen.includes(k)) dropped.add(k); for (const k of keys) dropped.delete(k); exSel = keys.slice(); syncExcept(); if (typeof except.onChange === 'function') { try { except.onChange(PM.exceptSaved(rows, sel, exSel)); } catch (e) { console.warn('[principal-picker] except.onChange', e); } } fire(null); },
+      cls: 'pp-except-picker', chipPrefix: t('Except: '), exceptChips: true, onChange: (keys) => { for (const k of exSel) if (!keys.includes(k) && heldAtOpen.includes(k)) dropped.add(k); for (const k of keys) dropped.delete(k); exSel = keys.slice(); syncExcept(); if (typeof except.onChange === 'function') { try { except.onChange(PM.exceptSaved(rows, sel, exSel)); } catch (e) { console.warn('[principal-picker] except.onChange', e); } } fire(null); },
     });
     exWrap.append(exToggle, exInner.el);
     keptEl = el('div', 'pp-kept');

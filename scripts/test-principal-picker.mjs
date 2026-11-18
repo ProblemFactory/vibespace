@@ -239,7 +239,46 @@ console.log('⑭ lane lg-group-parents U5b: «仅本组» (only) on a picked Tas
     ok(JSON.stringify(drawn.only) === JSON.stringify([G.key]) && JSON.stringify(PM.rowToPick({ to: [{ kind: 'group', id: G.id }] }, ROSTER).only) === '[]', 'rowToPick: a stored «仅本组» group entry is drawn into `only` by its picker key');
   } else ok(false, 'the roster fixture holds a Task Group row');
   const ppSrc = fs.readFileSync(path.join(REPO, 'src/lib/principal-picker.js'), 'utf-8');
-  ok(/const onlyOffered = !!\(only && typeof only === 'object'\);/.test(ppSrc) && /if \(onlyOffered && r\.kind === 'group'\)/.test(ppSrc) && /onlyKeys: \(\) => \(onlyOffered \? sel\.filter\(\(k\) => onlySet\.has\(k\)\) : null\)/.test(ppSrc), 'the picker: the switch only on a door that offers it, only on group chips; onlyKeys() answers the picked groups switched on (null when not offered)');
+  ok(/const onlyOffered = !!\(only && typeof only === 'object'\);/.test(ppSrc) && /if \(onlyOffered && r\.kind === 'group' && !exceptChips\)/.test(ppSrc) && /onlyKeys: \(\) => \(onlyOffered \? sel\.filter\(\(k\) => onlySet\.has\(k\)\) : null\)/.test(ppSrc), 'the picker: the switch only on a door that offers it, only on group chips; onlyKeys() answers the picked groups switched on (null when not offered)');
+}
+
+console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry admits is what the grant model admits — every state walked');
+{
+  const req = (await import('node:module')).createRequire(import.meta.url);
+  const GM = req(path.join(REPO, 'src/grant-model.js'));
+  const P = { kind: 'group', id: 'tg-p' };
+  const child = { conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: ['tg-p'] }, inP = { conversationKeys: ['k2'], groupIds: ['tg-p'] };
+  // each state: how the door draws the entry (entryReach's options) and the row it writes
+  const STATES = [
+    { name: 'a group picked (the default)', opts: {}, row: { door: 'exit', resource: 'm1', to: [P], except: [] } },
+    { name: 'a group marked «仅本组»', opts: { only: true }, row: { door: 'exit', resource: 'm1', to: [{ ...P, only: true }], except: [] } },
+    { name: 'an exception on a group', opts: { except: true }, row: { door: 'exit', resource: 'm1', to: [{ kind: 'everyone' }], except: [P] } },
+    { name: 'a group on the visibility door', opts: { own: true }, row: { door: 'group-visibility', resource: 'tg-x', to: [P], except: [] } },
+  ];
+  // what each word CLAIMS of a conversation in a CHILD group and of one in the group itself
+  const CLAIM = { children: { child: 'ok', own: 'ok' }, only: { child: 'no', own: 'ok' }, always: { child: 'excepted', own: 'excepted' }, own: { child: 'no', own: 'ok' } };
+  const said = (v) => (v.ok ? 'ok' : v.code === 'excepted' ? 'excepted' : 'no');
+  const walk = (Model, Pick) => STATES.map((s) => { const reach = Pick.entryReach({ kind: 'group', key: 'group:tg-p', id: 'tg-p' }, s.opts); return { name: s.name, reach, child: said(Model.admits([s.row], child)), own: said(Model.admits([s.row], inP)), claim: CLAIM[reach] || null }; });
+  const bad = (rows) => rows.filter((r) => !r.claim || r.child !== r.claim.child || r.own !== r.claim.own);
+  const real = walk(GM, PM);
+  ok(real.length === 4 && new Set(real.map((r) => r.reach)).size === 4 && bad(real).length === 0, 'every state: the chip\'s words (entryReach) claim exactly what the grant model admits — of a child group\'s conversation and of the group\'s own', J(real));
+  // CONTROLS (each must go red): a model that ignores «仅本组»; a picker model that calls every group entry «and its child groups»
+  const M2 = mutantCopies('picker-reach', REPO);
+  try {
+    const gsrc = read('src/grant-model.js');
+    const HIT = '(!e.only && toInherited && toInherited.has(e.id))';
+    ok(gsrc.split(HIT).length === 2, 'CONTROL setup: the model\'s «仅本组» check is found exactly once');
+    const GMx = M2.load('src/grant-model.js', gsrc.replace(HIT, '(toInherited && toInherited.has(e.id))'), 'ignores-only');
+    ok(bad(walk(GMx, PM)).length > 0, 'CONTROL: a model that ignores «仅本组» admits the child the chip says is left out — the leg above would be red');
+    const psrc = read('src/lib/principal-picker-model.js');
+    const RCH = "  return only ? 'only' : 'children';";
+    ok(psrc.split(RCH).length === 2, 'CONTROL setup: entryReach\'s «仅本组» answer is found exactly once');
+    const PMx = await import(pathToFileURL(M2.write('src/lib/principal-picker-model.js', psrc.replace(RCH, "  return 'children';"), 'reach-always-children', { esm: true })).href);
+    ok(bad(walk(GM, PMx)).length > 0, 'CONTROL: a chip that says «and its child groups» on a «仅本组» entry claims a child the model refuses — the leg above would be red');
+  } finally { try { fs.rmSync(M2.dir, { recursive: true, force: true }); } catch { } }
+  // the chips draw THESE words (the switch's face is the entry's reach; an exception chip says «…, always»)
+  const ppSrc2 = read('src/lib/principal-picker.js');
+  ok(/const reach = PM\.entryReach\(r, \{ except: exceptChips, only: onlyOffered && onlySet\.has\(String\(r\.key\)\) \}\);/.test(ppSrc2) && /o\.textContent = reachWords\(reach\);/.test(ppSrc2) && /\} else if \(reach\) c\.appendChild\(el\('span', 'pp-chip-reach', reachWords\(reach\)\)\);/.test(ppSrc2) && /chipPrefix: t\('Except: '\), exceptChips: true,/.test(ppSrc2), 'the picker draws the reach words on every Task Group chip (the switch\'s face; an exception chip «and its child groups, always»)');
 }
 
 console.log(`\n(${Date.now() - t0} ms)`);

@@ -468,20 +468,20 @@ function judgePrepared(n, F) {
   const toInherited = row.door === 'group-visibility' ? null : F.inherited;
   let exceptUndecided = false;
   for (const x of row.except) {
-    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x };   // lane lg-group-parents rule ③: a group's exception covers its descendants, always
+    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x, inherited: true };   // lane lg-group-parents rule ③: a group's exception covers its descendants, always (the cure (B): it says it came through a parent)
     if (x.kind === 'conversation' && F.keys.has(x.key)) return { state: 'excepted', row, entry: x };
     if (x.kind === 'group') { if (F.groups.has(x.id)) return { state: 'excepted', row, entry: x }; if (F.unreadable) exceptUndecided = true; }
   }
   const hits = [];
-  let groupUndecided = false;
+  let groupUndecided = false, onlyHeld = null;   // the chain's cure (B): the «仅本组» entry that held this caller (a child) out
   for (const e of row.to) {
     if (e.kind === 'everyone') { if (F.keys.size) hits.push(e); }
     else if (e.kind === 'conversation') { if (F.keys.has(e.key)) hits.push(e); }
-    else if (e.kind === 'group') { if (F.groups.has(e.id) || (!e.only && toInherited && toInherited.has(e.id))) hits.push(e); else if (F.unreadable) groupUndecided = true; }   // lane lg-group-parents rule ②: «含子组» unless «仅本组»
+    else if (e.kind === 'group') { if (F.groups.has(e.id) || (!e.only && toInherited && toInherited.has(e.id))) hits.push(e); else { if (e.only && !onlyHeld && toInherited && toInherited.has(e.id)) onlyHeld = e; if (F.unreadable) groupUndecided = true; } }   // lane lg-group-parents rule ②: «含子组» unless «仅本组»
   }
   if (hits.length) return exceptUndecided ? { state: 'unreadable', row } : { state: 'ok', row, hits: hits.sort((a, b) => SPECIFIC[b.kind] - SPECIFIC[a.kind]) };
   if (groupUndecided) return { state: 'unreadable', row };
-  return { state: 'no', row };
+  return { state: 'no', row, ...(onlyHeld ? { only: onlyHeld } : {}) };
 }
 /**
  * May this caller use what `rows` grant? → `{ok:true, via:'conversation'|'group'|'everyone', row, entry, hits}` (the
@@ -514,12 +514,13 @@ function prepareFacts(facts = {}, prev = null) {
 const FACTS_OF = Symbol('grant-model.facts-of');
 function verdictOf(judged, F) {
   const hits = [];
-  let excepted = null, unknown = null, unreadable = null;
+  let excepted = null, unknown = null, unreadable = null, onlyHeld = null;
   for (const j of judged) {
     if (j.state === 'ok') for (const e of j.hits) hits.push({ row: j.row, entry: e });
     else if (j.state === 'excepted') excepted = excepted || j;
     else if (j.state === 'unreadable') unreadable = unreadable || j;
     else if (j.state === 'unknown') unknown = unknown || j;
+    else if (j.state === 'no' && j.only) onlyHeld = onlyHeld || j;   // the chain's cure (B)
   }
   if (hits.length) {
     // lane lg-group-parents (the U1 read, 8): among group hits the caller's OWN group is named before a parent's; a verdict
@@ -530,9 +531,27 @@ function verdictOf(judged, F) {
   }
   if (unreadable) return { ok: false, code: 'groups_unreadable', row: unreadable.row };
   if (unknown) return { ok: false, code: 'unknown_shape', why: unknown.why };
-  if (excepted) return { ok: false, code: 'excepted', row: excepted.row, entry: excepted.entry };
+  if (excepted) return { ok: false, code: 'excepted', row: excepted.row, entry: excepted.entry, ...(excepted.inherited ? { inherited: true } : {}) };
   if (F.forkPending) return { ok: false, code: 'fork_pending' };
-  return { ok: false, code: 'not_granted' };
+  // the chain's cure (B): a child held out by a «仅本组» entry is told THAT (`only` = the entry, `row` = its row) — never a bare «not granted»
+  return { ok: false, code: 'not_granted', ...(onlyHeld ? { only: onlyHeld.only, row: onlyHeld.row } : {}) };
+}
+/** the chain's cure (B — the owner's «a refusal names its door; what a grant admits is said»): the words a door adds to a verdict
+ *  its LINEAGE decided, '' when it did not — an admit through a parent, an exception reached through a parent, a child held out
+ *  by a «仅本组» entry. `nameOf(id)` = the group's name as the reader may read it (the door belts it; the id when it has none).
+ *  The door adds WHERE the grant is changed (its own words already name that place). */
+const LINEAGE_WORDS = Object.freeze({
+  through: (n) => `through its parent Task Group "${n}"`,
+  excepted: (n) => `left out through its parent Task Group "${n}" (leaving a group out leaves out every group under it)`,
+  only: (n) => `the grant names its parent Task Group "${n}" as "this group only" — its child groups are not included; the owner can switch that entry to include them`,
+});
+function lineageWords(v, nameOf = null) {
+  if (!v || typeof v !== 'object') return '';
+  const nm = (e) => { const id = e && e.id; let n = null; try { n = typeof nameOf === 'function' ? nameOf(id) : null; } catch { n = null; } return String(n || id || '?'); };
+  if (v.ok === true && v.inherited && v.entry && v.entry.kind === 'group') return LINEAGE_WORDS.through(nm(v.entry));
+  if (v.ok === false && v.code === 'excepted' && v.inherited && v.entry) return LINEAGE_WORDS.excepted(nm(v.entry));
+  if (v.ok === false && v.code === 'not_granted' && v.only && v.only.kind === 'group') return LINEAGE_WORDS.only(nm(v.only));
+  return '';
 }
 /** Every admitting `{row, entry}` (a MAX door's input) — `admits(...).hits`, [] when refused. */
 function hitsOf(rows, facts = {}) { const v = admits(rows, facts); return v.ok ? v.hits : []; }
@@ -897,6 +916,7 @@ const LEGACY = Object.freeze({
 });
 
 module.exports = {
+  LINEAGE_WORDS, lineageWords,   // the chain's cure (B)
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, PUBLIC_SUFFIXES, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow, specificityOf,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,

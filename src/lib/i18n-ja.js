@@ -11792,7 +11792,8 @@ export default {
   "Every child Task Group (and theirs) is told this row, read-only": "すべての子タスクグループ（その子も）にこの行が読み取り専用で伝わります",
   "Rows inherited from parent groups (read-only here — change them in the parent)": "親グループから継承した行（ここでは読み取り専用——親で変更してください）",
   "this group only": "このグループのみ",
-  "+ child groups": "子グループも",
+  "and its child groups": "子グループも含む",
+  "and its child groups, always": "子グループも含む（常に）",
   "Only conversations in this group itself — its child groups are not included (press to include them)": "このグループ自身の会話のみ——子グループは含みません（押すと含めます）",
   "This group and every child group under it (press for this group only)": "このグループと配下のすべての子グループ（押すとこのグループのみ）",
   "No other Task Group to reference yet": "参照できる他のタスクグループはまだありません", // lane task-group-context

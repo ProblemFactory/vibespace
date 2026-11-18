@@ -7926,6 +7926,7 @@ label.chan-cap-row { cursor: default; }
 .pp-chip-only { font-size: 10px; padding: 0 6px; margin-left: 2px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
 .pp-chip-only.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .pp-chip-only:hover { color: var(--text); border-color: var(--border-active); }
+.pp-chip-reach { font-size: 10px; margin-left: 4px; color: var(--text-dim); white-space: nowrap; }   /* the chain's cure (B1): what a group entry admits */
 .pp-chip-only:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pp-chip-x:hover, .pp-chip-x:focus-visible { background: var(--bg-hover); color: var(--text); outline: none; }
 /* the owner 2026-11-17 (who may have a web login filled): a LOCKED chip — a wider grant holds it: no ✕, its «through» and its door */

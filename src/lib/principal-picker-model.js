@@ -257,6 +257,17 @@ export function principalOfRow(r) {
 }
 /** What a pick WRITES: `{to, except}` in the grant model's spelling (rows by key; unknown keys dropped). `held` (r10): the
  *  stored row's exception keys — kept verbatim while the «除了» row is not offered (minus a member picked itself). */
+/** the chain's cure (B1 — the owner's «what the page says a grant admits equals what the verdict admits»): what a picked entry
+ *  ADMITS, as the grant model (src/grant-model.js admits) judges it — 'children' (a Task Group AND every group under it: the
+ *  default, rule ②), 'only' (marked «仅本组»), 'always' (an exception on a group: it covers every group under it, always — rule ③),
+ *  'own' (a door whose group entries never reach down: the group's visibility, rule ④); null for an entry that is no Task Group. */
+export function entryReach(row, { except = false, only = false, own = false } = {}) {
+  if (!row || row.kind !== 'group') return null;
+  if (except) return 'always';
+  if (own) return 'own';
+  return only ? 'only' : 'children';
+}
+
 export function pickToRow(rows, selected, except = [], { held = null, only = null, onlyWas = null } = {}) {
   const byKey = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null).map((r) => [String(r.key), r]));
   const map = (keys) => (Array.isArray(keys) ? keys : []).map((k) => principalOfRow(byKey.get(String(k)))).filter(Boolean);

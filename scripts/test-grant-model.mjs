@@ -277,12 +277,20 @@ console.log('⑥ lane lg-group-parents: a child group uses what its parents are 
   const vm = { kind: 'group', id: 'tg-p', hosts: ['api.example.com'] };
   ok(VU.canonOf('secrets:secret:abc1234567#secret', { ...vm, only: true }, [], 2) !== VU.canonOf('secrets:secret:abc1234567#secret', vm, [], 2) && !VU.canonOf('secrets:secret:abc1234567#secret', vm, [], 2).includes('#only'), 'the U1 verdict: the vault canon\'s «仅本组» spelling, here in a FAST suite too (a member without the flag keeps its bytes)');
   ok(GM.onlyCarried(wasRow, [P]).to[0].only === true && GM.onlyCarried(wasRow, [{ ...P, only: false }]).to[0].only === false && GM.onlyCarried(wasRow, [{ ...P, mac: 'f'.repeat(64) }]).refused === 'group:tg-p' && GM.onlyCarried({ to: [P] }, [P]).to[0].only === undefined, 'read 2: onlyCarried — a write silent on the flag keeps it; only:false widens; a marked entry is refused; a row without the flag carries nothing');
+  // the chain's cure (B): the verdict SAYS what the lineage decided, and ONE place words it for a door
+  {
+    const nameOf = (id) => ({ 'tg-p': 'Parent' })[id] || null;
+    const through = L([row([P])], child), viaExc = L([row([{ kind: 'everyone' }], [P])], child), heldOnly = L([row([PONLY])], child), ownExc = L([row([{ kind: 'everyone' }], [{ kind: 'group', id: 'tg-c' }])], child), plain = L([row([{ kind: 'group', id: 'tg-z' }])], child);
+    ok(viaExc.code === 'excepted' && viaExc.inherited === true && heldOnly.code === 'not_granted' && heldOnly.only && heldOnly.only.id === 'tg-p' && heldOnly.only.only === true && ownExc.code === 'excepted' && !ownExc.inherited && plain.code === 'not_granted' && !plain.only, 'the cure (B): an exception reached through a parent says `inherited`; a child held out by a «仅本组» entry is `not_granted` WITH that entry (`only`); an own exception and a plain refusal say neither', [viaExc, heldOnly.only, ownExc.inherited, plain.only]);
+    const w = [GM.lineageWords(through, nameOf), GM.lineageWords(viaExc, nameOf), GM.lineageWords(heldOnly, nameOf), GM.lineageWords(ownExc, nameOf), GM.lineageWords(plain, nameOf), GM.lineageWords(L([row([P])], parentOwn), nameOf)];
+    ok(w[0] === GM.LINEAGE_WORDS.through('Parent') && w[1] === GM.LINEAGE_WORDS.excepted('Parent') && w[2] === GM.LINEAGE_WORDS.only('Parent') && w.slice(3).every((x) => x === '') && /parent Task Group "Parent"/.test(w[0]) && /this group only/.test(w[2]) && GM.lineageWords(heldOnly, () => { throw new Error('x'); }).includes('"tg-p"'), 'the cure (B): lineageWords names the parent for an admit through it, an exception reached through it, a «仅本组» refusal — nothing for an own verdict; a name read that throws falls back to the id', w);
+  }
   // CONTROLS — the change removed turns the legs above red
   const MZ = mutantCopies('grant-model', REPO);
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
     const HIT = "(F.groups.has(e.id) || (!e.only && toInherited && toInherited.has(e.id)))";
-    const EXC = "    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x };";
+    const EXC = "    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x, inherited: true };";   // the chain's cure (B): + it says it came through a parent
     ok(src.split(HIT).length === 2 && src.split(EXC).length === 2, 'CONTROL setup: the inherited hit and the inherited exception are each found exactly once');
     const M1 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id))'), 'no-inherited-hit');   // stale-pins: kept (the mutant puts the release's own-only hit back)
     ok(!M1.admits([row([P])], child).ok, 'CONTROL (c): a model with no inherited hit refuses the child — ⑥ rule ② would be red');
