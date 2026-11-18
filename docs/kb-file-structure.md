@@ -2036,6 +2036,7 @@ The reports, the causes as measured and the before / after shots: /var/tmp/vibes
 - **Gate:** scripts/test-vault-masker-once.mjs. A new writer of `record` must go through `writeRecord` (or `load`), or the set would outlive the entries it was built from.
 
 ### src/job-logs-sweep.js + src/job-logs-sweep-worker.js + src/jobs.js sweepLogs — WHAT A JOB'S RECORD NO LONGER LISTS LEAVES data/job-logs (lane job-logs-sweep, 2026-11-12)
+- **The steady journal (B-c330, 主开发's ruling B, 2026-11-18).** A steady pass that removes fewer than `LOGS_SAY_AT_ONCE` (50) run dirs is FOLDED into `st.day` (in the clean-up's record); the day's first pass after it says ONE line for the day (UTC), counts summed; a pass of fifty or more speaks at once, a HOLD as before.
 
 **Why it exists.** A job's record keeps its last 20 runs (`_spawn`'s splice), but the directory of a dropped run stayed for ever. A cron fires ONE child task for ever, so the 14-day gc of a task never reached it, and `rm` of a live record removed no directory. The owner's hub held 123 523 entries under job-logs, its largest store by entry count. The full record is in changelog-engineering 2.369.398.
 

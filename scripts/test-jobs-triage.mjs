@@ -1054,5 +1054,35 @@ console.log('§15 B-6c1a: a record whose runs is not a list never breaks the lis
   for (const r of copiesCensus(MJ6.files, MJ6.dir, ROOT, { minCopies: 1, label: 'B-6c1a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
+console.log('§16 B-c330: the job-logs clean-up\'s steady passes fold into ONE journal line a day; a big pass speaks at once');
+{
+  const DAY1 = Date.UTC(2026, 10, 17, 10, 0, 0), DAY2 = Date.UTC(2026, 10, 18, 0, 5, 0);
+  const scene = async (Mod, name) => {
+    const d = mkDir(name), logs = [];
+    const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), logsSweep: { bootDelayMs: 3600e3 } });
+    J.init();
+    J._logsAdopt({});
+    const answers = [3, 3, 3, 60, 2].map((n) => ({ removed: n, entries: n * 2, more: false, ms: 1, state: {} }));
+    let k = 0; J._logsRemover = () => ({ sweep: async () => answers[k++] });
+    for (const at of [DAY1, DAY1 + 3600e3, DAY1 + 7200e3, DAY1 + 9000e3]) await J._logsPass(at, 'tick');
+    const day1 = logs.filter((l) => /job-logs: /.test(l));
+    await J._logsPass(DAY2, 'tick');
+    const all = logs.filter((l) => /job-logs: /.test(l));
+    const kept = JSON.parse(JSON.stringify(J._logsState)); J._logsAdopt(kept);   // the record across a restart
+    const out = { day1, all, keptDay: J._logsState.day };
+    J.shutdown(); return out;
+  };
+  const r = await scene({ JobManager }, 'jobs-triage-logs-fold');
+  ok(r.day1.length === 1 && /job-logs: 60 run dir\(s\) past the 14-day retention that no record lists removed \(120 entries\)/.test(r.day1[0]), 'B-c330: three small steady passes say NOTHING yet; a pass that removes fifty or more speaks at once', r.day1);
+  ok(r.all.length === 2 && /job-logs: on 2026-11-17 \(UTC\) 9 run dir\(s\) past the 14-day retention that no record lists were removed over 3 steady pass\(es\) \(18 entries\)/.test(r.all[1]), 'B-c330: the day\'s first pass after it says the day\'s ONE folded line — the counts summed', r.all);
+  ok(r.keptDay && r.keptDay.day === '2026-11-18' && r.keptDay.removed === 2 && r.keptDay.passes === 1, 'B-c330: the day\'s folded counts are in the clean-up\'s record — a restart loses none', r.keptDay);
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), FOLD = '    else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }';
+  ok(JSRC.split(FOLD).length === 2, 'B-c330 control setup: the fold is one line in jobs.js (the plant the control swaps)');
+  const MJ30 = mutantCopies('jobs-logs-fold-c330', ROOT);
+  const rx = await scene(MJ30.load('src/jobs.js', JSRC.replace(FOLD, '    else if (ans.removed) this.d.log(LS.words.pass(ans));   /* MUTANT: the release — a line every pass */'), 'release'), 'jobs-triage-logs-fold-mut');
+  ok(rx.day1.length === 4, 'B-c330 CONTROL (the release, in a copy): every steady pass says its own line (four in a morning)', rx.day1.length);
+  for (const rr of copiesCensus(MJ30.files, MJ30.dir, ROOT, { minCopies: 1, label: 'B-c330 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

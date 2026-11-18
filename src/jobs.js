@@ -12,6 +12,7 @@ const net = require('net');
 const http = require('http');
 const PI = require('./proc-identity.js'); // B-1cc6: a pid is never an identity
 const WRAPPER_HELD = new Set(['up', 'starting', 'awaiting-user']);   // B-c134 cure: a job state whose wrapper the engine holds (an «unverified» one is a previous boot's pid: never kept out)
+const LOGS_SAY_AT_ONCE = 50;   // B-c330: a job-logs pass that removes this many run dirs or more is said at once (the steadier ones fold into a day's line)
 const crypto = require('crypto');
 const { withoutNoticeHead } = require('./notification-senders.js'); // lane notify-retry: a parked frame carries the ladder's head; the floor's digest is of the raw text
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
@@ -2992,9 +2993,14 @@ class JobManager {
       this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: on disk at the open — a restart resumes it, never a second start line
       this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));   // round 3 §8: said AFTER the record is on disk (a kill between never says it twice)
     }
+    // B-c330 (主开发's ruling B): a steady pass FOLDS into one line a day (the counts summed, kept in the record — a restart loses none);
+    // a pass that removes LOGS_SAY_AT_ONCE or more speaks at once (the journal's stamp is its hour); a HOLD speaks at once (_logsHeld)
+    const today = new Date(at).toISOString().slice(0, 10);
+    if (st.day && st.day.day !== today) { this.d.log(LS.words.day(st.day)); st.day = null; }
     const cu = st.catchUp;
     if (cu) { if (!opened) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; } }   // the opening pass is in the record already
-    else if (ans.removed) this.d.log(LS.words.pass(ans));
+    else if (ans.removed >= LOGS_SAY_AT_ONCE) this.d.log(LS.words.pass(ans));
+    else if (ans.removed) { const d = st.day || (st.day = { day: today, removed: 0, entries: 0, passes: 0 }); d.removed += ans.removed; d.entries += ans.entries || 0; d.passes++; }
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
     if (cu && !ans.more) { this.d.log(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
     this._logsSave();
@@ -3068,7 +3074,8 @@ class JobManager {
     this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { jobDirs: 0, ...cu } : null,
       last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [],
       owed: Array.isArray(r && r.owed) ? r.owed.filter((x) => typeof x === 'string' && LS.JOB_NAME.test(x)).slice(-LOGS_OWED_MAX) : [], heldNow: Array.isArray(r && r.heldNow) ? r.heldNow.filter((x) => typeof x === 'string').slice(0, 20) : [],
-      orphansCounted: Array.isArray(r && r.orphansCounted) ? r.orphansCounted.filter((x) => typeof x === 'string').slice(-50) : [] };
+      orphansCounted: Array.isArray(r && r.orphansCounted) ? r.orphansCounted.filter((x) => typeof x === 'string').slice(-50) : [],
+      day: r && r.day && typeof r.day === 'object' && /^\d{4}-\d{2}-\d{2}$/.test(String(r.day.day)) && ['removed', 'entries', 'passes'].every((k) => fin(r.day[k])) ? { ...r.day } : null };   // B-c330: the day's folded counts
     for (const id of this._logsState.owed) this._logsOwed.add(id);   // what an earlier process owed survives its restart
   }
   /** a set-aside's item was filed: its file is «said» — on disk at once (durably), so a restart never files it twice */
