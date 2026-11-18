@@ -1846,7 +1846,7 @@ await (async () => {
   // the cure's own read: the gate the Stop abandoned STILL RUNS — its pool switch fires the single continue on an ARMED session;
   // the in-flight flag stays up until that gate settles, so the stopped conversation is not continued behind the batch's back
   const ab = await run(real, { hangGate: true, armB: true, fireBAfter: true });
-  const mG = mutantAr([["          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; session._arHeldBy = tok; const free = () => { clearTimeout(t2); if (session._arHeldBy === tok) { session._arHeldBy = null; session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }\n          else session._arFiring = false;", '          session._arFiring = false;   // PRE-AMEND: cleared while the abandoned gate still runs']]);
+  const mG = mutantAr([["          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; gateHeld.set(e.id, tok); const free = () => { clearTimeout(t2); if (gateHeld.get(e.id) === tok) { gateHeld.delete(e.id); session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }\n          else session._arFiring = false;", '          session._arFiring = false;   // PRE-AMEND: cleared while the abandoned gate still runs']]);
   const cG = mG.mod ? await run(mG.mod, { hangGate: true, armB: true, fireBAfter: true }) : null;
   ok('17b. a conversation the Stop left in its gate is NOT continued by that gate\'s pool switch (the in-flight flag held until the gate settles); RED: the flag cleared at once lets the single continue through', ab.L.sent.join() === 'a' && (ab.rec.stopped || []).some((x) => x.id === 'b') && mG.hits === 1 && !!cG && cG.L.sent.join() === 'a,b', mG.err || JSON.stringify({ ab: ab.L.sent, cG: cG && cG.L.sent }));
   // THE HOLD FREES ONLY ITS OWN (主开发's should on the U2 cure): the bound's timer frees the flag, a single continue raises it
@@ -1876,7 +1876,7 @@ await (async () => {
     return { down, up, after: sb._arFiring, asked: gates };
   };
   const hs = await holdScene(real);
-  const mH = mutantAr([["const tok = {}; session._arHeldBy = tok; const free = () => { clearTimeout(t2); if (session._arHeldBy === tok) { session._arHeldBy = null; session._arFiring = false; } };", 'const free = () => { clearTimeout(t2); session._arFiring = false; };   /* the cure\'s form: frees whatever flag is up */']]);
+  const mH = mutantAr([["const tok = {}; gateHeld.set(e.id, tok); const free = () => { clearTimeout(t2); if (gateHeld.get(e.id) === tok) { gateHeld.delete(e.id); session._arFiring = false; } };", 'const free = () => { clearTimeout(t2); session._arFiring = false; };   /* the cure\'s form: frees whatever flag is up */']]);
   const hsRed = mH.mod ? await holdScene(mH.mod) : null;
   ok('17b. the gate hold frees only ITS hold: after its bound the flag is down, a single continue raises it for its own gate, the abandoned gate\'s late settle leaves it UP; RED: the cure\'s form takes it down', hs.down && hs.up && hs.after === true && hs.asked === 2 && mH.hits === 1 && !!hsRed && hsRed.up && hsRed.after === false, mH.err || JSON.stringify({ hs, hsRed }));
   // the refusal carries the K that fits every account (fitK, the guard's) to the dialog
@@ -2183,33 +2183,38 @@ await (async () => {
 })();
 
 // ── 18b. THE MODEL'S CAP STILL STANDS (主开发's law 2026-11-18 11:24Z, written on the chain's restack — it needs the U1 cure's
-// stop fact): the wall was a MODEL's cap and the plan's window is what reset ⇒ the timed continue is NOT delivered (it would meet
-// the cap again) and waits for the cap's own reset; on another member, or a model the cap does not draw, it continues.
+// stop fact): the wall was a MODEL's cap and the plan's window is what reset ⇒ the continue is NOT delivered (it would meet the
+// cap again) and waits for the cap's own reset once it has landed; on another member, or a model the cap does not draw, it
+// continues. The chain's own read: EVERY door that lands on the capped member is held (a member read «usable», a reset claim),
+// not only the timed fire; only the reading edge of the armed lane is not asked.
 {
-  console.log('\n18b. a model\'s cap that still stands holds the timed continue');
-  const { modelCapHold } = require(AR_PATH);
+  console.log('\n18b. a model\'s cap that still stands holds the continue');
+  const { modelCapHold, capDrawnBy, CAP_LAND_MS } = require(AR_PATH);
   const real = { create };
+  const QM = require(path.join(REPO, 'src/quota-model.js'));
+  ok('18b. the landing minute is the one every stated reset waits (quota-model RESET_GRACE_SEC)', CAP_LAND_MS === QM.RESET_GRACE_SEC * 1000, String(CAP_LAND_MS));
   const T = Date.now(), cap = { kind: 'quota', at: T - 3600e3, resetsAt: T + 3 * 3600e3, memberId: 'A', bucket: 'scoped', scopedName: 'opus' };
-  const H = (o) => modelCapHold({ fact: cap, now: T, key: 'A', modelFamily: 'opus', capFamily: 'opus', ...o });
+  const H = (o) => modelCapHold({ fact: cap, now: T, key: 'A', drawsCap: true, ...o });
   const tbl = [
-    ['the cap stands, the same member, the same family ⇒ held until the cap\'s reset', JSON.stringify(H({})) === JSON.stringify({ name: 'opus', until: cap.resetsAt })],
+    ['the cap stands, the same member, a model it draws ⇒ held, continued once the reset has landed', JSON.stringify(H({})) === JSON.stringify({ name: 'opus', until: cap.resetsAt, fireAt: cap.resetsAt + CAP_LAND_MS })],
     ['another member now ⇒ fires', H({ key: 'B' }) === null],
-    ['the cap\'s own reset has passed ⇒ fires', H({ fact: { ...cap, resetsAt: T - 1 } }) === null],
+    ['the cap\'s reset has landed (a minute after it) ⇒ fires', H({ fact: { ...cap, resetsAt: T - CAP_LAND_MS } }) === null],
+    ['the cap\'s reset passed but has not landed yet (inside its minute) ⇒ held', !!H({ fact: { ...cap, resetsAt: T - 1000 } })],
     ['a cap with no stated reset ⇒ fires (nothing to wait for)', H({ fact: { ...cap, resetsAt: null } }) === null],
     ['the wall was the plan\'s own window (fiveHour) ⇒ not this rule', H({ fact: { ...cap, bucket: 'fiveHour', scopedName: null } }) === null],
-    ['a model the cap does not draw (sonnet under an opus cap) ⇒ fires', H({ modelFamily: 'sonnet' }) === null],
-    ['a model of no known family ⇒ held (fails closed)', !!H({ modelFamily: null })],
-    ['a cap of no known family ⇒ held (fails closed)', !!H({ capFamily: null })],
+    ['a model the cap does not draw ⇒ fires', H({ drawsCap: false }) === null],
     ['a wall that named no member (no pool can move it) ⇒ held', !!H({ fact: { ...cap, memberId: null }, key: null })],
     ['a named member, an identity that cannot be told now ⇒ fires as before', H({ key: null }) === null],
     ['an overload stop ⇒ not this rule', H({ fact: { kind: 'overload', at: T } }) === null],
+    ['capDrawnBy: opus draws the opus cap; sonnet does not', capDrawnBy('claude-opus-5-5', 'opus') === true && capDrawnBy('claude-sonnet-5-5', 'opus') === false],
+    ['capDrawnBy fails closed: a model of no known family, a cap of no known family', capDrawnBy(null, 'opus') === true && capDrawnBy('some-new-model', 'opus') === true && capDrawnBy('claude-opus-5-5', 'Model cap') === true],
   ];
-  for (const [n, c] of tbl) ok('18b. PURE modelCapHold: ' + n, c);
+  for (const [n, c] of tbl) ok('18b. PURE: ' + n, c);
   // THE MODULE: an arm at the plan's reset, the stop fact a model's cap three hours on; the gate may move the conversation
-  const scene = (mod, { member = 'A', model = 'claude-opus-5-5', gateMovesTo = null, capAt = T + 3 * 3600e3 } = {}) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-mcap-')), sent = [], logs = [], sessions = new Map();
+  const scene = (mod, { member = 'A', model = 'claude-opus-5-5', gateMovesTo = null, capAt = T + 3 * 3600e3, doors = false } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-mcap-')), sent = [], logs = [], lists = [], sessions = new Map();
     let on = member;
-    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, log: (l) => logs.push(String(l)),
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, log: (l) => logs.push(String(l)), onListChange: () => lists.push(1),
       sendToSession: (id) => { sent.push(id); return true; }, fireIdentity: () => ({ key: on, name: on }), modelOf: () => model,
       beforeFire: () => { if (gateMovesTo) on = gateMovesTo; return true; } });
     sessions.set('m', sess({ _stoppedBy: { ...cap, resetsAt: capAt } }));
@@ -2217,27 +2222,36 @@ await (async () => {
     ar.armIfEnabled('m', sessions.get('m'), plan, 'usage limit', { bucket: 'scoped', scopedName: 'opus' });
     ar.tick(plan + GRACE_MS + 1);
     const a = ar._armed.get('m');
-    const out = { sent: sent.length, resetsAt: a ? a.resetsAt : null, watch: a ? !!a.watch : null, said: logs.some((l) => /m: the wall was the opus cap, which resets at .* not continued/.test(l)) };
-    if (a && !sent.length) {   // the cap's reset comes (the fact's own reset now behind the clock): the re-armed wait continues it
-      sessions.get('m')._stoppedBy = { ...sessions.get('m')._stoppedBy, resetsAt: Date.now() - 1 };
-      ar.tick(a.resetsAt + GRACE_MS + 1); out.after = sent.length;
+    const out = { sent: sent.length, resetsAt: a ? a.resetsAt : null, watch: a ? !!a.watch : null, said: logs.filter((l) => /m: the wall was the opus cap, which resets at .* not continued/.test(l)).length, lists: lists.length };
+    if (doors && a && !sent.length) {   // the other doors onto the SAME member: a member read «usable», a reset claim — held, said no more
+      out.wake = ar.fireNow('m', 'a member read usable'); out.claim = ar.fireNowOnClaim('m', 'a reset claim');
+      out.sentDoors = sent.length; out.saidDoors = logs.filter((l) => /m: the wall was the opus cap/.test(l)).length; out.stillAt = (ar._armed.get('m') || {}).resetsAt;
+    }
+    if (a && !sent.length) {   // the cap's reset comes and LANDS (the fact's own reset now a minute behind the clock): the wait ends
+      sessions.get('m')._stoppedBy = { ...sessions.get('m')._stoppedBy, resetsAt: Date.now() - CAP_LAND_MS - 1 };
+      ar.tick(a.resetsAt + GRACE_MS + 1); out.after = sent.length; out.armedAfter = ar._armed.has('m');
     }
     fs.rmSync(dir, { recursive: true, force: true });
     return out;
   };
-  const r = scene(real);
-  ok('18b. THE MODULE: the plan\'s window reset, the opus cap still stands on the same member ⇒ NOT continued, re-armed at the cap\'s own reset, said; at that reset it continues once', r.sent === 0 && r.resetsAt === T + 3 * 3600e3 && r.watch === false && r.said && r.after === 1, JSON.stringify(r));
+  const r = scene(real, { doors: true });
+  ok('18b. THE MODULE: the plan\'s window reset, the opus cap still stands on the same member ⇒ NOT continued, re-armed a minute after the cap\'s reset, said once, the list told; at that time it continues once', r.sent === 0 && r.resetsAt === T + 3 * 3600e3 + CAP_LAND_MS && r.watch === false && r.said === 1 && r.lists >= 1 && r.after === 1, JSON.stringify(r));
+  ok('18b. THE MODULE: the other doors onto the SAME member (a member read «usable», a reset claim) are held too — nothing sent, the wait unchanged, nothing said again', r.sentDoors === 0 && r.saidDoors === 1 && r.stillAt === r.resetsAt, JSON.stringify(r));
   const rFar = scene(real, { capAt: T + 5 * 24 * 3600e3 });
-  ok('18b. THE MODULE: a cap whose reset is days away ⇒ not continued, held as a WATCH (no timed continue; a reading that says the cap cleared opens it)', rFar.sent === 0 && rFar.resetsAt === T + 5 * 24 * 3600e3 && rFar.watch === true, JSON.stringify(rFar));
+  ok('18b. THE MODULE: a cap days away (beyond the waiting bound) ⇒ not continued, held as a WATCH — no timed continue: at its reset the watch retires (nothing sent), as every far wall', rFar.sent === 0 && rFar.resetsAt === T + 5 * 24 * 3600e3 + CAP_LAND_MS && rFar.watch === true && rFar.after === 0 && rFar.armedAfter === false, JSON.stringify(rFar));
   const rB = scene(real, { member: 'B' });
   ok('18b. THE MODULE: the conversation is on another member now ⇒ continued at the plan\'s reset', rB.sent === 1, JSON.stringify(rB));
   const rG = scene(real, { gateMovesTo: 'B' });
   ok('18b. THE MODULE: the pre-fire gate moves it onto another member ⇒ continued (the hold is asked AFTER the gate, of the identity it lands on)', rG.sent === 1, JSON.stringify(rG));
   const rS = scene(real, { model: 'claude-sonnet-5-5' });
   ok('18b. THE MODULE: the conversation asks a model the opus cap does not draw ⇒ continued', rS.sent === 1, JSON.stringify(rS));
-  const mC = mutantAr([["      if (kind === 'timed' && capHeld(id, session, key2)) return false;", '      /* the hold removed */']]);
+  const NEEDLE = "      if (!(origin && origin.via === 'reading') && capHeld(id, session, key2)) return false;";
+  const mC = mutantAr([[NEEDLE, '      /* the hold removed */']]);
   const rRed = mC.mod ? scene(mC.mod) : null;
   ok('18b. RED: without the hold the timed continue goes at the plan\'s reset into the cap that still stands', mC.hits === 1 && !!rRed && rRed.sent === 1, mC.err || JSON.stringify(rRed));
+  const mT = mutantAr([[NEEDLE, "      if (kind === 'timed' && capHeld(id, session, key2)) return false;   /* the first form: the timed fire only */"]]);
+  const rT = mT.mod ? scene(mT.mod, { doors: true }) : null;
+  ok('18b. RED: the timed-only form (the chain\'s first) lets a member that read «usable» continue it into the cap', mT.hits === 1 && !!rT && rT.sent === 0 && rT.sentDoors >= 1, mT.err || JSON.stringify(rT));
 }
 
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

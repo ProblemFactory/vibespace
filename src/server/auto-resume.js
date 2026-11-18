@@ -44,7 +44,7 @@ const path = require('path');
 const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this reading say the wall is gone?
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
 const { toAgentText } = require('../peer-text.js');          // PURE: the one belt on a name an agent reads (the account label)
-const { familyOfModel, familyOfScopedBucket } = require('../model-family.js');   // PURE: a model's family and a model cap's (modelCapHold)
+const { familyOfModel, projectCacheForFamily } = require('../model-family.js');   // PURE: does a request's model draw a model cap (capDrawnBy — the ONE family door)
 
 // THE CONTINUE AN AGENT READS (lane resume-words, the owner 2026-10-29: «agent 都会优先理解那个 claude 自己的 reset
 // time 作为"用量重置时间"，但实际上 vibespace 通知的时候才是重置的时候»). The Screeps conversation hit a WEEKLY wall
@@ -242,20 +242,30 @@ function claimContinueNotice({ label, cause = null }) {
 }
 
 /** THE MODEL'S CAP STILL STANDS (主开发's law 2026-11-18): the wall that stopped the conversation was a MODEL's cap (the stop
- *  fact's bucket 'scoped' with its name) whose OWN stated reset is still ahead, and the continue would land where it met it
- *  (the same member, a model the cap still draws) — the plan's window resetting is then not the way out: the request would
- *  meet the cap again. PURE: `{ name, until }` (hold until the cap's own reset) or null (fire as before). `key` = the identity
- *  the continue lands on NOW (after the pre-fire gate); a fact with no member is a conversation no pool can move (the same
- *  account); a known member with an unknown identity now cannot be told — fire as before (the gate and the wall still
- *  judge). The family fails CLOSED: a cap or a model of no known family binds; only two known, different families let it go.
- *  A cap with no stated reset has nothing to wait for — fire as before. */
-function modelCapHold({ fact, now = Date.now(), key = null, modelFamily = null, capFamily = null } = {}) {
+ *  fact's bucket 'scoped' with its name) whose OWN stated reset has not landed yet, and the continue would land where it met
+ *  it (the same member, a model the cap still draws) — a plan's window that reset, a member read «usable», a reset claim are
+ *  then not the way out: the request would meet the cap again. PURE: `{ name, until, fireAt }` (hold; continue at `fireAt` =
+ *  the cap's reset once it has LANDED) or null (fire as before). `key` = the identity the continue lands on NOW (after the
+ *  pre-fire gate); a fact with no member is a conversation no pool can move (the same account); a known member with an
+ *  unknown identity now cannot be told — fire as before (the gate and the wall still judge). `drawsCap` = capDrawnBy. A cap
+ *  with no stated reset has nothing to wait for — fire as before. A stated reset LANDS a minute late (`landMs` — the
+ *  vendor's own lag, quota-model RESET_GRACE_SEC, the owner's «wait a minute» of 2026-09-18). */
+const CAP_LAND_MS = 60 * 1000;
+function modelCapHold({ fact, now = Date.now(), key = null, drawsCap = true, landMs = CAP_LAND_MS } = {}) {
   if (!fact || fact.kind !== 'quota' || fact.bucket !== 'scoped' || !fact.scopedName) return null;
   const until = Number(fact.resetsAt) || 0;
-  if (!(until > now)) return null;
+  if (!(until > 0) || until + landMs <= now) return null;
   if (fact.memberId && fact.memberId !== key) return null;
-  if (modelFamily && capFamily && modelFamily !== capFamily) return null;
-  return { name: String(fact.scopedName), until };
+  if (!drawsCap) return null;
+  return { name: String(fact.scopedName), until, fireAt: until + landMs };
+}
+/** PURE: does a request for `model` draw the model cap named `capName`? Asked of model-family's ONE projection (a reading of
+ *  that one cap, projected to the model's family): a cap of another known family is set aside; a family nobody knows, a cap
+ *  of no known family, or a family known only from the CLI's catalog with no bucket of its own name all KEEP it (fail closed —
+ *  a vendor may meter a new family under an existing cap, as it meters Mythos under Fable). */
+function capDrawnBy(model, capName) {
+  const p = projectCacheForFamily({ scopedWeekly: [{ name: String(capName || '') }] }, familyOfModel(model));
+  return !!(p && Array.isArray(p.scopedWeekly) && p.scopedWeekly.length);
 }
 
 /** The delayed ARM announcement, worded by the arm's CAUSE (2.369.104, owner:
@@ -419,6 +429,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const r = Number(w.run.resetAt) || 0;
     return r > 0 && r <= Date.now() + (early ? 0 : WF_RESET_SLACK_MS) ? w.run : null;
   };
+  const gateHeld = new Map();   // id → the token of the bulk resume's hold on an abandoned gate (only THAT hold frees _arFiring — U2 cure's should)
   const wfPending = new Map();   // id → when ITS ARM's read started (the arm's own bookkeeping: never two reads for one live arm; said once)
   const wfOut = new Set();       // every read still OUT — the cap's count (U3 cure 3: a read that has not returned stays counted until it returns, its arm gone or not)
   const wfNotReadSaid = new Set();   // arms held «not read: the folder's storage does not answer» (said once)
@@ -732,7 +743,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
           // stopped or skipped — the in-flight flag stays up until THE GATE ITSELF settles (bounded: BULK_GATE_HOLD_MS)
           // …and frees only ITS hold (U2 cure's should): the bound's timer may free the flag first, a single continue raise it again
           // for its own gate — the old gate settling later must not take that one down
-          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; session._arHeldBy = tok; const free = () => { clearTimeout(t2); if (session._arHeldBy === tok) { session._arHeldBy = null; session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }
+          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; gateHeld.set(e.id, tok); const free = () => { clearTimeout(t2); if (gateHeld.get(e.id) === tok) { gateHeld.delete(e.id); session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }
           else session._arFiring = false;
         }
         if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)
@@ -1255,19 +1266,26 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  same identity had just been rejected.
    *    breaker → the SAME beforeFire gate → deliver → remember what we fired at
    *  Returns true when a continue was delivered or a gate is in flight. */
-  /** A TIMED continue whose wall was a model's cap that still stands (modelCapHold) is NOT delivered: re-armed at the cap's
-   *  own reset — a watch when that is beyond the waiting bound, so a reading that says the cap cleared early still opens it —
-   *  and said once per hold. Asked AFTER the pre-fire gate, of the identity the continue would land on: a gate that moved the
-   *  conversation onto another member continues it. */
+  /** A continue whose wall was a model's cap that still stands (modelCapHold) is NOT delivered — whichever door asked it (the
+   *  timed fire at the plan's reset, a member that read «usable», a reset claim, a switch back onto that member); only the
+   *  fresh-window edge, which opens on a reading of the ARMED lane itself, is not asked. Re-armed at the cap's reset once it
+   *  has landed — a WATCH when that is beyond the waiting bound (no timed continue; a reading of the cap's own lane can still
+   *  open it, and it retires at that reset like every far wall) — the list told, the journal once per arm record. Asked AFTER
+   *  the pre-fire gate, of the identity the continue would land on: a gate that moved it onto another member continues it. */
+  const capSaid = new WeakSet();
   function capHeld(id, session, key2) {
     const fact = session && session._stoppedBy;
     if (!fact || fact.bucket !== 'scoped') return false;
     let model = null; try { model = modelOf ? modelOf(id, session) : null; } catch { model = null; }
-    const h = modelCapHold({ fact, now: Date.now(), key: key2, modelFamily: familyOfModel(model), capFamily: familyOfScopedBucket(fact.scopedName) });
+    const h = modelCapHold({ fact, now: Date.now(), key: key2, drawsCap: capDrawnBy(model, fact.scopedName) });
     if (!h) return false;
-    log(`[auto-resume] ${id}: the wall was the ${h.name} cap, which resets at ${new Date(h.until).toISOString()} — the plan's window is what reset; not continued (it would meet the cap again), waiting for the cap's own reset`);
-    const re = armIfEnabled(id, session, h.until, `usage limit (the ${h.name} cap)`, { bucket: 'scoped', scopedName: h.name, ...(fact.lane ? { lane: fact.lane } : {}), cause: { scope: 'account', until: { label: h.name, resetsAt: h.until } } });
+    const re = armIfEnabled(id, session, h.fireAt, `usage limit (the ${h.name} cap)`, { bucket: 'scoped', scopedName: h.name, ...(fact.lane ? { lane: fact.lane } : {}), cause: { scope: 'account', until: { label: h.name, resetsAt: h.until } } });
+    if (!re || !capSaid.has(re)) {
+      if (re) capSaid.add(re);
+      log(`[auto-resume] ${id}: the wall was the ${h.name} cap, which resets at ${new Date(h.until).toISOString()} — not continued (it would meet the cap again); ${!re ? 'it cannot wait' : re.watch ? 'watching that cap (beyond the waiting bound: no timed continue)' : 'waiting for the cap\'s own reset'}`);
+    }
     if (!re) { armed.delete(id); save(); emit(id); }   // it could not wait (switched off, no verb): no due arm is left to re-enter the gate every tick
+    if (session._stoppedBy && onListChange) { try { onListChange(); } catch { } }   // the card's «waiting» follows (timed → a watch)
     return true;
   }
 
@@ -1328,7 +1346,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // ARMED RECORD (one source, one wording) — see continueNoticeFor
       const note = continueNoticeFor({ kind, armReason: a2.reason, label: label2, moved, cause });
       if (claim) Object.assign(note, claimContinueNotice({ label: label2, cause }));   // a continue on a reset claim says so (fireNowOnClaim)
-      if (kind === 'timed' && capHeld(id, session, key2)) return false;   // THE MODEL'S CAP STILL STANDS: the plan's window reset, not the cap (modelCapHold) — nothing reserved yet
+      if (!(origin && origin.via === 'reading') && capHeld(id, session, key2)) return false;   // THE MODEL'S CAP STILL STANDS (modelCapHold): every door but the armed lane's own reading edge — nothing reserved yet
       // THE CEILING, on the identity the continue actually lands on. The gate
       // can have moved us onto a member whose budget is spent — charging the
       // one we resolved before it is the round-2 defect in a second currency.
@@ -1602,5 +1620,5 @@ module.exports = {
   create, CONTINUE_PROMPT, continuePromptFor, workflowRunLine, WF_REREAD_MS, WF_FRESH_MS, WF_LEAD_MS, WF_INFLIGHT_MAX, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
-  modelCapHold,   // PURE: a model's cap that still stands holds a timed continue
+  modelCapHold, capDrawnBy, CAP_LAND_MS,   // PURE: a model's cap that still stands holds the continue
 };
