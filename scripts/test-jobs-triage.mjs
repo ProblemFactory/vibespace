@@ -50,9 +50,9 @@ function fakeApp() {
   return { app, call };
 }
 const policy = { doneAfterHours: 24, failedAfterDays: 7 };
-function boot(dir, { broadcasts = [] } = {}) {
+function boot(dir, { broadcasts = [], mod = wiring } = {}) {   // mod: a wiring module (a control's copy)
   const { app, call } = fakeApp();
-  const W = wiring.create({
+  const W = mod.create({
     app, dataDir: dir, broadcastAll: (m) => broadcasts.push(m), userTodos: { add() { }, resolveByJob() { return 0; } }, log: () => { },
     serverSetting: (k) => (k === 'jobs.archiveDoneAfterHours' ? policy.doneAfterHours : k === 'jobs.archiveFailedAfterDays' ? policy.failedAfterDays : undefined),
     taskGroups: null, activeSessions: null, deliver: { peerReachable: () => false, deliverToConversation: async () => ({ ok: false, reason: 'no lane' }) },
@@ -1023,6 +1023,35 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(ro.ro && ro.sync === 0 && ro.skel && !ro.archivedSkel, 'cure 3: a READ-ONLY engine\'s torn read again makes no synchronous read on the loop — the archive\'s ids come with the prefetch (its skeletons skip the archived job)', ro);
   ok(rox.ro && rox.sync > 0, 'cure 3 CONTROL (cure 2, in a copy): the load reads jobs-archive.json synchronously on the loop', rox);
   for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 7, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
+
+console.log('§15 B-6c1a: a record whose runs is not a list never breaks the list');
+{
+  const recOf = (id, extra = {}) => ({ id, kind: 'task', name: 'odd ' + id.slice(-2), state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [], createdAt: T0 - D, ...extra });
+  const scene = async (mod, name) => {
+    const d = mkDir(name);
+    const { W, jm, call: callR } = boot(d, { mod });
+    jm.jobs.set('jb-6c1a0001', recOf('jb-6c1a0001', { runs: { a: 1 } }));
+    jm.jobs.set('jb-6c1a0002', recOf('jb-6c1a0002', { runs: 5 }));
+    jm.jobs.set('jb-6c1a0003', recOf('jb-6c1a0003', { runs: [null, { startedAt: T0 - D, endedAt: T0 - D + 1, exit: 0 }] }));
+    jm.archive = [{ ...recOf('jb-6c1a0004', { runs: 'x' }), archivedAt: T0 - D, archivedWhy: 'done' }];
+    let list = null, arch = null;
+    try { list = await callR('GET', '/api/jobs', {}); } catch (e) { list = { threw: String(e && e.message) }; }
+    try { arch = await callR('GET', '/api/jobs', { query: { archived: '1' } }); } catch (e) { arch = { threw: String(e && e.message) }; }
+    W.shutdown?.();
+    return { list, arch };
+  };
+  const real = await scene(wiring, 'jobs-triage-runs-shape');
+  const rowsOf = (r) => (r && r.body && Array.isArray(r.body.jobs) ? r.body.jobs : []), runsBy = (r, id) => (rowsOf(r).find((j) => j.id === id) || {}).runs;
+  ok(real.list && real.list.status === 200 && ['jb-6c1a0001', 'jb-6c1a0002'].every((id) => Array.isArray(runsBy(real.list, id)) && runsBy(real.list, id).length === 0) && runsBy(real.list, 'jb-6c1a0003').length === 1
+    && real.arch && real.arch.status === 200 && Array.isArray(runsBy(real.arch, 'jb-6c1a0004')) && runsBy(real.arch, 'jb-6c1a0004').length === 0,
+    'B-6c1a: records whose runs is an object, a number, a string, or a list holding a null are LISTED (live and archived) — their runs read as none, never a list that fails', { live: rowsOf(real.list).map((j) => [j.id, j.runs]), arch: rowsOf(real.arch).map((j) => [j.id, j.runs]) });
+  const WSRC = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), NEW_RUNS = "(Array.isArray(j.runs) ? j.runs : []).filter((r) => r && typeof r === 'object').map((r) => ({";
+  ok(WSRC.split(NEW_RUNS).length === 2, 'B-6c1a control setup: the guarded runs read is in jobs-wiring once (the plant the control swaps)');
+  const MJ6 = mutantCopies('jobs-runs-shape-6c1a', ROOT);
+  const old = await scene(MJ6.load('src/server/jobs-wiring.js', WSRC.replace(NEW_RUNS, '(j.runs || []).map((r) => ({'), 'release'), 'jobs-triage-runs-shape-mut');   // stale-pins: kept — the control writes the release's runs read back into a copy
+  ok(!(old.list && old.list.status === 200) || !(old.arch && old.arch.status === 200), 'B-6c1a CONTROL (the release\'s runs read, in a copy): the list FAILS on such a record', { list: old.list && (old.list.status || old.list.threw), arch: old.arch && (old.arch.status || old.arch.threw) });
+  for (const r of copiesCensus(MJ6.files, MJ6.dir, ROOT, { minCopies: 1, label: 'B-6c1a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
