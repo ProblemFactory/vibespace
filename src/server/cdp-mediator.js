@@ -246,7 +246,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     return { tid, unknownSession: false, wrapped: false, innerMethod: null, innerParams: null, innerParamTid: null };
   }
   function wire(g, p, ws, up) {
-    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null, tracingActive: false, traceTainted: false, taintedStreams: null, withheld: new Map(), send: null };   // B-70af: `withheld` = the announcements this connection was not shown, `send` its scrubbed writer (an out-of-band admission replays there)
+    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null, tracingActive: false, traceTainted: false, taintedStreams: null, withheld: new Map(), deliver: null };   // B-70af: `withheld` = the announcements this connection was not shown, `deliver` its one after-filter (an out-of-band admission replays through it)
     askVersion(g, conn);   // (lane chrome-157 r2: the browser of THIS connection — a restart / relaunch closes it, the reconnect reads the new one)
     g.conns.add(conn);
     g.lastUsedAt = now();
@@ -437,7 +437,55 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
       ws.send(out);
     };
-    conn.send = sendClient;
+    // B-70af (主开发's readers, 00:15Z): ONE after-filter for every event this connection is shown — the upstream's (below) and an
+    // out-of-band admission's replay (admitInto → conn.deliver): the live-fill fence, its masking and the trace taint judge both,
+    // so the two roads can never differ
+    const deliverEvent = (evIn, raw = null) => {
+      let ev = evIn;
+      if (loginFence) {
+        const evSid = ev.sessionId == null ? null : String(ev.sessionId);
+        const evTid = conn.kind === 'page' ? conn.targetId : (evSid && g.scope ? g.scope.sessions.get(evSid) || null : null);
+        const evUnknownFenced = Boolean(evSid && !evTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
+        // lane chrome-157 (round 32, 主开发 item 2): a fenced tab's events pass by the argued list alone (browser-mediation liveFillEventAllowed)
+        const evLf = liveFillFor(g.profileId, evTid);
+        if ((evLf || evUnknownFenced) && !M.liveFillEventAllowed(ev, evTid)) {
+          g.dropped = (g.dropped || 0) + 1;
+          return;
+        }
+        if (evLf) ev = maskShownNav(g.profileId, evTid, ev, evLf);
+        if (ev.method === 'Target.receivedMessageFromTarget' && ev.params && typeof ev.params.message === 'string') {
+          const innerSid = ev.params.sessionId ? String(ev.params.sessionId) : null;
+          const innerTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : (ev.params.targetId ? String(ev.params.targetId) : null);
+          const innerUnknownFenced = Boolean(!innerTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
+          const innerLf = liveFillFor(g.profileId, innerTid);
+          if (innerLf || innerUnknownFenced) {
+            let inner = null;
+            try { inner = JSON.parse(ev.params.message); } catch { inner = null; }
+            if (!inner || inner.id != null || !M.liveFillEventAllowed(inner, innerTid)) { g.dropped = (g.dropped || 0) + 1; return; }
+            const masked = innerLf ? maskShownNav(g.profileId, innerTid, inner, innerLf) : inner;
+            if (masked !== inner) ev = { ...ev, params: { ...ev.params, message: JSON.stringify(masked) } };
+          }
+        }
+        if (ev.method === 'Tracing.dataCollected') {
+          if (conn.traceTainted || (typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId))) {
+            conn.traceTainted = true;
+            g.dropped = (g.dropped || 0) + 1;
+            return;
+          }
+        } else if (ev.method === 'Tracing.tracingComplete') {
+          const wasTainted = Boolean(conn.traceTainted || (typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId)));
+          conn.tracingActive = false;
+          conn.traceTainted = false;
+          if (wasTainted && ev.params && ev.params.stream) {
+            conn.taintedStreams = conn.taintedStreams || new Set();
+            conn.taintedStreams.add(String(ev.params.stream));
+            while (conn.taintedStreams.size > 64) conn.taintedStreams.delete(conn.taintedStreams.values().next().value);
+          }
+        }
+      }
+      try { sendClient(raw != null && ev === evIn ? raw : JSON.stringify(ev)); } catch { /* gone */ }
+    };
+    conn.deliver = (ev) => deliverEvent(ev);
     up.on('message', (data) => {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
@@ -524,48 +572,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       let ev = M.filterEvent(msg, g.scope);
       M.withhold(conn.withheld, msg, { shown: !!ev });   // B-70af: what this connection was not shown is kept (replayed if the keeper admits it); shown or destroyed ends it
       if (!ev) { g.dropped = (g.dropped || 0) + 1; return; }
-      if (loginFence) {
-        const evSid = ev.sessionId == null ? null : String(ev.sessionId);
-        const evTid = conn.kind === 'page' ? conn.targetId : (evSid && g.scope ? g.scope.sessions.get(evSid) || null : null);
-        const evUnknownFenced = Boolean(evSid && !evTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
-        // lane chrome-157 (round 32, 主开发 item 2): a fenced tab's events pass by the argued list alone (browser-mediation liveFillEventAllowed)
-        const evLf = liveFillFor(g.profileId, evTid);
-        if ((evLf || evUnknownFenced) && !M.liveFillEventAllowed(ev, evTid)) {
-          g.dropped = (g.dropped || 0) + 1;
-          return;
-        }
-        if (evLf) ev = maskShownNav(g.profileId, evTid, ev, evLf);
-        if (ev.method === 'Target.receivedMessageFromTarget' && ev.params && typeof ev.params.message === 'string') {
-          const innerSid = ev.params.sessionId ? String(ev.params.sessionId) : null;
-          const innerTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : (ev.params.targetId ? String(ev.params.targetId) : null);
-          const innerUnknownFenced = Boolean(!innerTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
-          const innerLf = liveFillFor(g.profileId, innerTid);
-          if (innerLf || innerUnknownFenced) {
-            let inner = null;
-            try { inner = JSON.parse(ev.params.message); } catch { inner = null; }
-            if (!inner || inner.id != null || !M.liveFillEventAllowed(inner, innerTid)) { g.dropped = (g.dropped || 0) + 1; return; }
-            const masked = innerLf ? maskShownNav(g.profileId, innerTid, inner, innerLf) : inner;
-            if (masked !== inner) ev = { ...ev, params: { ...ev.params, message: JSON.stringify(masked) } };
-          }
-        }
-        if (ev.method === 'Tracing.dataCollected') {
-          if (conn.traceTainted || (typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId))) {
-            conn.traceTainted = true;
-            g.dropped = (g.dropped || 0) + 1;
-            return;
-          }
-        } else if (ev.method === 'Tracing.tracingComplete') {
-          const wasTainted = Boolean(conn.traceTainted || (typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId)));
-          conn.tracingActive = false;
-          conn.traceTainted = false;
-          if (wasTainted && ev.params && ev.params.stream) {
-            conn.taintedStreams = conn.taintedStreams || new Set();
-            conn.taintedStreams.add(String(ev.params.stream));
-            while (conn.taintedStreams.size > 64) conn.taintedStreams.delete(conn.taintedStreams.values().next().value);
-          }
-        }
-      }
-      try { sendClient(ev === msg ? String(data) : JSON.stringify(ev)); } catch { /* gone */ }
+      deliverEvent(ev, ev === msg ? String(data) : null);
     });
     ws.on('close', () => closeBoth(1000, ''));
     ws.on('error', () => closeBoth(1011, 'client error'));
@@ -912,7 +919,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
   function admitInto(g, targetId) {
     const was = M.inScope(g.scope, targetId);
     M.admitTarget(g.scope, targetId);
-    for (const c of g.conns) { const ev = M.replayOnAdmit(c.withheld, targetId, { wasInScope: was }); if (ev && c.send) { try { c.send(JSON.stringify(ev)); } catch { /* gone */ } } }
+    for (const c of g.conns) { const ev = M.replayOnAdmit(c.withheld, targetId, { wasInScope: was }); if (ev && c.deliver) c.deliver(ev); }
   }
   function grantOf(profileId, browserKey) { const t = byKey.get(M.grantKey(profileId, browserKey)); return t ? grants.get(t) : null; }
   function urlFor(profileId, browserKey) { const g = grantOf(profileId, browserKey); return g && port ? M.mediatedBrowserUrl({ port, token: g.token }) : null; }

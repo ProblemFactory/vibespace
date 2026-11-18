@@ -681,6 +681,10 @@ console.log('— ⑧ lane browser-resume B: the kept fact, ownResumable, the sto
 // followed never told the driver (measured with the real driver 0.38.2 over this mediator, Chrome 154: 3 of 3 binds refused; with the replay, bound)
 console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a connection was not shown — once');
 {
+  // a «never heard» is witnessed by a SENTINEL, never a fixed wait: the fake Chrome then announces an in-scope change of the lease's own
+  // tab (T0) on the same upstream socket — the mediator handles one socket in order, so once the client hears the sentinel every
+  // announcement before it was judged (and any replay an admission sent before it is already on the client's socket)
+  let mark9 = 0;
   // the PURE pair
   const wh = new Map();
   M.withhold(wh, { method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T9', type: 'page', url: 'about:blank' } } });
@@ -714,22 +718,23 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     cdp.on('message', (d) => { const m = JSON.parse(d); if (m.method) heard.push(m); });
     await until(() => ups.length === 1, 3000);
     const created = (id) => heard.filter((m) => m.method === 'Target.targetCreated' && m.params.targetInfo.targetId === id).length;
-    return { med, cdp, heard, created, async close() { try { cdp.close(); } catch { } try { med.shutdown(); } catch { } } };
+    const settle = async () => { const title = `sentinel-${++mark9}`; announce('Target.targetInfoChanged', 'T0', { title }); ok(!!(await until(() => heard.some((m) => m.method === 'Target.targetInfoChanged' && m.params.targetInfo.title === title), 3000)), `⑨ the sentinel ${title} reached the client`); };
+    return { med, cdp, heard, created, settle, async close() { try { cdp.close(); } catch { } try { med.shutdown(); } catch { } } };
   };
   {
     const w9 = await world9(require('../src/server/cdp-mediator.js'));
     announce('Target.targetCreated', 'T9'); // the keeper's new window: no opener in the scope — dropped
     announce('Target.targetCreated', 'T12'); // another holder's tab: never this lease's
-    await sleep(150);
+    await w9.settle();
     const before = w9.created('T9');
     ok(w9.med.admitTarget(WORK, KEY, 'T9') === true, '⑨ the keeper admits its tab (openOwnTab\'s admitTarget)');
     await until(() => w9.created('T9') === 1, 2000);
     ok(before === 0 && w9.created('T9') === 1, '⑨ the driver HEARS the keeper\'s tab once it is the lease\'s (the replay) — before it, nothing', JSON.stringify(w9.heard.map((m) => m.method + ':' + (m.params.targetInfo || {}).targetId)));
-    w9.med.admitTarget(WORK, KEY, 'T9'); await sleep(150);
+    w9.med.admitTarget(WORK, KEY, 'T9'); await w9.settle();
     ok(w9.created('T9') === 1, '⑨ …a second admission says nothing again (once, never twice)');
-    w9.med.admitTarget(WORK, KEY, 'T10'); announce('Target.targetCreated', 'T10'); await until(() => w9.created('T10') >= 1, 2000); await sleep(100);
+    w9.med.admitTarget(WORK, KEY, 'T10'); announce('Target.targetCreated', 'T10'); await until(() => w9.created('T10') >= 1, 2000); await w9.settle();
     ok(w9.created('T10') === 1, '⑨ an announcement that arrives AFTER the admission passes once (in scope by then — no replay on top)');
-    announce('Target.targetCreated', 'T11'); announce('Target.targetDestroyed', 'T11'); await sleep(150); w9.med.admitTarget(WORK, KEY, 'T11'); await sleep(150);
+    announce('Target.targetCreated', 'T11'); announce('Target.targetDestroyed', 'T11'); await w9.settle(); w9.med.admitTarget(WORK, KEY, 'T11'); await w9.settle();
     ok(w9.created('T11') === 0, '⑨ a tab gone before its admission is never announced');
     ok(w9.created('T12') === 0, '⑨ another holder\'s tab is never announced to this lease');
     // the adversarial read's three (the replay must never REPEAT what another road already told, nor name a gone tab):
@@ -737,19 +742,19 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     //     (leaseUrlFor → grantFor with the lease's tabs) and by the keeper: once
     w9.cdp.send(JSON.stringify({ id: 91, method: 'Target.createTarget', params: { url: 'about:blank' } }));
     await until(() => w9.created('TC1') >= 1, 2000);
-    await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['T0', 'TC1'], mode: M.SCOPE_MODE }); w9.med.admitTarget(WORK, KEY, 'TC1'); await sleep(150);
+    await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['T0', 'TC1'], mode: M.SCOPE_MODE }); w9.med.admitTarget(WORK, KEY, 'TC1'); await w9.settle();
     ok(w9.created('TC1') === 1, '⑨ the lease\'s own new tab (its createTarget reply told it) is never told again by a later grant or admission', JSON.stringify(w9.heard.map((m) => m.method + ':' + ((m.params.targetInfo || {}).targetId || m.params.targetId))));
     // (b) a second own tab, closed IN scope (its destroy passes the filter) before any grant, then a grant names it (a lease's
     //     stale targetId): never a gone tab
     w9.cdp.send(JSON.stringify({ id: 93, method: 'Target.createTarget', params: { url: 'about:blank' } }));
     await until(() => w9.created('TC2') >= 1, 2000);
-    announce('Target.targetDestroyed', 'TC2'); await sleep(100);
-    await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['TC2'], mode: M.SCOPE_MODE }); w9.med.admitTarget(WORK, KEY, 'TC2'); await sleep(150);
+    announce('Target.targetDestroyed', 'TC2'); await w9.settle();
+    await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['TC2'], mode: M.SCOPE_MODE }); w9.med.admitTarget(WORK, KEY, 'TC2'); await w9.settle();
     ok(w9.created('TC2') === 1, '⑨ a tab closed in scope is never announced again when a grant or the keeper names it after');
     // (c) the grant's targetIds road (leaseCliOpts) brings a withheld tab into the scope ⇒ told once, as the keeper's admission does
-    announce('Target.targetCreated', 'T13'); await sleep(150);
+    announce('Target.targetCreated', 'T13'); await w9.settle();
     await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['T13'], mode: M.SCOPE_MODE }); await until(() => w9.created('T13') === 1, 2000);
-    await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['T13'], mode: M.SCOPE_MODE }); await sleep(150);
+    await w9.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: ['T13'], mode: M.SCOPE_MODE }); await w9.settle();
     ok(w9.created('T13') === 1, '⑨ a grant that brings a withheld tab into the scope tells it once — the next grant naming it says nothing');
     await w9.close();
   }
@@ -760,7 +765,7 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     const needle = 'if (!g || !targetId) return false; admitInto(g, targetId); return true; }';
     ok(src.includes(needle), '⑨ control setup: the out-of-band admission is found in src/server/cdp-mediator.js');
     const w9 = await world9(MUT.load('src/server/cdp-mediator.js', src.replace(needle, 'if (!g || !targetId) return false; M.admitTarget(g.scope, targetId); return true; }'), 'noreplay'));
-    announce('Target.targetCreated', 'T9'); await sleep(150); w9.med.admitTarget(WORK, KEY, 'T9'); await sleep(300);
+    announce('Target.targetCreated', 'T9'); await w9.settle(); w9.med.admitTarget(WORK, KEY, 'T9'); await w9.settle();
     ok(w9.created('T9') === 0, '⑨ CONTROL (an admission without the replay — the release): the driver never hears its tab (the bind\'s «No tab with target id»)');
     await w9.close();
     // CONTROL (the adversarial read's must-fix) — a replay that ignores what the scope already holds: the lease's own tab told TWICE
@@ -774,10 +779,14 @@ console.log('— ⑨ B-70af: an out-of-band admission replays the announcement a
     const w9r = await world9(MUT.load('src/server/cdp-mediator.js', medSrc.replace(medNeedle, `const M = require(${JSON.stringify(mrPath)});`), 'replay-always-med'));
     const tcR = 'TC' + (tcN + 1);
     w9r.cdp.send(JSON.stringify({ id: 92, method: 'Target.createTarget', params: { url: 'about:blank' } })); await until(() => w9r.created(tcR) >= 1, 2000);
-    await w9r.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: [tcR], mode: M.SCOPE_MODE }); await sleep(150);
+    await w9r.med.grantFor({ profileId: WORK, browserKey: KEY, upstream: up9, targetIds: [tcR], mode: M.SCOPE_MODE }); await w9r.settle();
     ok(w9r.created(tcR) === 2, '⑨ CONTROL (a replay that ignores the scope): the lease\'s own tab is told TWICE — the in-scope rule is what keeps it once', String(w9r.created(tcR)));
     await w9r.close();
     for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑨ controls: ' })) ok(c.pass, c.name, c.detail);
+    // 主开发's readers (00:15Z): the replay and the upstream's events go through ONE after-filter (the live-fill fence, its masking, the trace taint)
+    const medNow = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
+    ok(medNow.includes('    const deliverEvent = (evIn, raw = null) => {') && medNow.includes('      deliverEvent(ev, ev === msg ? String(data) : null);') && medNow.includes('if (ev && c.deliver) c.deliver(ev);') && medNow.includes('    conn.deliver = (ev) => deliverEvent(ev);') && medNow.split('!M.liveFillEventAllowed(ev, evTid)').length === 2,
+      '⑨ the replay is delivered through the SAME after-filter as every upstream event (deliverEvent — one copy of the live-fill fence), never a writer of its own');
   }
   await new Promise((r) => chrome9.close(() => r()));
 }
