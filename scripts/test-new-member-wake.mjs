@@ -109,6 +109,9 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 // DELIVERIES waits this out first; asserting straight after the wake measures
 // the scheduler, not the product (measured: one of two sessions had landed).
 const settle = () => tick(60);
+// …and a leg that counts DELIVERIES waits for them by their count, never a clock (B-2e0b: the .385 master run's INCIDENT leg read
+// {fired 2, sent 1} after settle()'s 60 ms at load 4.7 — the second send landed later). The guard only ends a wait that never comes.
+const delivered = async (w, n) => { for (let k = 0; k < 400 && w.fired.length < n; k++) await tick(20); return w.fired.length; };
 
 /** THE INCIDENT'S WORLD. Two exhausted members, a pool that holds both, two
  *  conversations parked and ARMED for a reset eight hours out — and a THIRD
@@ -162,12 +165,13 @@ function mkWorld({ auto = true, hot = true, host = null, withFireNow = true, new
   // NEW has NO cache file at all — "no usage data", exactly the arm reason
 
   const sessions = new Map();
-  const notices = [], notes = [], fired = [], wsSent = [];
+  const notices = [], notes = [], fired = [], wsSent = [], heldGates = new Map();
   const ar = createAR({
     dataDir, activeSessions: sessions, serverSetting: () => true, log: () => { },
     notify: (id, s2, text) => notes.push({ id, text }),
     sendToSession: (id, s2, text, carried) => { fired.push({ id, text, note: carried && carried.note || null }); return true; },   // 2.369.97: the cause rides the prompt (one card per continue)
-    beforeFire: (id, s2) => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return true; } },
+    // B-2e0b's placement: a held id's PRE-FIRE GATE answers only once released — the real window between the edge's decision and the send
+    beforeFire: (id, s2) => { const go = () => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return true; } }; const h = heldGates.get(id); return h ? h.then(go) : go(); },
     fireIdentity: (id, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } },
   });
   // §1c HALF ② OFF, as a real degrade: an auto-resume that publishes no
@@ -213,6 +217,8 @@ function mkWorld({ auto = true, hot = true, host = null, withFireNow = true, new
     notices, notes, fired, wsSent, cacheDir, readCache, writeCache, spent, probes, login,
     coldRestarts: () => wsSent.filter((p2) => /"type":"pool-auto-switched"/.test(String(p2))).length,
     setProbeAnswer: (f) => { probeAnswer = f; },
+    // B-2e0b's placement: this conversation's pre-fire gate answers only once released — the async gate resolving late, placed
+    holdGate: (id) => { let open; heldGates.set(id, new Promise((r) => { open = r; })); return () => { heldGates.delete(id); open(); }; },
     linkOf: (sid) => am.poolCurrentFor(P, sid),
     healthy: () => ({ fetchedAt: Date.now(), source: 'on-demand', fiveHour: { utilization: 0.04, resetsAt: R5 }, sevenDay: { utilization: 0.10, resetsAt: R7 } }),
     // the REAL rejection producer, exactly as test-auto-resume-loop drives it
@@ -284,7 +290,7 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     ok('…and nothing has read the new member either (the auto-cli loop is in its backoff)', w.probes.length === 0 && w.readCache(w.NEW) === null);
 
     const r = await w.eng.onMemberLoginSuccess(w.NEW, 'login success');
-    await settle();
+    await settle(); await delivered(w, (r.wake && r.wake.fired.length) || 0);
     // Every read on this path goes through the ONE caps-routed dispatcher and
     // names this member. The FIRST is the login edge's own; the later ones are
     // the pre-fire gate re-verdicting the target before it spends, which is
@@ -1134,10 +1140,28 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     w.unthrottle();
     w.writeCache(w.NEW, w.healthy());
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await settle(); await delivered(w, r.fired.length);
     ok('THE INCIDENT: both conversations were ALREADY parked on the newcomer, so the continue lands on the member that became usable — both released',
       r.fired.length === 2 && w.fired.length === 2 && r.skipped.length === 0, JSON.stringify({ fired: r.fired.length, sent: w.fired.length, skipped: r.skipped }));
     ok('…and the card names the account that recovered', /UCI Max 已恢复可用/.test(cardsOf(w)), cardsOf(w));
+  }
+  // (d′) B-2e0b PLACED: the same incident with B's PRE-FIRE GATE answering LATE (held until the first delivery is seen) — the .385
+  // runner's {fired 2, sent 1}. The leg waits for the deliveries by their count; the old leg's read (after settle()) is the control.
+  {
+    const w = mkWorld();
+    w.eng.maybePoolAutoSwitchForPool(w.P); await tick(5);
+    for (const s of [w.A, w.B]) w.ar.armIfEnabled(s._webuiId, s, w.R5 * 1000, 'UCI Max: no usage data | Fish Max: 5h 0% < 10%');
+    w.unthrottle();
+    w.writeCache(w.NEW, w.healthy());
+    const release = w.holdGate(w.B._webuiId);
+    const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
+    await settle(); const oldLeg = r.fired.length === 2 && w.fired.length === 2; // THE OLD LEG, read where it read: after settle()
+    const atFirst = await delivered(w, 1);
+    release();
+    await delivered(w, r.fired.length); await settle(); // …and a settle more: a duplicate continue would land in it
+    ok('B-2e0b PLACED: one continue\'s pre-fire gate answers late — the incident leg waits for BOTH deliveries by their count and both are released, exactly once each',
+      r.fired.length === 2 && w.fired.length === 2 && new Set(w.fired.map((f) => f.id)).size === 2 && w.fired[1].id === w.B._webuiId, JSON.stringify({ fired: r.fired.length, sent: w.fired.map((f) => f.id) }));
+    ok('CONTROL: the OLD leg (its read after settle()\'s 60 ms) is RED under the same placement — {fired 2, sent 1}, the .385 runner\'s red — while the first delivery has landed; only the wait on the count passes', oldLeg === false && atFirst === 1, JSON.stringify({ oldLeg, atFirst }));
   }
 
   // (e) "THE WAKE MOVED IT" IS HALF ①'s SPEND, NOT HALF ②'s — the LOGIN shape:
