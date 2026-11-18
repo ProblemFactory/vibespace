@@ -45,12 +45,20 @@ function rewindOut(session, now = Date.now()) {
   return now - o.at < REWIND_LIFE_MS ? o : null;   // pressed, its record not read yet (or a wrapper that says none): one life
 }
 
+/** WHEN THE REQUEST WENT OUT, by the hub's clock: the press's own mark when it is this request; else the wrapper's stamp,
+ *  never later than when the hub read it (`seenAt`). */
+function outAt(session, o) {
+  const own = session && session._rewindOut;
+  if (own && o && own.id === o.id) return Number(own.at) || 0;
+  return Math.min(Number(o && o.at) || 0, Number(o && o.seenAt) || Infinity);
+}
+
 /** THE PERSON'S FENCE (主开发 20:05Z): while a rewind is out the person's send waits — never past the stated expiry
  *  (REWIND_LIFE_MS from the press): the ms left, 0 = the send goes through. Only this fence is bounded; the hub's own mark
  *  (rewindOut) lives as long as the request. */
 function rewindFenceLeft(session, now = Date.now()) {
   const o = rewindOut(session, now);
-  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now)) : 0;
+  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, outAt(session, o) + REWIND_LIFE_MS - now)) : 0;
 }
 
 /** One press — or its DRY RUN (`dryRun`: the plan's words for the confirm, nothing written). Returns the frame for the
@@ -69,7 +77,7 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   if (!messages) return no('stopped');
   if (session._rebuildPromise) return no('rebuilding');  // the history is being rebuilt: the array is not whole yet
   const out0 = rewindOut(session, now);                 // one rewind at a time — past the minute the words name the Stop door
-  if (out0) return no(now - (Number(out0.at) || 0) >= REWIND_LIFE_MS ? 'pending-long' : 'pending');
+  if (out0) return no(now - outAt(session, out0) >= REWIND_LIFE_MS ? 'pending-long' : 'pending');
   // the page names the newest message IT shows: a conversation that moved past it is refused, never cut unseen
   const plan = rewindPlanOf(row, messages, String(msgId || ''), { ...rewindStateOf(session), pageLastSeenUuid: typeof lastSeenUuid === 'string' ? lastSeenUuid : null });
   if (!plan.ok) return no(plan.reason);
@@ -85,6 +93,7 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   try { out = road.request(plan, { id: typeof reqId === 'string' ? reqId : null }); } catch { return no('no-target-id'); } // the page's own id: it binds it before it sends
   try { session.pty.write(out.line + '\n'); } catch { return no('stopped'); }
   session._rewindOut = { id: out.requestId, at: now }; // one rewind at a time (rewindOut)
+  try { session._normalizer.noteRewindPressed?.({ id: out.requestId, lastId: (messages[messages.length - 1] || {}).id || null }); } catch { } // the late answer's bound
   return { ok: true, requestId: out.requestId, ...said };
 }
 

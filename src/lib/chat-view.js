@@ -1259,6 +1259,7 @@ class ChatView {
         // send was alive server-side — finalize the deferred draft clear
         // (chat-input dead-ws-window loss defense).
         this._chatInput?.confirmDelivery?.();
+        if (msg.op === 'create' && msg.message && msg.message.webuiMsgId) this._chatInput?.sentLanded?.(msg.message.webuiMsgId); // B-437e: only a person's send carries one
         this._onOp(msg);
       } else if (msg.type === 'streaming-label' && msg.sessionId === sessionId) {
         this._onServerStreamLabel(msg.label, msg.kind || null);
@@ -1357,6 +1358,7 @@ class ChatView {
         this._onSigninWall(msg); // lane signin-card-real-screen: the CLI's LIVE «Not logged in» answer (it no longer dies on it)
       } else if (msg.type === 'exited' && msg.sessionId === sessionId) {
         this._hideTyping();
+        try { sessionStorage.removeItem('vs-rewind:' + sessionId); } catch { } // B-437e: the process that held the tab's waiting presses ended
         this._signinLive = false; // the wall's CLI is gone: a re-send resumes at once
         // THE THIRD EXIT of every "right now" claim this view holds — the
         // compaction stage, the harness's turn-state chip, the executing-tool
@@ -7187,7 +7189,7 @@ class ChatView {
     if (isScopedRefusal(msg)) {
       this._hideTyping();
       // B-437e: a send the hub refused while a rewind is out — the words back in the box, said once (no ✗ line)
-      if (msg.code === 'rewind-out') { this._sayRefusedSend(this._chatInput?.refusedSend?.(msg.msgId) || 'none', msg.left); return; }
+      if (msg.code === 'rewind-out') { const put = this._chatInput?.refusedSend?.(msg.msgId); if (put) this._sayRefusedSend(put, msg.left); return; }
       // A refused LIVE style switch can be a FACT about this session: only
       // 'style-wrapper-old' means THIS wrapper will never serve the verb, so
       // only it flips the flag — the chip's menu then offers the restart row

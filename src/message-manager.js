@@ -1063,7 +1063,7 @@ class MessageManager extends MessageWindow {
       // B-437e: the CLI's persisted rewind anchor (rewound:true) cuts on a reload; any other last-prompt row is bookkeeping
       case 'last-prompt': return this._processLastPrompt(raw, emit);
       case 'frame_stamp': return this._processFrameStamp(raw, emit); // the wrapper's stamp on a person's frame (B-437e)
-      case 'rewind_out': if (typeof raw.request_id === 'string') this._rewindAsked = { id: raw.request_id, at: Number(raw.at) || 0 }; return;
+      case 'rewind_out': if (typeof raw.request_id === 'string') this._rewindAsked = { id: raw.request_id, at: Number(raw.at) || 0, seenAt: Date.now(), lastId: (this.messages[this.messages.length - 1] || {}).id || null }; return;
       // the WRAPPER's own records (2.369.354 — the CLI never writes these): its mid-turn queue
       case 'queued_input': return this._processQueuedInput(raw, emit);
       case 'queue_changed': return this._processQueueChanged(raw, emit);
@@ -1119,6 +1119,7 @@ class MessageManager extends MessageWindow {
   // B-437e: which of OUR requests the CLI answered (the server's one-at-a-time mark reads it; a rebuild replays the answers)
   rewindAnswered(requestId) { return !!this._rewindAnswers && this._rewindAnswers.includes(String(requestId)); }
   rewindAskedOut() { const a = this._rewindAsked; return a && !this.rewindAnswered(a.id) ? a : null; }
+  noteRewindPressed(p) { this._rewindPressed = p; }
 
   // B-437e: the CLI's answer to OUR request (vsr-): the cut at its echo when held, ONE rewind-answer with the reply as it came ⇒ kb-file-structure «rewind-door.js»
   _processRewindAnswer(resp, emit) {
@@ -1126,7 +1127,8 @@ class MessageManager extends MessageWindow {
     const body = resp && resp.subtype === 'error' ? { error: String(resp.error || 'error') } : (resp && resp.response) || null;
     this._rewindAnswers = [...(this._rewindAnswers || []).slice(-15), requestId];
     const echo = body && body.rewound === true ? body.targetMessageUuid : null;
-    const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo }, emit) : null;
+    const asked = [this._rewindPressed, this._rewindAsked].find((a) => a && a.id === requestId) || null;
+    const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo, untilId: asked && asked.lastId }, emit) : null;
     if (emit) this._emit({ op: 'meta', subtype: 'rewind-answer', data: { requestId, answer: body, taken: cut ? cut.taken : 0, already: !!(cut && cut.already) } });
   }
 
@@ -1150,8 +1152,8 @@ class MessageManager extends MessageWindow {
   }
 
   // B-437e: the cut — struck in place (rollback), ONE notice; a twin record cuts nothing; an unheld anchor is said ⇒ kb-file-structure «rewind-door.js»
-  _processRewindCut({ targetUuid = null, leafUuid = undefined } = {}, emit) {
-    const c = cutOf(this.messages, { targetUuid, leafUuid });
+  _processRewindCut({ targetUuid = null, leafUuid = undefined, untilId = null } = {}, emit) {
+    const c = cutOf(this.messages, { targetUuid, leafUuid, untilId });
     if (c.already) { // a twin: its leftovers (a card drawn after the cut) join the cut it has — no second notice
       const left = c.ids.length ? applyRewound(this.messages, c.ids, 'rollback') : [];
       if (emit && left.length) this._emit(rewoundOp({ harness: 'claude', toMessageId: left[0], ids: left, kind: 'rollback', ts: this._currentTs }));

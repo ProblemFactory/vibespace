@@ -24,7 +24,7 @@ const { addressableId } = require('../claude-lock-capture.js');
 
 const DOC_COMMENT_FROM = 'Doc comments';
 const SUMMARY_MAX = 400;
-const STATUS = Object.freeze({ bad_path: 400, empty: 400, too_many: 400, bad_summary: 400, no_owner: 409, no_conversation: 409, send_failed: 502 });
+const STATUS = Object.freeze({ bad_path: 400, empty: 400, too_many: 400, bad_summary: 400, no_owner: 409, no_conversation: 409, rewind_out: 409, send_failed: 502 });
 const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
 const hostOf = (h) => (h && h !== 'local' ? String(h) : null);
 const docPath = (p) => typeof p === 'string' && p.startsWith('/') && M.isDocPath(p);
@@ -115,7 +115,7 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
     for (let k = 0; k < lines.length; k++) {
       const r = sessionId && typeof sendUserInput === 'function' ? sendUserInput(sessionId, lines[k], { msgId: `${now()}-doc${lines.length > 1 ? '-' + (k + 1) : ''}`, origin: 'doc-comment', door: 'enter' }) : { ok: false, code: 'no_session' };
       if (r && r.ok) { msgIds.push(r.msgId); sent += v.batches[k].count; continue; }
-      if (k > 0 || !r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comments were not sent', { sent });
+      if (k > 0 || !r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comments were not sent', { sent, ...(r && r.i18n ? { i18n: r.i18n } : {}) });
       break;   // the first message found no typing session ⇒ every message waits in the stash
     }
     if (msgIds.length === lines.length) return { ok: true, delivered: 'sent', msgId: msgIds[0], msgIds, ...done, text: lines.join('\n\n') };

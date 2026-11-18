@@ -417,6 +417,24 @@ function roadLaws(MM = createMessageManager, D = DOOR) {
   if (rewindOut({ ...session, _rewindOut: null, _normalizer: MM('claude', 'cp-new-wrapper') }, T0 + 5)) bad.push('door:a-new-wrapper-holds-nothing');
   restarted._normalizer.processLive(REC.answer(r.requestId, { rewound: false, reason: 'state_changed', error: 'state changed' }));
   if (rewindOut(restarted, T0 + 10 * LIFE)) bad.push('door:the-answer-ends-it-after-a-restart');
+  // A LATE ANSWER (the one-life cure, three readers' scene): the CLI answers after the minute; between, the person sent M
+  // and the hub drew it — the CLI ran M AFTER the rewind, so the cut ends at the last message that stood when the request
+  // went out (the wrapper's record noted it); M and its reply stand
+  // — (press) the bound the PRESS noted, with NO record (a wrapper older than the record); (record) the record's own bound
+  // after a hub restart (a new normalizer, no press note)
+  const lateLaw = (which, ml, requestId) => {
+    for (const x of [REC.send('sent after the minute', 'm-late'), REC.stamp('m-late', U(81)), REC.said('its reply', U(82)), REC.result()]) ml.processLive(x);
+    ml.processLive(REC.answer(requestId, { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask' }));
+    const by = (u) => ml.messages.find((m) => m.uuid === u);
+    if (by(U(3))?.rewound !== 'rollback' || by(U(4))?.rewound !== 'rollback' || by(U(81))?.rewound || by(U(82))?.rewound) bad.push(`answer:a-late-answer-never-strikes-a-later-send (${which}: ${[3, 4, 81, 82].map((n) => by(U(n))?.rewound || '-')})`);
+  };
+  { const { mm: ml } = liveTwo(MM, 'cp-late');
+    const pl = ml.messages.find((m) => m.webuiMsgId === 'm-2');
+    const rl = requestRewind({ by: HUMAN, session: { ...session, _rewindOut: null, _normalizer: ml, pty: { write() { } } }, msgId: pl && pl.id, lastSeenUuid: U(3) });
+    if (!rl.ok) bad.push(`answer:a-late-answer-never-strikes-a-later-send (press: ${rl.reason})`); else lateLaw('press', ml, rl.requestId); }
+  { const { mm: ml2 } = liveTwo(MM, 'cp-late2');
+    ml2.processLive(REC.rewindOut('vsr-late2', Date.now()));
+    lateLaw('record', ml2, 'vsr-late2'); }
   // the CLI's answer
   const before = ops.length;
   mm.processLive(REC.answer(r.requestId, { rewound: true, targetMessageUuid: U(3), prefillText: 'second ask', precedingAssistantUuid: U(2) }));
@@ -514,9 +532,15 @@ function roadLaws(MM = createMessageManager, D = DOOR) {
   const s1 = typeIt('in-the-window');                  // THE STALL: the wrapper's record is held back — the press's own mark
   msd.processLive(REC.rewindOut(ps.requestId, Date.now()));
   const s2 = typeIt('with-the-record');
-  msd.processLive(REC.rewindOut(ps.requestId, Date.now() + 10 * LIFE));     // a clock that stepped: the fence still ends in a minute
-  if (!(rewindFenceLeft(sendS) > 0 && rewindFenceLeft(sendS) <= LIFE)) bad.push(`send:the-fence-never-exceeds-the-minute (${rewindFenceLeft(sendS)})`);
-  msd.processLive(REC.rewindOut(ps.requestId, Date.now()));
+  { const ahead = MM('claude', 'cp-ahead'); ahead.processLive(REC.rewindOut('vsr-ahead', Date.now() + 10 * LIFE));   // a wrapper clock running ahead
+    const sa = { ...sendS, _rewindOut: null, _normalizer: ahead }, t0 = Date.now();           // after a hub restart: no press mark
+    const f0 = rewindFenceLeft(sa, t0), f1 = rewindFenceLeft(sa, t0 + LIFE + 5);
+    if (!(f0 > 0 && f0 <= LIFE) || f1 !== 0) bad.push(`send:the-fence-ends-a-minute-after-the-hub-saw-the-request (${f0}, ${f1})`);
+    msd.processLive(REC.rewindOut(ps.requestId, Date.now() + 10 * LIFE));                    // the same, with the press's own mark:
+    if (!(rewindFenceLeft(sendS) > 0 && rewindFenceLeft(sendS) <= LIFE)) bad.push('send:the-press-own-time-rules-its-fence');
+    msd.processLive(REC.rewindOut(ps.requestId, Date.now()));
+    const sf = { ...sendS, _rewindOut: { id: 'vsr-future', at: Date.now() + 10 * LIFE }, _normalizer: MM('claude', 'cp-future') };
+    if (rewindFenceLeft(sf) > LIFE) bad.push(`send:the-fence-never-says-more-than-the-minute (${rewindFenceLeft(sf)})`); }
   const s3 = typeIt('/compact', { origin: 'dispatch' });
   if (s0.code !== 'send_failed') bad.push(`send:free-before-a-rewind (${s0.code})`);
   if (!ps.ok || typed.length !== 1) bad.push(`send:the-press-wrote-one-request (${ps.reason}, ${typed.length})`);
@@ -570,7 +594,7 @@ ok(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js')) && /fa
   'the claude stream knows the wrapper\'s two rewind records (frame_stamp, rewind_out: no «unhandled type» breadcrumb); BOTH For-you reply roads (a live conversation, a reopened one) carry the refusal\'s words as an i18n key');
 
 say('— §7 the real wrapper stamps every person frame');
-async function wrapperLaws(wrapperFile) {
+async function wrapperLaws(wrapperFile, { absent = 3000 } = {}) {   // `absent`: how long to wait for a record the wrapper may never say
   const bad = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-checkpoints-w-'));
   const SID = 'sess-9-1700000000437';
@@ -601,7 +625,7 @@ async function wrapperLaws(wrapperFile) {
     const f2 = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'h two' }] }, webui_msg_id: 'm-h2' };
     w.stdin.write(JSON.stringify(f1) + '\n' + JSON.stringify(f2) + '\n');
     await until(() => capLines().length >= 5 && results() >= 5, 4000);
-    await until(() => outRecs().filter((r) => r.type === 'frame_stamp').length >= 3, 3000); // m-idle, m-h1, m-h2: the records, not a sleep
+    await until(() => outRecs().filter((r) => r.type === 'frame_stamp').length >= 3, absent); // m-idle, m-h1, m-h2: the records, not a sleep
     const got = capLines().map((l) => { try { return JSON.parse(l); } catch { return null; } });
     const recs = outRecs(), st = recs.filter((r) => r.type === 'frame_stamp');
     const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -624,10 +648,10 @@ async function wrapperLaws(wrapperFile) {
     const nCap = capLines().length;
     await send({ type: 'control_request', request_id: 'vsr-rw-wrap1', request: { subtype: 'rewind_conversation', target_message_uuid: '00000000-0000-4000-8000-000000000001' } }, nCap + 1);
     await send({ type: 'control_request', request_id: 'other-ctl-1', request: { subtype: 'set_permission_mode', mode: 'default' } }, nCap + 2);
-    await until(() => outRecs().some((x) => x.type === 'rewind_out'), 3000);
+    await until(() => outRecs().some((x) => x.type === 'rewind_out'), absent);
     const ro = outRecs().filter((x) => x.type === 'rewind_out');
     if (ro.length !== 1 || ro[0].request_id !== 'vsr-rw-wrap1' || !Number.isFinite(ro[0].at) || capLines().length !== nCap + 2) bad.push(`wrapper:rewind-out-said (${JSON.stringify(ro)})`);
-    await until(() => fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"rewind_out"'), 2600);
+    if (ro.length) await until(() => fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"rewind_out"'), 2600);   // said: its buffer write follows (250 ms – 2 s)
     if (!(fs.existsSync(buf) && fs.readFileSync(buf, 'utf8').includes('"rewind_out"'))) bad.push('wrapper:rewind-out-in-the-buffer');
   } finally {
     try { w.stdin.end(); } catch { }
@@ -644,6 +668,7 @@ async function wrapperLaws(wrapperFile) {
   const sh = wsrc.slice(wsrc.indexOf('function steerHeld(entry, op) {'), wsrc.indexOf('\n}\n', wsrc.indexOf('function steerHeld(entry, op) {')));
   if (!((wsrc.match(/record\('frame_stamp'/g) || []).length === 1 && /function sayStamp\(msgId, uuid\) \{\n  if \(\(child && !childDead && child\.stdin && child\.stdin\.writable\) \|\| OFFSET_MODE\) record\('frame_stamp'/.test(wsrc)
     && /if \(entry\.stamp\) sayStamp\(entry\.msgId, entry\.stamp\);[^\n]*\n\s+if \(turnBusy \|\| cliOwesTurn\) handOver\(entry\.line/.test(sh))) bad.push('wrapper:every-road-to-the-cli-says-its-stamp');
+  if (!/if \(parsed\.type === 'control_request' && \/\^vsr-\/\.test\(String\(parsed\.request_id \|\| ''\)\) && \(\(child && !childDead && child\.stdin && child\.stdin\.writable\) \|\| OFFSET_MODE\)\) record\('rewind_out'/.test(wsrc)) bad.push('wrapper:a-dropped-frame-is-never-said');
   ok(bad.length === 0, 'the REAL wrapper: an idle person frame reaches the CLI with a uuid (its first key) and frame_stamp says the same uuid as cli_uuid (stdout and the buffer; never a top-level uuid); a HELD frame is stamped only when it reaches the CLI (after its queued_input, at the drain); a frame with an origin and one with no message id reach it untouched', bad.join(' | '));
 }
 
@@ -658,7 +683,7 @@ say('— §8 red controls (U2)');
     fs.writeFileSync(path.join(T, 'old/data/bin/chat-wrapper.js'), g.stdout);
     fs.symlinkSync(path.join(REPO, 'src'), path.join(T, 'old/src'));
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(T, 'old/node_modules'));
-    const bad = await wrapperLaws(path.join(T, 'old/data/bin/chat-wrapper.js'));
+    const bad = await wrapperLaws(path.join(T, 'old/data/bin/chat-wrapper.js'), { absent: 400 });   // its source says none of them (proven below): no full wait
     // the control proves its plant first: the release's wrapper says no rewind_out
     if (/record\('rewind_out'/.test(g.stdout)) bad.length = 0;
     ok(bad.some((b) => b.startsWith('wrapper:idle-frame-stamped')) && bad.some((b) => b.startsWith('wrapper:frame_stamp-says-it')) && bad.some((b) => b.startsWith('wrapper:a-held-frame')) && bad.some((b) => b.startsWith('wrapper:rewind-out-said')), `RED CONTROL the release ${BASE}'s wrapper sends an idle frame unstamped, says no stamp and no rewind_out`, bad.join(' | ') || 'all green');
@@ -670,34 +695,51 @@ say('— §8 red controls (U2)');
     ['last-prompt left ignored', "      case 'last-prompt': return this._processLastPrompt(raw, emit);", "      case 'last-prompt-x': return this._processLastPrompt(raw, emit);", 'reload:cuts-from-cutUuid'],
     ['the CLI\'s heal row not read', "    if (this._pendingRowCut && raw.explicit === true && raw.rewound !== true && this._namesThePendingCut(raw.leafUuid)) { this._pendingRowCut = null; return; }", '', 'reload:heal-row-cancels'],
     ['the stamp is not read', "      case 'frame_stamp': return this._processFrameStamp(raw, emit);", "      case 'frame_stamp-x': return this._processFrameStamp(raw, emit);", 'stamp:uuid-on-bubble'],
-    ['the wrapper\'s record is not read', "      case 'rewind_out': if (typeof raw.request_id === 'string') this._rewindAsked = { id: raw.request_id, at: Number(raw.at) || 0 }; return;", '', 'door:a-hub-restart-reads-the-mark-back'],
+    ['the wrapper\'s record is not read', "      case 'rewind_out': if (typeof raw.request_id === 'string') this._rewindAsked = { id: raw.request_id, at: Number(raw.at) || 0, seenAt: Date.now(), lastId: (this.messages[this.messages.length - 1] || {}).id || null }; return;", '', 'door:a-hub-restart-reads-the-mark-back'],
     ['the hub\'s mark lapses at the minute', "  if (said) return said;", "  if (said && now - said.at < REWIND_LIFE_MS) return said;", 'door:held-while-the-request-lives', 'src/server/rewind-requests.js'],
     ['the press marks nothing before its record', "  session._rewindOut = { id: out.requestId, at: now }; // one rewind at a time (rewindOut)", '', 'send:the-window-before-the-record', 'src/server/rewind-requests.js'],
+    ['a late answer strikes what was sent after the request', "    const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo, untilId: asked && asked.lastId }, emit) : null;",
+      "    const cut = echo && this.messages.some((m) => m && m.uuid === echo) ? this._processRewindCut({ targetUuid: echo, untilId: null }, emit) : null;", 'answer:a-late-answer-never-strikes-a-later-send'],
+    ['the fence trusts a wrapper clock running ahead', "  return Math.min(Number(o && o.at) || 0, Number(o && o.seenAt) || Infinity);", "  return Number(o && o.at) || 0;", 'send:the-fence-ends-a-minute-after-the-hub-saw-the-request', 'src/server/rewind-requests.js'],
+    ['the fence says more than the minute (a clock stepped back)', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, outAt(session, o) + REWIND_LIFE_MS - now)) : 0;", "  return o ? Math.max(0, outAt(session, o) + REWIND_LIFE_MS - now) : 0;", 'send:the-fence-never-says-more-than-the-minute', 'src/server/rewind-requests.js'],
+    ['the fence is never up — judged ONLY through the typing path (proves the typing copy sees the mutated door)', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, outAt(session, o) + REWIND_LIFE_MS - now)) : 0;", "  return 0;", 'send:refused-inside-the-minute', 'src/server/rewind-requests.js'],
+    ['the press notes no bound for a late answer', "  try { session._normalizer.noteRewindPressed?.({ id: out.requestId, lastId: (messages[messages.length - 1] || {}).id || null }); } catch { } // the late answer's bound", '', 'answer:a-late-answer-never-strikes-a-later-send (press', 'src/server/rewind-requests.js'],
     ['the person\'s send is not fenced', "    if (fence > 0) { const left = Math.ceil(fence / 1000); return { ok: false, code: 'rewind_out', left, i18n: { key: 'A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', params: { s: left } }, error: `A rewind is on its way — this message was not sent. Send it after the rewind answers (in ${left} s at the latest), or stop the conversation.` }; }", '', 'send:refused-inside-the-minute', 'src/server/user-input.js'],
-    ['the person\'s fence outlives the expiry', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now)) : 0;", "  return o ? 1 : 0;", 'send:goes-through-after-the-expiry', 'src/server/rewind-requests.js'],
-    ['the fence follows a stepped clock past the minute', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now)) : 0;", "  return o ? Math.max(0, (Number(o.at) || 0) + REWIND_LIFE_MS - now) : 0;", 'send:the-fence-never-exceeds-the-minute', 'src/server/rewind-requests.js'],
-    ['an earlier rewind\'s struck run reads as a twin', "  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
+    ['the person\'s fence outlives the expiry', "  return o ? Math.min(REWIND_LIFE_MS, Math.max(0, outAt(session, o) + REWIND_LIFE_MS - now)) : 0;", "  return o ? 1 : 0;", 'send:goes-through-after-the-expiry', 'src/server/rewind-requests.js'],
+    ['an earlier rewind\'s struck run reads as a twin', "  if (targetUuid == null && from < end && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
       "  if (targetUuid == null && list.slice(from).some((m) => m && m.rewound)) return { ids: [], placed: true, already: true };", 'reload:a-second-rewind-to-the-same-leaf', 'src/rewind-cut.js'], // stale-pins: kept — the mutant PLANTS the old rule
-    ['a card after the cut reads as a second rewind', "  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
+    ['a card after the cut reads as a second rewind', "  if (targetUuid == null && from < end && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };",
       "  if (targetUuid == null && from < list.length && !take.length) return { ids: [], placed: true, already: true };", 'reload:a-card-after-the-cut-is-no-second-rewind', 'src/rewind-cut.js'],
   ];
-  // ONE scratch copy of src/ (37 MB), re-patched per mutant with the copy's modules dropped from the require cache
-  const M = path.join(T, 'mut');
-  fs.cpSync(path.join(REPO, 'src'), path.join(M, 'src'), { recursive: true });
-  for (const f of ['package.json', 'node_modules']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M, f)); } catch { } }
-  const mreq = createRequire(path.join(M, 'package.json'));
+  // EACH MUTANT COMPILED IN PLACE (the one-life cure — the suite's fast time): ONE file's source changed and compiled under
+  // its own path, so every other require is the real, already-loaded module — no scratch copy of src/, no module graph
+  // reloaded per mutant; a file a mutant does not touch that requires the mutated one is compiled over it (`overrides`)
+  const NodeModule = require('module');
+  const compileAt = (rel, src, overrides = {}) => {
+    const filename = path.join(REPO, rel);
+    const m = new NodeModule(filename, null);
+    m.filename = filename; m.paths = NodeModule._nodeModulePaths(path.dirname(filename));
+    const real = m.require.bind(m);
+    m.require = (id) => (Object.prototype.hasOwnProperty.call(overrides, id) ? overrides[id] : real(id));
+    m._compile(src, filename);
+    return m.exports;
+  };
+  const realDoor = require(path.join(REPO, 'src/server/rewind-requests.js'));
   for (const [name, from, to, law, file = 'src/message-manager.js'] of NM) {
     const FSRC = read(file);
     if (FSRC.split(from).length !== 2) { ok(false, `mutant «${name}»: its anchor is in ${file} exactly once`); continue; }
-    for (const key of Object.keys(mreq.cache)) if (key.startsWith(M + path.sep)) delete mreq.cache[key];
-    for (const f of new Set(NM.map((x) => x[4] || 'src/message-manager.js'))) fs.writeFileSync(path.join(M, f), read(f)); // the others as they are
-    fs.writeFileSync(path.join(M, file), FSRC.split(from).join(to));
-    // A RED CONTROL PROVES ITS PLANT FIRST: the copy holds the planted line and no longer the anchor
-    const planted = fs.readFileSync(path.join(M, file), 'utf8');
-    if (planted.includes(from) || (to && !planted.includes(to))) { ok(false, `mutant «${name}»: its plant is where it claims (in the scratch ${file})`); continue; }
-    const MM = mreq('./src/normalizers.js').createMessageManager;
+    const planted = FSRC.split(from).join(to);
+    // A RED CONTROL PROVES ITS PLANT FIRST: the mutated source holds the planted line and no longer the anchor
+    if (planted.includes(from) || (to && !planted.includes(to))) { ok(false, `mutant «${name}»: its plant is where it claims (${file})`); continue; }
     let bad;
-    try { bad = roadLaws(MM, { ...mreq('./src/server/rewind-requests.js'), ...mreq('./src/server/user-input.js') }); } catch (e) { bad = [`threw: ${e.message}`]; }
+    try {
+      const cut = file === 'src/rewind-cut.js' ? compileAt(file, planted) : null;
+      const mmMod = file === 'src/message-manager.js' ? compileAt(file, planted) : cut ? compileAt('src/message-manager.js', read('src/message-manager.js'), { './rewind-cut.js': cut }) : null;
+      const MM = mmMod ? (backend, id, opts) => new mmMod.MessageManager(id, opts) : createMessageManager;
+      const door = file === 'src/server/rewind-requests.js' ? compileAt(file, planted) : realDoor;
+      const ui = compileAt('src/server/user-input.js', file === 'src/server/user-input.js' ? planted : read('src/server/user-input.js'), { './rewind-requests.js': door });
+      bad = roadLaws(MM, { requestRewind: door.requestRewind, rewindOut: door.rewindOut, rewindFenceLeft: door.rewindFenceLeft, createUserInputSender: ui.createUserInputSender });
+    } catch (e) { bad = [`threw: ${e.message}`]; }
     ok(bad.some((b) => b.startsWith(law)), `RED CONTROL «${name}» ⇒ the law «${law}» is red`, bad.join(' | ') || 'all green');
   }
 }
@@ -945,21 +987,25 @@ say('— §9 the page\'s door');
     else if (!dead.out.includes('view:a-reloaded-page-binds-the-answer')) bad.push('view:RED CONTROL a dead storage left the reloaded page binding (the leg proves nothing)'); }
   // ONE LIFE (4): a send THE HUB REFUSED while a rewind is out comes back into an EMPTY box, with its door and the seconds
   // the hub said; a box in use is never overwritten
-  box._textarea.value = ''; box._pendingSend = { text: 'my next ask' }; said.length = 0;
-  view._sayRefusedSend(box.refusedSend(), 42);
-  if (box._textarea.value !== 'my next ask' || box._pendingSend || !said.some((x) => /^A rewind is on its way — your message was not sent; it is back in the box\. Send it after the rewind answers \(in 42 s at the latest\), or stop the conversation\.$/.test(x[0]))) bad.push(`view:a-refused-send-comes-back-with-its-door (${said.map((x) => x[0])})`);
-  box._textarea.value = 'typing'; box._pendingSend = { text: 'other' }; said.length = 0;
-  view._sayRefusedSend(box.refusedSend(), 7);
+  box._textarea.value = ''; box._attachments = []; box._renderAttachments = () => { };
+  box._sentAwaiting = new Map([['m42', { text: 'my next ask', attachments: [] }], ['m-other', { text: 'x', attachments: [] }]]); box._pendingSend = { text: 'my next ask', msgId: 'm42' }; said.length = 0;
+  box.sentLanded('m-other');                         // ANOTHER message's op landed between the send and the refusal: m42 is still kept
+  view._sayRefusedSend(box.refusedSend('m42'), 42);
+  if (box._textarea.value !== 'my next ask' || box._pendingSend || box._sentAwaiting.has('m42') || !said.some((x) => /^A rewind is on its way — your message was not sent; it is back in the box\. Send it after the rewind answers \(in 42 s at the latest\), or stop the conversation\.$/.test(x[0]))) bad.push(`view:a-refused-send-comes-back-with-its-door (${said.map((x) => x[0])})`);
+  box._textarea.value = 'typing'; box._sentAwaiting.set('m7', { text: 'other', attachments: [] }); said.length = 0;
+  view._sayRefusedSend(box.refusedSend('m7'), 7);
   if (box._textarea.value !== 'typing' || !said.some((x) => /box already had text, so it was left alone\)\. Send it after the rewind answers \(in 7 s at the latest\)/.test(x[0]))) bad.push('view:a-refused-send-never-overwrites');
   // ITS words by its msgId: a later send's words never stand in for a refused earlier one; a pictures-only send's pictures come back
   box._textarea.value = ''; box._attachments = []; box._renderAttachments = () => { };
-  box._pendingSend = { text: 'B words', msgId: 'mB' }; said.length = 0;
-  view._sayRefusedSend(box.refusedSend('mA'), 9);
-  if (box._textarea.value !== '' || !box._pendingSend || box._pendingSend.msgId !== 'mB' || !said.some((x) => /^A rewind is on its way — your message was not sent\. Send it after/.test(x[0]))) bad.push('view:a-refused-send-is-matched-by-its-msgId');
-  box._pendingSend = { text: '', msgId: 'mP', attachments: [{ mediaType: 'image/png', base64: 'AAAA' }] }; said.length = 0;
+  box._sentAwaiting.set('mB', { text: 'B words', attachments: [] }); said.length = 0;
+  const putA = box.refusedSend('mA');               // not this box's send (another view of the conversation): nothing to say
+  if (putA !== null || box._textarea.value !== '' || !box._sentAwaiting.has('mB') || said.length) bad.push('view:a-box-that-did-not-send-it-is-silent');
+  box.sentLanded('mB');
+  if (box.refusedSend('mB') !== null) bad.push('view:a-landed-send-is-never-given-back');
+  box._sentAwaiting.set('mP', { text: '', attachments: [{ mediaType: 'image/png', base64: 'AAAA' }] }); said.length = 0;
   view._sayRefusedSend(box.refusedSend('mP'), 9);
-  if (box._attachments.length !== 1 || box._pendingSend || !said.some((x) => /it is back in the box/.test(x[0]))) bad.push('view:a-refused-send-brings-its-pictures-back');
-  box._attachments = []; box._textarea.value = 'new typing'; box._pendingSend = { text: 'old words', msgId: 'mQ', attachments: [{ mediaType: 'image/png', base64: 'BBBB' }] }; said.length = 0;
+  if (box._attachments.length !== 1 || !said.some((x) => /it is back in the box/.test(x[0]))) bad.push('view:a-refused-send-brings-its-pictures-back');
+  box._attachments = []; box._textarea.value = 'new typing'; box._sentAwaiting.set('mQ', { text: 'old words', attachments: [{ mediaType: 'image/png', base64: 'BBBB' }] }); said.length = 0;
   view._sayRefusedSend(box.refusedSend('mQ'), 9);
   if (box._attachments.length !== 0 || box._textarea.value !== 'new typing') bad.push('view:a-refused-send-pictures-never-join-new-typing');
   box._attachments = []; box._textarea.value = '';
@@ -992,8 +1038,13 @@ say('— §9 the page\'s door');
   const wires = [
     ['the renderer draws the door with the other message buttons', /this\.addForkBtn\(el, msg\);\n    this\.addRewindBtn\(el, msg\);/.test(cr)],
     ['the view hands the renderer its click and its live gate', /onRewind: \(msg\) => this\._rewindFromMessage\(msg\)/.test(cv) && /canRewind: \(\) => !this\._readOnly/.test(cv)],
-    ['a send the hub refused while a rewind is out comes back to the box (ITS words, by its msgId) with the seconds left', /if \(msg\.code === 'rewind-out'\) \{ this\._sayRefusedSend\(this\._chatInput\?\.refusedSend\?\.\(msg\.msgId\) \|\| 'none', msg\.left\); return; \}/.test(cv)],
-    ['the composer keeps a send\'s msgId and pictures until the hub takes it', /Object\.assign\(this\._pendingSend, \{ msgId, attachments: this\._attachments\.slice\(\) \}\);/.test(read('src/lib/chat-input.js'))],
+    ['a send the hub refused while a rewind is out comes back to the box (ITS words, by its msgId) with the seconds left — said only by the box that sent it', /if \(msg\.code === 'rewind-out'\) \{ const put = this\._chatInput\?\.refusedSend\?\.\(msg\.msgId\); if \(put\) this\._sayRefusedSend\(put, msg\.left\); return; \}/.test(cv)],
+    ['the composer keeps each send\'s words and pictures by its id until the hub draws THAT message', /this\._sentAwaiting\.set\(msgId, \{ text, attachments: this\._attachments\.slice\(\) \}\);/.test(read('src/lib/chat-input.js')) && /if \(msg\.op === 'create' && msg\.message && msg\.message\.webuiMsgId\) this\._chatInput\?\.sentLanded\?\.\(msg\.message\.webuiMsgId\);/.test(cv)],
+    ['a conversation that EXITED drops the tab\'s waiting presses (a re-attach timeout or a sign-in wall keeps them)', /\} else if \(msg\.type === 'exited' && msg\.sessionId === sessionId\) \{\n        this\._hideTyping\(\);\n        try \{ sessionStorage\.removeItem\('vs-rewind:' \+ sessionId\); \} catch \{ \}/.test(cv) && !/_setReadOnly\(\) \{[^}]*sessionStorage/.test(cv)],
+    ['an ACTION\'s own text (Compact now) is never given back as the person\'s words', /const sent = this\._send\(\) !== false;\n    if \(sent && !carriesUserText && this\._sentAwaiting\) this\._sentAwaiting\.delete\(this\._lastSentId\);/.test(read('src/lib/chat-input.js')) && /this\._lastSentId = msgId; this\._pendingSend\.msgId = msgId;/.test(read('src/lib/chat-input.js'))],
+    ['the design and doc comments say a refusal in the reader\'s language (engines, routes, clients)', /r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\);/.test(read('src/server/design-engine.js')) && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\) \}\);/.test(read('src/server/doc-engine.js'))
+      && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\) \}\)\);/.test(read('src/routes/design.js')) && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\) \}\)\);/.test(read('src/routes/doc.js'))
+      && /if \(r\.i18n && r\.i18n\.key\) return t\(r\.i18n\.key, r\.i18n\.params \|\| \{\}\);/.test(read('src/lib/design-window.js')) && /if \(r && r\.i18n && r\.i18n\.key\) return \{ words: t\(r\.i18n\.key, r\.i18n\.params \|\| \{\}\), kind: 'failed' \};/.test(read('src/lib/doc-window-model.js'))],
     ['the ws case answers the refusal by name, scoped to the action, with the seconds left', /if \(!r\.ok && r\.code === 'rewind_out'\) \{ try \{ ws\.send\(JSON\.stringify\(\{ type: 'error', code: 'rewind-out', scope: 'action',[^\n]*left: r\.left/.test(read('src/ws-handler.js'))],
     ['the stream\'s answer reaches the view', /if \(op\.subtype === 'rewind-answer'\) \{ this\._onRewindAnswer\(op\.data\); return; \}/.test(cv)],
     ['an edit to a field a point is judged on (a uuid, a batch, …) redraws the door', /if \(POINT_FIELDS\.some\(\(k\) => k in fields\)\) this\._renderers\.patchRewindBtn\(this\._elements\.get\(id\), msg\);/.test(cv)],

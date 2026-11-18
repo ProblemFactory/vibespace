@@ -97,7 +97,7 @@ const PREVIEW_TICKETS = 64;
 /** Status per refusal code (the routes answer `{error, code}` with it). */
 const STATUS = Object.freeze({
   bad_dir: 400, not_registered: 404, not_found: 404, not_a_dir: 400, too_big: 413, read_failed: 502, host_unreachable: 502,
-  no_remote: 503, not_publishable: 409, empty: 400, too_long: 400, too_many: 400, bad_change: 400, no_change: 400, bad_files: 400, no_conversation: 409, input_rejected: 400,
+  no_remote: 503, not_publishable: 409, empty: 400, too_long: 400, too_many: 400, bad_change: 400, no_change: 400, bad_files: 400, no_conversation: 409, rewind_out: 409, input_rejected: 400,
   too_large: 400, send_failed: 500, publish_failed: 500, no_pages: 503, page_not_found: 404, page_forbidden: 403,
   watch_limit: 429, agent_forbidden: 403, no_session: 409,
   not_yours: 403, bad_questions: 400, no_questions: 409, stale: 409, bad_file: 400, not_previewable: 409, unauthorized: 401,
@@ -646,7 +646,7 @@ function create({
     const sessionId = liveSessionFor(windowSessionId, host, dir, prefer);
     const r = typeof sendUserInput === 'function' ? sendUserInput(sessionId, line, { msgId: now() + '-design', origin: 'design-comment', door: 'enter' }) : { ok: false, code: 'no_session' };
     if (r && r.ok) return { ok: true, delivered: 'sent', msgId: r.msgId, text: line };
-    if (!r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comment was not sent');
+    if (!r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comment was not sent', r && r.i18n ? { i18n: r.i18n } : {});
     const cid = conversationFor(sessionId, host, dir, prefer);
     if (!cid) return fail('no_conversation', 'this conversation is not running and has no id yet — open its chat and send the comment there');
     const deliver = getDeliver();

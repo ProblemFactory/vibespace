@@ -966,6 +966,7 @@ export class ChatInput {
     if (keptAttachments.length) { this._attachments = []; this._renderAttachments(); }
     this._textarea.value = String(text || '');
     const sent = this._send() !== false;
+    if (sent && !carriesUserText && this._sentAwaiting) this._sentAwaiting.delete(this._lastSentId);   // B-437e: an action's text is never given back as the person's
     if (keptAttachments.length) { this._attachments = keptAttachments; this._renderAttachments(); }
     // THE BOX COMES BACK UNCONDITIONALLY (round-6 verifier). Gating the
     // restore on `keptText.trim()` covered only the case where there was
@@ -1164,14 +1165,19 @@ export class ChatInput {
   /** The hub refused this send by name while a rewind is out (B-437e `rewind-out`): THAT send's own words (matched by its
    *  msgId) come back into an EMPTY box, its pictures into an empty tray. Answers like putBack. */
   refusedSend(msgId) {
-    const p = this._pendingSend && (!msgId || !this._pendingSend.msgId || this._pendingSend.msgId === msgId) ? this._pendingSend : null;
-    if (p) this._pendingSend = null;
+    const p = msgId && this._sentAwaiting ? this._sentAwaiting.get(msgId) : null;
+    if (!p) return null;                       // this box did not send it (another view of the conversation): nothing to say
+    this._sentAwaiting.delete(msgId);
+    if (this._pendingSend && this._pendingSend.msgId === msgId) this._pendingSend = null;
     const put = this.putBack(p ? p.text : '');
     // the pictures come back WITH the words (never beside someone else's new text — the next Enter would send them)
     const pics = put !== 'kept' && !!(p && p.attachments && p.attachments.length && !(this._attachments && this._attachments.length));
     if (pics) { this._attachments = p.attachments; this._renderAttachments(); }
     return put === 'none' && pics ? 'restored' : put;
   }
+
+  /** The hub drew this send's message (its own id): nothing to give back for it any more. */
+  sentLanded(msgId) { if (this._sentAwaiting && msgId) this._sentAwaiting.delete(msgId); }
 
   setDisconnected(disconnected) {
     // Keep the textarea fully editable — the user must be able to select/copy
@@ -1557,7 +1563,10 @@ export class ChatInput {
     if (text) saveDraft('chat', this._sessionId, text);
     this._pendingSend = { text, storeBefore };
     this._judgeHeldDraft();   // the emptied box: this send's pin supersedes a held draft; a send without text lets it land
-    Object.assign(this._pendingSend, { msgId, attachments: this._attachments.slice() });   // B-437e: a refused send gets ITS words and pictures back
+    if (!this._sentAwaiting) this._sentAwaiting = new Map();   // B-437e: a refused send gets ITS words and pictures back
+    this._sentAwaiting.set(msgId, { text, attachments: this._attachments.slice() });
+    this._lastSentId = msgId; this._pendingSend.msgId = msgId;
+    if (this._sentAwaiting.size > 16) this._sentAwaiting.delete(this._sentAwaiting.keys().next().value);
     if (this._expanded) {
       this._expanded = false;
       this._textarea.classList.remove('chat-input-expanded');

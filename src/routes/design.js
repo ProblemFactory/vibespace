@@ -61,7 +61,7 @@ const { CSP: PAGE_CSP, injectShim } = require('../server/published-pages.js'); /
 const { contentDisposition } = require('../file-disposition.js'); // lane design-present: the download's name, both forms
 
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
-const answer = (res, r) => (r && r.ok ? res.json(r) : res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused', ...(r && r.refusals ? { refusals: r.refusals } : {}) }));
+const answer = (res, r) => (r && r.ok ? res.json(r) : res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused', ...(r && r.refusals ? { refusals: r.refusals } : {}), ...(r && r.i18n ? { i18n: r.i18n } : {}) }));
 
 function registerDesignRoutes(app, { design, activeSessions, getJobs = () => null }) {
   const ownerOnly = (req, res) => {

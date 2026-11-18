@@ -244,6 +244,7 @@ export function sendWords(t, r, n) {
   }
   if (r && r.code === 'no_owner') return null;
   if (r && Number.isInteger(r.sent) && r.sent > 0) return { words: t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n }), kind: 'partial' };
+  if (r && r.i18n && r.i18n.key) return { words: t(r.i18n.key, r.i18n.params || {}), kind: 'failed' };   // the hub's words in the reader's language (B-437e)
   return { words: t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }), kind: 'failed' };
 }
 

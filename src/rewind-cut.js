@@ -28,7 +28,7 @@ function startsATurn(m) {
  *  the person's message the rewind went back to — it, the earlier members of its batch, and everything after go;
  *  else `leafUuid` = the last message KEPT (everything after it; null = nothing kept). `placed: false` = an anchor this
  *  view does not hold (mark nothing, say it); `already: true` = this rewind is cut already (its twin record). */
-function cutOf(messages, { targetUuid = null, leafUuid = undefined } = {}) {
+function cutOf(messages, { targetUuid = null, leafUuid = undefined, untilId = null } = {}) {
   const list = Array.isArray(messages) ? messages : [];
   const notice = (m) => !!m && m.noticeKind === 'rewound';     // a rewind's own notice: never taken back, never an anchor
   let from = -1;
@@ -41,10 +41,12 @@ function cutOf(messages, { targetUuid = null, leafUuid = undefined } = {}) {
     for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].uuid === leafUuid) { from = i + 1; break; }
   }
   if (from < 0) return { ids: [], placed: false, already: false };
+  // what stood when the request went out (untilId) bounds the cut: a message sent after it ran AFTER the rewind
+  const u = untilId ? list.findIndex((m) => m && m.id === untilId) : -1, end = u >= 0 ? u + 1 : list.length;
   const take = [];
-  for (let i = from; i < list.length; i++) if (list[i] && !list[i].rewound && !notice(list[i])) take.push(list[i]);
+  for (let i = from; i < end; i++) if (list[i] && !list[i].rewound && !notice(list[i])) take.push(list[i]);
   // the leaf road's twin: no TURN left after the leaf; a card left there went with the cut (no second notice) ⇒ kb
-  if (targetUuid == null && from < list.length && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };
+  if (targetUuid == null && from < end && !take.some(startsATurn)) return { ids: take.map((m) => m.id), placed: true, already: true };
   return { ids: take.map((m) => m.id), placed: true, already: false };
 }
 

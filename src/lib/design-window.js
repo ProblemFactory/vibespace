@@ -65,6 +65,7 @@ export function commentRefusalText(r) {
   if (code === 'no_session' || code === 'session_required' || code === 'unknown_session') return t('This design is not linked to a conversation — open it from the conversation\'s design chip to comment');
   if (code === 'empty') return t('Write what should change first');
   if (code === 'too_long') return t('The comment is too long — keep it under 4000 characters');
+  if (r.i18n && r.i18n.key) return t(r.i18n.key, r.i18n.params || {});   // a refusal the hub words in the reader's language (B-437e)
   return r.error ? t('The comment was not sent: {why}', { why: String(r.error).slice(0, 300) }) : t('The comment was not sent');
 }
 /** The words a delivered comment is confirmed in (the hub says HOW it went: typed now / queued behind the turn / waiting). */

@@ -11,7 +11,7 @@
 const { STATUS } = require('../server/doc-engine.js');
 const { isAgentBearer } = require('./design.js');
 
-const answer = (res, r) => (r && r.ok ? res.json(r) : res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused', ...(r && Number.isInteger(r.sent) ? { sent: r.sent } : {}) }));
+const answer = (res, r) => (r && r.ok ? res.json(r) : res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused', ...(r && Number.isInteger(r.sent) ? { sent: r.sent } : {}), ...(r && r.i18n ? { i18n: r.i18n } : {}) }));
 
 function registerDocRoutes(app, { doc }) {
   const ownerOnly = (req, res) => {
