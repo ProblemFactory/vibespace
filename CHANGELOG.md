@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.410 — 2026-11-17
+## 2.369.410 — 2026-11-18
 
 ### Added
 - After mail could not be read for a while (a sign-in that stopped working, a restart), a Gmail account in Channels says how far back it caught up.
@@ -61,6 +61,25 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a very long conversation, the messages sent while the page was reconnecting now appear on the minimap.
 - Search everything no longer labels a message from another conversation, a VibeSpace notice or a compaction summary as «You».
 - In a chat, a compaction summary, the marker of a turn you stopped and a scheduled wake-up prompt show as system notes, not as messages you typed.
+- In the sidebar's Plugins, Background Work and Agents panels, names stay whole and buttons keep their words together, even at the narrowest sidebar.
+- A checkbox in a dialog now sits at the left of its words, in the vault's paste dialog and the two publish dialogs too.
+- In «Send a message on …», a recipient's name no longer breaks into one character per line.
+- Pressing Install during the welcome tour now shows the install window instead of opening it behind the tour.
+- When a file you are editing changes on disk, the editor shows «File changed on disk» in full, on a phone too.
+- In the sidebar's System panel each memory figure stays whole on its own line, and a long account name in the Agents panel shows in full when you point at it.
+- On Slack, a reply with files set to go in a thread and also show in the chat is now refused with its reason when proposed, not after you approve it.
+- On Slack, an agent's reply that mentions someone by full name (@First Last) or by Slack member id now notifies that person instead of going out as plain text.
+- When a file upload to Slack or Lark is retried, the send now ends within its time limit, and gives up at once when a retry cannot fit.
+- A chat row that opens search results no longer just says a draft is awaiting your approval; it says the draft waits in the Outbox.
+- After an agent browser's helper restarts, its open live view watches the browser again by itself instead of saying VibeSpace is not watching it.
+- In a chat, a compaction summary, the marker of a stopped turn and a scheduled wake-up prompt show as system notes, not as messages you typed.
+- In Chinese and Japanese, each row of a machine's group now says a command's exit code in your language, with the same word as the card and the group's head.
+- Opening a conversation whose window waits on another desktop takes you to that window in every case, instead of opening a second copy of it.
+- After switching desktops, keyboard commands act on a window you can see, never on one left behind on the other desktop.
+- In the session list, History's «Show more» button and the empty rows of History and of a machine with no conversations now read in your language.
+
+### Security
+- A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
 
 ## 2.369.409 — 2026-11-17
 
