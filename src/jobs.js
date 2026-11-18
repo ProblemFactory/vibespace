@@ -1514,7 +1514,7 @@ class JobManager {
     const t = PI.treeOf([Number(stamp.pid)], { since: Number(stamp.starttime) || 0 }), tree = t.filter((m) => m.pgid !== Number(stamp.pid));   // the group dies with the group's SIGKILL
     const killed = [], refused = [];
     let unjudged = 0;
-    for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale') unjudged++; }
+    for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++; }   // a recycled pid: that member had ended
     // B-c134 cure (MUST B): said where the person reads — the job's OWN log (a force stop's wrapper is dead: nobody else writes it),
     // a refused signal named, a cut walk said; and in the hub's log as before
     const n = killed.length, line = `its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`

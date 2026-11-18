@@ -210,7 +210,7 @@ const popts = { procRoot: FP };
   ok(still.length === 2 && /could not be read — its processes are not kept out/.test(warned), 'a road whose list throws is SAID (journal) and the walk goes on with the rest', warned);
   // the wiring: the two roads that hold processes register them
   const wsSrc = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8'), jsSrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
-  ok(/PI\.keepOut\('conversations', \(\) => \{ const out = \[\]; for \(const s of activeSessions\.values\(\)\) \{ const p = Number\(s && s\.pty && s\.pty\.pid\); if \(p > 1 && !s\.host\) out\.push\(\[p, 0\]\); \} return out; \}\);/.test(wsSrc) && /PI\.keepOut\('device-agent', \(\) => \{ devRead\(\); return devPid > 1 \? \[\[devPid, 0\]\] : \[\]; \}\);/.test(wsSrc) && /fsp\.readFile\(require\('path'\)\.join\(require\('os'\)\.homedir\(\), '\.vibespace', 'agentd', 'state', 'agentd\.pid'\)/.test(wsSrc)
+  ok(/PI\.keepOut\('conversations', \(\) => \{ const out = \[\]; for \(const s of activeSessions\.values\(\)\) \{ const p = Number\(s && s\.pty && s\.pty\.pid\); if \(p > 1 && !s\.host\) out\.push\(\[p, 0\]\); \} return out; \}\);/.test(wsSrc) && /PI\.keepOut\('device-agent', \(\) => \{ devRead\(\); return devPid > 1 \? \[\[devPid, 0\]\] : \[\]; \}\);/.test(wsSrc) && /fsp\.readFile\(require\('path'\)\.join\(process\.env\.VIBESPACE_DEVICE_ROOT \|\| process\.env\.VIBESPACE_AGENTD_ROOT \|\| require\('path'\)\.join\(require\('os'\)\.homedir\(\), '\.vibespace', 'agentd'\), 'state', 'agentd\.pid'\)/.test(wsSrc)
     && /this\._keepOutOff = PI\.keepOut\('jobs', \(\) => this\._wrappersHeld\(\)\);/.test(jsSrc) && /keepOut: tree\.keptOut\.slice\(0, 512\)/.test(jsSrc), 'WIRING: every live conversation\'s holder (ws-handler) and every live job\'s wrapper (the engine) is kept out; the intent hands the list to the wrapper', null);
 }
 // THE WRAPPER'S TWIN, with what it knows: the hub's pid (data/server.pid, written at the hub's boot) — a job that restarted the hub
@@ -229,12 +229,13 @@ const hubBefore = (expectEnded) => ({ dd }) => {
 {
   const ddOf = (tag) => path.join(D, tag);
   const hs = await jobScene(WRAP, 'job-hub', { argv: hubArgv(ddOf('job-hub')), signalAlone: true, before: hubBefore(false), ready: hubReady });
+  ok(/\[job-wrapper\] stop: its tree walk left alone 1 process it does not own/.test(hs.log), 'cure 2 (its reading): the wrapper\'s own line SAYS what its walk left alone (a stop it heard alone, no engine intent)', hs.log.split('\n').filter((l) => /job-wrapper\] stop/.test(l)));
   ok(hs.after && hs.after.hub === 2 && hs.after.alive === 2 && hs.tree.some((m) => m.comm === 'timeout') && !hs.left.some((m) => m.comm === 'timeout'), 'the wrapper\'s own walk keeps out the HUB of data/server.pid — the stand-in hub and its child live on; the job\'s own timeout ended', { after: hs.after, left: names(hs.left) });
   const KO = 'exclude: ko });';
   if (!WRAP.includes(KO)) ok(false, 'the anchor of the control «the wrapper keeps nothing out» is not in the source');
   else {
     const hc = await jobScene(WRAP.replace(KO, 'exclude: [] });   // MUTANT: keeps nothing out'), 'job-hub-mut', { argv: hubArgv(ddOf('job-hub-mut')), signalAlone: true, before: hubBefore(true), ready: hubReady });
-    ok(hc.after && hc.after.hub === 2 && hc.after.alive === 0, 'CONTROL (the wrapper keeps nothing out): the stand-in hub and its child are ENDED by the job\'s stop', hc.after);
+    ok(hc.after && hc.after.hub === 2 && hc.after.alive === 0 && !/left alone/.test(hc.log), 'CONTROL (the wrapper keeps nothing out): the stand-in hub and its child are ENDED by the job\'s stop — and nothing is said left alone', hc.after);
   }
 }
 
@@ -247,17 +248,20 @@ console.log('§7 B-c134 cure MUST B — A STOP THAT COULD NOT END EVERYTHING TEL
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
   ok(Object.values(PI.TREE_NOTICE).every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), 'the three sentences have their zh and ja rows');
   const ws = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8');
-  const PIN = (t) => /if \(!left\.length && !treeCut\) return;/.test(t) && /const tn = PI\.treeNotice\(r, \{ cut: treeCut \}, name\);\s*if \(tn\) \{ try \{ ctx\.serverNotice\?\.\(`tree-left:\$\{data\.sessionId\}`, tn\.text, \{ level: 2, i18n: \{ key: tn\.key, params: tn\.params \} \}\); \} catch \{ \} \}/.test(t);
+  const PIN = (t) => /if \(treeRoots\.length \|\| treeCut\) \{/.test(t) && /if \(!left\.length && !treeCut\) return;/.test(t) && /const tn = PI\.treeNotice\(r, \{ cut: treeCut \}, name\);\s*if \(tn\) \{ try \{ ctx\.serverNotice\?\.\(`tree-left:\$\{data\.sessionId\}`, tn\.text, \{ level: 2, i18n: \{ key: tn\.key, params: tn\.params \} \}\); \} catch \{ \} \}/.test(t);
   const rel = spawnSync('git', ['-C', ROOT, 'show', 'f12c94d6c:src/ws-handler.js'], { encoding: 'utf8' });
   ok(PIN(ws), 'the conversation\'s door: what is left — or a cut walk with nothing left — goes to the PERSON through the end path\'s notice (every page toasts it, in the person\'s words), the journal line kept');
   if (rel.status !== 0 || !rel.stdout) console.log('  · CONTROL skipped by name: this checkout has no f12c94d6c (a shallow copy)');
   else ok(!PIN(rel.stdout), 'CONTROL (f12c94d6c, the unit as lined): the line went to the journal only, and a cut walk with nothing left returned unsaid');
+  const c1 = spawnSync('git', ['-C', ROOT, 'show', '37ebd5f54:src/ws-handler.js'], { encoding: 'utf8' });
+  if (c1.status !== 0 || !c1.stdout) console.log('  · CONTROL skipped by name: this checkout has no 37ebd5f54 (a shallow copy)');
+  else ok(!PIN(c1.stdout) && /if \(treeRoots\.length\) \{/.test(c1.stdout), 'CONTROL (37ebd5f54, the cure as taken): a walk CUT before its first row reached nothing — the timer ran only for a read row');   // stale-pins: kept — the control reads the cure AS TAKEN (37ebd5f54), whose line it was
   // the job's door: a refused signal named, a cut said, the line into the job's own log (the force stop's wrapper is dead)
   const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
   const drive = (fn) => {
     const said = [], into = [], sig0 = PI.signalIdentity, tree0 = PI.treeOf;
-    PI.treeOf = () => Object.assign([{ pid: 9101, starttime: 1, pgid: 9101, comm: 'make' }, { pid: 9102, starttime: 1, pgid: 9102, comm: 'sleep' }], { cut: true, pruned: 0, keptOut: [] });
-    PI.signalIdentity = (m) => (m.comm === 'make' ? { ok: false, why: 'not-ours' } : { ok: true });
+    PI.treeOf = () => Object.assign([{ pid: 9101, starttime: 1, pgid: 9101, comm: 'make' }, { pid: 9102, starttime: 1, pgid: 9102, comm: 'sleep' }, { pid: 9103, starttime: 1, pgid: 9103, comm: 'cc1' }], { cut: true, pruned: 0, keptOut: [] });   // cc1: its pid recycled (it had ended)
+    PI.signalIdentity = (m) => (m.comm === 'make' ? { ok: false, why: 'not-ours' } : m.comm === 'cc1' ? { ok: false, why: 'pid-recycled' } : { ok: true });
     try { fn.call({ d: { log: (l) => said.push(l) }, _runLogFile: () => '/the/run/current.log', _runLogLine: (f, l) => into.push(l) }, { id: 'jb-t' }, { pid: 9100, starttime: 1 }); } finally { PI.signalIdentity = sig0; PI.treeOf = tree0; }
     return { said: said.join(' | '), into: into.join(' | ') };
   };

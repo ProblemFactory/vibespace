@@ -717,6 +717,7 @@ function onStop(sig, at, by) {
   let treeHeard = 0;
   for (const r of stopTree) if (termOnce(r)) treeHeard++;
   const treeCut = tree.cut || fromIntent.cut;
+  if (tree.pruned) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: its tree walk left alone ${tree.pruned} process${tree.pruned === 1 ? '' : 'es'} it does not own (the hub's, another job's or conversation's)\n`)); } catch { } }   // B-c134 cure 2: said, as the engine's walk says it
   if (stopTree.length || treeCut) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: ${stopTree.length} process${stopTree.length === 1 ? '' : 'es'} it started outside its group (${[...new Set(stopTree.map((r) => r[3]))].join(', ') || '—'}) hear${stopTree.length === 1 ? 's' : ''} it from the wrapper${treeHeard < stopTree.length ? ` (${stopTree.length - treeHeard} could not be signalled: gone, or not ours)` : ''}${treeCut ? '; its process tree was read only in part — what it started may be left' : ''}\n`)); } catch { } }
   if (scoped() && !listed) scopeTerm(sig);
   const on = mainBy === 'engine' || mainBy === 'wrapper' ? ` on ${sig}` : ''; // «did not end on SIGTERM» only when one reached it

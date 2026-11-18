@@ -387,9 +387,9 @@ function registerWsHandler(wss, ctx) {
   PI.keepOut('conversations', () => { const out = []; for (const s of activeSessions.values()) { const p = Number(s && s.pty && s.pty.pid); if (p > 1 && !s.host) out.push([p, 0]); } return out; });   // a remote shim's pid is another machine's
   // …nor the DEVICE AGENT of this machine (its state/agentd.pid, written at its start): read off the loop, at most once a minute
   let devPid = 0, devAt = 0;
-  const devRead = () => {   // the modules themselves (never the ctx's fs / os: a harness's ctx may hand neither) — and it never throws
+  const devRead = () => {   // the modules themselves (never the ctx's fs / os: a harness's ctx may hand neither) — and it never throws; the agent's own ROOT rule (src/agentd/agentd.js)
     if (Date.now() - devAt < 60_000) return; devAt = Date.now();
-    try { fsp.readFile(require('path').join(require('os').homedir(), '.vibespace', 'agentd', 'state', 'agentd.pid'), 'utf8').then((t) => { devPid = Number(String(t).trim()) || 0; }, () => { devPid = 0; }); } catch { devPid = 0; }
+    try { fsp.readFile(require('path').join(process.env.VIBESPACE_DEVICE_ROOT || process.env.VIBESPACE_AGENTD_ROOT || require('path').join(require('os').homedir(), '.vibespace', 'agentd'), 'state', 'agentd.pid'), 'utf8').then((t) => { devPid = Number(String(t).trim()) || 0; }, () => { devPid = 0; }); } catch { devPid = 0; }
   };
   devRead();
   PI.keepOut('device-agent', () => { devRead(); return devPid > 1 ? [[devPid, 0]] : []; });
@@ -465,7 +465,7 @@ function registerWsHandler(wss, ctx) {
         try { fs.unlinkSync(session.socketPath); } catch {}
       }
       if (localPty) readTree(localPty);   // B-c134: read before the pty's kill
-      if (treeRoots.length) {
+      if (treeRoots.length || treeCut) {   // cure 2 (its reading): a walk cut before its first row still speaks
         const name = session.name || data.sessionId;
         // cure (MUST B): what could not be ended — or a walk CUT, even when all it read has ended — is told to the PERSON through the
         // end path's notice (every page toasts it, in the person's words), the journal line kept
