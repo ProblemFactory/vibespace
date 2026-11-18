@@ -634,6 +634,26 @@ console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own set
     && (fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8').match(/_settingsFileGoverns: Array\.isArray\(meta\.settingsFileGoverns\)/g) || []).length === 2,
     '⑬b the kinds the file governs ride the session (meta settingsFileGoverns, restored on both rebuilds) — EVERY kind a governing file covers, not only those that stood down at the start (batch 21\'s cure: a switch turned on later never pushes over the file)');
   {
+    // batch 21's cure 3 (its readers' shoulds): (a) a session RESTORED from a 2.369.410 meta — which held only the kinds that stood down at
+    // its start — is restored as governing EVERY kind; (b) the settings-file toast puts a name with a «$» in as words (a behavioural leg)
+    const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
+    const EXPR = 'Array.isArray(meta.settingsFileGoverns) && meta.settingsFileGoverns.some((k) => typeof k === \'string\') ? [...SFW.GOVERNED_KINDS] : []';
+    ok((br.split('_settingsFileGoverns: ' + EXPR + ',').length - 1) === 2 && /^const SFW = require\('\.\.\/settings-file-words\.js'\);/m.test(br), '⑬b both rebuilds restore with ONE expression');
+    const restore = (src, meta) => new Function('meta', 'SFW', `return ${src};`)(meta, SFW);
+    const old410 = { settingsFileGoverns: ['outputStyle'] };
+    ok(JSON.stringify(restore(EXPR, old410)) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']) && JSON.stringify(restore(EXPR, { settingsFileGoverns: [] })) === '[]' && JSON.stringify(restore(EXPR, {})) === '[]',
+      '⑬b a session restored from a 2.369.410 meta (its file governed, only the output style stood down) governs ALL three kinds — a «Disable model fallback» turned on after the update never pushes over the file; no file, nothing governs');
+    const OLD_EXPR = "Array.isArray(meta.settingsFileGoverns) ? meta.settingsFileGoverns.filter((k) => typeof k === 'string') : []";   // stale-pins: kept — the restore expression before cure 3, the RED control re-plants it
+    ok(JSON.stringify(restore(OLD_EXPR, old410)) === JSON.stringify(['outputStyle']), 'RED CONTROL: the restore before cure 3 kept the partial list (the fallback push would go over the file) — the leg above can go red');
+    const a = wc.indexOf('          for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {'), b = wc.indexOf('\n          }\n', a);
+    const LOOP = a > 0 && b > a ? wc.slice(a, b + '\n          }\n'.length) : '';
+    const sayOf = (loop) => { const said = []; new Function('sessionSpec', 'session', 'data', 'SFW', 'serverNotice', 'id', loop)({ settingsNotes: ['outputStyle'] }, { name: "a $& b $' c" }, {}, SFW, (k, text) => said.push(text), 'sess-9'); return said; };
+    const said = LOOP ? sayOf(LOOP) : [];
+    ok(said.length === 1 && said[0].startsWith("a $& b $' c: your settings file is used as it is"), '⑬b the settings-file toast through the create\'s OWN loop: a conversation named «a $& b $\' c» is put in as words', said);
+    const strForm = LOOP.replace("w.replace('{name}', () => name)", "w.replace('{name}', name)");
+    ok(strForm !== LOOP && !sayOf(strForm)[0].startsWith("a $& b $' c:"), 'RED CONTROL: the string form (the tip before the cure) garbles the same name — the leg above can go red');
+  }
+  {
     // the RUNNING-CLI pushes skip what the file governs: the jobs engine's inbound catch-up, the fallback stop, a live settings change
     const jw = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), hc = fs.readFileSync(path.join(REPO, 'src/server/harness-config-sync.js'), 'utf8');
     ok(/if \(s\._csiAccepted\) continue;\s*if \(SFW\.fileGoverns\(s, 'jobNotices'\)\) continue;/.test(jw)

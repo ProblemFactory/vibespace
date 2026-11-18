@@ -1978,6 +1978,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   return Object.assign(async function handleCreate(ws, data, attachedSessions) {
     try { require('./server/loop-counts.js').inc(data && (data.resumeId || data.resume) ? 'resumes' : 'creates'); } catch { }   // loop-day-report M5
     const held = { release: null };
+    if (data && typeof data === 'object') data._contextRefused = null;   // the hub's own field (B-6c55's block writes it): a client's create frame never sets it
     try { return await createBody(ws, data, attachedSessions, held); } finally { try { held.release?.(); } catch { } }
   }, { onClientConnected });
 }

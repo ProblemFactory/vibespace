@@ -7,6 +7,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): the kinds a governing file covers, for a restored session
 const { restoredTurnState } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const pty = require('node-pty');
 const { createMessageManager } = require('../normalizers');
@@ -701,7 +702,7 @@ function restoreSessions() {
       _lockedModel: meta.lockedModel || null,
       _lockedContext: require('../lock-context.js').lockContextOf(meta.lockedContext),   // B-6c55
       _spawnContext: require('../lock-context.js').lockContextOf(meta.spawnContext),     // B-6c55: what the spawn commanded
-      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) ? meta.settingsFileGoverns.filter((k) => typeof k === 'string') : [],   // B-8dcf item two
+      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) && meta.settingsFileGoverns.some((k) => typeof k === 'string') ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two — a governing file governs EVERY kind (batch 21's cure 3: a 2.369.410 meta holds only the kinds that stood down at its start)
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _initialGroupIds: spawnGroupIds(meta), // lane new-session-form: every group it was spawned into (meta `taskIds`; an older meta's one `taskId`)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
@@ -1006,7 +1007,7 @@ async function readoptOrphanKeeperSessions() {
       _lockedModel: meta.lockedModel || null,
       _lockedContext: require('../lock-context.js').lockContextOf(meta.lockedContext),   // B-6c55
       _spawnContext: require('../lock-context.js').lockContextOf(meta.spawnContext),     // B-6c55: what the spawn commanded
-      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) ? meta.settingsFileGoverns.filter((k) => typeof k === 'string') : [],   // B-8dcf item two
+      _settingsFileGoverns: Array.isArray(meta.settingsFileGoverns) && meta.settingsFileGoverns.some((k) => typeof k === 'string') ? [...SFW.GOVERNED_KINDS] : [],   // B-8dcf item two — a governing file governs EVERY kind (batch 21's cure 3: a 2.369.410 meta holds only the kinds that stood down at its start)
       _initialGroupId: meta.taskId || null,
       _initialGroupIds: spawnGroupIds(meta),
       _remotePort: rport,

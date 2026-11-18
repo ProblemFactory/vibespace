@@ -54,6 +54,8 @@ function longContextOf(catalog, model) {
   const rows = catalog && Array.isArray(catalog.models) ? catalog.models : null;
   if (!name || !rows) return null;
   const al = catalog.aliases && typeof catalog.aliases === 'object' ? catalog.aliases : {};
+  // (an alias in ANY case — the verdict's own choice, not the catalog's: the catalog reader keys aliases as written; refusing the 1M form
+  // of a spelling the CLI itself might reject costs nothing)
   const alias = Object.keys(al).find((k) => typeof al[k] === 'string' && k.toLowerCase() === name.toLowerCase());   // an alias → its model
   // MATCHED AS THE CATALOG MATCHES (its core: lowercased, no `claude-`): the catalog id, or the dated first-party id the CLI reports
   const key = core(alias ? al[alias] : name);
