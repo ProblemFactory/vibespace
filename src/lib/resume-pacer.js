@@ -37,6 +37,7 @@ export function resumeAndWait(app, d, extra = {}) {
       r = app.resumeSession(d.sessionId, d.cwd, d.name, { ...opts, ...extra, onCreateEnd: (how, msg) => end(how, msg, r && r.row ? r.row : null) });
     } catch (e) { end('threw', { error: (e && e.message) || String(e) }); return; }
     const row = r && r.row ? r.row : null;
+    if (r && r.checking) { end('checking', null, row); return; }   // B-f64b cure 2: held by the backstop — not resumed, and named
     // a create in flight is the pending resume of THIS conversation (createSession's _resumeWins) — and not one we joined
     const sent = !(r && r.pending) && !!(app._pendingResumeWin && app._pendingResumeWin(backend, cid));
     if (!sent) end('none', null, row);
@@ -53,6 +54,7 @@ function whyNotResumed(r) {
     case 'error': return t('the server reported an error without a reason');
     case 'refused': return t('the server refused it without a reason');
     case 'threw': return t('it could not be started on this page');
+    case 'checking': return t('still checking whether it runs in another terminal');
     default: return t('it was not resumed');
   }
 }

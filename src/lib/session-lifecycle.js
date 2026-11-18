@@ -1105,7 +1105,6 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   /** B-f64b cure: the person's press on a row whose liveness is not known yet asks first (a method: a suite answers it) */
   async _askStillChecking(name) {
-    const { showConfirmDialog } = await import('./utils.js');
     return showConfirmDialog({ title: t('Still checking «{name}»', { name: String(name || '').slice(0, 60) }),
       message: t('VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.'),
       confirmText: t('Resume anyway') });
@@ -1127,11 +1126,18 @@ export function installSessionLifecycle(App, ctx = {}) {
     // B-f64b cure (主开发 11:47Z, as if a must): A ROW WHOSE LIVENESS IS NOT KNOWN YET IS NEVER STARTED UNASKED — a codex the person
     // runs in another terminal may be it (a second CLI on one transcript). Unattended or bulk (`stay`): nothing starts; a person's
     // own press: «still checking» is said first, and only a yes starts it
-    if (!unknownOk && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {
+    // cure 2: a conversation THIS page just ended (excludeWebuiId — a pool's cold move, a billing switch) is ours, never another terminal's
+    if (!unknownOk && !excludeWebuiId && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {
       if (!stay && !unattended && typeof this._askStillChecking === 'function') {
         const again = arguments[3] || {};
-        Promise.resolve(this._askStillChecking(sessionName)).then((yes) => { if (yes) this.resumeSession(sessionId, cwd, sessionName, { ...again, unknownOk: true }); }).catch(() => {});
-      }
+        Promise.resolve(this._askStillChecking(sessionName)).then((yes) => {
+          if (!yes) return;
+          // cure 2: the answer may have come while the question was open — read the row again before the yes acts
+          const row = (this.sidebar?._allSessions || []).find((s) => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === targetBackendId);
+          if (row && row.status === 'external') { showToast(t('«{name}» was not resumed: it is running in another terminal', { name: String(sessionName || '').slice(0, 60) }), { type: 'info', duration: 8000 }); return; }
+          this.resumeSession(sessionId, cwd, sessionName, { ...again, unknownOk: !!unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId) });
+        }).catch(() => {});
+      } else if (unattended && !stay) showToast(t('«{name}» was not resumed: still checking whether it runs in another terminal — resume it by itself', { name: String(sessionName || '').slice(0, 60) }), { type: 'info', duration: 8000 }); // cure 2: an unattended restart held is SAID
       return { row: null, desk: null, checking: true };
     }
     // THE WINDOW THE RESUME WAS PRESSED IN (r2 N1 — the Resume bar, the retry bar, the account bar, the terminal's exited overlay, a

@@ -254,7 +254,7 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
   const LY2 = read('src/lib/layout.js'), fcut = "    const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));\n";
   if (!LY2.includes(fcut)) throw new Error('the anchor of the control «B-f64b cure: the boot filter» is not in the source');
   const b0 = await bootUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', LY2.replace(fcut, '    const go = stopped || [];\n'), 'rap-unknown-boot', { esm: true })).href)).LayoutManager);
-  ok(b0.creates === 2 && !b0.said.some((x) => /still checking/.test(x)), 'CONTROL: a boot «resume all» without the filter — the backstop (resumeSession) still keeps the row from starting, but NOBODY IS TOLD it was skipped (RED for the leg above\'s «said»)', b0);
+  ok(b0.creates === 2 && !b0.said.some((x) => /^1 not resumed: still checking/.test(x)) && b0.said.some((x) => /could not be resumed: .*still checking/.test(x)), 'CONTROL: a boot «resume all» without the filter — the backstop (resumeSession) still holds the row, and the pace reports it as a FAILURE instead of the skip\'s own words (RED for the leg above\'s «said»)', b0);
   // THE BACKSTOP (resumeSession): unattended or bulk starts nothing; a person's own press asks first — a no starts nothing, a yes starts it
   const lifeUnknown = async (inst) => {
     const P = page(inst, { delay: 30 });
@@ -275,10 +275,31 @@ console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A 
   const l1 = await lifeUnknown(install);
   ok(l1.checking.every(Boolean) && l1.before === 0 && l1.after === 1 && l1.asked.length === 2,
     'resumeSession (the backstop): unattended or bulk starts nothing; a person\'s own press asks «still checking» first — a no starts nothing, a yes starts it (one create)', l1);
-  const LS = read('src/lib/session-lifecycle.js'), gcut = '    if (!unknownOk && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {';
+  const LS = read('src/lib/session-lifecycle.js'), gcut = '    if (!unknownOk && !excludeWebuiId && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {';
   if (!LS.includes(gcut)) throw new Error('the anchor of the control «B-f64b cure: the backstop» is not in the source');
   const l0 = await lifeUnknown(await loadLifecycle(LS.replace(gcut, '    if (false && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {')));
   ok(l0.before >= 1, 'CONTROL: a resumeSession without the backstop starts the row still being checked unattended (RED for the leg above)', l0);
+  // cure 2 (主开发 12:17Z): A PERSON'S PRESET (layout loadPreset) — the rows it left because they are still being checked are SAID,
+  // with the door to try again; the others are resumed
+  const presetUnknown = async (LMx) => {
+    const P = page(install, { delay: 30, ...(LMx ? { LM: LMx } : {}) });
+    P.app.sidebar.getCustomName = () => null;
+    const rows = rowsOf(1), keep = globalThis.fetch;
+    globalThis.fetch = async (u) => ({ ok: true, json: async () => (String(u) === '/api/sessions' ? { sessions: rows } : { sessions: [] }) });
+    P.lm._savedPresets = { p: { windows: stoppedOf(3).map((d) => ({ type: 'terminal', backend: 'claude', backendSessionId: d.sessionId })) } };
+    const t0 = made.length;
+    try { await P.lm.loadPreset('p'); await tick(40); } finally { globalThis.fetch = keep; }
+    const el = toasts(t0).find((e) => /still checking/.test(toastText(e)));
+    const door = !!(el && [...(el.children || [])].some((c) => /global-toast-action/.test(String(c.className || '')) && /Try again/.test(String(c.textContent || ''))));
+    return { creates: P.creates.length, said: saidOf(t0), door };
+  };
+  const pr1 = await presetUnknown();
+  ok(pr1.creates === 2 && pr1.said.some((x) => /^1 not resumed: still checking/.test(x)) && pr1.door,
+    'cure 2: a PERSON\'S PRESET resumes the two rows it knows and SAYS the one left because it is still being checked, with «Try again»', pr1);
+  const LY3 = read('src/lib/layout.js'), tcut = LY3.match(/\n    if \(stillChecking\) showToast\([^\n]*/);
+  if (!tcut) throw new Error('the anchor of the control «B-f64b cure 2: the preset\'s words» is not in the source');
+  const pr0 = await presetUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', LY3.replace(tcut[0], ''), 'rap-unknown-preset', { esm: true })).href)).LayoutManager);
+  ok(pr0.creates === 2 && !pr0.said.some((x) => /still checking/.test(x)), 'CONTROL: a preset without its words leaves the row in silence (RED for the leg above)', pr0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -2188,6 +2188,7 @@ class LayoutManager {
 
     // Track which backend session IDs have already been processed (prevent duplicates)
     const processedBackendSessionIds = new Set();
+    let stillChecking = 0;   // B-f64b cure 2: the rows a person's preset left because they are still being checked — SAID at its end
 
     // Process each preset window
     for (const ws of preset.windows) {
@@ -2235,7 +2236,9 @@ class LayoutManager {
             }
           } else if (backendSessionId) {
             // Check stopped sessions for resume
-            const stoppedMatch = allSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === backendSessionId && s.status === 'stopped' && s.liveness !== 'unknown'); // B-f64b cure: a row still being checked is never resumed by a restore
+            const anyStopped = allSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === backendSessionId && s.status === 'stopped');
+            const stoppedMatch = anyStopped && anyStopped.liveness !== 'unknown' ? anyStopped : null; // B-f64b cure: a row still being checked is never resumed by a preset —
+            if (anyStopped && !stoppedMatch) stillChecking++;                                         // counted, and said at the preset's end with its door
             if (stoppedMatch) {
               const customName = this.app.sidebar?.getCustomName(backendSessionId);
               this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name, {
@@ -2357,6 +2360,10 @@ class LayoutManager {
         this.app.wm.minimize(id);
       }
     }
+
+    // B-f64b cure 2 (主开发 12:17Z): the person who loaded the preset is TOLD how many rows it left because they are still being
+    // checked — the boot's sentence, with the door to try again (the same preset, once the check has answered)
+    if (stillChecking) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: stillChecking }), { type: 'info', duration: 15000, actions: [{ label: t('Try again'), run: () => { this.loadPreset(name); } }] });
 
     // Update active preset name
     await fetch('/api/layouts-active', {
