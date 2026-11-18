@@ -2004,9 +2004,11 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
 .settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
-.settings-https-copy, .settings-https-recheck { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
-.settings-https-copy:hover, .settings-https-recheck:hover { border-color: var(--border-active); }
-.settings-https-recheck:disabled { opacity: 0.6; cursor: default; }
+.settings-https-copy, .settings-https-recheck, .settings-engine-download { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
+.settings-https-copy:hover, .settings-https-recheck:hover, .settings-engine-download:hover { border-color: var(--border-active); }
+.settings-https-recheck:disabled, .settings-engine-download:disabled { opacity: 0.6; cursor: default; }
+.settings-engine-doors { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; } /* B-0bc7: the engine row's «Download kernel» doors + their answer */
+.settings-engine-said { font-size: 11px; color: var(--text-secondary); }
 .settings-https-probe { flex: 1 1 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.85; overflow-wrap: anywhere; } /* lane tls-pass-retry: the last failed tailscale call */
 /* lane attention-policy: a block of rows under its own head (the Settings window and the Channels ⚙ door draw the same one) */
 .settings-block { display: block; }

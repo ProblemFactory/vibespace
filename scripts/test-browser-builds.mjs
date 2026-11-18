@@ -2905,5 +2905,59 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(r0.atLoad === '' && r0.open.split(',').length === 2, 'CONTROL (B-0645 cure 2): a keeper that does not take them back leaves both open after a restart — the first one ends only by its Restart press (RED for the leg above)', r0);
 }
 
+// ═══ B-0bc7: THE «Download kernel» DOOR — which engine's card offers it, what its answer says (en / zh / ja, the real dictionaries),
+// the unread kernel's words naming it, the Settings row's wiring; CONTROL: a model copy that offers no door for a FAILED download ═══
+console.log('— B-0bc7: the engine card\'s «Download kernel» door');
+{
+  const BMk = await import('../src/lib/browser-build-model.js');
+  const zhK = (await import('../src/lib/i18n-zh.js')).default, jaK = (await import('../src/lib/i18n-ja.js')).default;
+  const tOf = (d) => (k, p) => { let x = (d && d[k]) || k; if (p) x = x.replace(/\{(\w+)\}/g, (m, y) => (p[y] !== undefined ? String(p[y]) : m)); return x; };
+  const tE = tOf(null);
+  const R0 = { defaultEngine: { value: 'default', source: 'default' }, engines: [
+    { id: 'eng-missing', label: 'Missing', installed: false, kernel: { state: 'missing' } },
+    { id: 'eng-failed', label: 'Failed', installed: false, kernel: { state: 'failed', code: 'disk' } },
+    { id: 'eng-busy', label: 'Busy', installed: false, kernel: { state: 'downloading', bytes: 1, total: 4 } },
+    { id: 'eng-unread', label: 'Unread', installed: true, executable: true, measuredVersion: '1.0', kernel: { state: 'staged', next: { version: '2.0', unread: 'EIO' } } },
+    { id: 'eng-ok', label: 'Ok', installed: true, executable: true, measuredVersion: '1.0', kernel: { state: 'installed' } },
+    { id: 'eng-own', label: 'Own', source: 'user', installed: false },
+    { id: 'eng-bad', label: 'Bad', code: 'browser_engine_protocol' },
+  ] };
+  const WANT = [{ id: 'eng-missing', label: 'Missing', busy: false }, { id: 'eng-failed', label: 'Failed', busy: false }, { id: 'eng-busy', label: 'Busy', busy: true }, { id: 'eng-unread', label: 'Unread', busy: false }];
+  const judgeDoors = (M) => JSON.stringify(M.kernelDoors(R0)) === JSON.stringify(WANT) && M.kernelDoors(null).length === 0 && M.kernelDoors({ error: 'unreachable' }).length === 0;
+  ok(judgeDoors(BMk), 'B-0bc7 kernelDoors: a door for a kernel not here (none yet, a failed download), one BUSY while it downloads, one for a waiting kernel that could not be read — none for an installed kernel, the owner\'s own program (never downloaded) or an engine that does not answer; none when the engines could not be read', BMk.kernelDoors(R0));
+  const unread = BMk.engineNote(R0.engines[3], tE);
+  ok(unread.endsWith('the waiting kernel 2.0 could not be read (EIO) — it is kept beside its place and asked again at the next start · press «Download kernel» to fetch it again'), 'B-0bc7: the unread waiting kernel\'s words name the door («press «Download kernel» to fetch it again»)', unread);
+  const ANS = [[{ ok: true, id: 'eng-missing' }, ''], [{ ok: false, code: 'install_running', error: 'x' }, 'its kernel is already downloading'],
+    [{ ok: false, code: 'disk', error: 'x' }, 'the kernel could not be downloaded: not enough free disk space'],
+    [{ ok: false, code: 'build_platform_unsupported', error: 'x' }, 'the kernel could not be downloaded: the engine offers no kernel for this computer'],
+    [{ ok: false, code: 'engine_kernel_landing', error: 'x' }, 'the kernel could not be downloaded: its kernel is being replaced or put back in its place — try again in a moment'],
+    [{ error: 'boom', code: 'odd_code' }, 'the kernel could not be downloaded: odd_code'], [null, 'VibeSpace did not answer — nothing was downloaded']];
+  const badAns = ANS.filter(([a, w]) => BMk.kernelDownloadWords(a, tE) !== w).map(([a, w]) => ({ a, want: w, got: BMk.kernelDownloadWords(a, tE) }));
+  ok(badAns.length === 0, 'B-0bc7 kernelDownloadWords: a started / ended download says nothing (the card\'s line says it), a refusal says itself BY CODE (install_running, disk, platform, a landing or put-back, any other by its code), no answer says so', badAns);
+  const KEYS = ['Download kernel', 'Download kernel: {plugin}', 'press «Download kernel» to fetch it again', 'its kernel is already downloading', 'the kernel could not be downloaded: {why}', 'its kernel is being replaced or put back in its place — try again in a moment', 'VibeSpace did not answer — nothing was downloaded'];
+  const ph = (k) => (k.match(/\{\w+\}/g) || []);
+  const missing = KEYS.flatMap((k) => [['zh', zhK], ['ja', jaK]].filter(([, d]) => !(typeof d[k] === 'string' && d[k] !== k && ph(k).every((x) => d[k].includes(x)))).map(([l]) => `${l}: ${k}`));
+  ok(missing.length === 0, `B-0bc7: every new word (${KEYS.length}) in zh AND ja, its placeholders kept`, missing);
+  ok(BMk.engineNote(R0.engines[3], tOf(zhK)).endsWith('按「下载内核」重新获取') && BMk.engineNote(R0.engines[3], tOf(jaK)).endsWith('「カーネルをダウンロード」を押すと取得し直します') && BMk.kernelDownloadWords({ ok: false, code: 'install_running' }, tOf(zhK)) === '它的内核正在下载',
+    'B-0bc7: …said in zh / ja through the real dictionaries');
+  // the Settings row's wiring (DOM-free here; the row is drawn by settings-ui): the doors drawn with EVERY answer of the engines, the
+  // person's POST, the row asked again while it runs (the card's progress), stopped when it answers, the answer in words
+  const ui = read('src/lib/settings-ui.js'), css = read('public/style.css');
+  ok(/line\.textContent = engineFactText\(r, t\); this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui)
+    && /fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui)
+    && /const tick = setInterval\(again, 1500\);/.test(ui) && /finally \{ clearInterval\(tick\); this\._kernelAsks\.delete\(id\); \}/.test(ui)
+    && /this\._kernelSaid = kernelDownloadWords\(ans, t\);/.test(ui) && /b\.disabled = d\.busy \|\| this\._kernelAsks\.has\(d\.id\);/.test(ui)
+    && /\.settings-engine-download \{ flex: none;|, \.settings-engine-download \{ flex: none;/.test(css) && /\.settings-engine-doors \{/.test(css),
+    'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again every 1.5 s while it runs and stops when it answers, disables a busy door, says the answer — styled with the row\'s own button rule (theme variables)');
+  // CONTROL: a model copy whose doors skip a FAILED download (only «none yet») — the engine whose download failed would have no door
+  const MUTK = mutantCopies('b0bc7-doors', REPO);
+  const msrc = read('src/lib/browser-build-model.js');
+  const needle = "    if (!e.installed || (k && k.next && k.next.unread)) out.push(";
+  ok(msrc.split(needle).length === 2, 'B-0bc7 control setup: the door rule is found once in src/lib/browser-build-model.js');
+  const fCopy = MUTK.write('src/lib/browser-build-model.js', msrc.replace(needle, "    if ((!e.installed && !(k && k.state === 'failed')) || (k && k.next && k.next.unread)) out.push("), 'no-failed-door', { esm: true });
+  const BMx = await import('file://' + fCopy);
+  ok(!judgeDoors(BMx) && !BMx.kernelDoors(R0).some((d) => d.id === 'eng-failed'), 'CONTROL (B-0bc7): a door rule without the failed download — that engine has no «Download kernel» ⇒ the door table goes RED', BMx.kernelDoors(R0));
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

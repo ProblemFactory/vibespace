@@ -4,6 +4,7 @@ import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-att
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
+import { kernelDoors, kernelDownloadWords } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
 import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -725,11 +726,46 @@ class SettingsUI {
   _loadEngines(row, path, line) {
     const paint = (r) => {
       if (r && !r.error) this._engines = r;
-      if (line && (line.isConnected || line.parentNode)) line.textContent = engineFactText(r, t);
+      if (line && (line.isConnected || line.parentNode)) { line.textContent = engineFactText(r, t); this._paintKernelDoors(line, r, () => this._loadEngines(row, path, line)); }
       const sel = row ? row.querySelector('select.settings-select') : null;
       if (sel) fillEngineSelect(sel, r && !r.error ? r : null, this.settings.get(path), t, document);
     };
     Promise.resolve(fetchJson('/api/browser/engines')).then(paint, () => paint({ error: 'unreachable' }));
+  }
+  /** B-0bc7: «Download kernel» under the engine fact — one button per door (kernelDoors: an engine plugin whose kernel is not here, or
+   *  whose waiting kernel could not be read), drawn again with every answer; a press is _downloadKernel's; its answer in words beside
+   *  the buttons (a refusal by its code). */
+  _paintKernelDoors(line, r, again) {
+    const next = line.nextElementSibling;
+    let box = next && next.classList && next.classList.contains('settings-engine-doors') ? next : null;
+    const doors = kernelDoors(r);
+    if (!this._kernelAsks) this._kernelAsks = new Set();
+    if (!doors.length && !this._kernelSaid) { if (box) box.remove(); return; }
+    if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
+    const kids = doors.map((d) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'settings-engine-download';
+      b.textContent = doors.length > 1 ? t('Download kernel: {plugin}', { plugin: d.label }) : t('Download kernel');
+      b.disabled = d.busy || this._kernelAsks.has(d.id);
+      b.onclick = () => this._downloadKernel(d.id, again);
+      return b;
+    });
+    if (this._kernelSaid) { const said = document.createElement('span'); said.className = 'settings-engine-said'; said.textContent = this._kernelSaid; kids.push(said); }
+    box.replaceChildren(...kids);
+  }
+  /** B-0bc7: a person's «Download kernel» — POST /api/browser/engines/:id/kernel (it answers when the download ends, or at once with a
+   *  refusal by name); while it runs the row is asked again every 1.5 s (the card's progress: kernel.state); one ask per engine. */
+  async _downloadKernel(id, again) {
+    if (!this._kernelAsks) this._kernelAsks = new Set();
+    if (this._kernelAsks.has(id)) return;
+    this._kernelAsks.add(id); this._kernelSaid = '';
+    again();
+    const tick = setInterval(again, 1500);
+    let ans = null;
+    try { ans = await fetchJson(`/api/browser/engines/${encodeURIComponent(id)}/kernel`, { method: 'POST' }); } finally { clearInterval(tick); this._kernelAsks.delete(id); }
+    this._kernelSaid = kernelDownloadWords(ans, t);
+    again();
   }
 
   /** lane https-tailscale: the hub's https address (GET /api/tls — the plan src/server/tls.js holds, no probe on render):

@@ -111,7 +111,8 @@ export function discardedWords(d, t, { again = false } = {}) {
 /** lane fleet-plugin-catalog: a new kernel that WAITS beside the running one (`kernelFact().next`). r8 (s3): one that could not
  *  be read when last asked (`next.unread` — the error) says so, never «it serves the next browser start». */
 export function nextKernelWords(next, t) {
-  if (next && next.unread) return t(i18nKey('the waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start'), { version: String(next.version || ''), code: String(next.unread) });
+  // B-0bc7: …and names its door, the card's «Download kernel» (kernelDoors) — a person's download sets the new one in the free slot
+  if (next && next.unread) return t(i18nKey('the waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start'), { version: String(next.version || ''), code: String(next.unread) }) + ' · ' + t(i18nKey('press «Download kernel» to fetch it again'));
   return t(i18nKey('new kernel {version} downloaded — it serves the next browser start'), { version: String((next && next.version) || '') });
 }
 const short = (sha) => String(sha || '').slice(0, 12);
@@ -178,8 +179,32 @@ function kernelFailWords(code, t) {
     case 'kernel_credential_unusable': return t(i18nKey('the Plugin Git credential cannot download it — a release asset needs an access token (https)'));
     // round 2: GitHub serves `releases/download/…` to a browser's session, never a token — the fix is the plugin's kernel.json
     case 'kernel_asset_browser_form': return t(i18nKey("the plugin's kernel.json names the browser download form; a private repository's asset needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin's author"));
+    case 'engine_kernel_landing': return t(i18nKey('its kernel is being replaced or put back in its place — try again in a moment')); // B-0bc7: a person's download beside a landing / a put-back
     default: return String(code);
   }
+}
+/** B-0bc7: THE «Download kernel» DOORS (POST /api/browser/engines/:id/kernel — a person's act): an engine PLUGIN that answers as one
+ *  (never the owner's own program — VibeSpace never downloads that), whose kernel is not installed on this computer (none yet, or
+ *  its download failed) or whose waiting kernel could not be read. `busy` while it downloads (the card says its progress then). `r` =
+ *  the GET /api/browser/engines answer. → [{id, label, busy}] in the table's order */
+export function kernelDoors(r) {
+  const engines = r && !r.error && Array.isArray(r.engines) ? r.engines : [];
+  const out = [];
+  for (const e of engines) {
+    if (!e || typeof e !== 'object' || !e.id || e.code || e.source === 'user') continue;
+    const k = e.kernel && typeof e.kernel === 'object' ? e.kernel : null;
+    if (!e.installed || (k && k.next && k.next.unread)) out.push({ id: String(e.id), label: String(e.label || e.id), busy: !!(k && k.state === 'downloading') });
+  }
+  return out;
+}
+/** B-0bc7: what a person's «Download kernel» answered, in words — '' when it ran (the card's line says the rest through kernel.state);
+ *  a refusal by its CODE (the route's own refusals before any byte: disk, build_platform_unsupported, install_running,
+ *  browser_engine_protocol; a landing / a put-back in flight; anything else by its code); null ⇒ the hub did not answer. */
+export function kernelDownloadWords(ans, t) {
+  if (!ans) return t(i18nKey('VibeSpace did not answer — nothing was downloaded'));
+  if (ans.ok !== false && !ans.code && !ans.error) return '';
+  if (ans.code === 'install_running') return t(i18nKey('its kernel is already downloading'));
+  return t(i18nKey('the kernel could not be downloaded: {why}'), { why: kernelFailWords(ans.code || 'error', t) });
 }
 /** The Settings row's fact beside «Default browser engine» (GET /api/browser/engines): where the value in effect comes from
  *  (a cluster preset says so) + each engine on this computer. */
