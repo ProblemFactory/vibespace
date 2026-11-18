@@ -151,8 +151,9 @@ console.log('\n§2 tier hygiene');
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
   // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings
-  // (data/ci-fast-times.json) and a row READ ≥ 10 s at ≥ ×1.5 its statement in BOTH newest whole tiers is a false row (the
-  // coordinator's ruling, 2026-11-15) — the tier reds on it. One tier never judges, nor does the box's ×1.3 thermal reading.
+  // (<git dir>/ci-fast-times.json, fastTimesPath) and a row READ ≥ 10 s at ≥ ×1.5 its statement in BOTH newest whole tiers is a false
+  // row (the coordinator's ruling, 2026-11-15) — the push gate SAYS it (a warning: its verdict may not depend on load) and
+  // `ci.mjs --false-rows` is the red. One tier never judges, nor does the box's ×1.3 thermal reading.
   { const R = (name, why, over) => ({ name, tier: 'fast', why, ...(over ? { over } : {}) }), rd = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
     const rows = [R('grew', 'in-process · 6.6 s'), R('grew-b', 'in-process · 9.5 s'), R('thermal', 'in-process · 8 s'), R('under', 'PURE · 0.6 s'),
       R('once', 'in-process · 6 s'), R('chat', 'EXCEPTION (x) · 10 s'), R('debt', 'in-process · 12.1 s', DEBT), R('debt-grew', 'in-process · 12.1 s', DEBT)];

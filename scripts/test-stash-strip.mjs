@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // WHAT IS WAITING FOR AN AGENT — VISIBLE, AND HANDED OVER ON REQUEST (the owner, 2026-09-27: "能看到，只是会堆积到我
-// 下次发消息给它，这个有点 confusing，因为我在界面里完全看不到'有消息在 queue'这件事情"). Gate row `test-stash-strip`, fast.
+// 下次发消息给它，这个有点 confusing，因为我在界面里完全看不到'有消息在 queue'这件事情"). Gate row `test-stash-strip`, heavy (B-a2c9: 23.5 s alone, slow for the fast tier).
 //
 //   ① PURE src/stash-summary.js: kindOf (the SOURCE and the PATH decide; a sender name only for VibeSpace's own
 //      senders — a peer NAMED "VibeSpace browser" is still a peer), summarize (grouping, KIND_ORDER, a peer by its
