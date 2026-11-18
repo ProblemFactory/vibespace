@@ -13,6 +13,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import http from 'node:http';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -149,7 +150,7 @@ const expectRows = idx.reduce((n, x) => n + x.rows, 0);
 const res = await walkResume(null);
 ok(res.parsed === 1 && res.rows === expectRows, `after the kill the walk re-read 1 of 3 transcripts (the cursors held the other 2) and the row count is exact (${res.rows} = ${expectRows})`, res);
 const W0 = read('src/search-index-worker.js');
-const noCursor = MUT.write('src/search-index-worker.js', W0.replace("if (cur && cur.size === st.size && cur.mtime === mtime) return", "if (false) return"), 'nocursor');
+const noCursor = MUT.write('src/search-index-worker.js', W0.replace("if (cur && !reread && cur.size === st.size && cur.mtime === mtime) return", "if (false) return"), 'nocursor');
 const resN = await walkResume(noCursor);
 ok(resN.parsed === 3, `CONTROL (no cursor): the resumed walk re-reads all 3 transcripts — the resume leg goes RED (${resN.parsed} parsed)`, resN);
 
@@ -208,6 +209,7 @@ console.log('§8 the routes: cookie-only, scope, operators, status, rebuild');
   ok(a.code === 200 && a.body.total === 0 && a.body.hits.length === 0, 'a query that is only operators: 200, empty');
   const stt = await call('GET /api/search/status');
   ok(stt.body.index && stt.body.index.rows > 3000 && stt.body.dir && !stt.body.dir.startsWith(dataDir), 'status: rows + bytes + the index dir (on local disk, not under data/)', stt.body);
+  ok(a.body.index && 'lastBuild' in a.body.index && a.body.index.backfill && typeof a.body.index.backfill.running === 'boolean', 'the search answer says how the index stands (state, backfill, lastBuild) — a window words «Indexing…» beside its count', a.body.index);
   const rb = await call('POST /api/search/rebuild');
   await new Promise((rr) => setTimeout(rr, 100));
   ok(rb.body.rebuilding && (await ix.call('status', {})).rows === 0, 'rebuild drops every row (the walk then re-reads the conversations)');
@@ -259,7 +261,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   const sidNew = () => `0f5e1a00-0000-4000-8000-0000c1ea${String(++nSid).padStart(4, '0')}`;
   const jsonl = (sid, texts) => { fs.writeFileSync(path.join(proj, sid + '.jsonl'), texts.map((t, i) => JSON.stringify({ type: 'user', uuid: `${sid.slice(-4)}-u${i}`, sessionId: sid, timestamp: new Date(2e12 + i * 1000).toISOString(), message: { role: 'user', content: t } })).join('\n') + '\n'); return { sid, backend: 'claude', cwd: '/w/clr' }; };
   const LEDGER = 'the zirconquill ledger: totals attached\nsecond line of the ledger'; // two lines: a card keeps them, a report folds them
-  const F1MSG = 'Quarterly numbers for the marrowbank board are below\nRevenue 4.2M this quarter\nPlan: acquire Brightline in Q1'; // the reader's F1: the first line holds the whole witness
+  const F1MSG = 'Quarterly numbers for the marrowbank board are below\nRevenue 4.2M this quarter\nPlan: acquire Quillmere in Q1'; // the reader's F1: the first line holds the whole witness
   const F3MSG = 'the\u200b vellichor memo: plans for the quarter ahead and more'; // the reader's F3: a format character a report line drops
   const wake = (report) => `Another Claude session sent a message:\n${report}\n\nThis came from another Claude session — not typed by your user.`;
   async function scene(workerFile = null, GEmod = null, SIm = SI) {
@@ -294,11 +296,16 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     N.feedPeerCard(s, { fromName: 'me', text: p1.text, group: { id: g1, at: p2.at, name: 'wake' }, recorded: wake(R1) });
     N.feedPeerCard(s, { fromName: 'me', text: pF1.text, group: { id: g1, at: pF3.at, name: 'wake' }, recorded: wake(R1) });
     s._normalizer.injectPeerCard({ fromName: 'me', text: pF1.text, kind: 'peer' });
-    SIm.noteLive(s); await new Promise((rr) => setTimeout(rr, 40)); await x.call('status', {}); // the debounce, then the FIFO
+    // the cure's controls (lens three): a ring card of p1 whose words are OTHER words (only its card key clears it), and a
+    // live card of g1 that carries the message's first line + a note (only its group, carried live, lets the line rule judge it)
+    const s2 = { backend: 'claude', backendSessionId: sidNew(), host: '', _normEpoch: 1, _historyLoaded: true, _normalizer: N.createMessageManager('claude', 'w-clr2') };
+    N.feedPeerCard(s2, { fromName: 'me', text: 'a card that kept other words', group: { id: g1, at: p1.at, name: 'wake' } });
+    s2._normalizer.injectPeerCard({ fromName: 'me', text: `${F1MSG.split('\n')[0]}\nand a note from me`, kind: 'peer', group: { id: g1, at: p4.at, name: 'wake' } });
+    SIm.noteLive(s); SIm.noteLive(s2); await new Promise((rr) => setTimeout(rr, 40)); await x.call('status', {}); // the debounce, then the FIFO
     const find = async (w) => (await x.search({ q: w, scope: 'chats', limit: 50 })).hits;
     const o = { g1, g2 };
     o.before = (await find('zirconquill')).length;
-    o.f1before = (await find('Brightline')).length; o.f3before = (await find('vellichor')).length; o.thanks = (await find('thanks')).length;
+    o.f1before = (await find('Quillmere')).length; o.f3before = (await find('vellichor')).length; o.thanks = (await find('thanks')).length;
     // THE CLEAR (the engine's own door, the worker running): p1, the short p4, F1MSG, F3MSG and «done!» of g1
     const rc = await ge.clearMessages({ group: g1, ids: [p1.vendorId, p4.vendorId, pF1.vendorId, pF3.vendorId], by: G.OWNER });
     o.cleared = rc.cleared.length;
@@ -312,16 +319,22 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     o.pasted = (await find('pasted record')).length;
     o.short = (await find('好的')).length;                  // g2's short message stays; g1's is gone
     o.liveRows = hits.filter((h) => h.sid === s.backendSessionId).length;
-    o.f1after = (await find('Brightline')).length;          // a later line of a card that holds the message as written (F1, F2)
+    o.f1after = (await find('Quillmere')).length;          // a later line of a card that holds the message as written (F1, F2)
     o.f3after = (await find('vellichor')).length;           // a hidden character in the first 40 (F3)
     o.thanksAfter = (await find('thanks')).length;          // «done!» cleared: a longer line holding it stays (F6)
+    o.keyOnly = (await find('kept other words')).length;    // a card of the record whose words differ: its key clears it
+    o.marrow = (await find('marrowbank')).length;            // every copy of F1MSG's first line, the live card that carries only its group too
+    // THE READERS' SHOULD: the person's OWN message with the same whole words, in an unrelated conversation, stays found
+    const C4 = jsonl(sidNew(), [F1MSG]);
+    await x.call('indexConversation', C4);
+    o.ownStays = (await find('Quillmere')).filter((h) => h.sid === C4.sid).length;
     // A RESTART: the next worker is handed the same set — nothing to sweep, nothing comes back
     await x.close(); x = make(); x.start();
     o.restart = (await find('zirconquill')).length;
     // AFTER THE CLEAR, a conversation indexed for the first time (its transcript holds g1's report as delivered)
     const C2 = jsonl(sidNew(), [wake(R1)]);
     await x.call('indexConversation', C2);
-    o.lateRows = (await find('zirconquill')).filter((h) => h.sid === C2.sid).length + (await find('Brightline')).filter((h) => h.sid === C2.sid).length;
+    o.lateRows = (await find('zirconquill')).filter((h) => h.sid === C2.sid).length + (await find('Quillmere')).filter((h) => h.sid === C2.sid).length;
     // A CLEAR WHILE NO WORKER RUNS: indexed before, cleared with the worker gone, swept when the next one starts
     const p6 = await post(g1, 'the quartzfennel memo for the board');
     const C3 = jsonl(sidNew(), [wake(reportOf(g1))]);
@@ -350,23 +363,53 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   ok(o.short === 1, `a SHORT message (2 characters, under the witness) is cleared as a whole line of its group's card only — the other group's stays (${o.short})`, o);
   ok(o.f1after === 0, `a message written on several lines (its first line longer than the witness) is gone from a card that holds it as written, and from a card that names no group (${o.f1after})`, o);
   ok(o.f3after === 0, `a message with a hidden character in its first 40 is gone from the copies that wrote it belted (${o.f3after})`, o);
+  ok(o.keyOnly === 0 && o.marrow === 0, `a card of the record whose words differ is cleared by its key; a live card that carries only the group is judged by the line rule (${o.keyOnly}, ${o.marrow})`, o);
+  ok(o.ownStays === 1, `the person's own message with the same whole words, in an unrelated conversation, stays found (${o.ownStays}) — only a PEER card that names no group is judged whole`, o);
   ok(o.thanks === o.thanksAfter && o.thanks >= 1, `a short cleared message («done!») clears no longer line that holds it («all done! thanks» stays: ${o.thanksAfter})`, o);
   ok(o.readsAtClear === 1, `a later clear reads only its own record — the set grows from it, never the group's log again (${o.readsAtClear} read)`, o);
   ok(o.restart === 1 && o.lateRows === 0, 'a restart brings nothing back; a conversation first indexed after the clear is judged at its write', o);
   ok(o.p6before === 1 && o.p6after === 0 && o.bootSync === 0 && o.bootAsync >= 1, `a clear made while no worker ran is swept by the next worker; at a boot the set is read off the loop (${o.bootSync} sync, ${o.bootAsync} async reads) and the first search waits for it`, o);
   ok(o.rebuilt === 1, `a rebuild re-derives every row through the judge (${o.rebuilt})`, o);
-  // the schema: an index a release before this one wrote (schema 1, its rows unjudged) is rebuilt at the first start
-  {
+  // THE SCHEMA STEP KEEPS A RELEASE'S ROWS (the cure's reader N1): a conversation the backfill cannot read again (a harness
+  // with no transcript reader) stays found; one it can read is read again and its rows replaced; a RED control (the old drop)
+  const mkV1 = () => {
     const d5 = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-v1-'));
     const dir5 = SI.indexDirFor(d5, home).dir; fs.mkdirSync(dir5, { recursive: true });
     const { DatabaseSync } = require('node:sqlite');
-    const db1 = new DatabaseSync(path.join(dir5, 'search.db')); db1.exec('CREATE TABLE msg (id INTEGER PRIMARY KEY, body TEXT)'); db1.exec('PRAGMA user_version = 1'); db1.close();
-    const x5 = SI.create({ dataDir: d5, homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9 }); x5.start();
+    const TOK = "tokenize = 'unicode61 remove_diacritics 2'";
+    const db1 = new DatabaseSync(path.join(dir5, 'search.db'));
+    for (const q of ["CREATE TABLE msg (id INTEGER PRIMARY KEY, sid TEXT NOT NULL, host TEXT NOT NULL DEFAULT '', backend TEXT, mid TEXT NOT NULL, ts INTEGER, role TEXT, body TEXT NOT NULL, UNIQUE (host, sid, mid))",
+      `CREATE VIRTUAL TABLE msg_fts USING fts5 (body, content = 'msg', content_rowid = 'id', ${TOK}, detail = full)`,
+      "CREATE TABLE art (id INTEGER PRIMARY KEY, sessionId TEXT, host TEXT NOT NULL DEFAULT '', path TEXT NOT NULL, mtime INTEGER, kind TEXT, skipped TEXT, body TEXT NOT NULL DEFAULT '', UNIQUE (host, path))",
+      `CREATE VIRTUAL TABLE art_fts USING fts5 (body, content = 'art', content_rowid = 'id', ${TOK}, detail = full)`,
+      'CREATE TABLE cursor (file TEXT PRIMARY KEY, sid TEXT, host TEXT, size INTEGER, mtime INTEGER, lines INTEGER, state TEXT)',
+      'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)']) db1.exec(q);   // the release's schema 1, letter for letter
+    const ins = db1.prepare('INSERT INTO msg (sid, host, backend, mid, ts, role, body) VALUES (?, ?, ?, ?, ?, ?, ?)'), fts = db1.prepare('INSERT INTO msg_fts (rowid, body) VALUES (?, ?)');
+    const put = (sid, backend, mid, body) => { const r = ins.run(sid, '', backend, mid, 1, 'user', body); fts.run(r.lastInsertRowid, M.segment(body)); };
+    put('ag-conv-1', 'antigravity', 'x1', 'the olivequartz note of a conversation no transcript reader can read');
+    put(MIG_SID, 'claude', 'u:m-old', 'the stalewords row the release wrote');
+    db1.prepare('INSERT INTO cursor (file, sid, host, size, mtime, lines, state) VALUES (?, ?, ?, ?, ?, ?, ?)').run(MIG_FILE, MIG_SID, '', fs.statSync(MIG_FILE).size, Math.floor(fs.statSync(MIG_FILE).mtimeMs), 1, 'done');
+    db1.prepare('INSERT INTO meta (k, v) VALUES (?, ?)').run('lastBuild', '1790000000000');
+    db1.exec('PRAGMA user_version = 1'); db1.close();
+    return d5;
+  };
+  const MIG_SID = '0f5e1a00-0000-4000-8000-00000000e1a1';
+  const MIG_DIR = path.join(home, '.claude/projects/-w-mig'); fs.mkdirSync(MIG_DIR, { recursive: true });
+  const MIG_FILE = path.join(MIG_DIR, MIG_SID + '.jsonl');
+  fs.writeFileSync(MIG_FILE, JSON.stringify({ type: 'user', uuid: 'm-1', sessionId: MIG_SID, timestamp: new Date(2e12).toISOString(), message: { role: 'user', content: 'the freshlinden words of the transcript' } }) + '\n');
+  const migrateScene = async (workerFile = null) => {
+    const x5 = SI.create({ dataDir: mkV1(), homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9, ...(workerFile ? { workerFile } : {}) }); x5.start();
     await x5.call('status', {});
-    const rb = x5.stats().ready && x5.stats().ready.rebuilt;
+    const f5 = async (w) => (await x5.search({ q: w, scope: 'chats' })).hits.length;
+    const m = { migrated: x5.stats().ready && x5.stats().ready.migrated, lastBuild: x5.stats().lastBuild, kept: await f5('olivequartz') };
+    const r = await x5.call('indexConversation', { sid: MIG_SID, backend: 'claude', cwd: '/w/mig' });
+    Object.assign(m, { reread: !!(r && r.parsed), stale: await f5('stalewords'), fresh: await f5('freshlinden') });
     await x5.close({ final: true });
-    ok(rb === 'schema 1 → 2', `an index written before (schema 1: rows nobody judged) is dropped and rebuilt at the first start (${rb})`);
-  }
+    return m;
+  };
+  const mg = await migrateScene();
+  ok(mg.migrated === 'schema 1 → 2, rows kept' && mg.kept === 1 && !!mg.lastBuild, `an index written by the release (schema 1) is MIGRATED, not dropped: a conversation no transcript reader can read stays found, the index counts as built (${mg.migrated})`, mg);
+  ok(mg.reread && mg.stale === 0 && mg.fresh === 1, 'a conversation its transcript can give again is read again, its rows replaced (the release\'s row gone, the transcript\'s words found)', mg);
   // the controls: the change removed ⇒ the legs go RED
   const W2 = read('src/search-index-worker.js'), GE2 = read(GE_REL), O2 = read('src/server/search-index.js');
   const pin = (src, s) => { const n = src.split(s).length - 1; if (n !== 1) ok(false, `the control's anchor is in its file once: ${s}`, n); return s; };
@@ -386,11 +429,55 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   const on = await scene(null, MUT.load(GE_REL, GE2.replace(pin(GE2, '      try { noteClearedNeedles(gid, out.cleared.map((vid) => found.get(vid)).filter(Boolean)); } catch { heldNeedles.delete(gid); }'), ''), 'nogrow'));
   ok(on.readsAtClear > 1, `CONTROL (the set not grown by the clear): a later clear reads the group's records again (${on.readsAtClear} reads)`, on);
   const os3 = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, "    if (all && typeof all.then === 'function') {"), '    if (false) {'), 'syncboot'));
+  const WAIT = "    if (clearedReady) { let t; await Promise.race([clearedReady, new Promise((r) => { t = setTimeout(r, CLEARED_WAIT_MS); t.unref?.(); })]); clearTimeout(t); } // B-b291: no answer before the worker holds the whole cleared set\n";
+  const onw = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, WAIT), ''), 'nowait'));
+  ok(onw.p6after >= 1, `CONTROL (no wait for the whole set at a boot): the first search answers from the cache-only set and finds the words (${onw.p6after})`, onw);
+  const omg = await migrateScene(wmut("if (!fresh && uv > 0 && uv < SCHEMA_VERSION && migrate())", "if (false)", 'nomigrate'));
+  ok(omg.kept === 0, `CONTROL (the schema step drops the index, as before the cure): the conversation no transcript reader can read is gone from search (${omg.kept})`, omg);
+  const ok2 = await scene(wmut("  if (typeof mid === 'string' && mid.startsWith('gm:')) {", "  if (false) {", 'nokey'));
+  ok(ok2.keyOnly >= 1, `CONTROL (no card-key branch): a card of the record whose words differ is found again (${ok2.keyOnly})`, ok2);
+  const CARRY = "...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : m.originKind === 'peer-message' ? { peerCard: true } : {})";
+  const ocar = await scene(null, null, MUT.load('src/server/search-index.js', O2.replace(pin(O2, CARRY), "...(m.originKind === 'peer-message' ? { peerCard: true } : {})"), 'nocarry'));
+  ok(ocar.marrow >= 1, `CONTROL (the live door drops the card's group): the live card that carries only its group is found again (${ocar.marrow})`, ocar);
+  const ogp = await scene(wmut("if ((grp === '' || grp === gid) && c.wholes.get(h) === f.length", "if ((!grp || grp === gid) && c.wholes.get(h) === f.length", 'anyrow'));
+  ok(ogp.ownStays === 0, `CONTROL (every row of no group judged whole): the person's own message is hidden — the precision leg goes RED (${ogp.ownStays})`, ogp);
   ok(os3.bootSync >= 1, `CONTROL (a boot reads the set on the loop): the start does a synchronous log read (${os3.bootSync})`, os3);
+  // R2 (the cure's reader): a cleared group whose log cannot be read at a boot is named PARTIAL and never cached — asked
+  // again, never handed over as a «whole» set
+  {
+    const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-part-'));
+    const st0 = createChannelStore({ dir: path.join(d6, 'channels') });
+    let failAsync = false, asyncReads = 0;
+    const st6 = new Proxy(st0, { get: (t, k) => (k === 'readTailAsync' ? async (...a) => { asyncReads++; if (failAsync) throw Object.assign(new Error('an unreadable log (stand-in)'), { code: 'EIO' }); return t.readTailAsync(...a); } : t[k]) });
+    let t6 = 2e12;
+    const mk6 = () => require(path.join(REPO, GE_REL)).create({ store: st6, deliver: null, broadcast() { }, now: () => (t6 += 60000), roster: () => ROSTER, groupSetting: () => 'none', log: quiet });
+    const ge6 = mk6();
+    const g6 = (await ge6.create({ by: G.OWNER, name: 'part', members: [ME, OTHER], quiet: true, consent: () => ({ ok: true }) })).group.id;
+    const p6 = (await ge6.post({ group: g6, from: ME, text: 'the hollowfern words' })).message;
+    await ge6.clearMessages({ group: g6, ids: [p6.vendorId], by: G.OWNER });
+    const ge7 = mk6();                       // a boot: its cache is empty
+    failAsync = true; const r1 = await ge7.clearedCopiesAsync();
+    failAsync = false; const r2 = await ge7.clearedCopiesAsync();
+    ok(r1.partial.includes(g6) && !r1.groups[g6] && r2.partial.length === 0 && r2.groups[g6] && r2.groups[g6].keys.length === 1 && asyncReads === 2,
+      `a group whose log could not be read is named partial, not cached, and read again at the next ask (${asyncReads} async reads)`, { r1, r2 });
+    st0.close();
+  }
   // the wiring (channels-wiring: the ONE place the engine and the index meet) + the device words the sentence
   const CWT = read('src/server/channels-wiring.js');
   ok(/try \{ SEARCH\.noteCleared\(gid\); \}/.test(CWT) && CWT.includes('SEARCH.setClearedSource((gid, o) => groups.clearedCopies(gid, o), () => groups.clearedCopiesAsync());'), 'the channels wiring tells the index of every clear and hands it the groups engine\'s clearedCopies (+ its async twin for a start)');
   ok(/const words = \(x\) => \(x\.includes\(CLEARED_TEXT\) \? x\.split\(CLEARED_TEXT\)\.join\(clearedText\(\)\) : x\);/.test(read('src/lib/search-window.js')), 'a snippet holding the sentence words it in the device\'s language (the marks keep their offsets)');
+  // THE READERS' MUST: an answer while the index (re)builds never says «No matches» alone
+  const SWm = await import(pathToFileURL(path.join(REPO, 'src/lib/search-window.js')).href);
+  const line = (r) => SWm.searchStatusText(r);
+  const running = line({ total: 0, index: { state: 'ready', backfill: { running: true, done: 12, total: 400 }, lastBuild: null } });
+  const notYet = line({ total: 2, took: 3, index: { state: 'ready', backfill: { running: false }, lastBuild: null } });
+  const notYet0 = line({ total: 0, index: { state: 'ready', backfill: { running: false }, lastBuild: null } });
+  const built = line({ total: 0, index: { state: 'ready', backfill: { running: false }, lastBuild: 1790000000000 } });
+  const walking = line({ total: 3, took: 4, index: { state: 'ready', backfill: { running: true, done: 1, total: 9 }, lastBuild: 1790000000000 } });
+  ok(running === 'No matches · Indexing 12 of 400 conversations…' && notYet === '2 matches · 3 ms · The index starts a minute after the server' && notYet0 === 'No matches · The index starts a minute after the server' && built === 'No matches' && walking === '3 matches · 4 ms',
+    `the count line says the index is building beside «No matches» / «N matches» until one build finished; a periodic walk over a whole index adds nothing («${running}» · «${notYet}» · «${notYet0}» · «${built}» · «${walking}»)`);
+  ok(/status\.textContent = searchStatusText\(r\);/.test(read('src/lib/search-window.js')) && /app\.ws\.onGlobal\(onClear\)/.test(read('src/lib/search-window.js')) && /app\.ws\.offGlobal\(onClear\)/.test(read('src/lib/search-window.js')),
+    'the window paints that line, and asks an open query again when a group message is cleared anywhere (listener removed with the window)');
 }
 await ix.close({ final: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

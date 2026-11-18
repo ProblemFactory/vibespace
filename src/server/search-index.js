@@ -65,12 +65,19 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   const progress = { done: 0, total: 0, running: false, startedAt: 0, finishedAt: 0, rows: 0, bytes: 0, ms: 0 };
   const names = new Map(); // `${host}|${sid}` → {name, backend, cwd} from the last listing
   let droppedSaidAt = 0;
+  // R5/R6 (the cure's reader): «a build has finished since this index was (re)created» — from the worker's meta at open
+  // (never after a rebuild from scratch), set when a walk ends, unset by a rebuild; a window says «Indexing…» until it is
+  let lastBuildAt = null, scheduledAt = 0, clearedRetries = 0;
 
   const setState = (s, r = null, extra = {}) => { st = s; reason = r; code = extra.code || null; };
   const onMessage = (m) => {
     if (m && m.ev === 'memory') return; // the memory census's answer (askMemory takes it)
     if (m && m.ev === 'state') {
-      if (m.state === 'ready') { ready = m; setState('ready'); log.log?.(`[search-index] ready: ${m.rows} messages, ${m.artifacts} files, ${m.bytes} bytes (${dir})${m.rebuilt ? ' — rebuilt: ' + m.rebuilt : ''}`); }
+      if (m.state === 'ready') {
+        ready = m; lastBuildAt = m.rebuilt ? null : (m.lastBuild || lastBuildAt || null);
+        // an index rebuilt from scratch past the boot's own delay (a corrupt file, a lost folder) is walked again soon
+        if (m.rebuilt && scheduledAt && now() - scheduledAt >= bootDelayMs && !walking) { const t = setTimeout(() => backfill({ reason: 'rebuilt' }).catch(() => { }), 2000); t.unref?.(); }
+        setState('ready'); log.log?.(`[search-index] ready: ${m.rows} messages, ${m.artifacts} files, ${m.bytes} bytes (${dir})${m.rebuilt ? ' — rebuilt: ' + m.rebuilt : ''}`); }
       else if (m.state === 'disabled') { setState('disabled', m.reason, { code: m.code }); log.log?.(`[search-index] off — ${m.reason}${m.code ? ' (' + m.code + ')' : ''}${m.detail ? ': ' + m.detail : ''}`); }
       return;
     }
@@ -126,11 +133,18 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     const all = (() => { try { return clearedCopiesAll(); } catch { return null; } })();
     if (all && typeof all.then === 'function') {
       call('setCleared', { groups: copiesOf(null, { cachedOnly: true }), whole: false }).catch(() => { });
-      clearedReady = all.then((groups) => call('addCleared', { groups: groups || {}, whole: true }), (e) => { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); return call('addCleared', { groups: copiesOf(null), whole: true }); }).catch(() => { });
+      clearedReady = all.then((r) => handOver(r), (e) => { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); retryCleared(); return call('addCleared', { groups: copiesOf(null, { cachedOnly: true }), whole: false }); }).catch(() => { }); // a failed read never falls back to the loop's synchronous reads (the readers' should)
     } else { call('setCleared', { groups: copiesOf(null), whole: true }).catch(() => { }); clearedReady = null; }
     return api;
   }
   let clearedReady = null;
+  /** The async set handed over: `whole` only when every group was read (a group whose log could not be read is asked again). */
+  const handOver = (r) => { const groups = (r && r.groups) || {}, partial = (r && Array.isArray(r.partial)) ? r.partial : []; if (partial.length) retryCleared(); return call('addCleared', { groups, whole: !partial.length }); };
+  function retryCleared() {
+    if (clearedRetries >= 10) { log.warn?.('[search-index] the cleared group messages are still partial after 10 tries — the next worker start asks again'); return; }
+    clearedRetries++;
+    const t = setTimeout(() => { if (!worker) return; Promise.resolve().then(() => clearedCopiesAll()).then((r) => (r ? handOver(r) : null)).catch(() => retryCleared()); }, 60e3); t.unref?.();
+  }
   const CLEARED_WAIT_MS = 5000;
   const copiesOf = (gid, o) => { try { return clearedCopies(gid, o) || {}; } catch (e) { log.warn?.(`[search-index] the cleared group messages were not read: ${e && e.message}`); return {}; } };
   /** A group message was cleared: its group's rows are judged again. No worker now ⇒ the next one is handed the whole set. */
@@ -182,7 +196,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
       for (const i of walk.send) {
         const m = msgs[i];
         const body = M.textOf(m);
-        if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }], ...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : {}) });   // B-b291: the group a card is of
+        if (body) out.push({ mid: m.id, ts: m.ts, role: m.role, content: [{ type: 'text', text: body }], ...(m.peerGroup ? { peerGroup: { id: m.peerGroup.id } } : m.originKind === 'peer-message' ? { peerCard: true } : {}) });   // B-b291: the group a card is of (a peer card that names none: peerCard)
         cur.sent.add(m.id);
       }
       cur.from = walk.from;
@@ -234,7 +248,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
         // idle pacing: yield every conversation, back off while the loop lags
         for (let i = 0; i < 20 && (await lagMs()) > 50; i++) await sleep(250);
       }
-      try { await call('sweepArtifacts', {}); await call('noteBuild', { at: now() }); } catch { }
+      try { await call('sweepArtifacts', {}); await call('noteBuild', { at: now() }); lastBuildAt = now(); } catch { }
       Object.assign(progress, { running: false, finishedAt: now(), ms: now() - t0 });
       log.log?.(`[search-index] backfill (${why}): ${progress.done} of ${progress.total} conversations, ${progress.rows} new messages, ${Math.round(progress.bytes / 1048576)} MB read in ${progress.ms} ms`);
     })().finally(() => { walking = null; });
@@ -243,6 +257,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   function schedule() {
     if (backfillTimer) return api;
     const run = () => { backfillTimer = setTimeout(run, backfillEveryMs); backfillTimer.unref?.(); backfill().catch(() => { }); };
+    scheduledAt = now();
     backfillTimer = setTimeout(run, bootDelayMs); backfillTimer.unref?.();
     return api;
   }
@@ -263,6 +278,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   }
   async function rebuild() {
     await call('drop', {});
+    lastBuildAt = null; // the window says «Indexing…» until this walk ends
     names.clear();
     backfill({ reason: 'rebuild' }).catch(() => { });
     return { ok: true, rebuilding: true };
@@ -287,7 +303,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
     return r;
   }
 
-  const api = { start, schedule, backfill, noteLive, noteArtifact, noteCleared, search, status, rebuild, forget, close, call, stats: () => ({ state: st, reason, code, dir, ready, ...counts, backfill: { ...progress } }), get dir() { return dir; } };
+  const api = { start, schedule, backfill, noteLive, noteArtifact, noteCleared, search, status, rebuild, forget, close, call, stats: () => ({ state: st, reason, code, dir, ready, lastBuild: lastBuildAt, ...counts, backfill: { ...progress } }), get dir() { return dir; } };
   return api;
 }
 
@@ -303,7 +319,7 @@ function mount(app, ix) {
       const q = String(req.query.q || '');
       const r = await ix.search({ q, scope: req.query.scope, limit: Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20)), offset: Math.max(0, parseInt(req.query.offset, 10) || 0) });
       const s = ix.stats();
-      res.json({ hits: r.hits, groups: r.groups, total: r.total, took: Date.now() - t0, empty: r.empty || null, index: { state: s.state, backfill: s.backfill } });
+      res.json({ hits: r.hits, groups: r.groups, total: r.total, took: Date.now() - t0, empty: r.empty || null, index: { state: s.state, backfill: s.backfill, lastBuild: s.lastBuild || null } }); // lastBuild (B-b291 cure): a window says «Indexing…» until one build has finished
     } catch (e) { res.status(e.status || 500).json({ error: e.message, reason: e.reason || null, hits: [], total: 0 }); }
   });
   app.get('/api/search/status', async (req, res) => {

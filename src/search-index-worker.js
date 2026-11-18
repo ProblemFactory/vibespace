@@ -76,6 +76,29 @@ function openOnce() {
   return db.prepare('PRAGMA user_version').get().user_version;
 }
 
+// THE STEP THAT KEEPS THE ROWS (B-b291 cure r2, the reader's N1): a release's index is MIGRATED, never dropped — a
+// conversation the backfill cannot read again (a harness with no transcript reader: its rows came from the live door) would
+// otherwise leave search for good. The step adds its columns; every conversation the backfill CAN read is marked to be read
+// again (its rows are replaced then — `migrated` cursors), and every user row is held as a possible peer card (grp '': the
+// whole-message rule judges it) until it is. A table set this release does not know is dropped and rebuilt as before.
+const ADDED_COLUMNS = [['grp', 'TEXT']];
+const KNOWN_TABLES = ['msg', 'msg_fts', 'art', 'art_fts', 'cursor', 'meta'];
+function migrate() {
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
+  if (!KNOWN_TABLES.every((t) => tables.has(t))) return false;
+  const have = new Set(db.prepare('PRAGMA table_info(msg)').all().map((c) => c.name));
+  db.exec('BEGIN');
+  try {
+    for (const [c, ty] of ADDED_COLUMNS) if (!have.has(c)) db.exec(`ALTER TABLE msg ADD COLUMN ${c} ${ty}`);
+    db.exec('CREATE INDEX IF NOT EXISTS msg_grp ON msg (grp) WHERE grp IS NOT NULL');
+    if (!have.has('grp')) db.exec("UPDATE msg SET grp = '' WHERE role = 'user'");
+    db.exec("UPDATE cursor SET state = 'migrated' WHERE state = 'done'");
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec('COMMIT');
+    return true;
+  } catch { try { db.exec('ROLLBACK'); } catch { } return false; }
+}
+
 function open() {
   fs.mkdirSync(dbDir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(dbDir, 'owner.json'), JSON.stringify({ dataDir: dataReal, at: Date.now() }) + '\n');
@@ -87,13 +110,17 @@ function open() {
     removeDbFiles(); rebuilt = 'corrupt';
     uv = openOnce();
   }
+  let migrated = null;
   if (uv !== SCHEMA_VERSION) {
     const fresh = uv === 0 && db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n === 0;
-    if (!fresh) { db.close(); removeDbFiles(); openOnce(); rebuilt = `schema ${uv} → ${SCHEMA_VERSION}`; }
-    db.exec('BEGIN');
-    for (const s of SCHEMA) db.exec(s);
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    db.exec('COMMIT');
+    if (!fresh && uv > 0 && uv < SCHEMA_VERSION && migrate()) migrated = `schema ${uv} → ${SCHEMA_VERSION}, rows kept`;
+    else {
+      if (!fresh) { db.close(); removeDbFiles(); openOnce(); rebuilt = `schema ${uv} → ${SCHEMA_VERSION}`; }
+      db.exec('BEGIN');
+      for (const s of SCHEMA) db.exec(s);
+      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      db.exec('COMMIT');
+    }
   }
   S = {
     insMsg: db.prepare('INSERT OR IGNORE INTO msg (sid, host, backend, mid, ts, role, body, grp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -117,7 +144,7 @@ function open() {
     putMeta: db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)'),
     getMeta: db.prepare('SELECT v FROM meta WHERE k = ?'),
   };
-  return rebuilt;
+  return { rebuilt, migrated };
 }
 
 const tx = (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { try { db.exec('ROLLBACK'); } catch { } throw e; } };
@@ -132,7 +159,9 @@ const WHOLE_LENS = new Set();
 const SUBSTRING_FLOOR = 12; // the reader's F6: a 4-unit witness («done», «👍👍») inside every line of a group cleared too much
 const WHOLE_FLOOR = 12;     // a row that names no group is cleared whole only by a message at least this long
 const GID_RE = /^g-[0-9a-f]{8}$/;
-const groupOfCard = (m) => { const id = m && m.peerGroup && m.peerGroup.id; return typeof id === 'string' && GID_RE.test(id) ? id : null; };
+// the group a row is of: a card's peerGroup; '' = a PEER card that names no group (a harness that drops it); null = any
+// other row (the person's, an agent's) — never judged as a whole cleared message (the readers' should: no false hide)
+const groupOfCard = (m) => { const id = m && m.peerGroup && m.peerGroup.id; if (typeof id === 'string' && GID_RE.test(id)) return id; return m && (m.peerCard === true || m.originKind === 'peer-message') ? '' : null; };
 const fold = (s) => String(s).replace(/\s+/g, ' ').trim();
 const digest = (f) => crypto.createHash('sha256').update(f).digest('base64').slice(0, 22); // the groups engine's wholeDigest
 /** Merge the owner's copies into the set → {gid: the NEW facts of it} (what a sweep looks for). */
@@ -157,10 +186,10 @@ function judgeRow(mid, body, grp) {
   if (!body || !CL.size) return body;
   if (typeof mid === 'string' && mid.startsWith('gm:')) { const k = mid.slice(3), c = CL.get(k.slice(0, k.indexOf(':'))); if (c && c.keys.has(k)) return RC.CLEARED_TEXT; } // a group card IS its record (GC.cardId)
   if (WHOLE_LENS.size) {
-    // a row that IS one cleared message (a card holding its words as written — several lines, a harness's card that
-    // names no group): whole; a row of another group never
+    // a row that IS one cleared message (a card holding its words as written — several lines, a harness's PEER card that
+    // names no group): whole; a row of another group never, a row that is no peer card never
     const f = fold(body);
-    if (WHOLE_LENS.has(f.length)) { const h = digest(f); for (const [gid, c] of CL) if ((!grp || grp === gid) && c.wholes.get(h) === f.length && (grp === gid || f.length >= WHOLE_FLOOR)) return RC.CLEARED_TEXT; }
+    if (WHOLE_LENS.has(f.length)) { const h = digest(f); for (const [gid, c] of CL) if ((grp === '' || grp === gid) && c.wholes.get(h) === f.length && (grp === gid || f.length >= WHOLE_FLOOR)) return RC.CLEARED_TEXT; }
   }
   let out = body;
   for (const [gid, c] of CL) {
@@ -209,14 +238,20 @@ function setCleared({ groups, whole = true } = {}) {
 function sweepIfMoved(force = false) {
   const sig = clearedSig(), was = S.getMeta.get('clearedSig');
   if (!force && was && was.v === sig) return { groups: CL.size, swept: 0, same: true };
-  return { groups: CL.size, swept: tx(() => { const n = sweepCleared(everything()); S.putMeta.run('clearedSig', sig); return n; }) };
+  const out = { groups: CL.size, swept: tx(() => { const n = sweepCleared(everything()); S.putMeta.run('clearedSig', sig); return n; }) };
+  checkpointAfter(out.swept);
+  return out;
 }
 /** A clear (that group's new facts swept), or the whole set after a cache-only start (`whole`). */
 function addCleared({ groups, whole = false } = {}) {
   const fresh = takeCleared(groups);
   if (whole) { const force = partial && insertedWhilePartial > 0; partial = false; insertedWhilePartial = 0; return sweepIfMoved(force); }
-  return { groups: Object.keys(fresh).length, swept: tx(() => { const n = sweepCleared(fresh); S.putMeta.run('clearedSig', clearedSig()); return n; }) };
+  const out = { groups: Object.keys(fresh).length, swept: tx(() => { const n = sweepCleared(fresh); S.putMeta.run('clearedSig', clearedSig()); return n; }) };
+  checkpointAfter(out.swept);
+  return out;
 }
+/** A sweep that rewrote rows: the WAL's older page images (the words before) are folded into the file and dropped. */
+function checkpointAfter(n) { if (n > 0) { try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { } } }
 
 /** Rows (normalized cards) → inserted rows; a mid already indexed is skipped (UNIQUE). */
 function insertMessages(sid, host, backend, msgs) {
@@ -238,6 +273,8 @@ function appendMessages({ sid, host = '', backend = null, msgs = [] } = {}) {
   return { rows: tx(() => insertMessages(String(sid), host, backend, msgs)) };
 }
 
+/** A conversation's rows out of the table and its FTS (the caller holds the transaction). */
+function dropRowsOf(sid, host) { const rows = S.msgsOf.all(String(sid), host || ''); for (const r of rows) S.delMsgFts.run(r.id, M.segment(r.body)); S.delMsgs.run(String(sid), host || ''); return rows.length; }
 /** Clear a conversation's rows (its transcript is gone; a rebuild of one). */
 function clearConversation({ sid, host = '' } = {}) {
   return tx(() => {
@@ -261,7 +298,8 @@ async function indexConversation({ sid, host = '', backend, cwd = '', live = fal
   let st; try { st = fs.statSync(file); } catch { return { skipped: 'no-transcript' }; }
   const cur = S.cursor.get(file);
   const mtime = Math.floor(st.mtimeMs);
-  if (cur && cur.size === st.size && cur.mtime === mtime) return { skipped: cur.state === 'trying' || cur.state === 'failed' ? 'failed-before' : 'same', file };
+  const reread = !!cur && cur.state === 'migrated'; // B-b291 cure r2: written by the release before the schema step — read again, its rows replaced
+  if (cur && !reread && cur.size === st.size && cur.mtime === mtime) return { skipped: cur.state === 'trying' || cur.state === 'failed' ? 'failed-before' : 'same', file };
   if (live && cur && cur.state === 'done') return { skipped: 'live', file }; // a live conversation's new cards arrive through appendMessages
   if (cur && cur.state === 'trying') { S.putCursor.run(file, sid, host, st.size, mtime, 0, 'failed'); return { skipped: 'failed-before', file }; }
   if (st.size > maxBytes) { S.putCursor.run(file, sid, host, st.size, mtime, 0, 'too-large'); return { skipped: 'too-large', file }; }
@@ -272,7 +310,7 @@ async function indexConversation({ sid, host = '', backend, cwd = '', live = fal
   const mm = require('./normalizers').createMessageManager(backend, 'ix', { threadId: sid });
   await mm.convertHistoryAsync(reader.raw() || []);
   const msgs = mm.messages || [];
-  const rows = tx(() => { const n = insertMessages(sid, host, backend, msgs); S.putCursor.run(file, sid, host, st.size, mtime, msgs.length, 'done'); return n; });
+  const rows = tx(() => { if (reread) dropRowsOf(sid, host); const n = insertMessages(sid, host, backend, msgs); S.putCursor.run(file, sid, host, st.size, mtime, msgs.length, 'done'); return n; });
   return { rows, parsed: true, cards: msgs.length, file, bytes: st.size };
 }
 
@@ -387,7 +425,7 @@ function failed(e) {
 }
 
 if (!disabled) {
-  try { const rebuilt = open(); state('ready', { rebuilt, ...status() }); } catch (e) { failed(e); }
+  try { const { rebuilt, migrated } = open(); state('ready', { rebuilt, migrated, ...status() }); } catch (e) { failed(e); }
 }
 
 const OPS = { appendMessages, clearConversation, indexConversation, indexArtifact, removeArtifact, sweepArtifacts, search, status, drop, setCleared, addCleared,

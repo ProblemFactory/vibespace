@@ -1625,17 +1625,22 @@ function create({
     }
     return out;
   }
-  /** The whole set with no synchronous log read — what a starting search worker is handed (one group at a time). */
+  /** The whole set with no synchronous log read — what a starting search worker is handed (one group at a time) →
+   *  {groups, partial}: a group whose log could not be read is named in `partial` and never cached (asked again). */
   async function clearedCopiesAsync() {
-    const out = {};
+    const out = {}, partial = [];
     for (const [id, g] of Object.entries(all())) {
       const vids = clearedVids(g);
       if (!vids.length) continue;
       let c = heldNeedles.get(id);
-      if (!needlesFresh(c, vids)) { const recs = [...(await originalsOfAsync(id, vids)).values()].filter(Boolean); c = needlesOf(id, recs, vids.length, recs.length < vids.length); heldNeedles.set(id, c); }
+      if (!needlesFresh(c, vids)) {
+        let recs;
+        try { recs = [...(await originalsOfAsync(id, vids)).values()].filter(Boolean); } catch (e) { log.warn && log.warn(`[groups] a cleared group's log was not read (${id}): ${e && e.message}`); partial.push(id); continue; } // never cached: the ladder's judge and the next ask read it again
+        c = needlesOf(id, recs, vids.length, recs.length < vids.length); heldNeedles.set(id, c);
+      }
       out[id] = copyOf(c);
     }
-    return out;
+    return { groups: out, partial };
   }
 
   /** The OWNER opened / touched a group's window (g3): its read mark moves to

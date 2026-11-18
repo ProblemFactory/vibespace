@@ -42,6 +42,16 @@ export function indexStateText(st) {
   if (ix && ix.lastBuild) return t('{rows} messages and {files} files indexed', { rows: num(ix.rows || 0), files: num(ix.artifacts || 0) });
   return t('The index starts a minute after the server');
 }
+/** THE COUNT LINE of an answer (the readers' must on B-b291): while the index is (re)building — a backfill running, or
+ *  none finished yet (every hub's first walk after an index rebuild) — «No matches» / «N matches» never stands alone:
+ *  the index's own line rides beside it (existing words). `r.index` = the route's {state, backfill, lastBuild}. */
+export function searchStatusText(r) {
+  const base = r && r.total ? t('{n} matches · {ms} ms', { n: num(r.total), ms: r.took }) : t('No matches');
+  const ix = r && r.index;
+  return indexBuilding(ix) ? `${base} · ${indexStateText({ state: ix.state, backfill: ix.backfill, index: { lastBuild: null } })}` : base;
+}
+/** No build has finished since this index was (re)created — a periodic walk over a whole index is not «building». */
+export const indexBuilding = (ix) => !!ix && ix.state !== 'disabled' && !ix.lastBuild;
 /** Until a backfill has finished, the empty state keeps asking /status (and patches its one line). */
 const indexPending = (st) => !st || (st.state !== 'disabled' && (!(st.index && st.index.lastBuild) || !!(st.backfill && st.backfill.running)));
 
@@ -92,7 +102,7 @@ export function openSearchWindow(app, opts = {}) {
   const list = el('div', 'search-list'); list.setAttribute('role', 'listbox');
   root.append(box, chips, status, list);
   winInfo.content.appendChild(root);
-  let ac = null, timer = null, poll = null, rows = [], sel = -1;
+  let ac = null, timer = null, poll = null, rerun = null, rows = [], sel = -1;
 
   const paintChips = () => { chips.textContent = ''; for (const [k, label] of SCOPES) { const c = el('button', 'search-chip' + (k === scope ? ' on' : ''), t(label)); c.onclick = () => { scope = k; paintChips(); run(); }; chips.append(c); } };
   const select = (i) => { sel = Math.max(-1, Math.min(rows.length - 1, i)); rows.forEach((r, j) => r.classList.toggle('active', j === sel)); if (sel >= 0) rows[sel].scrollIntoView({ block: 'nearest' }); };
@@ -114,7 +124,8 @@ export function openSearchWindow(app, opts = {}) {
     rows = []; sel = -1;
     const groups = new Map(), drawn = [];
     for (const h of r.hits || []) { const k = (h.host || '') + '|' + (h.kind === 'artifact' ? h.sessionId : h.sid); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(h); }
-    status.textContent = r.total ? t('{n} matches · {ms} ms', { n: num(r.total), ms: r.took }) : t('No matches');
+    status.textContent = searchStatusText(r);
+    clearTimeout(rerun); if (indexBuilding(r.index)) rerun = setTimeout(() => { if (box.value.trim()) run(); }, 3000); // the answer is asked again while the index builds (the cure's reader R3)
     for (const [, hits] of groups) {
       const first = hits[0];
       const s = first.kind === 'message' ? sessionFor(app, first.sid, first.host) : null;
@@ -169,7 +180,10 @@ export function openSearchWindow(app, opts = {}) {
     else if (e.key === 'Escape') { e.preventDefault(); if (box.value) { box.value = ''; run(); } else { try { app.wm.closeWindow(winInfo.id); } catch { } } }
   };
   winInfo._searchSet = (nq, sc) => { box.value = String(nq || ''); if (sc && SCOPES.some(([k]) => k === sc)) scope = sc; paintChips(); run(); setTimeout(() => box.focus(), 0); };
-  winInfo._listenerCtl?.signal.addEventListener('abort', () => { clearTimeout(poll); clearTimeout(timer); ac?.abort(); });
+  // B-b291 (the readers' ask 4): a clear anywhere asks an open query again — the words this window shows may be gone
+  const onClear = (msg) => { if (msg && msg.type === 'channel-groups-updated' && Array.isArray(msg.cleared) && msg.cleared.length && box.value.trim()) { clearTimeout(timer); timer = setTimeout(run, 400); } };
+  try { app.ws.onGlobal(onClear); } catch { }
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { clearTimeout(poll); clearTimeout(timer); clearTimeout(rerun); ac?.abort(); try { app.ws.offGlobal(onClear); } catch { } });
   paintChips(); run();
   setTimeout(() => box.focus(), 0);
   return winInfo;
