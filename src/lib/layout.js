@@ -1768,7 +1768,7 @@ class LayoutManager {
     const at = this._lastUserInputAt || Date.now();
     this._deferUserAt = at; // this kind holds a PERSON's act (B-46fc cure: a page leaving re-arms the dirty bit for it alone)
     this._deferT = setTimeout(() => {
-      this._deferT = null;
+      this._deferT = null; this._deferUserAt = null; this._deferUserT = null; // the stamp ends with its own timer (B-46fc cure 3)
       if (!this._userDirty && !(this._savedAt > at)) { this._userDirty = true; this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at); }
       this.scheduleAutoSave();
     }, 1100);

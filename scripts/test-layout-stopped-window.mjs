@@ -1064,6 +1064,19 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     const { LayoutManager: LMs } = await mutantEsm('src/lib/layout.js', 'deferred && this._deferUserT === this._deferT && this._deferUserAt != null', 'deferred && this._deferUserAt != null'); // stale-pins: kept — the control writes the cure's first form back on purpose
     const st0 = await staleScene(LMs);
     ok(st0.full === 1 && st0.recipes === 0, '§9 CONTROL: the stamp without its timer (the cure\'s first form) re-arms the stale act — a whole save (the leg above goes RED)', st0);
+    // …and the stamp ENDS with its timer (cure 3 — the cure-2 verdict's should): the 1.1 s deferral that fires on its own clears it
+    const fireScene = (Lm) => { const W = world({ records: { 'desk-w': [files('w-0', 0)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w', Lm });
+      const st = globalThis.setTimeout; let cb = null;
+      globalThis.setTimeout = (f, ms, ...a) => (ms === 1100 ? (cb = f, st(() => {}, 0)) : st(f, ms, ...a));
+      try { W.lm._userDirty = true; W.lm._restoring = true; W.lm._deferSave(); } finally { globalThis.setTimeout = st; }
+      W.lm._restoring = false; W.lm.scheduleAutoSave = () => {}; const held = { at: W.lm._deferUserAt != null, t: W.lm._deferUserT === W.lm._deferT && !!W.lm._deferT };
+      if (cb) cb();
+      return { fired: !!cb, held, at: W.lm._deferUserAt, t: W.lm._deferUserT, deferT: W.lm._deferT }; };
+    const fs3 = fireScene(LM);
+    ok(fs3.fired && fs3.held.at && fs3.held.t && fs3.at === null && fs3.t === null && fs3.deferT === null, '§9 …the person\'s-deferral stamp ENDS with its own timer: set while the 1.1 s deferral waits, both cleared when it fires (B-46fc cure 3)', fs3);
+    const { LayoutManager: LMk } = await mutantEsm('src/lib/layout.js', 'this._deferT = null; this._deferUserAt = null; this._deferUserT = null; // the stamp ends with its own timer (B-46fc cure 3)', 'this._deferT = null;');
+    const fs3red = fireScene(LMk);
+    ok(fs3red.fired && fs3red.at !== null && fs3red.t !== null, '§9 CONTROL: the cure-2 callback (no clear) leaves the stamp after its timer fired (the leg above goes RED)', fs3red);
     ok(o.recipes === 1 && o.full === 0 && o.dirty === false, '§9 …a deferral that owed only RECIPES sends only them (_doAutoSave\'s own road) — never a whole desktop, the dirty bit never set for it', o);
     ok(u.full === 1, '§9 …a deferral that holds a PERSON\'s act (an apply cleared its dirty bit) re-arms it and the act leaves — also with a recipe owed on another desktop (the verdict\'s reader: `owed` anywhere lost it)', u);
     const { LayoutManager: LMo } = await mutantEsm('src/lib/layout.js', 'const act = this._userDirty || (deferred && this._deferUserT === this._deferT && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));', 'const act = this._userDirty || (deferred && !!this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt));');
