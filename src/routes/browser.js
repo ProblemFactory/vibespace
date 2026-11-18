@@ -389,7 +389,7 @@ function sessionFacts(id) {
   const s = ctx?.activeSessions?.get?.(id) || null;
   if (!s) return null;
   let taskIds = [], groupsUnreadable = false;
-  try { taskIds = (ctx.tasksForSession?.(s, id) || []).map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch (e) { taskIds = []; groupsUnreadable = true; console.warn(`[browser] ${id}: the Task Group list could not be read — ${e && e.message}`); }
+  try { const raw = ctx.tasksForSession?.(s, id) || []; if (raw.unread) groupsUnreadable = true; taskIds = raw.map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch (e) { taskIds = []; groupsUnreadable = true; console.warn(`[browser] ${id}: the Task Group list could not be read — ${e && e.message}`); }
   // identity verify r2 (2026-09-28): a session on ANOTHER machine (an ssh host / a paired device — rung H) is named so
   const remote = !!(s.hostId || s.host || s._browserVariant === require('../browser-profiles.js').VARIANTS.H);
   // lane grants-unify: the keys the grants store names this conversation by (its id — a borrowed one is nobody's —, its
@@ -1633,6 +1633,7 @@ function jobFactsOf(token, { mint = true } = {}) {
   let taskIds = [], groupsUnreadable = false;
   try {
     const raw = s ? (ctx.tasksForSession?.(s, id) || []) : (typeof ctx.tasksForConversation === 'function' ? (ctx.tasksForConversation(cid) || []) : []);
+    if (raw.unread) groupsUnreadable = true;   // B-55dc: an answer still being read (the keeper refuses a grant, keeps a lease)
     taskIds = raw.map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean);
   } catch (e) { taskIds = []; groupsUnreadable = true; }
   const k = ctx.keeper;

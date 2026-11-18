@@ -197,6 +197,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // the browserProfileId precedent: a default is where a session starts,
   // never a retroactive edit of a running one. Absent ⇒ no group rung.
   taskGroupCap = null,
+  // B-55dc THE DECIDING DOOR on the spawn road: (facts) → a promise of the Task Group store's first reads for these create
+  // facts (bounded), or null when nothing is left to read — ws-create awaits it BEFORE the two synchronous reads above
+  taskGroupRead = null,
   // "Who can use it" is a LIST (2026-09-27): the Task Groups a conversation belongs to NOW, by its browser key (the task
   // store's own live rule, `groupsForSession`, over the live session carrying it) → `{ids, unreadable}` — asked by the
   // PATCH's re-judge of every lease and by the pick that writes the list; and one Task Group's facts → `{title,
@@ -1896,6 +1899,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The instance default (setting `browser.defaultProfile`, an id or label). */
   /** B-f7ab verify r2: the Task Group's default CAP for a create's facts, READ (not stamped) — a keyless spawn records it
    *  as part of its start-time witness so the late key stamps what was in force at the START, never the group's later edit. */
+  function taskGroupReadFor(facts = {}) {
+    if (typeof taskGroupRead !== 'function') return null;
+    try { return taskGroupRead(facts || {}) || null; } catch { return null; }
+  }
   function taskGroupCapFor(facts = {}) {
     if (typeof taskGroupCap !== 'function') return null;
     try { return B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); return null; }
@@ -8291,7 +8298,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // owner ruling A: a pin that did not open is said; one driver at a time; Delete… releases everything first; the adopt
     // stops the conversation's own browser first. "Who can use it" is a list (2026-09-27): the ONE re-judge, the pick that
     // writes the list, the keys a write may name, the Task Group seams (the routes' GET …/use reads them)
-    rejudgeLeases, rejudgeAll, addConversation, knownKeysOf, keyNamed, taskIdsForKey: (bk) => groupsOfKey(bk), taskInfo: (id) => taskFacts(id),
+    rejudgeLeases, rejudgeAll, addConversation, knownKeysOf, keyNamed, taskIdsForKey: (bk) => groupsOfKey(bk), taskInfo: (id) => taskFacts(id), taskGroupReadFor,
     copyPin, notePinFailure, pinFailureOf, clearPinFailure, releaseAll, stopEphemeralOf,
     start, stop, attach: attachTimed, detach, statusFor,
     // BROWSE YOURSELF (B-6ae8): the user as one more holder on his own tab — the button, his window's controls, the two ends

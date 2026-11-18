@@ -317,7 +317,7 @@ try {
     check('CONTROL: without the gate a bare local connection reaches the machine — the pre-verify shape', /EX:[\s\S]*ping/.test(bare2), JSON.stringify(bare2));
     await ex2.stop('host-mac');
     // CONTROL (A3-r2): a copy whose connection judge stops at the pair (r1's check) lets a dead conversation's pair through
-    const pairOnly = src.replace("    const s = this.sessionsMap().get(c.sessionId);\n    if (!s || !E.exitVerdict(this.access(hostId), 'use', this.ctxFor(s, c.sessionId)).ok) {", "    const s = null;\n    if (false) {");
+    const pairOnly = src.replace("    const s = this.sessionsMap().get(c.sessionId);\n    if (!s || (() => { const x = this.ctxFor(s, c.sessionId); return this._endsOn(E.exitVerdict(this.access(hostId), 'use', x), x); })()) {", "    const s = null;\n    if (false) {");
     check('(the A3-r2 control patch applies)', pairOnly !== src);
     const { ExitProxyManager: EPM3 } = M.load('src/exit-proxy.js', pairOnly, 'paironly');
     const S9 = { name: 'nine', backend: 'claude', claudeSessionId: 'c-9' };

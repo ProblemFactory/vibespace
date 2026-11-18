@@ -473,6 +473,19 @@ async function clearAsAgent(hit, item, res) {
 // (tasks.readSignatures: SafeFs, ≤ 1 s inside the hook's 3 s) and the route is entered AGAIN once that settled — nothing
 // above the call consumes anything. With nothing to read (every signature fresh, no off-thread reader) it stays synchronous.
 const turnRead = new WeakSet();   // the requests whose Context read already ran (the second entry goes straight through)
+// B-55dc THE DECIDING DOOR on the hooks' road: who is a member decides what the agent is TOLD, so the first read of a path
+// membership needs (the cwd's realpath, a relative / file-candidate discover row) is awaited OFF the loop, bounded
+// (tasks.membershipRead), and the route is entered AGAIN once it settled — the same seam as readTurnSigs, placed before
+// anything is consumed; with everything already read it stays synchronous.
+const memberRead = new WeakSet();
+function readMembership(req, res, route, s, id) {
+  if (memberRead.has(req) || typeof tasks.membershipRead !== 'function') return false;
+  const p = tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+  if (!p) return false;
+  memberRead.add(req);
+  p.then(() => route(req, res), () => route(req, res));
+  return true;
+}
 function readTurnSigs(req, res, route, s, groups) {
   if (turnRead.has(req) || typeof tasks.readSignatures !== 'function') return false;
   const p = tasks.readSignatures(groups, { stale: s._sigStale || null });
@@ -642,6 +655,7 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
     // prompt found nothing. Nothing is rendered, drained, stamped or consumed here for such a harness — its first
     // prompt-context call IS its delivery (a codex sub-agent thread's SessionStart is the same call).
     if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });
+    if (readMembership(req, res, taskContextRoute, s, id)) return;   // B-55dc: the deciding door's first reads, then again
     const key = sessionStatusKey(s, id);
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off (2.211.0) ⇒ no group content is injected at
@@ -783,6 +797,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
   try {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
+    if (readMembership(req, res, promptContextRoute, s, id)) return;   // B-55dc: who is a member FIRST (the deciding door), then again
     // lane task-group-fanout: the Context read FIRST (off the loop, bounded) — the route is entered again once it settled,
     // and nothing above this line consumed anything
     if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
@@ -1336,6 +1351,7 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
   // endpoints inject (objective/backlog/activity) — `vibespace-task show` from
   // a pre-toggle session must not bypass the pristine state through it.
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is disabled (master switch)' });
+  if (readMembership(req, res, taskShowRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   // lane task-group-fanout: `--full` lists every row's files — read OFF the loop first (bounded), entered again once settled
@@ -1357,10 +1373,11 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
     res.json({ success: true, you, task: taskShowAnswer(t, openSorted), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // verify r4 F1: every peer-written field through the belt
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
-app.post('/api/agent/task-progress', (req, res) => {
+app.post('/api/agent/task-progress', function taskProgressRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task progress');
+  if (readMembership(req, res, taskProgressRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
@@ -1379,12 +1396,13 @@ app.post('/api/agent/task-progress', (req, res) => {
 // Activity-log entry THIS session wrote keeps its time and place, its words
 // become the one cleared sentence. The owner clears any entry from the Task
 // Group log window. A job token never (a named 403, before anything is read).
-app.post('/api/agent/task/progress-redact', async (req, res) => {
+app.post('/api/agent/task/progress-redact', async function taskRedactRoute(req, res) {
   const tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token || '';
   if (String(tok).startsWith('jbt_')) return res.status(403).json({ error: 'a job token cannot clear records — ask the user to clear it, or clear it from the session that wrote it', code: 'job_token' });
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task progress-redact');
+  if (readMembership(req, res, taskRedactRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   const ref = String(req.body?.ref ?? req.body?.id ?? req.body?.at ?? '').trim();
@@ -1407,10 +1425,11 @@ app.post('/api/agent/task-plan', (req, res) => {
 // Refs resolve by stable item id (B-xxxx — the user can copy one to ANY
 // member agent), by 1-based index into the OPEN-items list (what
 // `show`/`backlog` display), or by unique text substring.
-app.post('/api/agent/task-backlog', (req, res) => {
+app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task backlog');
+  if (readMembership(req, res, taskBacklogRoute, hit[0], hit[1])) return;   // B-55dc: an agent's right to its group, decided on a READ answer
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
@@ -2716,10 +2735,15 @@ app.get('/api/agent/pages', (req, res) => {
   if (!a.sessionId && !a.conversationId) return res.json({ pages: [] }); // a caller with no scope sees nothing (no all-pages oracle — review-caught)
   res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }).map(pageAnswer) : [] });   // verify r6 F3: every name through the belt
 });
-// B-70f9 cure 2: the create door answers EVERY throw by name (src/server/job-where.js answersEveryThrow — async since the folder check)
-app.post('/api/agent/jobs', answersEveryThrow(async (req, res) => {
+// B-70f9 cure 2: the create door answers EVERY throw by name (src/server/job-where.js answersEveryThrow — async since the folder check).
+// B-55dc ⋈ B-70f9: the route the membership read ENTERS AGAIN (readMembership) is this WRAPPED one, by its name — a throw on the
+// second entry is answered by name too, never a request left open
+const jobsCreateRoute = answersEveryThrow(async (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
+  // B-55dc: the job KEEPS its creator's groups (groupsSnapshot) — who is a member is read first (the deciding door), so a
+  // snapshot is never taken from an answer still being read; the route is entered again once it settled (nothing consumed)
+  if (a.session && readMembership(req, res, jobsCreateRoute, a.session, a.sessionId)) return;
   // verify r5: a job is OWNED for good by the conversation that makes it — a borrowed id (a pending fork) is refused
   // by name, like every verb that records a principal; a session with no id yet keeps its lineage-less job
   if (a.caller.borrowed) return res.status(409).json({ error: a.caller.borrowed, code: 'bad-member' });
@@ -2767,7 +2791,8 @@ app.post('/api/agent/jobs', answersEveryThrow(async (req, res) => {
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
   res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
-}));
+});
+app.post('/api/agent/jobs', jobsCreateRoute);
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   // ?archived=1 → the caller's VISIBLE archived one-shots (triage §13 rule 5;

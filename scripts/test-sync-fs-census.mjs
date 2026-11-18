@@ -366,10 +366,9 @@ const ROWS = [
   ["src/turn-carry.js", "createOutstanding", 2, "local-only", "lane report-mark-on-ack r3: the outstanding deliveries by conversation (data/turn-carry-outstanding.json, the instance's own data dir), read ONCE when the agent routes are set up — the tidy after r4: opened and its SIZE checked first (fstat), read only under its 1 MiB bound"],
   ["src/user-todos.js", "UserTodoManager._setAside", 2, "local-only", "lane wake-approve-card r9: an unreadable data/user-todos.json SET ASIDE at boot — renamed (else copied) beside itself as user-todos.json.corrupt-<ts>; both paths are the instance's own data dir (the store's file)"],
   ["src/task-groups.js", "TaskGroupManager._listContextFiles > walk", 2, "guarded", "the Context-table folder walk (a person/agent-named folder): a row on a STORAGE mount takes the SafeFs road (contextFiles, src/storage-facts.js) — this walk runs for a local / home folder only"],
-  ["src/task-groups.js", "TaskGroupManager._kindOf", 1, "guarded", "a Context row's stat: a STORAGE row answers from its SafeFs fact (stat, src/storage-facts.js; never read yet = reading) — this stat runs for a local / home row only"],
+  ["src/task-groups.js", "TaskGroupManager._kindOf", 1, "guarded", "a Context row's stat for the RENDERS (the injection's table, the notes folder): a STORAGE row answers from its SafeFs fact (stat, src/storage-facts.js; never read yet = reading) — this stat runs for a local / home row only; MEMBERSHIP never asks it (B-55dc: its kinds and a cwd's realpath are off-loop facts, src/member-facts.js — the gone _realOf row was its realpathSync)"],
   ["src/task-groups.js", "TaskGroupManager._stat", 1, "guarded", "a Context row's stat (size / mtime): a STORAGE row answers from its SafeFs fact — this stat runs for a local / home row only"],
   ["src/task-groups.js", "TaskGroupManager._readText", 1, "guarded", "a told Context file's read: a STORAGE file answers from its SafeFs fact (textHead) — this read runs for a local / home file only"],
-  ["src/task-groups.js", "TaskGroupManager._realOf", 1, "guarded", "a session cwd's realpath (per prompt, cached): never on a STORAGE mount (storageRootOf ⇒ the cwd itself matches) nor a blocked one; a local / home cwd once"],
   ["src/task-groups.js", "TaskGroupManager.exportToFile", 3, "guarded", "mkdir/write/rename at req.body.path — any absolute path the person/agent names (server.js export route)"],
   ["src/task-groups.js", "TaskGroupManager.importFromFile", 1, "guarded", "readFileSync of req.body.path — any absolute file the person/agent names (server.js import route)"],
   ["src/task-groups.js", "*", 16, "local-only", "store + Activity-log archive under dataDir = <checkout>/data (server.js new TaskGroupManager): task-groups.json, tasks.json, task-groups-archive/<id>/<month>.ndjson"],
@@ -542,7 +541,7 @@ console.log('④ the conversions: a storage path is never read on the main threa
   const src = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   const PINS = [
     ['src/routes/sessions.js', /if \(SP\.storageRootOf\(cwd\)\) return null;[^\n]*\n\s*let rp = null;\n\s*try \{ const r = fs\.realpathSync\(cwd\)/],
-    ['src/task-groups.js', /else if \(SP\.storageRootOf\(cwd\)\) real = null;[^\n]*\n\s*else \{\n\s*try \{ real = fs\.realpathSync\(cwd\)/],
+    ['src/task-groups.js', /else if \(SP\.storageRootOf\(cwd\)\) real = null;[^\n]*\n\s*else \{ const r = this\._mfacts\.real\(cwd\);/],   // B-55dc: before the OFF-LOOP fact (no sync call left)
     ['src/server/browser-env.js', /if \(SP\.storageRootOf\(p\)\) \{ project\.path = p; project\.error = [^\n]*\n\s*try \{ raw = fs\.readFileSync\(p, 'utf8'\)/],
     ['src/ws-handler.js', /if \(!pe\.host && !SP\.storageRootOf\(pe\.filePath\)\) \{ try \{ live = fs\.existsSync\(pe\.filePath\)/],
     ['src/desktop-serve.js', /const execHere = \(x\) => \(SP\.storageRootOf\(x\) \? x : fs\.existsSync\(x\) \? x : null\);/],

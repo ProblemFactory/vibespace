@@ -59,6 +59,17 @@ const MIRROR_RETRY_MS = 30000;
 // asks between two rebuilds — one per distinct (session key, cwd + its realpath, spawned-into ids) asked, i.e. every live
 // and discovered session × its cwds — and is CLEARED at the cap (an answer is recomputed, never wrong)
 const MEMBER_RESULTS_MAX = 2048;
+// B-55dc: the membership facts' reader when the store has no SafeFs worker (suites; an embedded store) — fs.promises, the
+// libuv pool, never a sync call on the main thread
+const MEMBER_FALLBACK = Object.freeze({
+  stat: (p) => fs.promises.stat(p).then((st) => ({ isDirectory: st.isDirectory(), isFile: st.isFile() })),
+  realpath: (p) => fs.promises.realpath(p).then((r) => ({ path: r })),
+});
+// B-55dc THE DECIDING DOOR's bound: how long an ask that decides what an agent is told or allowed waits for the first read
+// of a path never read, before it answers with the «reading» answer (the rules then arrive at the next hook)
+const DECIDE_BOUND_MS = 1500;
+// task-context's own rooted rule (src/task-context.js isRooted): a rooted row resolves without the disk
+const ROOTED_ROW = (p) => p.startsWith('/') || p === '~' || p.startsWith('~/') || TC.isRemote(p);
 // what membership READS, per record, in store order: its key, id, archived, createdAt (the answer's order), sessions[] and
 // its Context rows (the discover folders). A store write that moves none of it (a progress line, a title, a note, a
 // backlog item) keeps the index; this is the split of the revision — by what membership reads, never by a list of writers
@@ -280,6 +291,9 @@ class TaskGroupManager {
     this._mirrorFs = typeof mirrorFs === 'function' ? mirrorFs : (mirrorFs ? () => mirrorFs : () => null);
     // a landed storage fact that differs from the kept one drops the derived caches (the next ask re-derives)
     this._facts = require('./storage-facts.js').create({ safeFs: () => this._mirrorFs(), onLanded: () => { for (const c of [this._resCache, this._walkCache, this._sigCache]) if (c) c.clear(); } });
+    // B-55dc: THE MEMBERSHIP ANSWER COSTS THE MAIN LOOP NO FILE CALL — a discover row's kind and a cwd's realpath are the last
+    // OFF-LOOP read (SafeFs's worker, else fs.promises); a read that changes who is a member says so once (_memberMoved)
+    this._mfacts = require('./member-facts.js').create({ reader: () => this._mirrorFs(), fallback: MEMBER_FALLBACK, onMoved: (op, p, v) => this._memberMoved(op, p, v) });
     this._mirror = new Map(); // groupId → { want: {dir, content}|null, inflight, since, startedAt, failedAt, why, retry }
     this._mirrorBoundMs = Number(mirrorBoundMs) > 0 ? Number(mirrorBoundMs) : MIRROR_BOUND_MS;   // (a suite shortens it)
     this._sigBoundMs = Number(sigBoundMs) > 0 ? Number(sigBoundMs) : SIG_BOUND_MS;   // lane task-group-fanout: the turn read's bound (a suite shortens it)
@@ -296,6 +310,7 @@ class TaskGroupManager {
     if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch { this._archSeen = new Set(); } }
     const existed = this._load();
     for (const t of Object.values(this._state.tasks)) this._holdLegacy(t);
+    this._primeMemberRows();   // B-55dc: the boot STARTS every Context row's first read, once, off the loop (no refresh loop)
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
     let migrated = false;
@@ -680,7 +695,28 @@ class TaskGroupManager {
   _resKey(list) { return JSON.stringify(list.map((r) => (r.ref ? '@' + r.ref : r.path))); }
 
   /** The old folders[], derived: every 'discover' row's folder [{ path, recursive: true }] (membership by cwd). */
-  foldersOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.discoverFolders(this._ctxRows(t), this._res(t)) : []; }
+  foldersOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.discoverFolders(this._ctxRows(t), this._memberRes(t)) : []; }
+  /** B-55dc: a row's kind FOR MEMBERSHIP — _kindOf's answer with no file call: the door, a STORAGE row's SafeFs fact (as
+   *  _kindOf), else the last off-loop read of this path ('reading' before its first one lands). */
+  _memberKindOf(abs) {
+    if (typeof abs !== 'string' || !path.isAbsolute(abs)) return 'missing';
+    if (DOOR.blocked(abs) || SP.storageRootOf(abs)) return this._kindOf(abs);   // neither reaches a sync call there
+    return this._mfacts.kind(abs);
+  }
+  /** _res for membership: the same TC.resolveRows over _memberKindOf, kept 4 s per table AND per landed fact (a read that
+   *  lands re-derives at the next ask) — a separate cache, so a render's resolution (its own stat) never mixes in */
+  _memberRes(t) {
+    const list = this._ctxRows(t);
+    if (!list.length) return [];
+    const key = this._resKey(list), gen = this._mfacts.gen(), now = Date.now();
+    if (!this._mresCache) this._mresCache = new Map();
+    const hit = this._mresCache.get(key);
+    if (hit && hit.gen === gen && now - hit.at < 4000) return hit.res;
+    const res = TC.resolveRows(list, { home: this._home, kindOf: (a) => this._memberKindOf(a) });
+    if (this._mresCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._mresCache.clear();
+    this._mresCache.set(key, { res, at: now, gen });
+    return res;
+  }
   /** The old contextDir, derived: the 'notes' row's absolute folder or null (the .vibespace/TASK.md mirror lives there). */
   contextDirOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.notesDir(this._ctxRows(t), this._res(t)) : null; }
 
@@ -1809,12 +1845,59 @@ class TaskGroupManager {
   groupsForSession(args = {}) {
     let ans = null;
     try { ans = this._memberAnswer(args || {}); } catch { ans = null; }   // a doubt: the walk answers
-    if (ans) { this._mixStats.answers++; return ans; }
-    this._mixStats.walks++;
-    return this._groupsForSessionWalk(args);
+    if (ans) this._mixStats.answers++;
+    else { this._mixStats.walks++; ans = this._groupsForSessionWalk(args); }
+    // B-55dc THE LAW «nobody loses anything on an answer still being read»: the answer says, as a NON-enumerable flag,
+    // whether a path it depended on is not read yet — a site that would REVOKE / END / DROP on «not a member» does
+    // nothing while it is up and re-judges at the store's signal when the read lands (a grant may refuse: it is asked again)
+    if (Array.isArray(ans) && this.membershipUnread(args)) { Object.defineProperty(ans, 'unread', { value: true, enumerable: false }); this._handedUnread = true; }
+    return ans;
   }
 
-  get _mixStats() { return this.__mixStats || (this.__mixStats = { builds: 0, kept: 0, answers: 0, walks: 0, hits: 0, cleared: 0 }); }
+  /** B-55dc: the member groups' IDS, carrying the drawing door's `unread` flag (a `.map` would drop it) — server.js's two
+   *  synchronous wrappers (the exit's and the window reach's `groupsOf`) read this, so a re-judge there can keep */
+  memberIds(args = {}) {
+    const gs = this.groupsForSession(args) || [];
+    const ids = gs.map((g) => g.id);
+    if (gs.unread) Object.defineProperty(ids, 'unread', { value: true, enumerable: false });
+    return ids;
+  }
+
+  /** B-55dc: does THIS ask's answer depend on a path not read yet? (a cwd whose realpath, or a discover group whose row,
+   *  has no fact yet — every such read is started by the asking). A key alone depends on no file fact ⇒ false. */
+  membershipUnread(args = {}) {
+    const a = args || {};
+    if (typeof a.cwd !== 'string' || !a.cwd) return false;
+    // the ROWS half (a relative discover row whose candidates are not read) does not depend on the cwd — any such row could
+    // move any cwd's answer (a safe over-flag: a keeping site keeps a little longer, never revokes on it): kept per landed
+    // facts (gen) and store rev
+    const gen = this._mfacts.gen(), rev = this.rev();
+    let r = this._rowsUnread;
+    if (!r || r.gen !== gen || r.rev !== rev) {
+      let v = false;
+      try { v = this._memberNeeds({}, { rowsOnly: true }).length > 0; } catch { v = false; }
+      r = this._rowsUnread = { gen: this._mfacts.gen(), rev, v };
+    }
+    if (r.v) return true;
+    // the CWD half: its realpath not read yet AND it could add a group (the rule _memberNeeds applies) — kept per cwd
+    if (a.realCwd || !path.isAbsolute(a.cwd) || DOOR.blocked(a.cwd) || SP.storageRootOf(a.cwd)) return false;
+    if (this._mfacts.real(a.cwd) !== undefined) return false;   // read already (the asking started it)
+    const c = this._cwdMatters || (this._cwdMatters = new Map());
+    const hit = c.get(a.cwd);
+    if (hit && hit.gen === gen && hit.rev === rev) return hit.v;
+    let v = false;
+    try {
+      const discover = (x) => x && Array.isArray(x.tags) && x.tags.includes('discover');
+      v = Object.values((this._state && this._state.tasks) || {}).some((t) => t && typeof t === 'object' && !t.archived && this._ctxRows(t).some(discover) && !this.foldersOf(t).some((f) => insideFolder(a.cwd, f)));
+    } catch { v = false; }
+    if (c.size >= 4096) c.clear();
+    c.set(a.cwd, { gen, rev, v });
+    return v;
+  }
+
+
+
+  get _mixStats() { return this.__mixStats || (this.__mixStats = { builds: 0, kept: 0, answers: 0, walks: 0, hits: 0, cleared: 0, waited: 0, bounded: 0, moves: 0, settles: 0 }); }
   memberIndexStats() { const ix = this._mix; return { ...this._mixStats, results: ix ? ix.results.size : 0, max: MEMBER_RESULTS_MAX }; }
 
   _memberIndex() {
@@ -1842,13 +1925,13 @@ class TaskGroupManager {
     let moved = false;
     for (const g of ix.groups) {
       if (!g.rows) continue;   // no rows ⇒ no folders (the walk's _res answers [] there, uncached)
-      const e = g.resKey !== null && this._resCache ? this._resCache.get(g.resKey) : undefined;
-      if (e !== undefined && e === g.resEntry && now - e.at < 4000) continue;
+      const e = g.resKey !== null && this._mresCache ? this._mresCache.get(g.resKey) : undefined;
+      if (e !== undefined && e === g.resEntry && e.gen === this._mfacts.gen() && now - e.at < 4000) continue;
       g.dirs = this.foldersOf(g.t);
       g.resKey = this._resKey(this._ctxRows(g.t));
-      g.resEntry = this._resCache ? this._resCache.get(g.resKey) : undefined;
+      g.resEntry = this._mresCache ? this._mresCache.get(g.resKey) : undefined;
       const fsig = JSON.stringify(g.dirs);
-      if (fsig !== g.fsig) { g.fsig = fsig; moved = true; }
+      if (fsig !== g.fsig) { if (g.fsig) (this._movedIds || (this._movedIds = new Set())).add(g.t.id); g.fsig = fsig; moved = true; }
     }
     if (moved && ix.results.size) ix.results.clear();
     return ix;
@@ -1882,20 +1965,95 @@ class TaskGroupManager {
 
   // Match a folder against the cwd AND its symlink-resolved realpath (a session
   // opened under claude-code-webui → vibespace must match a folder on either).
-  // realpath is cached (this runs per prompt; same scheme as routes/sessions.js).
+  // The realpath is read ONCE per cwd, OFF the loop (B-55dc: it was a fs.realpathSync per new cwd on the main thread — this
+  // runs per prompt): before that read lands the cwd alone matches; the deciding door waits for it (groupsForSessionDecided).
   _realOf(cwd, realCwd) {
     let real = realCwd;
     if (!real && cwd) {
-      if (!this._realCache) this._realCache = new Map();
-      if (this._realCache.has(cwd)) real = this._realCache.get(cwd);
-      else if (DOOR.blocked(cwd)) real = null;   // B-afc4: a sync realpath into a dead FUSE — not cached, resolved once it answers
-      else if (SP.storageRootOf(cwd)) real = null;   // lane hub-fuse-sync-guard: never a sync walk into a storage mount — the cwd itself matches
-      else {
-        try { real = fs.realpathSync(cwd); } catch { real = null; }
-        this._realCache.set(cwd, real);
-      }
+      if (DOOR.blocked(cwd)) real = null;   // B-afc4: a dead FUSE — never read; resolved once it answers
+      else if (SP.storageRootOf(cwd)) real = null;   // lane hub-fuse-sync-guard: never a walk into a storage mount — the cwd itself matches
+      else { const r = this._mfacts.real(cwd); real = r === undefined ? null : r; }
     }
     return real;
+  }
+
+  // ── B-55dc: THE TWO DOORS ────────────────────────────────────────────────────────────────────────────────────────────
+  // groupsForSession is THE DRAWING DOOR: synchronous, no file call — the last off-loop facts; before a path's first read
+  // a rooted discover row counts as a folder, a relative row stops at its first candidate, the cwd matches without its
+  // realpath. groupsForSessionDecided is THE DECIDING DOOR, for whatever decides what an agent is TOLD or ALLOWED (the
+  // hooks' injection, the agent doors, the spawn road): it first WAITS — a promise, never the loop — for the first read
+  // of every path this ask needs that was never read, then answers as the release did from the very first ask. The wait
+  // is bounded (DECIDE_BOUND_MS): a mount that does not answer gets the «reading» answer when it passes (where the release
+  // held the whole hub while the mount hung), and the group's rules arrive at the next hook by the seen marks.
+  /** THE DECIDING DOOR's wait alone, for a synchronous route that re-enters itself (agent-routes' hooks): null when this
+   *  ask needs no first read (the route goes straight on, synchronously), else the promise of the bounded wait. */
+  membershipRead(args = {}, { boundMs = DECIDE_BOUND_MS } = {}) {
+    let keys = [];
+    try { keys = this._memberNeeds(args || {}); } catch { keys = []; }
+    return keys.length ? this.groupsForSessionDecided(args, { boundMs }).then(() => true, () => false) : null;
+  }
+
+  async groupsForSessionDecided(args = {}, { boundMs = DECIDE_BOUND_MS } = {}) {
+    const a = args || {};
+    const until = Date.now() + Math.max(0, Number(boundMs) || 0);
+    for (let round = 0; round < 8; round++) {   // a relative row asks its next candidate only once the previous one answered
+      let keys = [];
+      try { keys = this._memberNeeds(a); } catch { keys = []; }
+      if (!keys.length) break;
+      const left = until - Date.now();
+      const all = left > 0 ? await this._mfacts.wait(keys, left) : false;
+      if (!all) { this._mixStats.bounded++; break; }
+      this._mixStats.waited++;
+    }
+    return this.groupsForSession(a);
+  }
+
+  /** The facts THIS ask needs that were never read (their reads started): the cwd's realpath, and every path a discover
+   *  group's resolution asks — a rooted row (a file is no folder), each relative candidate, the group's first folder. */
+  _memberNeeds({ cwd, realCwd } = {}, { rowsOnly = false } = {}) {
+    if (!rowsOnly && (typeof cwd !== 'string' || !cwd)) return [];   // a key alone needs no file fact
+    const discover = (r) => r && Array.isArray(r.tags) && r.tags.includes('discover');
+    const groups = Object.values((this._state && this._state.tasks) || {}).filter((t) => t && typeof t === 'object' && !t.archived && this._ctxRows(t).some(discover));
+    if (!groups.length) return [];   // no discover row anywhere: no folder can make anyone a member — no file fact matters
+    const need = [];
+    const local = (p) => typeof p === 'string' && path.isAbsolute(p) && !DOOR.blocked(p) && !SP.storageRootOf(p);
+    // THE ROWS: only a RELATIVE discover row's folder depends on what is on disk (its candidates, and the rows that are its
+    // bases). A ROOTED discover row matches by its string — a dir, a missing path and «reading» alike, and a file can hold
+    // no cwd — so its kind never moves a membership: never read for it
+    for (const t of groups) {
+      const rows = this._ctxRows(t);
+      if (!rows.some((r) => discover(r) && typeof r.path === 'string' && !ROOTED_ROW(r.path))) continue;
+      TC.resolveRows(rows, { home: this._home, kindOf: (p) => { const k = this._memberKindOf(p); if (k === 'reading' && local(p)) need.push(['stat', p]); return k; } });
+    }
+    if (rowsOnly) return need;
+    // THE CWD's REALPATH can only ADD a group whose folders do not already hold the cwd itself: read it only then
+    if (!realCwd && local(cwd) && groups.some((t) => !this.foldersOf(t).some((f) => insideFolder(cwd, f))) && this._mfacts.real(cwd) === undefined) need.push(['realpath', cwd]);
+    return need;
+  }
+
+
+  /** a landed fact that differs from the kept one: when it MOVES a membership answer — a discover group's folders changed,
+   *  or a cwd's realpath (a symlinked cwd) landed — the store's own change signal goes out ONCE (coalesced into one tick):
+   *  a page that drew the «reading» answer redraws without anyone asking. A first read that moves nothing says nothing. */
+  _memberMoved(op, p, v) {
+    const pend = this._mmPending || (this._mmPending = { all: false });
+    if (op === 'realpath' && v != null && v !== p) pend.all = true;   // a symlinked cwd: its groups may move (which ones is not cheap to say)
+    if (this._mmTimer) return;
+    this._mmTimer = setImmediate(() => {
+      this._mmTimer = null;
+      const all = this._mmPending && this._mmPending.all; this._mmPending = null;
+      try { this._memberIndex(); } catch { }   // re-derives every discover group from the landed facts (no file call)
+      const ids = this._movedIds ? [...this._movedIds] : []; this._movedIds = null;
+      // a settle waits for the LAST read in flight (one landing batch, one signal): a relative row's next candidate, a
+      // cwd's realpath still on its way keep the flag for the landing that ends them
+      const handed = !!this._handedUnread && !this._mfacts.busy();
+      if (handed || all || ids.length) this._handedUnread = false;
+      if (all || ids.length) { this._mixStats.moves++; this._notify(all ? null : ids); }
+      // an answer handed out «still being read» is read now and moved nothing: the sites that KEPT on it re-judge (the same
+      // signal, naming no group — nothing is broadcast to a page); a re-judge that asks again re-arms it until all is read
+      else if (handed) { this._mixStats.settles++; this._notify([]); }
+    });
+    if (this._mmTimer && typeof this._mmTimer.unref === 'function') this._mmTimer.unref();
   }
 
   // THE WALK — membership as it was asked before the index, kept as the index's answer on any doubt and as its
@@ -2013,7 +2171,10 @@ class TaskGroupManager {
 
   // lane task-group-fanout: a write names the groups it touched (`ids`; null = every group) — the hub's ONE broadcaster
   // (src/server/task-fanout.js) sends those groups' DELTA, never the store (1.57 MB to every client per Activity line before)
-  _notify(ids = null) { this._rev = (this._rev || 0) + 1; try { this._onChange({ ids: ids == null ? null : [].concat(ids) }); } catch { } }
+  _notify(ids = null) { this._rev = (this._rev || 0) + 1; this._primeMemberRows(); try { this._onChange({ ids: ids == null ? null : [].concat(ids) }); } catch { } }
+  /** B-55dc PRIMING: a store edit (a Context row added or changed) STARTS the off-loop reads membership will need, so a
+   *  synchronous asker after it finds them read; no file call here (the reads are promises), nothing when nothing is new */
+  _primeMemberRows() { try { if (this._mfacts) this._memberNeeds({}, { rowsOnly: true }); } catch { } }
 
   _migrateGroups(userState) {
     const groups = userState?.sessionGroups && typeof userState.sessionGroups === 'object' ? userState.sessionGroups : {};
@@ -2824,4 +2985,4 @@ class TaskGroupManager {
 }
 
 // B-31d7: the item's line + detail caps, for the route that REFUSES past them before a write (never a silent clip)
-module.exports = { TaskGroupManager, MEMBER_RESULTS_MAX, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };
+module.exports = { TaskGroupManager, MEMBER_RESULTS_MAX, DECIDE_BOUND_MS, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };

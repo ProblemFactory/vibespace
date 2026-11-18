@@ -127,7 +127,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         if (activeSessions) for (const [id, s] of activeSessions) {
           if (addressableId(s) !== cid) continue;
           const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
-          return { live: true, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set(groups.map((g) => g.id)) };
+          // B-55dc: an answer still being READ judges like no live record — the engine HOLDS the line ('unknown': kept for the
+          // drain, never 'refused' / dropped) and the next push or drain asks again once the read landed
+          return { live: !groups.unread, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set(groups.map((g) => g.id)), ...(groups.unread ? { reading: true } : {}) };
         }
         const byKey = taskGroups && typeof taskGroups.list === 'function' ? taskGroups.list().filter((g) => !g.archived && (g.sessions || []).some((k) => typeof k === 'string' && k.endsWith(':' + cid))) : [];
         return { live: false, conversationId: cid, groups: new Set(byKey.map((g) => g.id)) };

@@ -905,7 +905,7 @@ console.log('controls (patched copies)');
   const msrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
   const ms = msrc.replace("if (answer === 'revoked') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'not_granted', grant: 'run', h, has: j.has, cmd }); }", '')
     .replace("const again = E.exitVerdict(accNow, 'run', ctxNow);", "const again = { ok: true, via: 'session' };")   // B-48a4 U3 + (B): run's stillGranted line
-    .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || !E.exitVerdict(this.access(k.hostId), 'run', this.ctxFor(s, k.sessionId)).ok) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
+    .replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: setAccess re-judges through THE ONE rejudgeAll — its ask branch is what a revoke settles
   ok(ms !== msrc && !ms.includes("? 'revoked' : null;") && ms.includes("const again = { ok: true, via: 'session' };"), '(f) the patch applies (all three edits — run\'s stillGranted line among them: the plant proves itself first)');
   const MF = M.load('src/exit-proxy.js', ms, 'nostill').ExitProxyManager;
   const w = world({ Mgr: MF });
@@ -951,7 +951,7 @@ console.log('controls (patched copies)');
   const rj = await pj;
   ok(still === 1 && aj.v && aj.v.state === 'allowed' && rj.v && rj.v.code === 0 && wj.runs.length === 1, 'CONTROL (j): without the subscription the item is done while the ask still waits and is then ALLOWED — the ask-b legs go red');
   // (k) verify-r2 (the open connection): the re-judge without its ask loop — B left G, its waiting ask still stands
-  const mk2 = msrc.replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || !E.exitVerdict(this.access(k.hostId), 'run', this.ctxFor(s, k.sessionId)).ok) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: the ask branch of THE ONE re-judge
+  const mk2 = msrc.replace("        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;", "        const kwhy = !s ? 'conversation-gone' : null;"); // verify-r3: the ask branch of THE ONE re-judge
   ok(mk2 !== msrc, '(k) the patch applies');
   const MK = M.load('src/exit-proxy.js', mk2, 'norejudgeask').ExitProxyManager;
   const wk = world({ Mgr: MK });

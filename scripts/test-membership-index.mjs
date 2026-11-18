@@ -166,19 +166,20 @@ const LEGS = {
     // «later» does not exist the row points nowhere; once it is made, the row is a folder — at _res's 4 s bound
     tg._state.tasks = { 'T-fb': { id: 'T-fb', title: 'fb', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: base, tags: ['notes'] }, { path: 'later', tags: ['discover'] }], progress: [] } }; tg._save();
     const ask = { sessionKey: 'claude:fb', cwd: path.join(later, 'work') };
-    const at = (label) => { const i = tg.groupsForSession(ask), w = tg._groupsForSessionWalk(ask); return { label, i: ids(i), w: ids(w), same: same(i, w) }; };
-    const s0 = at('before');
+    // B-55dc: membership's file facts are OFF-LOOP reads — an ask starts the (re)read, the next ask after it landed sees it
+    const at = async (label) => { tg.groupsForSession(ask); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy()) break; } const i = tg.groupsForSession(ask), w = tg._groupsForSessionWalk(ask); return { label, i: ids(i), w: ids(w), same: same(i, w) }; };
+    const s0 = await at('before');
     fs.mkdirSync(later);
-    skew = 1500; const s1 = at('+1.5 s');
-    skew = 4100; const s2 = at('+4.1 s');
-    // a cleared _res cache is read at once (test-seen-marks clears it to make every turn read)
+    skew = 1500; const s1 = await at('+1.5 s');
+    skew = 4100; const s2 = await at('+4.1 s');
+    // cleared facts are read again at once (the next ask starts the read)
     fs.rmSync(later, { recursive: true });
-    tg._resCache && tg._resCache.clear();
-    const s3 = at('removed, cache cleared');
+    tg._mfacts.clear();
+    const s3 = await at('removed, facts cleared');
     skew = 0;
     const steps = [s0, s1, s2, s3];
     const okv = steps.every((x) => x.same) && s0.i === '' && s1.i === '' && s2.i === 'T-fb' && s3.i === '';
-    return { ok: okv, detail: steps.map((x) => `${x.label}: index [${x.i}] walk [${x.w}]`).join(' · ') + ' (a folder created on disk is seen within the 4 s bound, at the same ask as the walk)' };
+    return { ok: okv, detail: steps.map((x) => `${x.label}: index [${x.i}] walk [${x.w}]`).join(' · ') + ' (a folder created on disk is seen within ONE REFRESH — the 4 s bound, then its off-loop read — the index ≡ the walk at every step)' };
   },
   async 'result-bound'(T) {
     const s = seeded(T, 202), tg = s.tg;
@@ -235,17 +236,17 @@ const LEGS = {
     fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'via'));   // base/via → folder/sub: a cwd outside the folder by its path
     const tasks = () => ({ 'T-rp': { id: 'T-rp', title: 'rp', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
     const said = [];
-    const ask = (tg, a) => { const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${JSON.stringify(a.realCwd ? { cwd: a.cwd, realCwd: a.realCwd } : a.cwd)} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : 'DIFFERS'; };
+    const ask = async (tg, a) => { tg.groupsForSession(a); for (let k = 0; k < 12; k++) { await tg._mfacts.settled(); await new Promise((r) => setImmediate(() => setImmediate(r))); if (!tg._mfacts.busy()) break; } const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${JSON.stringify(a.realCwd ? { cwd: a.cwd, realCwd: a.realCwd } : a.cwd)} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : 'DIFFERS'; };
     // (i) a cwd that exists THROUGH a symlink: it belongs by its real path only
     const t1 = manager(T).tg; t1._state.tasks = tasks(); t1._save();
     const viaCwd = path.join(base, 'via', 'w');
-    const i1 = ask(t1, { sessionKey: 'claude:rp', cwd: viaCwd });
+    const i1 = await ask(t1, { sessionKey: 'claude:rp', cwd: viaCwd });
     // (ii) the remote shape: one cwd, two given real paths — inside, then outside; and outside, then inside
     const remote = '/remote-host/home/proj';
     const t2 = manager(T).tg; t2._state.tasks = tasks(); t2._save();
-    const a1 = ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') }), a2 = ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: out });
+    const a1 = await ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') }), a2 = await ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: out });
     const t3 = manager(T).tg; t3._state.tasks = tasks(); t3._save();
-    const b1 = ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: out }), b2 = ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') });
+    const b1 = await ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: out }), b2 = await ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') });
     const okv = i1 === 'T-rp' && a1 === 'T-rp' && a2 === '' && b1 === '' && b2 === 'T-rp';
     return { ok: okv, detail: said.join(' · ') };
   },
@@ -279,7 +280,8 @@ const LEGS = {
       const tasks = {};
       for (let i = 0; i < N; i++) { const d = path.join(base, 'g' + i); fs.mkdirSync(d, { recursive: true }); tasks['T-c' + i] = { id: 'T-c' + i, title: 'g' + i, kind: 'task', createdAt: i + 1, sessions: [], ctx: [{ path: d, tags: ['discover'] }, { path: d, tags: ['notes'] }], progress: [] }; }
       tg._state.tasks = tasks; tg._save();
-      let stats = 0; const kindOf = tg._kindOf.bind(tg); tg._kindOf = (a) => { stats++; return kindOf(a); };
+      // B-55dc: membership asks no stat at all — what the cliff costs now is its resolver re-deriving: kinds asked per warm ask
+      let stats = 0; const kindOf = tg._memberKindOf.bind(tg); tg._memberKindOf = (a) => { stats++; return kindOf(a); };
       const asks = Array.from({ length: 40 }, (_, i) => ({ sessionKey: 'claude:c' + i, cwd: path.join(base, 'g' + ((i * 7) % N), 'w') }));
       tg.groupsForSession(asks[0]);   // warm
       stats = 0;
@@ -287,7 +289,7 @@ const LEGS = {
       for (const a of asks) { const i = tg.groupsForSession(a); if (i.length !== 1) bad++; }
       const per = stats / asks.length;
       if (!(per === 0 && bad === 0)) okAll = false;
-      out.push(`${N} groups: ${per.toFixed(0)} stats per warm ask${bad ? `, ${bad} wrong` : ''}`);
+      out.push(`${N} groups: ${per.toFixed(0)} kinds re-derived per warm ask${bad ? `, ${bad} wrong` : ''}`);
     }
     return { ok: okAll, detail: out.join(' · ') + ' (each group its own discover + notes row)' };
   },
@@ -320,11 +322,11 @@ const TG = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
 const PATCHES = {
   'no-signature': ["memberSig(tasks) === ix.sig && ", '', 'writers', 'a rev change keeps the index whatever moved (the signature check out)'],
   'no-identity': [" && ix.groups.every((g) => tasks[g.key] === g.t)", '', 'writers', 'an equal copy keeps the old record (the identity check out)'],
-  'no-bound': ["      if (e !== undefined && e === g.resEntry && now - e.at < 4000) continue;\n", "      if (g.resKey !== null) continue;\n", 'folder-bound', 'the folders never re-derived (the 4 s bound out)'],
+  'no-bound': ["      if (e !== undefined && e === g.resEntry && e.gen === this._mfacts.gen() && now - e.at < 4000) continue;\n", "      if (g.resKey !== null) continue;\n", 'folder-bound', 'the folders never re-derived (the 4 s bound out)'],
   'no-cap': ["if (ix.results.size >= MEMBER_RESULTS_MAX) {", 'if (false) {', 'result-bound', 'the result map unbounded (the cap out)'],
   'no-real-path': ["    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);\n    const key = ", "    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd].filter(Boolean);\n    const key = ", 'real-path', 'the cwds reduced to the cwd alone (主开发\'s mutant a)'],
   'no-real-in-key': ["const key = JSON.stringify([sessionKey || '', cwds, spawned]);", "const key = JSON.stringify([sessionKey || '', [cwd || ''], spawned]);", 'real-path', 'the result key built without the real path (主开发\'s mutant b)'],
-  'cache-256': ["if (this._resCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._resCache.clear();", "if (this._resCache.size > 256) this._resCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
+  'cache-256': ["if (this._mresCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._mresCache.clear();", "if (this._mresCache.size > 256) this._mresCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
   'hub-real-for-remote': ["    return onOtherMachine(hostId) ? (realCwd || null) : this._realOf(cwd, realCwd);", "    return this._realOf(cwd, realCwd);", 'other-machine', 'another machine\'s path resolved by the hub\'s realpath (the checkpoint as it was, B-df5f)'],
   'no-fallback': ["try { ans = this._memberAnswer(args || {}); } catch { ans = null; }", 'ans = this._memberAnswer(args || {});', 'doubts', 'a throw of the index reaches the caller (the fallback out)'],
 };

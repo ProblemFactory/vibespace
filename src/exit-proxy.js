@@ -154,15 +154,19 @@ class ExitProxyManager {
   ctxFor(session, sessionId, { groups = true } = {}) {   // B-48a4 (B): `groups: false` = the session's own facts only, no Task Group walk
     const s = session || {};
     const keys = addressableId(s) ? R.callerKeys(s, sessionId) : [`webui:${sessionId}`];
-    let groupIds = [], unreadable = false;
+    let groupIds = [], unreadable = false, unread = false;
     if (groups && typeof this.groupsOf === 'function') {
-      try { groupIds = (this.groupsOf(s, sessionId) || []).map((g) => String(g && typeof g === 'object' ? g.id : g)); }
+      try { const gs = this.groupsOf(s, sessionId) || []; groupIds = gs.map((g) => String(g && typeof g === 'object' ? g.id : g)); if (gs.unread) { unreadable = true; unread = true; } }
       catch (e) { unreadable = true; this.log(`group membership unreadable for ${sessionId}: ${e.message}`); }
     }
     // lane grants-unify: the same keys in the grant model's ONE spelling (the conversation id; `webui:<id>` before it has one)
     const conversationKeys = keys.map(GM.keyFromSessionKey).filter(Boolean);
-    return { sessionKeys: keys, conversationKeys, groupIds, ...(unreadable ? { unreadable: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
+    return { sessionKeys: keys, conversationKeys, groupIds, ...(unreadable ? { unreadable: true } : {}), ...(unread ? { unread: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
   }
+  /** B-55dc THE LAW «nobody loses anything on an answer still being read»: a verdict that refuses ONLY because a group row
+   *  could decide while the caller's membership is still being READ (not a store that threw) ends nothing — the holder is
+   *  kept and re-judged at the store's signal when the read lands. Every other refusal ends as before. */
+  _endsOn(verdict, ctx) { return !verdict.ok && !(ctx && ctx.unread && verdict.code === 'groups_unreadable'); }
   /** B-48a4 (B) — THE MEMBERSHIP IS ASKED AGAIN EXACTLY WHEN IT CAN DECIDE. A verdict reads the Task Group membership (groupIds and
    *  the unreadable flag) ONLY through a group named in the grant's lists, to or except (src/exit-reach.js exitVerdict → src/grant-model.js
    *  admits; test-exit-cost ⑧ is the census over every principal kind). Its inputs are the Task Group store AND facts no store write
@@ -172,7 +176,7 @@ class ExitProxyManager {
   _ctxAgain(session, sessionId, judged, grantNow) {
     const namesGroup = !!grantNow && [...(Array.isArray(grantNow.who) ? grantNow.who : []), ...(Array.isArray(grantNow.except) ? grantNow.except : [])].some((e) => e && e.kind === 'group');
     if (namesGroup) return this.ctxFor(session, sessionId);
-    return { ...this.ctxFor(session, sessionId, { groups: false }), groupIds: (judged && judged.groupIds) || [], ...(judged && judged.unreadable ? { unreadable: true } : {}) };
+    return { ...this.ctxFor(session, sessionId, { groups: false }), groupIds: (judged && judged.groupIds) || [], ...(judged && judged.unreadable ? { unreadable: true } : {}), ...(judged && judged.unread ? { unread: true } : {}) };
   }
   /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every machine's two lists (use its exit / run through it)
    *  judged for ONE conversation by THE door's verdict (`E.exitVerdict` over the machine's access, as `_judge` asks it) —
@@ -483,13 +487,13 @@ class ExitProxyManager {
         const now = hostGone ? null : this.access(hostId);
         for (const sid of new Set([...live.users, ...(live.bySession ? live.bySession.keys() : [])])) {
           const s = hostGone ? null : liveSession(sid);
-          if (!s || !E.exitVerdict(now, 'use', this.ctxFor(s, sid)).ok) { live.users.delete(sid); this._dropCred(live, sid); out.stopped.push({ hostId, sessionId: sid }); }
+          if (!s || (() => { const c = this.ctxFor(s, sid); return this._endsOn(E.exitVerdict(now, 'use', c), c); })()) { live.users.delete(sid); this._dropCred(live, sid); out.stopped.push({ hostId, sessionId: sid }); }
         }
         if (!live.users.size) { out.hosts.push(hostId); stopping.push(this.stop(hostId).catch(() => {})); }
       }
       for (const k of [...this._asks.values()]) {
         const s = liveSession(k.sessionId);
-        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || !E.exitVerdict(this.access(k.hostId), 'run', this.ctxFor(s, k.sessionId)).ok) ? 'revoked' : null;
+        const kwhy = !s ? 'conversation-gone' : (endedH.has(k.hostId) || (() => { const c = this.ctxFor(s, k.sessionId); return this._endsOn(E.exitVerdict(this.access(k.hostId), 'run', c), c); })()) ? 'revoked' : null;
         if (kwhy) { this._settleAsk(k, 'denied', kwhy); out.settled.push(k.askId); out.asks.push({ askId: k.askId, hostId: k.hostId, why: kwhy }); }
       }
       if (out.stopped.length || out.settled.length) {
@@ -593,7 +597,7 @@ class ExitProxyManager {
     const c = live && live.creds && live.creds.get(user);
     if (!c || !safeEq(c.pass, pass)) return false;
     const s = this.sessionsMap().get(c.sessionId);
-    if (!s || !E.exitVerdict(this.access(hostId), 'use', this.ctxFor(s, c.sessionId)).ok) {
+    if (!s || (() => { const x = this.ctxFor(s, c.sessionId); return this._endsOn(E.exitVerdict(this.access(hostId), 'use', x), x); })()) {
       this.log(`exit ${hostId}: a connection with ${s ? 'a revoked' : 'a dead'} conversation's credentials refused — its pair dropped`);
       this._dropCred(live, c.sessionId); live.users.delete(c.sessionId);
       return false;
@@ -772,7 +776,9 @@ class ExitProxyManager {
     // a revoke DURING the daemon's run cannot stop the command (no cancel op; ≤ 30 s) — it is recorded as such
     const accAfter = this.access(h.id);
     const ctxAfter = this._ctxAgain(session, sessionId, ctxNow, accAfter.run);   // B-48a4 (B): a group removal during the run is recorded, whatever moved it
-    const revokedDuringRun = !E.exitVerdict(accAfter, 'run', ctxAfter).ok;
+    // B-55dc ⋈ B-48a4: the context B-48a4 asks again, judged by B-55dc's law — a refusal only because that membership is still
+    // being READ is no revocation (the holder is re-judged at the store's signal)
+    const revokedDuringRun = this._endsOn(E.exitVerdict(accAfter, 'run', ctxAfter), ctxAfter);
     const by = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };
     // lane-exit-run-output E2: the child NEVER STARTED (`cmd-result.spawnError`, the daemon's judge) — distinct from a
     // non-zero exit: the row, the audit line, the card and the agent all say WHY (pre-fix: "exit 1 · 0.0 s", a guess)
@@ -911,7 +917,7 @@ class ExitProxyManager {
     const stillOn = async () => {
       if (o.signal && o.signal.aborted) throw Object.assign(new Error('the vibespace-exit call ended'), { code: 'caller_gone' });
       if (!this._stillLive(session, sessionId)) throw Object.assign(new Error('the conversation ended'), { code: 'conversation_gone' });
-      if (!E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId)).ok) throw Object.assign(new Error('access was removed during the transfer'), { code: 'not_granted' });
+      if ((() => { const c = this.ctxFor(session, sessionId); return this._endsOn(E.exitVerdict(this.access(h.id), 'run', c), c); })()) throw Object.assign(new Error('access was removed during the transfer'), { code: 'not_granted' });
     };
     const named = (e) => e && e.code === 'not_granted' ? fail('not_granted', {}, 'not_granted') : e && e.code === 'conversation_gone' ? this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd: line0(), verb, line: { path: remote, localPath: local } }) : null;
     let dm, caps = [], platform = null, info = {};

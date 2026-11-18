@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+// THE MEMBERSHIP ANSWER COSTS THE MAIN LOOP NO FILE CALL (B-55dc, from the owner's «the hub is laggy»). src/task-groups.js
+// groupsForSession (THE DRAWING DOOR) answers from the last OFF-LOOP read of the file facts membership depends on (a discover
+// row's kind, where a relative row resolves, a cwd's realpath — src/member-facts.js); groupsForSessionDecided (THE DECIDING
+// DOOR, for what an agent is told or allowed) first waits, bounded, for the first read of every path the ask needs. Legs:
+//   ① THE ORACLE: the release's answer (its own lines: membership's kind = _kindOf's statSync, the realpath = a
+//     realpathSync — set back on an instance of this tree) against this tree's, record by record, over rooted / relative /
+//     file / missing rows and a symlinked folder: on the DECIDING door at the FIRST ask of a store nothing was read in; on
+//     the DRAWING door after one refresh. The drawing door's first answer differs ONLY where presence decides (named).
+//   ② THE COUNT: synchronous fs calls on the main thread per ask = 0 on BOTH doors, at 10 groups and at 100 groups of 20
+//     rows; RED control: the release's lines count them.
+//   ③ THE BOUND: a stall PLACED in the reader (a SafeFs that never answers) — the deciding door answers when its bound
+//     passes, with the «reading» answer, and the loop turned the whole time.
+//   ④ THE NOTIFY: a first read that moves a membership sends ONE store signal; a first read that moves nothing sends none;
+//     a store edit is seen at once (no refresh between).
+//   ⑤ THE LAW «nobody loses anything on an answer still being read»: a conversation in a symlinked folder HOLDS an exit
+//     forward through its group; the reader is stalled; the REAL re-judge (src/exit-proxy.js rejudgeAll) during the stall
+//     keeps it; when the read lands the answer is the release's and ONE signal went out. RED: the same wiring without the
+//     flag (the ids mapped plainly) drops the forward during the stall.
+// Run: node scripts/test-membership-doors.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { checker } from './lib/check.mjs';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const { TaskGroupManager, DECIDE_BOUND_MS } = require(path.join(REPO, 'src/task-groups.js'));
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-member-doors-'));
+process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+const { ok, report } = checker();
+
+// ── a folder tree: dirs, a file, a missing path, a symlinked folder, a folder under home ─────────────────────────────────
+const P = (...a) => path.join(ROOT, ...a);
+const HOME = P('home');
+for (const d of ['home/hsub/y', 'A/sub/w', 'B/x', 'C']) fs.mkdirSync(P(d), { recursive: true });
+fs.writeFileSync(P('F.txt'), 'x');
+fs.symlinkSync(P('B'), P('L'));   // a cwd under L/ resolves into B/
+
+// ONE REFRESH, to its end: a relative row reads its candidates in rounds (each landing starts the next), so «after one refresh»
+// = until no read is in flight
+const tick = () => new Promise((r) => setImmediate(() => setImmediate(r)));
+async function refresh(tg) { for (let i = 0; i < 12; i++) { await tg._mfacts.settled(); await tick(); if (!tg._mfacts.busy()) return; } }
+const ALL = [];   // every store this suite made (the count leg lets them all settle first: their landings run in its window)
+let dn = 0;
+function store(tasks, opts = {}) {
+  const dataDir = P('data' + (++dn)); fs.mkdirSync(dataDir, { recursive: true });
+  const signals = [];
+  const tg = new TaskGroupManager({ dataDir, homeDir: HOME, onChange: (e) => signals.push(e), ...opts });
+  tg._syncTaskMd = () => { };   // the mirror is not membership (and would write into the folders)
+  tg._state.tasks = JSON.parse(JSON.stringify(tasks)); tg._save();
+  signals.length = 0;
+  ALL.push(tg);
+  return { tg, signals };
+}
+// THE RELEASE'S LINES, set back on an instance of this tree: membership asked _kindOf (statSync for a local row) and a
+// realpathSync per new cwd (cached) — the only two places this change moved
+function releaseOf(tg) {
+  tg._memberKindOf = (abs) => tg._kindOf(abs);
+  const cache = new Map();
+  tg._realOf = (cwd, realCwd) => {
+    let real = realCwd;
+    if (!real && cwd) {
+      if (cache.has(cwd)) real = cache.get(cwd);
+      else { try { real = fs.realpathSync(cwd); } catch { real = null; } cache.set(cwd, real); }
+    }
+    return real;
+  };
+  return tg;
+}
+const row = (p, ...tags) => ({ path: p, tags });
+const GROUPS = {
+  'T-rooted':   { ctx: [row(P('A'), 'discover')] },                                   // a rooted folder
+  'T-relprev':  { ctx: [row(P('A'), 'notes'), row('sub', 'discover')] },              // relative: the previous row's folder ⇒ A/sub
+  'T-relhome':  { ctx: [row('hsub', 'discover')] },                                   // relative: home ⇒ home/hsub
+  'T-relfile':  { ctx: [row(P('F.txt'), 'notes'), row('x', 'discover')] },            // relative after a FILE: its parent ⇒ ROOT/x (missing) … home/x (missing) ⇒ none
+  'T-missing':  { ctx: [row(P('M'), 'discover')] },                                   // a missing rooted folder: matches by its string
+  'T-file':     { ctx: [row(P('F.txt'), 'discover')] },                               // a FILE is no folder
+  'T-linked':   { ctx: [row(P('B'), 'discover')] },                                   // the target of the symlinked cwd
+  'T-first':    { ctx: [row(P('F.txt'), 'notes'), row(P('C'), 'notes'), row('w', 'discover')] },   // first = the first rooted DIR (C) ⇒ C/w (missing) … none
+  'T-bound':    { ctx: [], sessions: ['claude:bound-1'] },                            // by its key
+};
+const tasksOf = (g) => Object.fromEntries(Object.entries(g).map(([id, x], i) => [id, { id, title: id, kind: 'task', createdAt: 1000 + i, archived: false, sessions: x.sessions || [], ctx: x.ctx }]));
+const TASKS = tasksOf(GROUPS);
+const ASKS = [
+  { cwd: P('A/sub/w') }, { cwd: P('A') }, { cwd: P('L/x') }, { cwd: P('B/x') }, { cwd: path.join(HOME, 'hsub/y') },
+  { cwd: P('M/z') }, { cwd: P('C') }, { cwd: '/opt/elsewhere' }, { sessionKey: 'claude:bound-1' },
+  { sessionKey: 'claude:bound-1', cwd: P('L/x') }, { sessionKey: 'claude:none', cwd: P('A/sub/w'), initialGroupId: 'T-missing' },
+  { cwd: P('L/x'), realCwd: P('B/x') },
+];
+const view = (list) => JSON.stringify((list || []).map((t) => t));   // record by record, every field
+const ids = (list) => (list || []).map((t) => t.id).join(',');
+
+// ── ① THE ORACLE ──────────────────────────────────────────────────────────────────────────────────────────────────────
+{
+  const rel = releaseOf(store(TASKS).tg);
+  const bad = [], degraded = [], notSubset = [], unflagged = [];
+  for (const a of ASKS) {
+    const want = rel.groupsForSession(a);
+    const mine = store(TASKS).tg;   // a store nothing was read in
+    const got = await mine.groupsForSessionDecided(a);
+    if (view(got) !== view(want)) bad.push(`${JSON.stringify(a)}: release [${ids(want)}] · decided [${ids(got)}]`);
+    const fresh = store(TASKS).tg;
+    const first = fresh.groupsForSession(a);
+    if (ids(first) !== ids(want)) degraded.push(`${JSON.stringify(a)}: [${ids(first)}] → [${ids(want)}]`);
+    // the «reading» answer can only UNDER-include: a conversation's folder is never a file nor a path that does not exist
+    if (!first.every((t) => want.some((w) => w.id === t.id))) notSubset.push(`${JSON.stringify(a)}: [${ids(first)}] ⊄ [${ids(want)}]`);
+    if (ids(first) !== ids(want) && !first.unread) unflagged.push(JSON.stringify(a));
+    await refresh(fresh);
+    const after = fresh.groupsForSession(a);
+    if (view(after) !== view(want)) bad.push(`${JSON.stringify(a)} drawing after one refresh: release [${ids(want)}] · drawn [${ids(after)}]`);
+  }
+  ok(bad.length === 0, `the DECIDING door at the first ask, and the DRAWING door after one refresh, answer as the release — record by record, ${ASKS.length} asks over rooted / relative / file / missing rows and a symlinked folder`, bad);
+  // the drawing door's first answer before any read: exactly the places presence decides (the named degradation)
+  const want = [`{"cwd":"${P('A/sub/w')}"}`, `{"cwd":"${P('L/x')}"}`, `{"sessionKey":"claude:bound-1","cwd":"${P('L/x')}"}`, `{"sessionKey":"claude:none","cwd":"${P('A/sub/w')}","initialGroupId":"T-missing"}`];
+  const seen = degraded.map((d) => d.slice(0, d.indexOf(': [')));
+  ok(seen.length === want.length && want.every((w) => seen.includes(w)), `before its first read the DRAWING door differs only where presence decides — the relative row behind a folder not read yet, and the symlinked cwd without its realpath (${degraded.length} asks)`, degraded);
+  ok(notSubset.length === 0, `every «reading» answer over the fixture is a SUBSET of the release's answer (${ASKS.length} asks) — a grant asked during a read is refused at worst, never given to a non-member`, notSubset);
+  ok(unflagged.length === 0, 'every first answer that differs from the release carries the drawing door\'s `unread` flag (a revoking site can see it)', unflagged);
+  // the release's own spellings held: a file is no folder, a missing rooted row is one, a relative row after a file finds none
+  const r = (cwd) => ids(rel.groupsForSession({ cwd }));
+  ok(r(P('F.txt')) === '' && r(P('M/z')) === 'T-missing' && r(P('A/sub/w')) === 'T-rooted,T-relprev' && r(P('L/x')) === 'T-linked' && r(path.join(HOME, 'hsub/y')) === 'T-relhome',
+    'the fixture exercises each rule the oracle compares (file ⇒ none, missing ⇒ by its string, relative ⇒ prev / home, symlink ⇒ realpath)', { F: r(P('F.txt')), M: r(P('M/z')), A: r(P('A/sub/w')), L: r(P('L/x')) });
+}
+
+// ── ② THE COUNT ──────────────────────────────────────────────────────────────────────────────────────────────────────
+const SYNC = ['statSync', 'lstatSync', 'fstatSync', 'realpathSync', 'existsSync', 'readdirSync', 'readFileSync', 'accessSync', 'openSync', 'readSync', 'opendirSync', 'readlinkSync'];
+const real = {}; let counting = false, calls = 0; const where = [];
+for (const k of SYNC) { real[k] = fs[k]; fs[k] = function (...a) { if (counting) { calls++; if (where.length < 6) where.push(k + ' ' + String(a[0]).slice(-40)); } return real[k].apply(this, a); }; }
+real.native = fs.realpathSync.native;
+fs.realpathSync.native = function (...a) { if (counting) calls++; return real.native.apply(this, a); };
+function bigTasks(n) {
+  const out = {};
+  for (let g = 0; g < n; g++) {
+    const base = P('big', 'g' + g);
+    const ctx = [];
+    for (let i = 0; i < 20; i++) {
+      const d = path.join(base, 'r' + i);
+      if (i < 18) fs.mkdirSync(d, { recursive: true });
+      ctx.push(i % 5 === 4 ? row('r' + i, 'discover') : row(d, i % 3 ? 'discover' : 'notes'));   // rooted rows + relative ones, two missing
+    }
+    out['T-big' + g] = { id: 'T-big' + g, title: 'g' + g, kind: 'task', createdAt: 5000 + g, archived: false, sessions: [], ctx };
+  }
+  return out;
+}
+async function countAsks(tg, n, door) {
+  const asks = Array.from({ length: 40 }, (_, i) => ({ sessionKey: 'claude:k' + (i % 7), cwd: P('big', 'g' + (i % n), 'r' + (i % 18), 'deep') }));
+  let c = 0;
+  for (const a of asks) {
+    counting = true; calls = 0;
+    if (door === 'decided') { const p = tg.groupsForSessionDecided(a); counting = false; c += calls; counting = true; calls = 0; await p; c += calls; }
+    else tg.groupsForSession(a);
+    counting = false; c += door === 'decided' ? 0 : calls;
+  }
+  return { c, asks: asks.length };
+}
+for (const tg of ALL) await refresh(tg);   // no landing of an earlier store may run inside a counted window
+for (const n of [10, 100]) {
+  const T = bigTasks(n);
+  const sd = store(T).tg, sc = store(T).tg, warm = store(T).tg;
+  for (const tg of [sd, sc, warm]) await refresh(tg);   // their boot reads (the store's own priming) land before the count
+  sd._mfacts.clear(); sc._mfacts.clear(); warm._mfacts.clear();   // …then nothing read: the first asks are counted from cold
+  const draw = await countAsks(sd, n, 'draw');
+  await refresh(sd);
+  const dec = await countAsks(sc, n, 'decided');
+  await refresh(sc);
+  await countAsks(warm, n, 'decided'); await refresh(warm);
+  const again = await countAsks(warm, n, 'draw');
+  ok(draw.c === 0 && dec.c === 0 && again.c === 0, `${n} groups × 20 rows: synchronous fs calls on the main thread per ask = 0 — the drawing door (first asks and after a refresh) and the deciding door (${draw.asks} asks each)`, { draw: draw.c, decided: dec.c, again: again.c, where });
+  const rtg = store(T).tg; await refresh(rtg); releaseOf(rtg);
+  const rel = await countAsks(rtg, n, 'draw');
+  ok(rel.c > 0, `CONTROL (${n} groups): the release's lines make ${rel.c} synchronous fs calls over the same ${rel.asks} asks — the count can see one`, { where });
+}
+for (const k of SYNC) fs[k] = real[k];
+fs.realpathSync.native = real.native;
+
+// ── ③ THE BOUND (a stall PLACED in the reader, never load) ────────────────────────────────────────────────────────────
+{
+  const stalled = { call: () => new Promise(() => { }) };   // a mount that never answers
+  const { tg } = store(TASKS, { mirrorFs: () => stalled });
+  let ticks = 0; const iv = setInterval(() => { ticks++; }, 5);
+  const t0 = performance.now();
+  const BOUND = 300;   // the bound the suite HANDS the deciding door (the wall-clock census: a const handed to the mechanism × a slack)
+  const got = await tg.groupsForSessionDecided({ cwd: P('A/sub/w') }, { boundMs: BOUND });
+  const ms = performance.now() - t0; clearInterval(iv);
+  ok(ms >= BOUND - 5 && ms < 2 * BOUND && ids(got) === ids(tg.groupsForSession({ cwd: P('A/sub/w') })) && ids(got) === 'T-rooted', `the deciding door answers when its bound passes (${Math.round(ms)} ms for a ${BOUND} ms bound) with the «reading» answer [${ids(got)}]`);
+  ok(ticks >= 30, `…and the loop turned the whole time (${ticks} timer turns of 5 ms during the wait) — the release held the whole hub for as long as the mount hung`);
+  ok(tg.memberIndexStats().bounded === 1, 'the store counts the ask that met its bound', tg.memberIndexStats());
+  ok(DECIDE_BOUND_MS === 1500, `the production bound is DECIDE_BOUND_MS = ${DECIDE_BOUND_MS} ms (chosen from the measured first read, docs/kb-file-structure.md)`);
+}
+
+// ── ④ THE NOTIFY ─────────────────────────────────────────────────────────────────────────────────────────────────────
+{
+  const flush = tick;
+  const moving = store(tasksOf({ 'T-relprev': GROUPS['T-relprev'] }));
+  await refresh(moving.tg); moving.tg._mfacts.clear(); moving.signals.length = 0;   // the boot's priming landed; then cold
+  const a = { cwd: P('A/sub/w') };
+  const before = ids(moving.tg.groupsForSession(a));
+  await refresh(moving.tg);
+  const after = ids(moving.tg.groupsForSession(a));
+  ok(before === '' && after === 'T-relprev' && moving.signals.length === 1 && Array.isArray(moving.signals[0].ids) && moving.signals[0].ids.join() === 'T-relprev', `a first read that MOVES a membership (the relative row's folder) sends ONE store signal naming its group (${JSON.stringify(moving.signals)}) — [${before}] → [${after}]`, moving.signals);
+  const still = store(tasksOf({ 'T-rooted': GROUPS['T-rooted'] }));
+  await refresh(still.tg); still.tg._mfacts.clear(); still.signals.length = 0;
+  still.tg.groupsForSession(a); await refresh(still.tg);
+  ok(still.signals.length <= 1 && still.signals.every((e) => Array.isArray(e.ids) && e.ids.length === 0) && ids(still.tg.groupsForSession(a)) === 'T-rooted',
+    `a first read that moves nothing (a rooted folder: «reading» already counted it) names no group — at most the one settle signal the KEEPING sites re-judge on, nothing broadcast (${JSON.stringify(still.signals)})`, still.signals);
+  const link = store(tasksOf({ 'T-linked': GROUPS['T-linked'] }));
+  await refresh(link.tg); link.tg._mfacts.clear(); link.signals.length = 0;
+  const b0 = ids(link.tg.groupsForSession({ cwd: P('L/x') })); await refresh(link.tg);
+  ok(b0 === '' && ids(link.tg.groupsForSession({ cwd: P('L/x') })) === 'T-linked' && link.signals.length === 1, `a symlinked cwd's realpath landing sends ONE signal (${link.signals.length}), then the cwd is a member`, link.signals);
+  // a person's own edit through the store is seen at once — no refresh between
+  const ed = store(TASKS).tg;
+  ed.groupsForSession({ sessionKey: 'claude:new' });
+  ed.update('T-rooted', { sessions: ['claude:new'] });
+  ok(ids(ed.groupsForSession({ sessionKey: 'claude:new' })) === 'T-rooted', 'a store edit (a session bound) is seen at the very next ask');
+}
+
+// ── ⑤ THE LAW: nobody loses anything on an answer still being read (the REAL exit re-judge, a stand-in holder) ─────────
+{
+  const flush = () => new Promise((r) => setImmediate(() => setImmediate(r)));
+  const { ExitProxyManager } = require(path.join(REPO, 'src/exit-proxy.js'));
+  const ACCESS = { use: { mode: 'only', who: [{ kind: 'group', id: 'T-linked' }] }, run: { mode: 'nobody' } };
+  async function leg(withFlag) {
+    let release = () => { };
+    const gate = new Promise((r) => { release = r; });
+    // the stall PLACED in the reader: a SafeFs stand-in that answers only when the leg releases it
+    const reader = { call: async (op, payload) => { await gate; if (op === 'realpath') return { path: await fs.promises.realpath(payload.path) }; const st = await fs.promises.stat(payload.path); return { isDirectory: st.isDirectory(), isFile: st.isFile() }; } };
+    const st = store(tasksOf({ 'T-linked': GROUPS['T-linked'] }), { mirrorFs: () => reader });
+    const sessions = new Map([['w-held', { name: 'held', backend: 'claude', claudeSessionId: 'c-held', cwd: P('L/x') }]]);
+    const facts = (s) => ({ sessionKey: 'claude:c-held', cwd: s.cwd });
+    // server.js's wiring (tasks.memberIds), and the RED form: the same answer's ids mapped plainly (the flag gone)
+    const groupsOf = withFlag ? (s) => st.tg.memberIds(facts(s)) : (s) => st.tg.groupsForSession(facts(s)).map((g) => g.id);
+    const ex = new ExitProxyManager({ hosts: { list: () => [] }, log: () => { }, sessionsMap: () => sessions, groupsOf, grants: () => null });
+    ex.access = () => ACCESS; ex.stop = async () => { }; ex._dropCred = () => { };
+    ex._live.set('h1', { users: new Set(['w-held']), creds: new Map(), bySession: new Map(), sockets: new Set() });
+    const during = ex.rejudgeAll('task-groups');
+    const keptDuring = !!ex._live.get('h1') && ex._live.get('h1').users.has('w-held');
+    release(); await refresh(st.tg);
+    const after = withFlag ? ex.rejudgeAll('task-groups') : null;
+    return { keptDuring, stoppedDuring: during.stopped.length, keptAfter: !!ex._live.get('h1') && ex._live.get('h1').users.has('w-held'), stoppedAfter: after ? after.stopped.length : -1, signals: st.signals.length, answer: ids(st.tg.groupsForSession(facts({ cwd: P('L/x') }))) };
+  }
+  const law = await leg(true);
+  ok(law.keptDuring && law.stoppedDuring === 0, `during the stall the real exit re-judge KEEPS the forward of a conversation in a symlinked folder (${law.stoppedDuring} stopped)`, law);
+  ok(law.answer === 'T-linked' && law.signals === 1 && law.keptAfter && law.stoppedAfter === 0, `when the read lands: the release's answer [${law.answer}], ONE store signal (${law.signals}), and the re-judge at that signal keeps it`, law);
+  const red = await leg(false);
+  ok(!red.keptDuring && red.stoppedDuring === 1, `RED: the same wiring without the flag DROPS the forward during the stall (${red.stoppedDuring} stopped)`, red);
+}
+
+report();

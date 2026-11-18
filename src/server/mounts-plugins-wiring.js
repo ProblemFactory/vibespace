@@ -76,6 +76,7 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
     const g = gs.find((x) => x.id === s._initialGroupId) || gs[0];
     return g ? { id: g.id, name: g.title || null } : null;
   },
+  groupRead: (s, id) => { const tasks = getTasks && getTasks(); return tasks && sessionStatusKey && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : null; },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
   collectorToken: () => process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '', selfKeyId: () => feedbackForward.keyId(),
   forwardOf: (id) => feedbackForward.forwardOf(id),   // lane feedback-forward-404: `vibespace-feedback list` says a report stayed here
@@ -124,7 +125,7 @@ const vaultUseFacts = (caller) => {
     if (!s || s.isTmuxView || !caller || require('../claude-lock-capture.js').addressableId(s) !== caller.conversationId) continue;   // fork-safe: a pending fork shares its parent's id and is never picked
     let groupIds = [], groupsUnreadable = false;
     const tasks = getTasks && getTasks();
-    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
+    if (tasks && sessionStatusKey) { try { const gs = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); groupIds = gs.map((g) => g.id); if (gs.unread) groupsUnreadable = true; /* B-55dc: still being read */ } catch { groupsUnreadable = true; } }
     const tb = s._turnBy && typeof s._turnBy === 'object' ? s._turnBy : null;   // B-d868: who started the turn now running (claude-stream-json's kept fact)
     return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable, turnBy: tb ? require('../message-manager.js').turnByForAsk({ ...tb, by: String(tb.by || 'unrecorded') }, s._turnByBackground) : null };   // B-d868: background work of another turn ⇒ «not recorded»
   }
@@ -1133,6 +1134,11 @@ function createSessionMessages(session, sessionId) {
         return { turn: TF.turnKnown(s) ? TF.turnOf(s) : null, name: String(s.webuiName || s.name || '') || null };
       },
       // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
+      // B-55dc: the deciding door's first reads for a create's facts — ws-create awaits them before the two reads here
+      taskGroupRead: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+        const tasks = getTasks ? getTasks() : null;
+        return tasks && typeof tasks.membershipRead === 'function' ? tasks.membershipRead({ sessionKey, cwd, initialGroupId, initialGroupIds }) : null;
+      },
       // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
       taskGroupCap: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
@@ -1156,7 +1162,9 @@ function createSessionMessages(session, sessionId) {
         if (!hit) return { ids: [], unreadable: false, live: false };
         try {
           const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
-          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, hostId: hit.host || null, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || []).map((g) => g.id), unreadable: false };
+          const gs = tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, hostId: hit.host || null, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || [];
+          // B-55dc: an answer still being read is UNREADABLE here — the keeper then KEEPS a lease (undecided) and refuses a new one
+          return { ids: gs.map((g) => g.id), unreadable: !!gs.unread };
         } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
       },
       // lane grants-unify: "Who can use it" names a conversation by its CONVERSATION id in the ONE grants store — a browser
@@ -1185,7 +1193,10 @@ function createSessionMessages(session, sessionId) {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
       const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
-      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
+      const gs = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || [];
+      const ids = gs.map((g) => g.id);
+      if (gs.unread) Object.defineProperty(ids, 'unread', { value: true, enumerable: false });   // B-55dc: still being read (the callers say unreadable)
+      return ids;
     };
     let browserEnvMemo;
     // the pin route re-points a RUNNING session's indirection through the
@@ -1232,7 +1243,7 @@ function createSessionMessages(session, sessionId) {
         }
         let taskIds = [], groupsUnreadable = false;
         if (s) {
-          try { taskIds = taskIdsFor(s, sid); } catch { taskIds = []; groupsUnreadable = true; }
+          try { taskIds = taskIdsFor(s, sid); if (taskIds.unread) groupsUnreadable = true; } catch { taskIds = []; groupsUnreadable = true; }
         }
         const cid = s ? addressableId(s) : (caller && caller.conversationId ? caller.conversationId : null);
         const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(sid ? [`webui:${sid}`] : []), ...(bk ? [String(bk)] : [])])];

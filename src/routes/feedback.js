@@ -45,11 +45,14 @@ const answer = (res, r) => {
  *  instance() → {name, version}; collectorToken() → the hub's VIBESPACE_TELEMETRY_INGEST_TOKEN ('' ⇒ the doors are off);
  *  selfKeyId() → this instance's own origin id (a forward from itself is answered `self` and kept once);
  *  forwardOf(id) → the report's forward state on this instance (lane feedback-forward-404) */
-function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => null, groupOf = () => null, instance = () => ({}), collectorToken = () => '', selfKeyId = () => null, forwardOf = () => null }) {
+function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => null, groupOf = () => null, groupRead = () => null, instance = () => ({}), collectorToken = () => '', selfKeyId = () => null, forwardOf = () => null }) {
   // the name the user's sidebar shows for a live session (src/session-name.js's ladder, the user's own rename aside): a
   // name GIVEN at creation / by a rename, else the harness's own title, else the live name ('Session N')
   const nameOf = (s) => (s && ((s._nameExplicit && s.name) || s._cliTitle || s.name || s.webuiName)) || null;
   const groupFor = (s, id) => { try { return s ? groupOf(s, id) : null; } catch { return null; } };
+  // B-55dc: the report KEEPS its reporter's group — the Task Group store's first reads for this caller (a promise | null)
+  const groupReadFor = (s, id) => { try { return s ? groupRead(s, id) : null; } catch { return null; } };
+  const reportRead = new WeakSet();
   /** THE CALLER, from its token: { facts (the record's), ids (whose reports are "mine") } | null (answered) */
   const agentCaller = (req, res) => {
     const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
@@ -61,13 +64,13 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
       let sid = null, s = null;
       if (cid) for (const [id, x] of activeSessions) if (x && addressableId(x) === cid) { sid = id; s = x; break; }
       const key = cid || `job:${job.id}`;
-      return { ids: [key, sid], facts: { session: { id: key, name: nameOf(s) || `job ${require('../job-model.js').labelVia(jm)(job) || job.id}` }, group: groupFor(s, sid), harness: s ? (s.backend || 'claude') : null, instance: instance() } };
+      return { read: groupReadFor(s, sid), ids: [key, sid], facts: { session: { id: key, name: nameOf(s) || `job ${require('../job-model.js').labelVia(jm)(job) || job.id}` }, group: groupFor(s, sid), harness: s ? (s.backend || 'claude') : null, instance: instance() } };
     }
     if (!token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token — vibespace-feedback runs inside a VibeSpace session', code: 'unauthorized' }); return null; }
     for (const [id, s] of activeSessions) {
       if (!s || !sameToken(token, s.agentToken)) continue;
       const cid = addressableId(s);
-      return { ids: [cid || id, id], facts: { session: { id: cid || id, name: nameOf(s) }, group: groupFor(s, id), harness: s.backend || 'claude', instance: instance() } };
+      return { read: groupReadFor(s, id), ids: [cid || id, id], facts: { session: { id: cid || id, name: nameOf(s) }, group: groupFor(s, id), harness: s.backend || 'claude', instance: instance() } };
     }
     res.status(401).json({ error: 'unknown session token', code: 'unauthorized' });
     return null;
@@ -80,9 +83,10 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
   const body = (req) => (req.body && typeof req.body === 'object' ? req.body : {});
 
   // ── agent ──
-  app.post('/api/agent/feedback', (req, res) => {
+  app.post('/api/agent/feedback', function feedbackRoute(req, res) {
     const c = agentCaller(req, res);
     if (!c) return;
+    if (c.read && !reportRead.has(req)) { reportRead.add(req); c.read.then(() => feedbackRoute(req, res), () => feedbackRoute(req, res)); return; }   // B-55dc: the label from a READ answer
     const b = body(req);
     answer(res, store.report({ text: b.text, about: b.about, kind: b.kind }, c.facts));
   });

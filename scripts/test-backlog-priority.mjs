@@ -216,6 +216,9 @@ const call = (method, p, body) => {
   return { out, code };
 };
 tasks.update(g.id, { backlog: [] });
+// B-55dc: an agent's right to its group is decided on a READ answer (the deciding door awaits the cwd's first realpath off the
+// loop — a symlinked cwd could reach another folder); this rig calls the route synchronously, so that read lands first
+await tasks.groupsForSessionDecided({ cwd });
 {
   const r = call('POST', '/api/agent/task-backlog', { add: 'urgent thing', priority: 'high' });
   check('add with priority high → stored high, echoed', r.code === 200 && r.out.item?.priority === 'high' && tasks.get(g.id).backlog[0].priority === 'high', JSON.stringify(r.out).slice(0, 200));
