@@ -33,7 +33,7 @@ const { familyOfScopedBucket } = require('./model-family.js');
 function backfillLimits({ cacheDir, archiveDir, id = 'backfill', log = () => { } }) {
   const res = { scanned: 0, stamped: 0, already: 0, skipped: 0, limits: 0, byKey: {} };
   let names = [];
-  try { names = fs.readdirSync(cacheDir); } catch { return res; }
+  try { names = usageWrite.listCacheDir(cacheDir); } catch { return res; }   // lane lg-store-writes U6.4: the readings folder through the cache module
   const archive = [];
   for (const fn of names) {
     // `isCacheFileName` is the product's own predicate: `.json`, never
@@ -41,7 +41,7 @@ function backfillLimits({ cacheDir, archiveDir, id = 'backfill', log = () => { }
     // migration ends up repairing a file nothing else reads.
     if (!usageWrite.isCacheFileName(fn)) continue;
     const key = fn.slice(0, -5);
-    let cur; try { cur = JSON.parse(fs.readFileSync(path.join(cacheDir, fn), 'utf-8')); } catch { res.skipped++; continue; }
+    let cur; try { cur = usageWrite.readCacheJson(path.join(cacheDir, fn)); } catch { res.skipped++; continue; }
     if (!cur || typeof cur !== 'object') { res.skipped++; continue; }
     res.scanned++;
     if (Array.isArray(cur.limits)) { res.already++; res.byKey[key] = cur.limits.length; res.limits += cur.limits.length; continue; }

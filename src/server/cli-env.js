@@ -369,7 +369,7 @@ function noteModelSeen(id) {
   try {
     const fp = path.join(USAGE_CACHE_DIR, '__models__.json');
     let list = [];
-    try { list = JSON.parse(fs.readFileSync(fp, 'utf-8')) || []; } catch { }
+    try { list = require('../usage-cache-write.js').readCacheJson(fp) || []; } catch { }   // lane lg-store-writes U6.4: the folder's models list through the cache module
     if (!list.some((m) => m && m.id === id)) {
       list.push({ id, label: id.replace(/^claude-/, '').replace(/-(\d{8})$/, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) });
       fs.writeFileSync(fp, JSON.stringify(list));

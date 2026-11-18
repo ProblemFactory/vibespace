@@ -147,7 +147,7 @@ function unfoldWeeklyLanes({ dataDir, id = 'weekly-lanes-unfold', now = Date.now
   const report = { id, scanned: 0, candidates: 0, buffers: 0, rederived: 0, already: 0, left: 0, kept: 0, refused: 0, unreadable: null, keys: [] };
   const say = (key, action, why, extra = {}) => { report.keys.push({ key, action, why, ...extra }); report[action]++; };
   let files = [];
-  try { files = fs.readdirSync(cacheDir).filter(usageWrite.isCacheFileName); } catch (e) { if (e && e.code !== 'ENOENT') report.unreadable = `${cacheDir}: ${e.message}`; return report; }
+  try { files = usageWrite.listCacheDir(cacheDir).filter(usageWrite.isCacheFileName); } catch (e) { if (e && e.code !== 'ENOENT') report.unreadable = `${cacheDir}: ${e.message}`; return report; }   // lane lg-store-writes U6.4: through the cache module
   // ① the candidates: claude caches whose PLAN limit was last written by an event
   const cands = new Map();
   for (const fn of files) {

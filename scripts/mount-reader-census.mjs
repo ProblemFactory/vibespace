@@ -76,7 +76,6 @@ export const ROWS = [
   ['src/port-forward.js', 'own-tree', 4, null, PROC],
   ['src/proc-identity.js', 'own-tree', 16, null, `${PROC}; B-91aa +1: statOf — a held probe child\'s stat [state, starttime], sync, «gone» apart from «unreadable» (met at 2.369.412\'s second checkpoint); B-f64b +1: startToken's one /proc/self stat (is this Linux's procfs — read once) — procfs, never a mount; lane bl-jobs B-c134 +2 (childTreeOf — the tree a stop started, by the parent chain: each process's main-thread children list and stat — procfs, never a mount); lane jobs-memory-bound round 6 +2 (membersOf — a recorded run's processes at clear time): the /proc listing and a process's environ (the job's mark) — procfs, never a mount; round 8 +2: a candidate's <pid>/task/<pid>/children and an unreadable environ's <pid>/status (its owner) — procfs; lane bl-jobs B-2c5c +1: keptByChain — a process's stat up its parent chain (is it the hub's)`],
   ['src/proc-listen.js', 'own-tree', 4, null, PROC],
-  ['src/quota-model-migrate.js', 'own-tree', 2, null, CLI],
   ['src/reading-repair.js', 'own-tree', 13, null, CLI], // lane lg-store-writes U6.3 −1: the folder's listing through the cache module (listCacheDir) — B-1319: +4 = prefetchAnchorRows (readdir / stat / readFile through fs.promises) + the size+mtime check before its rows are taken
   ['src/remote-fs.js', 'own-tree', 1, null, DATA],
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
@@ -119,7 +118,7 @@ export const ROWS = [
   ['src/server/host-tokens.js', 'own-tree', 10, null, DATA], // + lane lg-remote-hardening D3b: data/agentd/hub-identity.pem (read / exists / the read back after an exclusive first mint) // lane vault-e2e-password-fix-r2: data/agentd — the pre-vault host-<id>.token files (read / exists), the attach configs it strips, the dir listings, vault.json's presence (via secret-box)
   ['src/server/sealed-json.js', 'own-tree', 1, null, DATA], // lane vault-e2e-password-fix-r2: the sealed JSON file itself (data/dropline-oauth.json)
   ['src/server/static-public.js', 'own-tree', 1, null, DATA], // lane csp-mermaid-sites r2: the stat of the checkout's own public/ script a request names (its build stamp, as the index route writes it) — never a user path
-  ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
+  ['src/server/auto-cli-loop.js', 'own-tree', 1, null, CLI], // lane lg-store-writes U6.4 −1: the account's reading through the cache module
   ['src/server/auto-resume-workflow.js', 'own-tree', 7, null, `${CLI}; lg-recovery U3 cure +1: ONE lstat helper asks the conversation's workflows/ and the snapshot file before it is read (a link is never read through; only «no such file» is «no snapshot»); lg-recovery U3 (B-3437): ONE conversation's Workflow run folders (the run its launch ack named, the folder listed bounded), every file through one O_NOFOLLOW handle`],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
   ['src/server/boot-restore.js', 'own-tree', 17, null, DATA], // lane end-obeys-verdict +1: the end record's ONE read before the kill — the wrapper's sidecar, async and BOUNDED (endFactsBefore, a second); B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen); lane dead-socket-keeps-chat-meta +2: the read-back of the kept stopped metas — one async readdir of data/session-meta + a readFile per <sock>.json.stopped, once per boot
@@ -145,7 +144,7 @@ export const ROWS = [
   ['src/server/channel-api.js', 'own-tree', 3, null, DATA],
   ['src/server/channels-wiring.js', 'own-tree', 3, null, DATA],
   ['src/server/cli-cmd.js', 'own-tree', 4, null, CLI], // + `present` (lane cli-shell-truth: a target that does not run — missing, or there but not executable)
-  ['src/server/cli-env.js', 'own-tree', 4, null, PROC],
+  ['src/server/cli-env.js', 'own-tree', 3, null, PROC], // lane lg-store-writes U6.4 −1: the folder's models list through the cache module
   ['src/server/cluster-presets.js', 'own-tree', 7, null, DATA],
   ['src/server/conversation-deliver.js', 'own-tree', 2, null, DATA],
   ['src/server/decision-engine.js', 'own-tree', 5, null, DATA],   // lane lg-store-writes (主开发 2026-11-20 03:10Z) +1: the month's journal tail read OFF the loop (fs.promises.open);  lane decision-core: data/decision-{memo,usage}.json + the journal; lane decision-spend-readout: the journal's bounded tail (the month so far)
@@ -243,7 +242,7 @@ export const ROWS = [
   ['src/user-todos.js', 'own-tree', 2, null, DATA], // B-44f3: +1 — a held store's read again (fs.promises.readFile of its own data/user-todos.json, off the loop)
   ['src/vnc.js', 'own-tree', 3, null, PROC],
   ['src/webdav.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name; lane hub-fuse-sync-guard: the /dav verbs are async fs (exists() = one fsp.access) — −5 sites'],
-  ['src/weekly-lanes-unfold.js', 'own-tree', 8, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
+  ['src/weekly-lanes-unfold.js', 'own-tree', 7, null, CLI], // lane lg-store-writes U6.4 −1: the folder's listing through the cache module · lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/window-targets.js', 'own-tree', 2, null, PROC],
   ['src/watch-door.js', 'exempt', 3, null, 'the watch door (the 2026-11-19 hotfix): the container probe — /.dockerenv and /run/.containerenv, fixed system paths read once at a notice; procfs /proc/sys/fs/inotify/max_user_watches read at a notice (the command offers double it, S2); its poll stats only a path its CALLER already follows (a helper\'s transcript under ~/.claude, the presets folder, a workflow run\'s folder), async, through the fs handed to it'],
   ['src/workflow-usage-tailer.js', 'own-tree', 4, null, CLI],

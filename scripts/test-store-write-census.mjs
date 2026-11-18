@@ -1940,10 +1940,6 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
   // file → [count, class, why]; 'debt' = a raw read U6.2–U6.4 move onto the door (a row only falls); 'folder' = the folder itself
   // made / checked, never a reading
   const READINGS_ROWS = {
-    'src/quota-model-migrate.js': [2, 'debt', 'the quota model\'s migration walk (readdir + each reading) — U6.4'],
-    'src/weekly-lanes-unfold.js': [1, 'debt', 'the weekly lanes\' unfold walk (readdir) — U6.4'],
-    'src/server/auto-cli-loop.js': [1, 'debt', 'the auto-cli loop\'s per-account reading — U6.4'],
-    'src/server/cli-env.js': [1, 'debt', 'the CLI env\'s __models__ read — U6.4'],
     'src/server/agent-tool-generators.js': [1, 'folder', 'ensureDir(USAGE_CACHE_DIR) at boot — the folder made, never a reading'],
   };
   const RD_FILES = censusFiles(REPO).filter((f) => f !== RD_DOOR);
@@ -1959,7 +1955,7 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
   };
   const RC0 = readingsCensus();
   const sumR = [...RC0.got.values()].reduce((n, x) => n + x.length, 0);
-  ok(!RC0.bad.length, `the readings folder: ${sumR} raw reads in ${RC0.got.size} files outside the cache module, each file a row with its count (U6.1: usage-routes' nine moved onto the door — readCacheJson / listCacheDir; U6.2: the pool engine's twelve — through B-403e's memo as the door's «via»; U6.3: the reading repair's six, the capture's two, the window stamp's one)`, RC0.bad);
+  ok(!RC0.bad.length, `the readings folder: ${sumR} raw reads in ${RC0.got.size} files outside the cache module, each file a row with its count (U6.1: usage-routes' nine moved onto the door — readCacheJson / listCacheDir; U6.2: the pool engine's twelve — through B-403e's memo as the door's «via»; U6.3: the reading repair's six, the capture's two, the window stamp's one; U6.4: the quota migration's two, the weekly unfold, the auto-cli loop, the CLI env — the folder's ensureDir alone left)`, RC0.bad);
   ok(!RC0.got.has('src/usage-routes.js'), 'usage-routes reads the readings folder ONLY through the cache module (U6.1)');
   const CE = fs.readFileSync(path.join(REPO, 'src/server/cli-env.js'), 'utf8'), WS = fs.readFileSync(path.join(REPO, 'src/window-stamp.js'), 'utf8'), UR = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   const c1 = readingsCensus({ 'src/zz-readings-plant.js': "const fs = require('fs'); const usageWrite = require('./usage-cache-write.js');\nfunction zz(USAGE_CACHE_DIR) { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'a.json')); }\n" });

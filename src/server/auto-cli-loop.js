@@ -61,6 +61,7 @@
 // of the group, and each id reads the group's merged memory.
 const fs = require('fs');
 const path = require('path');
+const usageWrite = require('../usage-cache-write.js');   // lane lg-store-writes U6.4: a reading is read through the cache module
 const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketBought, PROJECTION_WINDOW_MS } = require('../account-pool-auto.js');
 const { cliRefreshDrift } = require('../usage-estimator.js');
 const { withOwnAbsence } = require('../quota-model.js'); // PURE: a sibling's 5h window never outranks this account's «no 5h limit»
@@ -175,7 +176,7 @@ function createAutoCliLoop(d) {
       for (const a of (d.accounts.list().accounts || [])) {
         if (a.type !== 'subscription' || a.pooled || capsOf(a.backend).quotaProbe !== 'cli-usage' || unprobeable(a, now) || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, an account the probe cannot PROVE is never sent (oat-only / no login — unprobeable, lane auto-cli-oat-unprobeable), and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
         let raw = null, mem = [a.id];
-        try { raw = JSON.parse(fs.readFileSync(path.join(d.USAGE_CACHE_DIR, a.id + '.json'), 'utf-8')); } catch { }
+        try { raw = usageWrite.readCacheJson(path.join(d.USAGE_CACHE_DIR, a.id + '.json')); } catch { }
         try {
           for (const [, g] of d.usageIdentityGroupsCached()) {
             if (!g.accountIds.includes(a.id)) continue;
