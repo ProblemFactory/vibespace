@@ -207,7 +207,12 @@ const SUPERSEDED_DEFAULTS = {
 // whole walk).
 const SCAN_BUDGET_BYTES = 1024 * 1024;
 const WARM_SLICE_BYTES = SCAN_BUDGET_BYTES; // the boot warm's slice (B-1319): the same MiB a walk tick takes
-const TRIM_BATCH_ROWS = 16384; // …and its window slide, rows moved cold per step (~17 ms here)
+const HOT_HEADROOM = 8; // usage-cpu U1: past the byte ceiling the hot window is cut to (1 − 1/8) of it
+const LATE_ROWS_PLACED = 64; // usage-cpu U1: up to this many late rows are placed in the sorted view by binary search (more: the linear merge)
+const TRIM_BATCH_ROWS = 16384; // …and its window slide, row visits per step (the test machine, 300 000 hot rows: a pass step 3 to 9 ms)
+// a row STAGED cold costs this many visits of the step (measured there: 3.7 µs staged vs 0.3 µs passed — one step of 16 288 staged
+// rows held 60.7 ms; weighed, a stage step is 1 024 rows, about 4 ms)
+const TRIM_STAGE_COST = 16;
 const PROBE_BYTES = 64; // the append-only proof: the last bytes before a shard's old end (B-9428 r3)
 // lane ledger-dedup-law (B-7f9e) — the latent twin of the 23.8 GiB shard: the SYNC load read a shard's whole unread tail in
 // ONE Buffer.alloc(to - from) (a first load of a 24 GiB tail = 24 GB), and a reader that took the stepped warm over parsed
@@ -1082,7 +1087,8 @@ class UsageHistory {
   // window request re-read + re-parsed every shard (~seconds at 100k+ events).
   // B-9428 (the owner's heap snapshot: this cache was 406 MB of a 1.17 GB heap
   // — every row ever, parsed): `events` holds the HOT rows only (ts ≥ cutoff,
-  // the window + byte ceiling of cache-bounds.js); an older row lives in
+  // the window + byte ceiling of cache-bounds.js — a row the columns cannot hold, or one that came while a trim's stage
+  // was open (usage-cpu U1), may sit below it until the next trim); an older row lives in
   // `cold` as the priced columns, and its other fields are streamed from the
   // shards by (shard, offset) (usage-cold-walk.js). rids/mids = the hot rows' ids; the cold rows' ids live
   // in the slab's sorted hash indexes (r2: dedup and ledgerKnowsId regardless of ts).
@@ -1230,7 +1236,7 @@ class UsageHistory {
       if (st.size === consumed) continue;
       if (!pass.seen) { // the first new bytes of this pass: slide the window (hourly, never under a walk), order the id indexes
         pass.seen = new Set();
-        if (!c.walking && (c.cutoff === -Infinity || Date.now() - this._ledgerWindowMs() > c.cutoff + 3600e3)) this._trimHot();
+        if (!c.walking && (c.cutoff === -Infinity || Date.now() - this._ledgerWindowMs() > c.cutoff + 3600e3)) this._trimOwed(c);
         for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
       }
       // the shard's new bytes, a slice at a time on BOTH paths (lane ledger-dedup-law: the sync path read the whole tail in
@@ -1251,7 +1257,7 @@ class UsageHistory {
         if (stepped) yield;
       }
     }
-    if (pass.grew && c.hotBytes > this._ledgerHotMaxBytes()) { if (stepped) { yield; yield* this._trimSteps(trimBatch); } else this._trimHot(); }
+    if (pass.grew && c.hotBytes > this._ledgerHotMaxBytes()) { if (stepped) { yield; yield* this._trimSteps(trimBatch); } else this._trimOwed(c); }
     // a pass that loaded many cold rows (a boot, a rebuild after a rewrite) orders them NOW, inside the same
     // long load, not in the next query's walk planning (r3: a 13 M-row settle measured 5 s in a 30-day query)
     if (pass.cooled && c.cold.n - c.cold.sortedN > Math.max(65536, c.cold.n >> 2)) { if (stepped) yield; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) { if (stepped) yield; c.cold.idx[k].settle(); } }
@@ -1336,25 +1342,45 @@ class UsageHistory {
   }
   /** The hot rows in ts order (a STABLE sort: equal ts keep their load order). INCREMENTAL (hotfix usage-ledger-walk ④ — a
    *  fresh hub spent whole seconds re-sorting every hot row because one row arrived): rows only ever APPEND to `events`
-   *  between sorts (a trim or a rebuild replaces the array and drops `sorted`), so the new tail is sorted alone and appended
-   *  — or merged, old first on equal ts — which is the same order the full stable sort gives. */
+   *  between sorts (a rebuild replaces the array with its own order; a trim FILTERS the view — usage-cpu U1), so the new tail
+   *  is sorted alone and appended — or merged, old first on equal ts — which is the same order the full stable sort gives.
+   *  `sortedSz[k]` = the bytes of `sorted[k]`'s line (the trim's cut walks them from the old end). */
   _sortHot(c) {
-    const ts = (e) => e.ts || 0;
+    const ts = (e) => e.ts || 0, evs = c.events, n = evs.length;
     const old = c.sorted, n0 = c.sortedLen;
-    if (old && c.sortedOf === c.events && n0 >= 0 && n0 <= c.events.length) {
-      const add = c.events.slice(n0).sort((a, b) => ts(a) - ts(b));
-      if (!add.length) c.sorted = old;
-      else if (!old.length || ts(add[0]) >= ts(old[old.length - 1])) c.sorted = old.concat(add);
-      else {
-        const out = new Array(old.length + add.length);
+    if (old && c.sortedOf === evs && c.sortedSz && n0 >= 0 && n0 <= n) {
+      const ix = []; for (let i = n0; i < n; i++) ix.push(i);
+      ix.sort((a, b) => (ts(evs[a]) - ts(evs[b])) || (a - b));
+      const add = ix.map((i) => evs[i]), asz = ix.map((i) => c.sizes[i]), osz = c.sortedSz;
+      if (!add.length) { /* the view holds every row */ }
+      else if (!old.length || ts(add[0]) >= ts(old[old.length - 1])) { c.sorted = old.concat(add); c.sortedSz = osz.concat(asz); }
+      else if (add.length <= LATE_ROWS_PLACED && add.length * 16 < old.length) { // a few late rows (usage-cpu U1): each placed by a binary search, the runs between them copied whole
+        const parts = [], pz = [];
+        let from = 0;
+        for (let j = 0; j < add.length; j++) {
+          const t = ts(add[j]);
+          let lo = from, hi = old.length;
+          while (lo < hi) { const q = (lo + hi) >> 1; if (ts(old[q]) <= t) lo = q + 1; else hi = q; }
+          if (lo > from) { parts.push(old.slice(from, lo)); pz.push(osz.slice(from, lo)); }
+          parts.push([add[j]]); pz.push([asz[j]]); from = lo;
+        }
+        if (from < old.length) { parts.push(old.slice(from)); pz.push(osz.slice(from)); }
+        c.sorted = [].concat(...parts); c.sortedSz = [].concat(...pz);
+      } else {
+        const out = new Array(old.length + add.length), sz = new Array(old.length + add.length);
         let i = 0, j = 0, k = 0;
-        while (i < old.length && j < add.length) out[k++] = ts(add[j]) < ts(old[i]) ? add[j++] : old[i++];
-        while (i < old.length) out[k++] = old[i++];
-        while (j < add.length) out[k++] = add[j++];
-        c.sorted = out;
+        while (i < old.length && j < add.length) { if (ts(add[j]) < ts(old[i])) { sz[k] = asz[j]; out[k++] = add[j++]; } else { sz[k] = osz[i]; out[k++] = old[i++]; } }
+        while (i < old.length) { sz[k] = osz[i]; out[k++] = old[i++]; }
+        while (j < add.length) { sz[k] = asz[j]; out[k++] = add[j++]; }
+        c.sorted = out; c.sortedSz = sz;
       }
-    } else c.sorted = c.events.slice().sort((a, b) => ts(a) - ts(b));
-    c.sortedLen = c.events.length; c.sortedOf = c.events;
+    } else {
+      const ix = new Array(n); for (let i = 0; i < n; i++) ix[i] = i;
+      ix.sort((a, b) => (ts(evs[a]) - ts(evs[b])) || (a - b));
+      c.sorted = ix.map((i) => evs[i]); c.sortedSz = ix.map((i) => c.sizes[i]);
+      c.fullSorts = (c.fullSorts || 0) + 1; // usage-cpu U1's count: a new cache's first view only
+    }
+    c.sortedLen = n; c.sortedOf = evs;
   }
   /** One parsed line → hot (1), cold (2) or dropped (0, a duplicate rid — the FIRST copy wins, whatever its
    *  ts; r3 verify #4/#15: a cold hash hit is a candidate, the rid STRING at its place decides). */
@@ -1408,7 +1434,7 @@ class UsageHistory {
         }
       }
     }
-    if (ev.ts < c.cutoff && CB.coldable(ev, sh, off)) { c.cold.push(ev, sh, off, lineHash); return 2; }
+    if (ev.ts < c.cutoff && CB.coldable(ev, sh, off) && !c.cold.sn) { c.cold.push(ev, sh, off, lineHash); return 2; } // usage-cpu U1: while a trim's stage is open it waits hot and the trim asks again after its commit (an equal-ms tie with a moved row may then sit after it in the columns: a sum's last ulp, said)
     if (ev.rid) c.rids.add(ev.rid);
     if (ev.mid) c.mids.add(ev.mid); // stream-side id space (live-odometer exclusion join)
     c.events.push(ev); c.sizes.push(size); c.locs.push(CB.locOf(sh, off)); c.hrh.push(lineHash); c.hotBytes += size; // hrh = the WHOLE line's hash (r4, verify #0)
@@ -1425,28 +1451,98 @@ class UsageHistory {
   /** Slide the hot cutoff (the window, the byte ceiling) and move the rows it passed into the cold columns
    *  in ts order (the load order on equal ts). Never while a walk holds the cutoff it started on. */
   _trimHot() { const steps = this._trimSteps(); for (let r = steps.next(); !r.done; r = steps.next()); }
-  /** …the same move, `batch` rows per step on the stepped warm (B-1319: one 209 k-row move measured 226 ms in a lane). Between
-   *  steps a moved row is in the cold columns (found by id) and still in `events` — no reader sees that: every reader of the
-   *  resident rows finishes the pass first (`_loadEvents`), the id join (`ledgerKnowsId`) finds the row in either place. */
+  /** The sync road's trim: the hub's ledger (`firstLoadInWorker`) runs it a step per loop turn, every other instance (the
+   *  fold worker's, a CLI's, a test's) to the end at once — the release's order. */
+  _trimOwed(c) { if (this.firstLoadInWorker) this._trimLater(c); else this._trimHot(); }
+  /** A step per loop turn, one in flight per cache; `c.trimP` settles when it ended. */
+  _trimLater(c = this._evCache) {
+    if (!c) return null;
+    if (c.trimP) return c.trimP;
+    const g = this._trimSteps(TRIM_BATCH_ROWS);
+    return (c.trimP = new Promise((resolve) => {
+      const step = () => {
+        let r;
+        try { r = g.next(); } catch (e) { r = { done: true }; try { console.warn(`[usage] the ledger's window slide failed: ${(e && e.message) || e} — the hot rows stay as they were; the next pass tries again`); } catch { } }
+        if (!r.done) return setImmediate(step);
+        c.trimP = null; resolve();
+        if (c.trimAgain && this._evCache === c) { c.trimAgain = false; this._trimLater(c); } // rows came below the cut while it ran, or the window is still over its ceiling
+      };
+      setImmediate(step);
+    }));
+  }
+  /** THE TRIM, `batch` rows a step (usage-cpu U1 — on the hub every trim mapped and sorted every hot row, rebuilt four
+   *  arrays of every row in ONE turn and dropped the sorted view, so the next sync reader sorted the whole window again:
+   *  36.2 s of full sorts + 11.5 s of trims held). WHOLE FOR A READER AT EVERY STEP:
+   *   1. the cut from the sorted view (CB.ledgerCutoffSorted: the rows it passes, never a sort);
+   *   2. a read-only pass over the rows as they are — the kept rows' columns built aside, the moved rows found;
+   *   3. the moved rows STAGED in the cold slab in ts order (past what a reader counts);
+   *   4. ONE commit turn: the rows appended meanwhile carried, the new columns swapped in, the cold rows counted, the sorted
+   *      view FILTERED (the moved rows are its prefix: no sort), the cutoff moved; rows that came below the cut meanwhile (or a
+   *      window still over its ceiling) ⇒ it asks again (`c.trimAgain`). A walk's plan out ⇒ the stage is dropped and the
+   *      walk's end asks again (the release's rule: no slide under a walk);
+   *   5. the moved rows' hot ids forgotten — until then a hot id names a row the ledger holds (dedup and the id join agree).
+   *  `c.lastTrim` = its counts (test-usage-trim §2). */
   *_trimSteps(batch = Infinity) {
     const c = this._evCache;
-    if (!c || c.walking) return;
-    const evs = c.events, tss = evs.map((e) => e.ts || 0);
-    const cut = CB.ledgerCutoff({ nowMs: Date.now(), tss, sizes: c.sizes, windowMs: this._ledgerWindowMs(), maxBytes: this._ledgerHotMaxBytes(), prev: c.cutoff });
-    c.cutoff = cut;
-    const go = [];
-    for (let i = 0; i < evs.length; i++) { if (i && i % (batch * 4) === 0) yield; if (tss[i] < cut && !Number.isNaN(c.locs[i]) && CB.coldable(evs[i], Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296)) go.push(i); }
-    if (!go.length) return;
-    go.sort((a, b) => (tss[a] - tss[b]) || (a - b));
-    const drop = new Uint8Array(evs.length);
-    for (let k = 0; k < go.length; k++) {
-      if (k && k % batch === 0) yield;
-      const i = go[k], ev = evs[i]; c.cold.push(ev, Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296, c.hrh[i]); drop[i] = 1; if (ev.rid) c.rids.delete(ev.rid); if (ev.mid) c.mids.delete(ev.mid);
-    }
-    const ne = [], ns = [], nl = [], nh = [];
-    let hb = 0;
-    for (let i = 0; i < evs.length; i++) if (!drop[i]) { ne.push(evs[i]); ns.push(c.sizes[i]); nl.push(c.locs[i]); nh.push(c.hrh[i]); hb += c.sizes[i]; }
-    c.events = ne; c.sizes = ns; c.locs = nl; c.hrh = nh; c.hotBytes = hb; c.sorted = null;
+    if (!c || c.trim) return;
+    // a trim asked while a walk's plan is out never starts under it: it is OWED to the walk's end (_aggregateWalk runs it) —
+    // the r4 gate's real-walk leg: dropped here, it waited for the next ingest
+    if (c.walking) { c.trimOwed = true; c.lastTrim = { end: 'a walk is out — owed to its end', moved: 0 }; return; }
+    c.trim = true; c.trimAgain = false;
+    let committed = false;
+    try {
+      if (!(c.sorted && c.sortedOf === c.events && c.sortedLen === c.events.length && c.sortedSz)) this._sortHot(c);
+      const evs = c.events, n = evs.length, S = c.sorted, SZ = c.sortedSz, gone = () => this._evCache !== c || c.events !== evs;
+      // HEADROOM (usage-cpu U1): past the ceiling the window is cut to 7/8 of it, so a window that sits at its ceiling is trimmed
+      // once per eighth of it that arrives — not at every scan's append (the read-only pass below is O(the hot rows), stepped)
+      const max = this._ledgerHotMaxBytes();
+      const { cut, visited } = CB.ledgerCutoffSorted({ nowMs: Date.now(), sorted: S, sizes: SZ, total: c.hotBytes, windowMs: this._ledgerWindowMs(), maxBytes: max - Math.floor(max / HOT_HEADROOM), prev: c.cutoff });
+      const stat = c.lastTrim = { rows: n, cut, cutVisits: visited, moved: 0, passVisits: 0, stageVisits: 0, commitVisits: 0, steps: 0, maxStep: 0, end: null };
+      let lo = 0, hi = S.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if ((S[m].ts || 0) < cut) lo = m + 1; else hi = m; }
+      const p = lo;
+      if (!p) { c.cutoff = cut; stat.end = 'nothing below the cut'; return; }
+      if (c.stuck && c.stuck.cut === cut && c.stuck.p === p) { stat.end = 'the same rows below the cut, none coldable'; return; } // (a row the columns cannot hold stays hot: no pass for nothing)
+      let since = 0;
+      const tick = (k) => { since += k; if (since >= batch) { stat.maxStep = Math.max(stat.maxStep, since); since = 0; stat.steps++; return true; } return false; };
+      const cand = new Set();
+      for (let k = 0; k < p; k++) { cand.add(S[k]); if (tick(1)) { yield; if (gone()) { stat.end = 'gone'; return; } } }
+      const moved = new Map(), ne = [], ns = [], nl = [], nh = [];
+      let hb = 0;
+      for (let i = 0; i < n; i++) {
+        const ev = evs[i], loc = c.locs[i];
+        if (cand.has(ev) && !Number.isNaN(loc) && CB.coldable(ev, Math.floor(loc / 4294967296), loc % 4294967296)) moved.set(ev, i);
+        else { ne.push(ev); ns.push(c.sizes[i]); nl.push(loc); nh.push(c.hrh[i]); hb += c.sizes[i]; }
+        stat.passVisits++;
+        if (tick(1)) { yield; if (gone()) { stat.end = 'gone'; return; } }
+      }
+      if (!moved.size) { c.cutoff = cut; c.stuck = { cut, p }; stat.end = 'nothing coldable below the cut'; return; }
+      for (let k = 0; k < p; k++) {
+        const ev = S[k], i = moved.get(ev), w = i !== undefined ? TRIM_STAGE_COST : 1;
+        if (since + w > batch && since > 0) { stat.maxStep = Math.max(stat.maxStep, since); since = 0; stat.steps++; yield; if (gone()) { stat.end = 'gone'; return; } } // a staged row WEIGHS its cost: the step ends before it would pass the batch
+        since += w; stat.stageVisits++;
+        if (i !== undefined) { const loc = c.locs[i]; c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); }
+      }
+      stat.maxStep = Math.max(stat.maxStep, since); since = 0;
+      if (c.walking) { c.cold.unstage(); c.trimOwed = true; stat.end = 'a walk is out — the stage dropped'; return; } // the walk's end asks again (_aggregateWalk)
+      // THE COMMIT — the one turn: what arrived meanwhile, the filtered view, the swap
+      const m = evs.length;
+      let below = 0;
+      for (let i = n; i < m; i++) { ne.push(evs[i]); ns.push(c.sizes[i]); nl.push(c.locs[i]); nh.push(c.hrh[i]); hb += c.sizes[i]; stat.commitVisits++; if ((evs[i].ts || 0) < cut) below++; }
+      const V = c.sorted, VZ = c.sortedSz; // a reader may have merged the appended rows in: the view covers [0, c.sortedLen)
+      lo = 0; hi = V.length;
+      while (lo < hi) { const q = (lo + hi) >> 1; if ((V[q].ts || 0) < cut) lo = q + 1; else hi = q; }
+      const head = [], headSz = [];
+      for (let k = 0; k < lo; k++) { stat.commitVisits++; if (!moved.has(V[k])) { head.push(V[k]); headSz.push(VZ[k]); } }
+      // the kept rows of the view are copied whole by the engine (a pointer copy — no row is visited here)
+      c.sorted = head.concat(V.slice(lo)); c.sortedSz = headSz.concat(VZ.slice(lo)); c.sortedLen -= moved.size; c.sortedOf = ne;
+      c.events = ne; c.sizes = ns; c.locs = nl; c.hrh = nh; c.hotBytes = hb;
+      c.cold.commit(); committed = true; c.cutoff = cut; c.stuck = null; stat.moved = moved.size; stat.cameBelow = below;
+      if (below || c.hotBytes > max) c.trimAgain = true; // the hub's driver asks again (no cold push under the stage; a burst past the ceiling)
+      let q = 0;
+      for (const ev of moved.keys()) { if (ev.rid) c.rids.delete(ev.rid); if (ev.mid) c.mids.delete(ev.mid); if (++q % batch === 0) { stat.steps++; yield; } }
+      stat.end = 'moved';
+    } finally { c.trim = false; if (!committed && c.cold.sn) c.cold.unstage(); } // a trim that ended early (a throw, a dropped cache) leaves no stage behind
   }
   /** Does the ledger hold this request / message id? (the live odometer's exclusion join): the hot ids,
    *  then the cold rows' sorted hashes — whatever the caller's ts (r2, verify #14). */
@@ -1717,10 +1813,10 @@ class UsageHistory {
       else { const ids = ch.k === 'rid' ? rids : mids; for (const id of rows) ids.add(id); }
       await new Promise((r) => setImmediate(r));
     }
-    const sorted = new Array(events.length);
-    for (let k = 0; k < sorted.length; k++) sorted[k] = events[b.perm[k]];
+    const sorted = new Array(events.length), sortedSz = new Array(events.length);
+    for (let k = 0; k < sorted.length; k++) { sorted[k] = events[b.perm[k]]; sortedSz[k] = sizes[b.perm[k]]; }
     const marks = new Map(b.marks.map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: Buffer.from(m.probe.buffer, m.probe.byteOffset, m.probe.length) }]));
-    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, srcWm: new Map(b.srcWm), hostAcct: new Map((b.hostAcct || []).map(([h, m]) => [h, new Map(m.map(([a, ts]) => [a, { ts, sorted: false }]))])), hostAcctFloor: b.hostAcctFloor ?? undefined, hostAcctNewest: b.hostAcctNewest ?? undefined, checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedLen: events.length, overWarned: b.overWarned, whole: true };
+    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, srcWm: new Map(b.srcWm), hostAcct: new Map((b.hostAcct || []).map(([h, m]) => [h, new Map(m.map(([a, ts]) => [a, { ts, sorted: false }]))])), hostAcctFloor: b.hostAcctFloor ?? undefined, hostAcctNewest: b.hostAcctNewest ?? undefined, checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedSz, sortedLen: events.length, sortedOf: events, overWarned: b.overWarned, whole: true };
   }
   /** THE SWAP: ONE assignment — a reader sees the previous cache or the rebuilt one, each whole — and a new generation for
    *  the cost memos (usage-anchors keys on ledgerGen). The appends since the worker read come in the next pass (checkedAt 0). */
@@ -1899,8 +1995,9 @@ class UsageHistory {
     if (!c.cold.n || (from && from >= c.cutoff)) { yield* this._hotEvents(from, to, arr); return; }
     yield* this._merged(c.cold.rows(from, to), from, to, arr);
   }
-  /** The cold sequence + the hot rows by ts. Every hot row the columns could hold is ≥ the cutoff, so only a
-   *  row they cannot (coldable() false: a scanner never writes one) interleaves. */
+  /** The cold sequence + the hot rows by ts, merged (a hot row on an equal ts first). A hot row below the cutoff is a row the
+   *  columns cannot hold (coldable() false: a scanner never writes one) or one that arrived while a trim ran (usage-cpu U1 —
+   *  the next trim moves it); both interleave here. */
   * _merged(cold, from, to, arr) {
     const it = this._hotEvents(from, to, arr);
     let h = it.next();
@@ -2025,7 +2122,7 @@ class UsageHistory {
         throw Object.assign(new Error('the usage ledger was rewritten during the read twice (' + e.message + ') — retry'), { code: 'STALE' });
       }
       throw e;
-    } finally { if (c.walking > 0) c.walking--; }
+    } finally { if (c.walking > 0) c.walking--; if (!c.walking && c.trimOwed && this._evCache === c) { c.trimOwed = false; try { this._trimOwed(c); } catch (e) { console.warn(`[usage] the ledger's window slide after a walk failed: ${(e && e.message) || e}`); } } } // usage-cpu U1: a trim dropped for this walk runs now (never the walk's answer's error)
     const answer = res.answer;
     this._fixLabels(answer);
     answer.asOf = asOf;

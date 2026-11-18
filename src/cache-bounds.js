@@ -129,6 +129,25 @@ function ledgerCutoff({ nowMs, tss, sizes, windowMs = LEDGER_WINDOW_DAYS * DAY_M
   }
   return cut;
 }
+/** THE SAME CUT over rows already in ts order (usage-cpu U1 — a trim at the ceiling mapped every hot row's ts and sorted an
+ *  index of every row, 11.5 s held over 7 trims): `sorted` ascends by `e.ts || 0`, `sizes[k]` is the bytes of `sorted[k]`,
+ *  `total` their sum. The rows below now − window are a PREFIX (a binary search); the byte edge is walked from the OLD end —
+ *  while the bytes at or past a ts pass maxBytes that ts's group goes whole — so the work is the rows the cut passes, never
+ *  a pass over the rows it keeps. → { cut (= ledgerCutoff's, test-usage-trim §5's differential), visited }. */
+function ledgerCutoffSorted({ nowMs, sorted, sizes, total, windowMs = LEDGER_WINDOW_DAYS * DAY_MS, maxBytes = LEDGER_HOT_MAX_BYTES, prev = -Infinity }) {
+  const ts = (e) => e.ts || 0;
+  let cut = Math.max(prev, nowMs - windowMs), lo = 0, hi = sorted.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (ts(sorted[m]) < cut) lo = m + 1; else hi = m; }
+  let left = total, visited = 0;
+  for (let q = 0; q < lo; q++) { left -= sizes[q]; visited++; }
+  let k = lo;
+  while (k < sorted.length && left > maxBytes) {
+    const t = ts(sorted[k]);
+    while (k < sorted.length && ts(sorted[k]) === t) { left -= sizes[k++]; visited++; }
+    cut = Math.max(cut, t + 1);
+  }
+  return { cut, visited };
+}
 
 /** A row the cold columns hold EXACTLY: a finite ts and each token count a whole number below 2³²−1, null
  *  or absent (null prices as 0, absent as NaN — the same arithmetic the full row gets). Anything else stays hot. */
@@ -164,18 +183,18 @@ function idHash(s) {
  *  loaded first stays first — the order the old whole-ledger sort gave). */
 class ColdSlab {
   constructor(cap = 1024) {
-    this.n = 0; this.sortedN = 0; this.cap = 0;
+    this.n = 0; this.sortedN = 0; this.cap = 0; this.sn = 0; // sn: rows a trim staged past n (stage / commit)
     this.names = NAME_FIELDS.map(() => ({ vals: [], ix: new Map() }));
     this.idx = { rid: new HashIndex(), mid: new HashIndex(), bare: new HashIndex() };
     this._grow(cap);
   }
   _grow(cap) {
-    const f64 = (old) => { const a = new Float64Array(cap); if (old) a.set(old.subarray(0, this.n)); return a; };
-    const u32 = (old) => { const a = new Uint32Array(cap); if (old) a.set(old.subarray(0, this.n)); return a; };
+    const f64 = (old) => { const a = new Float64Array(cap); if (old) a.set(old.subarray(0, this.n + this.sn)); return a; };
+    const u32 = (old) => { const a = new Uint32Array(cap); if (old) a.set(old.subarray(0, this.n + this.sn)); return a; };
     this.ts = f64(this.ts); this.rh = f64(this.rh);
     this.tok = TOKEN_FIELDS.map((_, k) => u32(this.tok && this.tok[k]));
     this.nm = NAME_FIELDS.map((_, k) => u32(this.nm && this.nm[k]));
-    const u8 = (old) => { const a = new Uint8Array(cap); if (old) a.set(old.subarray(0, this.n)); return a; };
+    const u8 = (old) => { const a = new Uint8Array(cap); if (old) a.set(old.subarray(0, this.n + this.sn)); return a; };
     this.sh = u8(this.sh); this.off = u32(this.off);
     this.cap = cap;
   }
@@ -187,8 +206,20 @@ class ColdSlab {
   }
   /** Append one coldable row (load order) living at byte `off` of shard number `sh`. */
   push(ev, sh = 0, off = 0, lineHash = NaN) {
+    if (this.sn) throw new Error('a cold row pushed under an open stage'); // the ledger's _take sends such a row hot (usage-cpu U1)
     if (this.n === this.cap) this._grow(Math.max(1024, Math.ceil(this.cap * 1.5)));
-    const j = this.n++;
+    this._put(this.n++, ev, sh, off, lineHash);
+  }
+  /** usage-cpu U1: a row the ledger's trim moves, written PAST the rows a reader sees (`n`) until commit() — so every step
+   *  of the trim is whole for a reader (the row is still hot until the one commit turn). Its id hashes go in at once: a
+   *  hash hit is only a candidate (the caller reads the line), and the row IS in the ledger. */
+  stage(ev, sh = 0, off = 0, lineHash = NaN) {
+    if (this.n + this.sn === this.cap) this._grow(Math.max(1024, Math.ceil(this.cap * 1.5)));
+    this._put(this.n + this.sn++, ev, sh, off, lineHash);
+  }
+  commit() { this.n += this.sn; this.sn = 0; }
+  unstage() { this.sn = 0; } // the staged rows dropped (their id hashes stay: each names a row the ledger holds)
+  _put(j, ev, sh, off, lineHash) {
     this.sh[j] = sh; this.off[j] = off;
     this.ts[j] = ev.ts;
     this.rh[j] = lineHash; // r4 (verify #0): the WHOLE line's hash — any field edited in place ⇒ STALE on the next read
@@ -209,14 +240,14 @@ class ColdSlab {
     tail.sort((a, b) => (ts[a] - ts[b]) || (a - b));
     let inOrder = true;
     for (let k = 0; k < tail.length; k++) if (tail[k] !== s + k) { inOrder = false; break; }
-    if (inOrder && (s === 0 || ts[s - 1] <= ts[s])) { this.sortedN = n; if (this.cap > Math.ceil(n * 1.5) && this.cap > 1024) this._grow(Math.max(1024, Math.ceil(n * 1.125))); return; }
+    if (inOrder && (s === 0 || ts[s - 1] <= ts[s])) { this.sortedN = n; if (this.cap > Math.ceil((n + this.sn) * 1.5) && this.cap > 1024) this._grow(Math.max(1024, Math.ceil((n + this.sn) * 1.125))); return; }
     const perm = new Uint32Array(n);
     let i = 0, j = 0, k = 0;
     while (i < s && j < tail.length) perm[k++] = ts[tail[j]] < ts[i] ? tail[j++] : i++;
     while (i < s) perm[k++] = i++;
     while (j < tail.length) perm[k++] = tail[j++];
-    const cap = Math.max(1024, Math.ceil(n * 1.125)); // right-sized on every merge (the doubling's slack is not kept)
-    const remap = (col) => { const a = new col.constructor(cap); for (let q = 0; q < n; q++) a[q] = col[perm[q]]; return a; };
+    const sn = this.sn, cap = Math.max(1024, Math.ceil((n + sn) * 1.125)); // right-sized on every merge (the doubling's slack is not kept)
+    const remap = (col) => { const a = new col.constructor(cap); for (let q = 0; q < n; q++) a[q] = col[perm[q]]; for (let q = n; q < n + sn; q++) a[q] = col[q]; return a; }; // a staged row keeps its place past n
     this.cap = cap;
     this.ts = remap(this.ts); this.rh = remap(this.rh); this.sh = remap(this.sh); this.off = remap(this.off);
     this.tok = this.tok.map(remap); this.nm = this.nm.map(remap);
@@ -255,13 +286,13 @@ class ColdSlab {
     for (const k of Object.keys(this.idx)) idx[k] = this.idx[k].parts();
     const p = { n: this.n, sortedN: this.sortedN, cap: this.cap, ts: this.ts, rh: this.rh, sh: this.sh, off: this.off, tok: this.tok, nm: this.nm, names: this.names.map((t) => t.vals), idx };
     const bufs = new Set([this.ts, this.rh, this.sh, this.off, ...this.tok, ...this.nm].map((a) => a.buffer));
-    for (const k of Object.keys(idx)) for (const a of ['keys', 'vals', 'tk', 'tv']) bufs.add(idx[k][a].buffer);
+    for (const k of Object.keys(idx)) { for (const a of ['keys', 'vals', 'tk', 'tv']) bufs.add(idx[k][a].buffer); for (const a of [...idx[k].rk, ...idx[k].rv]) bufs.add(a.buffer); }
     return { parts: p, transfer: [...bufs] };
   }
   /** …and back: the same slab (the intern maps rebuilt from their values — a few hundred names). */
   static fromParts(p) {
     const s = Object.create(ColdSlab.prototype);
-    Object.assign(s, { n: p.n, sortedN: p.sortedN, cap: p.cap, ts: p.ts, rh: p.rh, sh: p.sh, off: p.off, tok: p.tok, nm: p.nm });
+    Object.assign(s, { n: p.n, sortedN: p.sortedN, cap: p.cap, sn: 0, ts: p.ts, rh: p.rh, sh: p.sh, off: p.off, tok: p.tok, nm: p.nm });
     s.names = p.names.map((vals) => ({ vals, ix: new Map(vals.map((v, i) => [v, i])) }));
     s.idx = {};
     for (const k of Object.keys(p.idx)) s.idx[k] = HashIndex.fromParts(p.idx[k]);
@@ -279,12 +310,16 @@ class ColdSlab {
 /** A sorted multimap of 53-bit hashes → places (loc): sorted Float64Arrays (keys, locs) + an unsorted tail,
  *  merged when the tail passes a QUARTER of the sorted part (geometric: O(n log n) over a whole boot) by an
  *  LSD radix sort of the tail on the hash's four 16-bit digits (O(n), the place carried) + a linear merge.
- *  `merges` counts them (verify #16). */
+ *  `merges` counts them (verify #16). LEVELS (usage-cpu U1 — the ledger settles every index at each pass's first new bytes,
+ *  and a settle of a few ids copied the WHOLE index: 2.9 s held at 2 passes): the sorted part is a stack of runs — `keys` the
+ *  oldest and biggest, `rk`/`rv` newer ones above it — and a settled tail merges down only while the run below is at most
+ *  4× its size, so a pass's few ids never copy the index and each id is merged O(log n) times. `work` = entries written. */
 class HashIndex {
-  constructor() { this.keys = new Float64Array(0); this.vals = new Float64Array(0); this.tk = new Float64Array(4096); this.tv = new Float64Array(4096); this.tn = 0; this.merges = 0; }
+  constructor() { this.keys = new Float64Array(0); this.vals = new Float64Array(0); this.rk = []; this.rv = []; this.tk = new Float64Array(4096); this.tv = new Float64Array(4096); this.tn = 0; this.merges = 0; this.work = 0; }
+  _settled() { let n = this.keys.length; for (const a of this.rk) n += a.length; return n; }
   put(h, loc) {
     if (this.tn === this.tk.length) {
-      if (this.tn >= 4096 + (this.keys.length >> 2)) this.settle();
+      if (this.tn >= 4096 + (this._settled() >> 2)) this.settle();
       else { const k = new Float64Array(this.tk.length * 2), v = new Float64Array(this.tk.length * 2); k.set(this.tk); v.set(this.tv); this.tk = k; this.tv = v; }
     }
     this.tk[this.tn] = h; this.tv[this.tn] = loc; this.tn++;
@@ -304,25 +339,38 @@ class HashIndex {
       for (let i = 0; i < n; i++) tmp[cnt[(arr[ord[i]] >>> shift) & 0xffff]++] = ord[i];
       [ord, tmp] = [tmp, ord];
     }
-    const A = this.keys, AV = this.vals, K = new Float64Array(A.length + n), V = new Float64Array(A.length + n);
-    let i = 0, j = 0, k = 0;
-    while (i < A.length && j < n) { if (A[i] <= this.tk[ord[j]]) { K[k] = A[i]; V[k++] = AV[i++]; } else { K[k] = this.tk[ord[j]]; V[k++] = this.tv[ord[j++]]; } }
-    while (i < A.length) { K[k] = A[i]; V[k++] = AV[i++]; }
-    while (j < n) { K[k] = this.tk[ord[j]]; V[k++] = this.tv[ord[j++]]; }
-    this.keys = K; this.vals = V; this.tn = 0; this.tk = new Float64Array(4096); this.tv = new Float64Array(4096); this.merges++;
+    let K = new Float64Array(n), V = new Float64Array(n);
+    for (let q = 0; q < n; q++) { K[q] = this.tk[ord[q]]; V[q] = this.tv[ord[q]]; }
+    this.work += n; this.tn = 0; this.tk = new Float64Array(4096); this.tv = new Float64Array(4096);
+    // the new run merges down while the run below is at most 4× its size (the older run first on an equal hash)
+    const merge = (A, AV) => {
+      const MK = new Float64Array(A.length + K.length), MV = new Float64Array(A.length + K.length);
+      let i = 0, j = 0, k = 0;
+      while (i < A.length && j < K.length) { if (A[i] <= K[j]) { MK[k] = A[i]; MV[k++] = AV[i++]; } else { MK[k] = K[j]; MV[k++] = V[j++]; } }
+      while (i < A.length) { MK[k] = A[i]; MV[k++] = AV[i++]; }
+      while (j < K.length) { MK[k] = K[j]; MV[k++] = V[j++]; }
+      this.work += k; this.merges++; K = MK; V = MV;
+    };
+    while (this.rk.length && this.rk[this.rk.length - 1].length <= 4 * K.length) { merge(this.rk.pop(), this.rv.pop()); }
+    if (!this.rk.length && this.keys.length <= 4 * K.length) { if (this.keys.length) merge(this.keys, this.vals); this.keys = K; this.vals = V; }
+    else { this.rk.push(K); this.rv.push(V); }
   }
-  _lower(h) { const a = this.keys; let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < h) lo = m + 1; else hi = m; } return lo; }
-  /** The sorted part only (the loader's pass checks its own rows with its own set). */
-  findSorted(h) { const out = []; for (let q = this._lower(h); q < this.keys.length && this.keys[q] === h; q++) out.push(this.vals[q]); return out; }
+  _lower(h, a = this.keys) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < h) lo = m + 1; else hi = m; } return lo; }
+  /** The sorted part only — every run, the oldest first (the loader's pass checks its own rows with its own set). */
+  findSorted(h) {
+    const out = [];
+    for (let r = -1; r < this.rk.length; r++) { const a = r < 0 ? this.keys : this.rk[r], v = r < 0 ? this.vals : this.rv[r]; for (let q = this._lower(h, a); q < a.length && a[q] === h; q++) out.push(v[q]); }
+    return out;
+  }
   find(h) {
     if (this.tn > 4096) this.settle();
     const out = this.findSorted(h);
     for (let q = 0; q < this.tn; q++) if (this.tk[q] === h) out.push(this.tv[q]);
     return out;
   }
-  bytes() { return this.keys.byteLength + this.vals.byteLength + this.tk.byteLength + this.tv.byteLength; }
-  parts() { return { keys: this.keys, vals: this.vals, tk: this.tk, tv: this.tv, tn: this.tn, merges: this.merges }; }
-  static fromParts(p) { return Object.assign(Object.create(HashIndex.prototype), p); }
+  bytes() { let b = this.keys.byteLength + this.vals.byteLength + this.tk.byteLength + this.tv.byteLength; for (let r = 0; r < this.rk.length; r++) b += this.rk[r].byteLength + this.rv[r].byteLength; return b; }
+  parts() { return { keys: this.keys, vals: this.vals, rk: this.rk, rv: this.rv, tk: this.tk, tv: this.tv, tn: this.tn, merges: this.merges, work: this.work }; }
+  static fromParts(p) { const x = Object.assign(Object.create(HashIndex.prototype), p); if (!x.rk) { x.rk = []; x.rv = []; } if (!Number.isFinite(x.work)) x.work = 0; return x; }
 }
 
 /** A census row. bytes in the CEILING's unit (unit says which); kind = where it lives: 'heap' (counted in
@@ -334,5 +382,5 @@ function cacheRow(name, { bytes = 0, count = 0, unit = 'entries', ceiling = null
 
 module.exports = {
   MB, DAY_MS, LEDGER_WINDOW_DAYS, LEDGER_HOT_MAX_BYTES, JSONL_CACHE_MAX_BYTES, JSONL_CACHE_IDLE_MS, JSONL_CACHE_MAX_ENTRIES, JSONL_LIVE_MAX_BYTES, ESTIMATOR_LINES_MAX_BYTES,
-  ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES, COLD_COLUMNS_MAX_BYTES, COLD_FOLD_DEADLINE_MS, COLD_QUEUE_MAX, COLD_ROW_BUDGET, COLD_TERMINATE_DEADLINE_MS, foldCapRule, locOk, locOf, evictLru, evictIdle, ledgerCutoff, coldable, idHash, ColdSlab, HashIndex, cacheRow, TOKEN_FIELDS, NAME_FIELDS,
+  ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES, COLD_COLUMNS_MAX_BYTES, COLD_FOLD_DEADLINE_MS, COLD_QUEUE_MAX, COLD_ROW_BUDGET, COLD_TERMINATE_DEADLINE_MS, foldCapRule, locOk, locOf, evictLru, evictIdle, ledgerCutoff, ledgerCutoffSorted, coldable, idHash, ColdSlab, HashIndex, cacheRow, TOKEN_FIELDS, NAME_FIELDS,
 };

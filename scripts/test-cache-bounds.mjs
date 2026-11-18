@@ -451,7 +451,7 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   // §14's r2 fallback copy and its two children run INSIDE this control's 1 s (lane fast-debt-clear): they share nothing with
   // t's pending walk (the copy is its own patched module; the children their own processes, READING r3), and the verdict
   // below can only be 'still waiting' if the fold still waits when they are done — never less than 1 s of proof
-  const fb = uhSrc.replace("      throw e;\n    } finally { if (c.walking > 0) c.walking--; }", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--; }");
+  const fb = uhSrc.replace("      throw e;\n    } finally { if (c.walking > 0) c.walking--;", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--;"); // usage-cpu U1: the walk's end runs the trim it owes after the decrement
   const UHf = M.load('src/usage-history.js', fb, 'fallback').UsageHistory;
   const tf = new UHf({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); tf.ledgerWindowMs = 40 * DAY; tf.ledgerHotMaxBytes = 60 * 1024; tf.warm(); tf.coldWorkerHeapMb = 32; tf.coldWorkerFile = oom;
   let nf = 0; const realf = tf._allRows.bind(tf); tf._allRows = function* (...x) { nf++; yield* realf(...x); };

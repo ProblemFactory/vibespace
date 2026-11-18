@@ -127,6 +127,14 @@ const repair = (u, how = 'swap') => { const f = path.join(u.dir, shards(u)[0]); 
 const read = (u) => { if (u._evCache) u._evCache.checkedAt = 0; return u._loadEvents(); }; // a reader's pass (past the 1 s re-check throttle)
 /** THE HOT WINDOW + THE COLD COLUMNS, hashed: every hot row (its JSON, place, size, line hash), the ids, the watermarks,
  *  the cutoff, the shards' places + append proofs, every cold column's first n values and the sorted id indexes. */
+/** An index's runs merged (usage-cpu U1): the keys ascending, an equal key in run order (the oldest run first). */
+function idxMerged(x) {
+  const runs = [[x.keys, x.vals], ...(x.rk || []).map((a, r) => [a, x.rv[r]])], n = runs.reduce((t, [a]) => t + a.length, 0);
+  const K = new Float64Array(n), V = new Float64Array(n), ix = new Array(n);
+  let o = 0; for (const [a, v] of runs) { for (let q = 0; q < a.length; q++) { K[o + q] = a[q]; V[o + q] = v[q]; ix[o + q] = o + q; } o += a.length; }
+  ix.sort((p, q) => (K[p] - K[q]) || (p - q));
+  return [Float64Array.from(ix, (i) => K[i]), Float64Array.from(ix, (i) => V[i])];
+}
 function digest(c) {
   const h = crypto.createHash('sha256'), put = (x) => h.update(typeof x === 'string' ? x : JSON.stringify(x));
   for (const e of c.events) put(JSON.stringify(e) + '\n');
@@ -134,7 +142,9 @@ function digest(c) {
   put([...c.marks].map(([f, m]) => [f, m.ino, m.mtimeMs, Buffer.from(m.probe).toString('hex')]));
   const s = c.cold; s.settle(); put([s.n, s.names.map((t) => t.vals)]);
   for (const a of [s.ts, s.rh, s.sh, s.off, ...s.tok, ...s.nm]) h.update(Buffer.from(a.buffer, a.byteOffset, s.n * a.BYTES_PER_ELEMENT));
-  for (const k of Object.keys(s.idx)) { const x = s.idx[k]; x.settle(); put(k); h.update(Buffer.from(x.keys.buffer, x.keys.byteOffset, x.keys.byteLength)); h.update(Buffer.from(x.vals.buffer, x.vals.byteOffset, x.vals.byteLength)); }
+  // usage-cpu U1: an index is a stack of sorted runs (src/cache-bounds.js HashIndex levels) — hashed as ONE merge of them, the
+  // older run first on an equal hash (= the whole merge's order), so two loads that split their runs apart still agree
+  for (const k of Object.keys(s.idx)) { const x = s.idx[k]; x.settle(); put(k); const [K, V] = idxMerged(x); h.update(Buffer.from(K.buffer)); h.update(Buffer.from(V.buffer)); }
   return h.digest('hex').slice(0, 16);
 }
 /** The on-loop build of the same files at the rebuilt cache's cutoff (Date.now pinned to cutoff + the window): the reference. */
