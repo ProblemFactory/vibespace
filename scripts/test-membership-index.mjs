@@ -413,7 +413,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const req = createRequire(import.meta.url);
   const TM = req(path.join(REPO, 'src/task-membership.js'));
   const SRC = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
-  const PAGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), MERGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
+  const PAGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), MERGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8'), APP = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
   const base = path.join(ROOT, 'board'), D = path.join(base, 'folder');
   fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true });
   fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'link'));   // base/link → folder/sub ON THE HUB (a shared home's link)
@@ -424,6 +424,8 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   ok(typeof TM.membershipCwds === 'function' && typeof TM.onOtherMachine === 'function', 'task-membership carries the ONE rule: membershipCwds (the page\'s cwds) and onOtherMachine (none and \'local\' are the hub)');
   ok(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, host: s\.host \}\);/.test(PAGE) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && /host: wm\?\.host \|\| null,/.test(MERGE),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
     'the page\'s folder match (sidebar-tasks _sessionFolderMatch) takes its cwds from membershipCwds with the row\'s host — the host the merge (sidebar _merge) lays over a hub row');
+  ok(/const under = membershipCwds\(\{ cwd: s\.cwd, realCwd: s\.realCwd, host: s\.host \}\)\.some\(\(c\) => insideFolder\(c, rec\)\);/.test(APP) && !/insideFolder\(s\.cwd, rec\) \|\| \(s\.realCwd && insideFolder\(s\.realCwd, rec\)\)/.test(APP),   // stale-pins: kept — the deliberate absence check: the chips' own copy is gone
+    'cure 2: the New Session folder chips (app.js _taskCwdSuggestions) take their cwds from the same membershipCwds — the page holds ONE copy of the rule');
   {   // (on a tree without membershipCwds the page's rule before is judged — the scene goes red BY NAME, never skipped)
     const cwdsOf = typeof TM.membershipCwds === 'function' ? TM.membershipCwds : ({ cwd, realCwd }) => [cwd, realCwd].filter(Boolean);
     // the hub's discovery row of the conversation (the route stamps the hub's real path), then the page's merge

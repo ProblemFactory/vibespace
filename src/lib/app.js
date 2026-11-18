@@ -96,7 +96,7 @@ import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-
 import { enterSubmits } from './chat-enter-keys.js';
 import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
 import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
-import { insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself)
+import { insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself); B-df5f: the page's cwds of a row
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -1987,7 +1987,7 @@ class App {
           const subs = new Map(); // session cwd inside the folder (the folder itself included — its chip is already pinned above) -> count
           for (const s of this.sidebar?._allSessions || []) {
             if (s.host || !s.cwd) continue;
-            const under = insideFolder(s.cwd, rec) || (s.realCwd && insideFolder(s.realCwd, rec));
+            const under = membershipCwds({ cwd: s.cwd, realCwd: s.realCwd, host: s.host }).some((c) => insideFolder(c, rec)); // ONE copy of the page's rule (B-df5f cure 2)
             if (under) subs.set(s.cwd, (subs.get(s.cwd) || 0) + 1);
           }
           for (const [c, n] of [...subs.entries()].sort((a, b) => b[1] - a[1]))

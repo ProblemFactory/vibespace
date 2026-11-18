@@ -25,6 +25,7 @@ const { parseRunDir, journalAttemptsFromText, treeAlive } = require('../workflow
 // store.discover lists its own sessions (claude lock-first sweep in
 // session-store, codex worker-side rollout walk); no backend ternary here.
 const { list: listHarnesses } = require('../harnesses');
+const { onOtherMachine } = require('../task-membership.js'); // B-df5f: the ONE «another machine» predicate (withSessionKey)
 const { findSessionJsonlPath } = require('../session-store');
 const { collectCodexThreadMetasAsync } = require('../codex-session-store');
 const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
@@ -54,7 +55,6 @@ function realCwdOf(cwd) {
 // so a row that names another machine is never stamped with it. A GUARD: no producer of this route hands such a row today
 // (discovery rows are local, kept-stopped rows are local metas); the road where the page met another machine's conversation
 // with the hub's real path is its own merge, closed by task-membership membershipCwds
-const { onOtherMachine } = require('../task-membership.js');
 const namesOtherMachine = (s) => [s.host, s.hostId].some(onOtherMachine);
 function withSessionKey(session = {}) {
   const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);

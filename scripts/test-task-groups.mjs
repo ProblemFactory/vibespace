@@ -242,7 +242,7 @@ console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)
   ok(/const \{ birthBindVerdict \} = require\('\.\.\/task-membership\.js'\);/.test(ops) && /for \(const groupId of v\.groupIds\) \{[^\n]*\n\s*try \{\n\s*bindConversation\(\{ webuiId: id \}, groupId,/.test(ops) && /\{ birthBy \}\);/.test(ops) && /if \(s && s\._birthBind && birthBy\) s\._birthBind\.by = birthBy;/.test(ops),
     'conversation-ops: the verdict is the PURE one, the bind is bindConversation (the owner\'s route\'s writer), the verb hands who bound it to the headless create');
   ok((ops.match(/\[automation\] session \$\{/g) || []).length === 1 && (ops.match(/boundNote\(/g) || []).length === 2, 'ONE spelling of the automation bind line (boundNote — conversations.bind and the --task open)');
-  ok(/import \{ folderOf, insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
+  ok(/import \{ folderOf, insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder, membershipCwds \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
     && /const \{ folderOf, insideFolder, membersWithout, onOtherMachine \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule; B-df5f: + THE hub-real-path rule, membershipCwds / onOtherMachine)');
   // THE CENSUS: a Task Group folder file (it reads a group's folders) never hand-rolls the prefix test
   const HAND = /startsWith\(\s*[\w$.]*\.path\s*\+\s*'\/'\s*\)/;
