@@ -238,7 +238,9 @@ await evalJs(`(() => { app._addSubscription(); return 1; })()`);
 // _modalShell) with an input in it, and when none comes it SAYS what the page held
 const dlgOk = await evalJs(`new Promise((res) => { const t0 = Date.now(); (function look() {
   const ovs = [...document.querySelectorAll('[id^="input-dialog-"]')];
-  const ov = ovs[ovs.length - 1];
+  // its run alone at 6ab4d2475: «input-dialog 2» — the host's window root and the form carry the same id prefix, and the LAST
+  // one holds no input: take the newest one that HOLDS the input
+  const ov = ovs.slice().reverse().find((o) => o.querySelector('input, textarea'));
   const inp = ov && ov.querySelector('input, textarea');
   if (inp) {
     inp.value = 'Smoke Sub';
@@ -248,7 +250,7 @@ const dlgOk = await evalJs(`new Promise((res) => { const t0 = Date.now(); (funct
     if (btn) btn.click();
     return res(btn ? true : 'an input dialog with no Continue button');
   }
-  if (Date.now() - t0 > 8000) return res('no name dialog in 8 s — input-dialog ' + ovs.length + ' · .dialog-overlay ' + document.querySelectorAll('.dialog-overlay').length + ' · .dialog-form ' + document.querySelectorAll('.dialog-form').length + ' · windows ' + app.wm.windows.size);
+  if (Date.now() - t0 > 8000) return res('no name dialog in 8 s — input-dialog ' + ovs.length + ' [' + ovs.map((o) => o.tagName.toLowerCase() + '.' + String(o.className || '').split(' ').join('.')).join(', ') + '] · .dialog-overlay ' + document.querySelectorAll('.dialog-overlay').length + ' · .dialog-form ' + document.querySelectorAll('.dialog-form').length + ' · windows ' + app.wm.windows.size);
   setTimeout(look, 200); })(); })`);
 check('add-subscription name dialog confirmed', dlgOk === true, String(dlgOk));
 await sleep(2500);
