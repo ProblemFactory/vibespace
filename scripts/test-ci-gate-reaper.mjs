@@ -552,9 +552,49 @@ console.log('\n§9d the directory sweep (B-60d2)');
       const ex = extraRootPatterns(`rel/x-*:/a/*:/srv/l/wt-accept-*/fixed:/srv/../x/*:${acc}/wt-accept-x/*:/srv/l/wt-accept-*/.rev-*`);
       ok(ex.ok.length === 1 && ex.refused.map((r) => r.why.split(' (')[0]).join('|') === 'not absolute|fewer than three segments|no * in its last segment|a . or .. segment|no name of two characters before the * of its last segment',
         `B-f397: a pattern that is relative, too short, without a * last, with a .. or with a bare * last is refused by name: ${JSON.stringify(ex.refused.map((r) => r.why))}`);
-      const ck = path.resolve(REPO);
-      process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${path.dirname(ck)}/${path.basename(ck).slice(0, 2)}*`;
-      ok(extraRootPatterns().ok.length === 1 && scratchRootOf(path.join(ck, 'scripts')) === null, `B-f397: a configured root that IS this checkout is never a root (${process.env.VIBESPACE_CI_SCRATCH_ROOTS})`);
+      // train-410 gate cure (主开发 17:07Z): THE LAW — a configured root that is, holds or lies inside the home, the checkout or the
+      // gate's cwd is never a root — is tested WHEREVER the gate put the checkout. The production gate runs every fast row in its own
+      // isolated worktree /tmp/vs-ci-fast-<sha>-<pid>: a pattern spelled from that path is too short (refused by name), and the path
+      // lies under the BUILT-IN root, which the reader answers first (the gate's own worktree is a run with a record — by design).
+      // (a) THE HOME, with a stand-in the leg controls (the reader takes the home from the environment at call time): a home inside
+      //     this leg's own folder, deep enough for a lawful pattern — a path inside it is no root. CONTROL: the same pattern with the
+      //     home elsewhere answers that root (the leg can go red).
+      {
+        const homes = path.join(acc, 'hh-homes'), H = path.join(homes, 'hh-scratch-home'), elsewhere = path.join(acc, 'hh-elsewhere');
+        for (const d of [H, elsewhere]) fs.mkdirSync(d, { recursive: true });
+        const prevHome = process.env.HOME;
+        try {
+          process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${homes}/hh*`;
+          process.env.HOME = H; const inHome = scratchRootOf(path.join(H, 'x'));
+          process.env.HOME = elsewhere; const away = scratchRootOf(path.join(H, 'x'));
+          ok(extraRootPatterns().ok.length === 1 && inHome === null && away === H,
+            `train-410 gate cure (a): a configured root that IS the home is never a root (${inHome}); CONTROL — the same pattern with the home elsewhere answers that root (${away})`);
+        } finally { if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome; }
+      }
+      // (b) THE CHECKOUT, wherever the gate put it: the leg names the case and asserts what the reader must say THERE —
+      //     lawful   (deep enough, outside the built-in root): the pattern accepted, a path inside the checkout is no root;
+      //     refused  (too shallow, or a character outside the name set): the pattern refused BY ITS NAMED REASON — no configured
+      //              root can name the checkout; under the built-in root the reader answers that root;
+      //     built-in (deep enough, under /tmp/vs-<name>): the pattern accepted, and the reader answers the BUILT-IN root first.
+      const REASONS = /^(?:not absolute|an empty segment|a \. or \.\. segment|fewer than three segments|no \* in its last segment|no name of two characters|a character outside)/;
+      const checkoutCase = (ck) => {
+        const pattern = `${path.dirname(ck)}/${path.basename(ck).slice(0, 2)}*`, p = extraRootPatterns(pattern), b = SCRATCH_ROOT_RE.exec(ck);
+        return p.refused.length ? { case: 'refused', pattern, why: p.refused[0].why, builtIn: b ? b[0] : null } : b ? { case: 'built-in', pattern, builtIn: b[0] } : { case: 'lawful', pattern, builtIn: null };
+      };
+      const sayOf = (ck) => {   // → { ok, words } for a checkout at `ck` (the reader is asked about a path inside it)
+        const c = checkoutCase(ck); process.env.VIBESPACE_CI_SCRATCH_ROOTS = c.pattern;
+        const got = scratchRootOf(path.join(ck, 'scripts')), accepted = extraRootPatterns().ok.length;
+        if (c.case === 'lawful') return { c, ok: accepted === 1 && got === null, words: `lawful: deep enough and outside the built-in root — ${c.pattern} accepted, a path inside the checkout is no root (${got})` };
+        if (c.case === 'refused') return { c, ok: REASONS.test(c.why) && accepted === 0 && got === c.builtIn, words: `refused: ${c.pattern} is refused by its named reason («${c.why}») — no configured root can name this checkout${c.builtIn ? `; it lies under the built-in root, which the reader answers first (${got})` : ` (${got})`}` };
+        return { c, ok: accepted === 1 && got === c.builtIn, words: `built-in: ${c.pattern} accepted, but the checkout lies under the built-in root — the reader answers that root first (${got}), never the configured pattern` };
+      };
+      const ck = path.resolve(REPO), here = sayOf(ck);
+      ok(here.ok, `B-f397: a configured root that IS this checkout is never a root — this checkout (${ck}) is ${here.words}`);
+      // the cases this box's checkout is not in, through the leg's own helper with stand-in checkouts (the reader is pure on paths
+      // here: the production gate's worktree shape, a deeper checkout under the built-in root, a shallow one outside it)
+      const standIns = [['/tmp/vs-ci-fast-0123abcd-4242', 'refused'], ['/tmp/vs-ci-fast-0123abcd-4242/wt/checkout', 'built-in'], ['/srv/co', 'refused']].map(([p, want]) => ({ p, want, ...sayOf(p) }));
+      ok(standIns.every((x) => x.c.case === x.want && x.ok) && standIns[0].c.builtIn === '/tmp/vs-ci-fast-0123abcd-4242' && standIns[2].c.builtIn === null,
+        `train-410 gate cure (b): the cases a gate may put its checkout in, each answered as the law says — ${standIns.map((x) => `${x.p} → ${x.words}`).join(' | ')}`);
     } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_SCRATCH_ROOTS; else process.env.VIBESPACE_CI_SCRATCH_ROOTS = prev; }
   }
 }
