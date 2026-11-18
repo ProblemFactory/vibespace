@@ -1447,5 +1447,41 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   ok(`B-f1f0 CONTROL: the patched copy that never keeps an element below the anchor moves the reader (E2 ${red && red.before[2]} → ${red && red.after[2]}) — the leg goes red`, !!red && red.after[2] !== red.before[2], JSON.stringify(red));
 }
 
+// B-ef04 (int358's race hunt on 571f1903: a turn landing grew the drafted row and the tail pin scrolled the card ~110 px between the
+// person's aim and the press — the click opened the NEIGHBOUR's conversation): THE PRESS-ARM RULE FOR A ROW THAT OPENS A
+// CONVERSATION. The REAL _pressMovedUnder: a row OTHER than the aimed one, the list moved after the aim within ARM_MS ⇒ refused;
+// the aimed row itself (a finger's landing, a still mouse on the same row while a turn streams — the adversarial read), re-aimed
+// since, long ago, never moved ⇒ answered. The REAL capture handler (its source, bound to a fake view): a mouse press the rule
+// refuses is said; a key's press and a press elsewhere pass. A patched copy whose rule never refuses goes RED by name
+{
+  const J = JSON.stringify, T = 1_000_000, A = { id: 'rowA' }, B = { id: 'rowB' };
+  const call = (CV, o, row) => { const v = Object.assign(Object.create(CV.prototype), o); return typeof v._pressMovedUnder === 'function' ? v._pressMovedUnder(row, T) : null; }; // (a tree without the rule: null, never a TypeError)
+  const caseOf = (CV) => ({ moved: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimRow: A }, B), offRow: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimRow: null }, B),
+    same: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimRow: A }, A), reaimed: call(CV, { _listMovedAt: T - 100, _aimAt: T - 50, _aimRow: B }, B),
+    old: call(CV, { _listMovedAt: T - 800, _aimAt: T - 900, _aimRow: A }, B), never: call(CV, { _aimAt: T - 50, _aimRow: A }, B) });
+  const c = caseOf(ChatView);
+  ok(`B-ef04 RED-able (b06f36e90: no rule — every press opens what is under it): another row than the aimed one, the list moved after the aim within 700 ms ⇒ refused (aimed at a row or at none); the aimed row itself, re-aimed since, 800 ms ago, never moved ⇒ answered (${J(c)})`, J(c) === '{"moved":true,"offRow":true,"same":false,"reaimed":false,"old":false,"never":false}', J(c));
+  const CVS = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+  const h0 = CVS.indexOf("    this._messageList.addEventListener('click', (e) => {"), h1 = CVS.indexOf('    }, { capture: true });', h0);
+  const arrow = h0 > 0 && h1 > h0 ? CVS.slice(CVS.indexOf('(e) =>', h0), h1 + '    }'.length) : null;
+  const pressOf = (moved) => { const said = []; let stopped = 0; const view = { _pressMovedUnder: (row) => moved && !!row };
+    const fn = arrow ? new Function('MOVED_PRESS_ROWS', 'showToast', 't', `return function () { return ${arrow}; };`)('.chat-channel-touch, .chat-peer-name', (m) => said.push(m), (k) => k).call(view) : null;
+    const ev = (detail, row) => ({ detail, target: { closest: (q) => (q === '.chat-channel-touch, .chat-peer-name' && row ? {} : null) }, stopPropagation: () => { stopped++; }, preventDefault() {} });
+    if (!fn) return null; fn(ev(1, true)); const mouse = [stopped, said.length]; fn(ev(0, true)); const key = [stopped, said.length]; fn(ev(1, false)); const other = [stopped, said.length];
+    return { mouse, key, other, words: said[0] || null }; };
+  const pr = pressOf(true), pr0 = pressOf(false);
+  ok(`B-ef04: the capture handler refuses a mouse press the rule refuses and says why («${pr && pr.words}»); a key's press and a press elsewhere pass (${J(pr)}); the rule answering ⇒ nothing refused (${J(pr0)})`,
+    !!pr && J(pr.mouse) === '[1,1]' && J(pr.key) === '[1,1]' && J(pr.other) === '[1,1]' && /moved under the pointer/.test(pr.words || '') && !!pr0 && J(pr0.other) === '[0,0]');
+  const wire = { pin: /        list\.scrollTop = sh;\n        this\._listMovedAt = performance\.now\(\);/.test(CVS), pass: /      this\._runsRestore\(list, anchor\);\n      this\._listMovedAt = performance\.now\(\);/.test(CVS),
+    restore: CVS.includes('if (Math.abs(list.scrollTop - stBefore) > 1) { this._listMovedAt = performance.now();'),
+    aim: CVS.includes("this._messageList.addEventListener('pointermove', aim, { passive: true });") && CVS.includes("this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });") && CVS.includes('this._aimRow = e.target?.closest?.(MOVED_PRESS_ROWS) || null;'),
+    rows: /^const MOVED_PRESS_ROWS = '\.chat-channel-touch, \.chat-peer-name';$/m.test(CVS), row: /rowEl\.className = 'chat-channel-touch';/.test(fs.readFileSync(path.join(REPO, 'src/lib/channel-touch-view.js'), 'utf8')) && /<span class="chat-peer-name" role="link"/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8')) };
+  ok(`B-ef04: the list's moves are stamped (the tail pin, a fold pass, its restore); the aim is the pointer's last move or a finger's / a pen's landing, with the row under it; the rule's rows are the ones the transcript draws (${J(wire)})`, Object.values(wire).every(Boolean));
+  const { mutantCopies } = await import('./mutant-copy.mjs'), from = '    return !pressVerdict({ since: moved, now }).ok;';
+  const CVm = CVS.split(from).length === 2 ? (await import(mutantCopies('ef04', REPO).write('src/lib/chat-view.js', CVS.replace(from, '    return false;'), 'never-refuses'))).ChatView : null;
+  const cm = CVm ? caseOf(CVm) : null;
+  ok(`B-ef04 CONTROL: the patched copy whose rule never refuses answers the press the list just moved under the pointer (${J(cm)}) — the leg goes red`, !!cm && cm.moved === false);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

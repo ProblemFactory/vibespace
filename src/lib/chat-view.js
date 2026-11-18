@@ -13,6 +13,10 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { pressVerdict } from './press-arm.js'; // B-ef04: a card row that opens a conversation counts a press only on what sat still
+/** B-ef04: the transcript's rows that OPEN A CONVERSATION — a channel card's row, a peer's name — a press on one that the list just
+ *  moved under a still pointer is refused */
+const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
 import { stampAt as when, num, span, stampSpan } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
@@ -699,6 +703,22 @@ class ChatView {
       this._pointerDownOnScrollbar = this._pointerOnScrollbar(e);
       this._pointerDownScrollTop = this._messageList.scrollTop;
     }, { passive: true });
+    // B-ef04 (int358's race hunt on 571f1903: a turn landing grew the drafted row and the tail pin scrolled the card ~110 px between
+    // the person's aim and the press — the click opened the NEIGHBOUR's conversation): THE PRESS-ARM RULE FOR A ROW THAT OPENS A
+    // CONVERSATION (MOVED_PRESS_ROWS). The AIM is the pointer's last real move — or where a finger / a pen lands (no hover before it)
+    // — and the row under it (`_aimAt`, `_aimRow`); the list's moves are stamped (`_listMovedAt`: the tail pin, a fold pass, its
+    // restore). A press on a row OTHER than the aimed one, the list moved since the aim and within ARM_MS, landed on a row that came
+    // under a still pointer — refused and said; the same row pressed passes however the list streams (the adversarial read: a rule
+    // on the move alone refused every tap for a whole streamed turn). A key's press (detail 0) aims at its focus — never refused
+    const aim = (e) => { this._aimAt = performance.now(); this._aimRow = e.target?.closest?.(MOVED_PRESS_ROWS) || null; };
+    this._messageList.addEventListener('pointermove', aim, { passive: true });
+    this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });
+    this._messageList.addEventListener('click', (e) => {
+      const row = e.detail === 0 ? null : e.target?.closest?.(MOVED_PRESS_ROWS);
+      if (!row || !this._pressMovedUnder(row)) return;
+      e.stopPropagation(); e.preventDefault();
+      showToast(t('That button moved under the pointer just now — read it, then press it again'));
+    }, { capture: true });
     // …and the press ends wherever the pointer is RELEASED — a scrollbar drag
     // routinely leaves the element, so this listens on the window, bound to the
     // window's AbortController like every other document-level listener here
@@ -4161,6 +4181,7 @@ class ChatView {
       if (sh - list.scrollTop - list.clientHeight > 1) {
         this._traceExpect('fsb');
         list.scrollTop = sh;
+        this._listMovedAt = performance.now(); // B-ef04: the tail pin moved what stands under a still pointer
       }
       // An A-B-A height (back to the value of two frames ago) is a card
       // resolving and re-locking, not growth: following it is the shake —
@@ -6483,6 +6504,14 @@ class ChatView {
     this._forceScrollToBottom();
   }
 
+  /** B-ef04: did the list move `row` under a STILL pointer just now? — a row other than the aimed one, the list moved after the
+   *  aim and within ARM_MS of `now` (press-arm.js pressVerdict). Never moved, the aimed row itself, or re-aimed since ⇒ no. */
+  _pressMovedUnder(row, now = performance.now()) {
+    const moved = this._listMovedAt;
+    if (moved == null || row === this._aimRow || (this._aimAt != null && this._aimAt > moved)) return false;
+    return !pressVerdict({ since: moved, now }).ok;
+  }
+
   // Drag-and-drop file/folder upload onto the chat → saved into the session's
   // working directory, with the path inserted into the input. (Editable views
   // only; the input button handles the mobile/click path.)
@@ -7631,7 +7660,7 @@ class ChatView {
     const stBefore = list.scrollTop;
     this._traceExpect('runsRestore');
     list.scrollTop = keep ? a.offsetTop - keep[1] : a === anchorEl ? a.offsetTop - anchor.delta : a.offsetTop;
-    if (Math.abs(list.scrollTop - stBefore) > 1) this._trace('runsRestore', { same: a === anchorEl, kept: !!keep, from: Math.round(stBefore), to: Math.round(list.scrollTop) });
+    if (Math.abs(list.scrollTop - stBefore) > 1) { this._listMovedAt = performance.now(); this._trace('runsRestore', { same: a === anchorEl, kept: !!keep, from: Math.round(stBefore), to: Math.round(list.scrollTop) }); } // (B-ef04: a move of the list)
   }
 
   _updateRuns() {
@@ -7916,6 +7945,7 @@ class ChatView {
     } finally {
       this._runsMutating = false;
       this._runsRestore(list, anchor);
+      this._listMovedAt = performance.now(); // B-ef04: a fold pass re-lays the rows (a card compacted, its rows a line of chips)
       // Drain OUR OWN mutation records: the observer callback is delivered at
       // a microtask checkpoint AFTER this finally resets _runsMutating, so the
       // flag alone never suppressed self-triggering — every pass scheduled
