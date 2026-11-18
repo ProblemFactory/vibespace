@@ -1175,6 +1175,32 @@ leg('§3 REAL ㊹ ONE SIGNAL PER PID PER STOP STEP — a main that cleans up 0.3
   }
 });
 
+leg('§3 REAL ㊹c B-c134 A STOP ENDS THE WHOLE TREE, ONE SIGNAL A PROCESS — a child the job started with setsid env -i (outside its group, without its mark) cleans up 0.3 s on its first signal and dies on a second: the engine\'s stop, on the pod\'s rung and the cgroup rung — it hears ONE SIGTERM, ends gracefully, nothing of it is left', async () => {
+  const rungs = [...(realOf('prlimit') ? ['rlimit-data'] : []), ...(userSystemd ? ['cgroup'] : [])];
+  if (!rungs.length) { skip++; ok.say('  - SKIP the tree leg: neither prlimit nor a user systemd here'); return; }
+  const SIGKID = (f, pf) => `const fs=require('fs'),f=${JSON.stringify(f)},log=(s)=>fs.appendFileSync(f,Date.now()+' '+s+'\\n');fs.writeFileSync(${JSON.stringify(pf)},String(process.pid));let g=false;for(const s of ['SIGINT','SIGTERM','SIGHUP'])process.on(s,()=>{log(s);if(g){log('hard-exit');process.exit(143)}g=true;setTimeout(()=>{log('graceful-exit');process.exit(0)},300)});setInterval(()=>{},1000);`;
+  const one = async (rung) => {
+    const dir = scratch(), f = path.join(dir, 'tree.signals'), pf = path.join(dir, 'tree.pid'), kid = path.join(dir, 'kid.js');
+    fs.writeFileSync(kid, SIGKID(f, pf));
+    const E = engineIn(dir)({ memoryRungs: [rung], memorySample: { stopMs: 2000 } });
+    const j = E.jobs.get(E.create({ kind: 'task', name: `tree-${rung}`, cmd: { argv: ['sh', '-c', `setsid env -i ${NODE} ${kid} & wait`] }, memoryMb: 1024, owner }, caller).job.id);
+    await until(() => ready(j) && fs.existsSync(pf), 6000, 10);
+    const st = E._readStamp(j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
+    const kp = Number(fs.readFileSync(pf, 'utf8')) || 0;
+    E.stop(j);
+    await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 5000, 10);
+    await until(() => !alive(kp), 3000, 10);
+    const heard = (() => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').map((l) => l.split(' ')[1]); } catch { return []; } })();
+    const left = alive(kp);
+    try { if (left) process.kill(kp, 'SIGKILL'); } catch { }
+    try { process.kill(-st.pid, 'SIGKILL'); } catch { }
+    killScopeOf(b.unit);
+    stopEngine(E);
+    return { rung: b.by || rung, heard: heard.join(','), left };
+  };
+  for (const r of await Promise.all(rungs.map(one))) ok(r.heard === 'SIGTERM,graceful-exit' && !r.left, `${r.rung}: the setsid env -i child heard ${r.heard || 'nothing'} and ${r.left ? 'is STILL RUNNING' : 'ended'} — one SIGTERM from the wrapper's one table, a graceful end (B-c134)`, r);
+});
+
 leg('§3 REAL ㊺ A STOP GOES ONCE — a process that cleans up 0.3 s on its first signal and dies on a second: Stop pressed twice (the second press says «already stopping»); an agent\'s SIGINT to the wrapper, then the person\'s Stop; a Stop while the wrapper drains what an ended task left (the engine signals the wrapper ALONE — its stopping.json); a SIGTERM to the wrapper then — the pod\'s rung and the cgroup rung, the scope rung behind a logging systemctl (8ad58d8b: the engine\'s group signal again, and the drain\'s scope kill unrecorded — code 143 mid-cleanup)', async (ok) => {
   const rungs = [...(realOf('prlimit') ? ['rlimit-data'] : []), ...(userSystemd ? ['cgroup'] : [])];
   if (!rungs.length) { skip++; ok.say('  - SKIP the stop-goes-once leg: neither prlimit nor a user systemd here'); return; }

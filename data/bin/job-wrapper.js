@@ -614,6 +614,46 @@ const termKey = ([pid, st]) => `${pid}:${st}`;
 // step, SIGTERMed at 2051 ms of a 2 s grace and killed the same millisecond, was never said)
 const termOnce = (p, pass = 'stop') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), { at: Date.now(), pass }); try { process.kill(p[0], 'SIGTERM'); return true; } catch { return false; } };
 const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
+// ── SHIPPED TWIN (B-c134) BEGIN — data/bin/job-wrapper.js carries these lines byte-for-byte (a wrapper copied into a scratch data
+// folder cannot require src/); scripts/test-stop-tree.mjs pins the copy to this source ──
+/** THE TREE A STOP STARTED (B-c134, lane bl-jobs 2026-11-18): every process under `root` by the PARENT CHAIN — each one's main-thread
+ *  children list (/proc/<pid>/task/<pid>/children: the file the release's member walk reads; no directory is listed), breadth first —
+ *  read BEFORE the first signal. A child that made its own group (setsid, the timeout program) or dropped the job's environ (env -i, a
+ *  `systemd-run --scope … env -i`) is outside the group walk and the environ mark, but it is its parent's child until that parent
+ *  dies; after the first signal it is re-parented and the chain is gone. SYNCHRONOUS on purpose, as the release's member walk: procfs is
+ *  memory (never a mount), it costs THE TREE (a list and a stat a member) — never all of /proc — no thread pool stands between a stop
+ *  and its first signal, and the stop's signal stays synchronous; bounded by `maxRows` and `maxMs` all the same. A zombie is no member (its children are re-parented already); nothing that started before `since`.
+ *  → {rows: [[pid, starttime, pgid, comm]], cut} — a CUT walk proves nothing (the caller says so). THE MODEL: it ends what a
+ *  MISTAKE left behind; a child that hides ON PURPOSE (a double fork that re-parents before the stop) is outside it, not chased. */
+function childTreeOf(root, { since = 0, maxRows = 512, maxMs = 50, procRoot = '/proc' } = {}) {
+  const rows = [], seen = new Set([Number(root)]), queue = [Number(root)], t0 = Date.now();
+  let cut = false;
+  walk: while (queue.length) {
+    const p = queue.shift();
+    let kids = '';
+    try { kids = fs.readFileSync(`${procRoot}/${p}/task/${p}/children`, 'utf8'); } catch { continue; }
+    for (const w of kids.split(/\s+/)) {
+      const c = Number(w);
+      if (!(c > 1) || seen.has(c)) continue;
+      if (rows.length >= maxRows || Date.now() - t0 > maxMs) { cut = true; break walk; }
+      seen.add(c);
+      let st = '';
+      try { st = fs.readFileSync(`${procRoot}/${c}/stat`, 'utf8'); } catch { continue; }
+      const o = st.indexOf('('), e = st.lastIndexOf(')');
+      if (o < 0 || e < o) continue;
+      const r = st.slice(e + 2).split(' ');
+      if (r[0] === 'Z' || !(Number(r[19]) >= since)) continue;
+      rows.push([c, Number(r[19]), Number(r[2]), st.slice(o + 1, e).slice(0, 32)]);
+      queue.push(c);
+    }
+  }
+  return { rows, cut };
+}
+// ── SHIPPED TWIN (B-c134) END ──
+// B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under this wrapper, read at the stop BEFORE its first signal — the members
+// outside our group (setsid, the timeout program, a `systemd-run --scope … env -i`) hear the stop from us through the ONE table,
+// once, and the drain takes what of them is left with the rest. Read here, in the wrapper's own process (never the hub's loop)
+let stopTree = [];
 // round 10: THE MAIN IS THE HANDLE WE SPAWNED — never a pid read again: signalled only while the handle is live (exitCode and
 // signalCode null: not reaped, so its pid is no other process's), nothing after its 'exit' (r9 re-read /proc/<pid>/stat after
 // the reap — a Stop racing the job's own end, a signal to us while we drained: whoever held that pid since got the job's stop,
@@ -651,6 +691,7 @@ function onStop(sig, at, by) {
   // the grace under «did not end on SIGTERM»), then the rest SIGTERM. The cgroup rung: THE SCOPE IS THE GROUP — its processes one
   // by one through the same table (round 4's `systemctl kill` of the scope sent the stop AGAIN to all the engine's signal had
   // reached: the main heard it twice, 3 ms apart); a scope whose list cannot be read, the manager's kill (as before)
+  const tree = childTreeOf(process.pid, { since: Number(stamp.starttime) || 0 });   // B-c134: the tree FIRST — after the first signal a child is re-parented
   const main = mainLive() ? rowOf(child.pid) : null; // the main first — its own stat names its group (no walk before it hears the stop)
   if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), { at, pass: 'stop' });
   mainBy = main ? (termed.has(termKey(main)) ? 'engine' : termMain(main, sig) ? 'wrapper' : '') : child && !mainLive() ? 'ended' : '';
@@ -663,6 +704,15 @@ function onStop(sig, at, by) {
         : 'a signal to the wrapper alone — the wrapper signals its group';
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who}${mainBy === 'ended' ? '; its main process had already ended' : ''})\n`)); } catch { }
   for (const p of rows) termOnce(p); // what the engine's signal did not reach — every member, for a stop not the engine's
+  // B-c134: the tree's members outside our group — not the main (its own road above), each once (the table); the drain takes the rest
+  // the engine's intent carries the tree it read BEFORE its signal (ours here may come after the main's children were re-parented)
+  const fromIntent = by === 'engine' || by === 'intent' || by === 'alone' ? intentTree() : { rows: [], cut: false };
+  const keyed = new Map([...fromIntent.rows, ...tree.rows].filter((r) => r[2] !== process.pid && !(child && r[0] === child.pid)).map((r) => [termKey(r), r]));
+  stopTree = [...keyed.values()];
+  let treeHeard = 0;
+  for (const r of stopTree) if (termOnce(r)) treeHeard++;
+  const treeCut = tree.cut || fromIntent.cut;
+  if (stopTree.length || treeCut) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: ${stopTree.length} process${stopTree.length === 1 ? '' : 'es'} it started outside its group (${[...new Set(stopTree.map((r) => r[3]))].join(', ') || '—'}) hear${stopTree.length === 1 ? 's' : ''} it from the wrapper${treeCut ? '; its process tree was read only in part — what it started may be left' : ''}\n`)); } catch { } }
   if (scoped() && !listed) scopeTerm(sig);
   const on = mainBy === 'engine' || mainBy === 'wrapper' ? ` on ${sig}` : ''; // «did not end on SIGTERM» only when one reached it
   const left = Math.max(0, at + stopMs - Date.now());
@@ -687,6 +737,10 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
   onStop(sig, engine ? s.at : Date.now(), engine ? (s.alone ? 'alone' : 'engine') : 'signal');
   if (heard) heard();
 });
+/** B-c134: the tree the engine read before its signal, from its intent — rows [pid, start, pgid, comm] (each proven again at the act) */
+function intentTree() {
+  try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); const rows = Array.isArray(s.tree) ? s.tree.filter((r) => Array.isArray(r) && Number(r[0]) > 1 && Number(r[1]) > 0).slice(0, 256).map((r) => [Number(r[0]), Number(r[1]), Number(r[2]), String(r[3] || '').slice(0, 32)]) : []; return { rows, cut: s.treeCut === true }; } catch { return { rows: [], cut: false }; }
+}
 /** the engine's stop intent for THIS run (its ctl dir), or null */
 function stopIntent() {
   try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now(), alone: s.alone === true }; } catch { return null; }
@@ -714,6 +768,10 @@ async function drainScope() {
   const still = procsOf(scopeDir).length, s = still === 1 ? '' : 'es', was = still === 1 ? 'was' : 'were';
   if (still) await forceScope(left ? `${still} process${s} it left ${was} still running ${stopMs / 1000} s after its SIGTERM — its scope was killed` : `${still} process${s} ${was} still in its scope ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its end'} — its scope was killed`);
   for (let i = 0; i < 80 && procsOf(scopeDir).length; i++) await nap(25);
+  // B-c134: a STOP's tree outside the scope (a child that moved to a scope of its own — `systemd-run --scope`) — heard at the stop
+  // step (the table), waited on to the stop's one clock, then by force; never counted as the scope's
+  const tl = stopping ? stopTree.filter(same) : [];
+  if (tl.length) { while (tl.some(same) && Date.now() < deadline) await nap(25); for (const p of tl) killNow(p); }
   return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !procsOf(scopeDir).length };
 }
 // A RUNG WITHOUT A SCOPE (rlimit-data, none — a fleet pod): what the job left is what still runs in OUR process group (the job
@@ -753,6 +811,8 @@ function escapedOf() { // started after us, outside our group, carrying the job'
 async function drainGroup() {
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
+  // B-c134: a STOP's tree — what of it the stop step read outside our group and is still there is the stop's to end, with the rest
+  { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); } }
   if (!left.length && !out.length) return {};
   // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
   // between them) is one process, never two
@@ -779,7 +839,7 @@ async function drainGroup() {
   // its SIGTERM leaves no child behind), at most three passes
   const killed = new Set();
   for (let pass = 0; pass < 3; pass++) {
-    const more = [...groupLeft(), ...(mine ? escapedOf() : [])].filter((p) => !killed.has(termKey(p)));
+    const more = [...groupLeft(), ...(mine ? escapedOf() : []), ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
     if (!more.length) break;
     for (const p of more) if (killNow(p)) killed.add(termKey(p));
   }

@@ -1501,7 +1501,19 @@ class JobManager {
   _killGroup(job, sig) { // handle-kill with act-time re-verification (B-16d9 law)
     const stamp = this._readStamp(job);
     if (!this._verifyAlive(stamp)) return false;
+    if (sig === 'SIGKILL') this._killTree(job, stamp);   // B-c134: a SIGKILL ends the wrapper before it can end its tree — the engine does, first
     return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok; // the group, else its leader
+  }
+  /** B-c134 A STOP ENDS THE WHOLE TREE IT STARTED — where the wrapper cannot: a FORCE stop and the ladder's kill step SIGKILL it (its
+   *  own stop step, which ends its tree through its one table, never runs). The tree under the wrapper read FIRST (PI.treeOf — the
+   *  tree's own cost, procfs, bounded), each member SIGKILLed by identity (pid + start at the act), said in the log; then the caller's
+   *  SIGKILL of the group / the scope, in the same tick. A SIGTERM is never sent here (the wrapper's stop step delivers a stop's). */
+  _killTree(job, stamp) {
+    const t = PI.treeOf([Number(stamp.pid)], { since: Number(stamp.starttime) || 0 }), tree = t.filter((m) => m.pgid !== Number(stamp.pid));   // the group dies with the group's SIGKILL
+    let n = 0;
+    for (const m of tree) if (PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }).ok) n++;
+    if (n || t.cut) this.d.log(`[jobs] ${job.id}: its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(tree.map((m) => m.comm))].join(', ')})${t.cut ? ' — its tree was read only in part' : ''}`);
+    return n;
   }
   // A STOP ENDS THE JOB (lane jobs-memory-bound, acceptance round 4): on the cgroup rung the job's group is its SCOPE — every
   // process it started, in its process group or not, and whether or not its wrapper still lives (the base killed nothing once
@@ -1582,6 +1594,7 @@ class JobManager {
     }
     if (k && !['refused', 'unread', 'nokill'].includes(k.r)) return true; // its kill in flight or landed: the next rung waits its step
     const rec = job._scopeKilled = { unit: scope.unit, at: k ? k.at : now() };
+    if (!k) { const st = this._readStamp(job); if (this._verifyAlive(st)) this._killTree(job, st); }   // B-c134: what moved out of the scope dies with it (read first)
     this._killScope(scope).then((r) => { rec.r = r; if (r === 'killed') said('its scope was killed'); });
     return true;
   }
@@ -1593,8 +1606,14 @@ class JobManager {
       // round 10: A STOP GOES ONCE — a wrapper already delivering a stop step itself (its stopping.json: its own stop, an agent's
       // signal to it; or the drain of what its ended job left) is signalled ALONE, the intent saying so — it delivers the rest
       // through its one table (round 9 signalled the whole group again: a process mid-cleanup heard SIGTERM twice, code 143)
+      // B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under the wrapper is read FIRST (a child of its main is re-parented the
+      // moment the main dies — and the group's signal reaches the main and the wrapper at once) and rides the intent; the wrapper's stop
+      // step delivers it through its ONE table (one SIGTERM a process — the engine sends the tree none). Synchronous, as the release's
+      // member walk: procfs, the tree's own cost, bounded — the stop's signal stays in this same tick
       const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json');
-      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}) }); } catch { }
+      const st = this._readStamp(job), tree = st && this._verifyAlive(st) ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false });
+      const rows = tree.filter((m) => m.pgid !== Number(st && st.pid)).slice(0, 256).map((m) => [m.pid, m.starttime, m.pgid, m.comm]);
+      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}), ...(rows.length ? { tree: rows } : {}), ...(tree.cut ? { treeCut: true } : {}) }); } catch { }
       if (alone) { const stamp = this._readStamp(job); return this._verifyAlive(stamp) && PI.signalIdentity(stamp, 'SIGTERM', { what: `job ${job.id}'s wrapper` }).ok; }
     }
     return this._killGroup(job, 'SIGTERM');

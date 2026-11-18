@@ -417,6 +417,16 @@ function registerWsHandler(wss, ctx) {
       // Cancel any pending delayed-SIGINT from a recent interrupt — after
       // kill, the childPid may be reused by an unrelated process
       if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
+      // B-c134 A CONVERSATION'S END LEAVES NOTHING OF ITS OWN RUNNING: the tree under its process is read BEFORE the first signal
+      // (src/proc-identity.js treeOf — the children lists, procfs, the tree's own cost, bounded), and a moment after the teardown what of it SURVIVED hears the stop, once (the hangup reached the rest — never a
+      // second signal), its grace, then by force — said in one line. Roots: the dtach master(s) of a local terminal conversation and
+      // a local chat conversation's own pty process (a real node-pty) — never a pipe conversation's or an OpenCode serve's (their pty is
+      // a shim: the device agent's / the serve's — the remainder), or a plain shell's (a person's `nohup` there is the person's to keep)
+      const treeRoots = [];
+      let treeCut = false;
+      const readTree = (pid) => { const t = PI.treeOf([pid], { since: Number((PI.identityOf(pid) || {}).starttime) || 0 }); if (t.cut) treeCut = true; treeRoots.push(...t); };   // procfs, the tree's own cost, bounded
+      const ownTree = !capsOf(session.backend).terminalOnly;   // a plain shell's leftovers are the person's (the declared row, never an id)
+      const localPty = ownTree && session.pty && Number(session.pty.pid) > 1 && session.pty.constructor && session.pty.constructor.name !== 'Object' && !session.socketPath ? Number(session.pty.pid) : 0;
       // Kill the dtach session process (which kills claude as its child)
       // The dtach process is the parent of our attach PTY's target
       if (session.socketPath) {
@@ -431,11 +441,22 @@ function registerWsHandler(wss, ctx) {
           // 23.6 ms flat, and 155 ms of latency down to 24.
           for (const dpid of await pidsMatchingCmdline(session.socketPath)) {
             if (dpid && dpid !== session.pty?.pid) {
+              if (ownTree) readTree(dpid);   // B-c134: its tree read first
               try { process.kill(dpid, 'SIGTERM'); } catch {}
             }
           }
         } catch {}
         try { fs.unlinkSync(session.socketPath); } catch {}
+      }
+      if (localPty) readTree(localPty);   // B-c134: read before the pty's kill
+      if (treeRoots.length) {
+        const name = session.name || data.sessionId;
+        const t = setTimeout(() => {
+          const left = treeRoots.filter((m) => PI.aliveIdentity(m) === true);
+          if (!left.length) return;
+          PI.endTree(left, { graceMs: 5000 }).then((r) => { const line = PI.treeLine(r, { cut: treeCut }); if (line) console.log(`[session] ${data.sessionId} "${name}": its end ${line}`); }).catch(() => { });
+        }, 3000);
+        t.unref?.();
       }
       if (session.pty) session.pty.kill();
       if (session.sockName) deleteSessionMeta(session.sockName);

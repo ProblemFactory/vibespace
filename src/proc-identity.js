@@ -211,6 +211,79 @@ function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBE
   return out;
 }
 
+// ── SHIPPED TWIN (B-c134) BEGIN — data/bin/job-wrapper.js carries these lines byte-for-byte (a wrapper copied into a scratch data
+// folder cannot require src/); scripts/test-stop-tree.mjs pins the copy to this source ──
+/** THE TREE A STOP STARTED (B-c134, lane bl-jobs 2026-11-18): every process under `root` by the PARENT CHAIN — each one's main-thread
+ *  children list (/proc/<pid>/task/<pid>/children: the file the release's member walk reads; no directory is listed), breadth first —
+ *  read BEFORE the first signal. A child that made its own group (setsid, the timeout program) or dropped the job's environ (env -i, a
+ *  `systemd-run --scope … env -i`) is outside the group walk and the environ mark, but it is its parent's child until that parent
+ *  dies; after the first signal it is re-parented and the chain is gone. SYNCHRONOUS on purpose, as the release's member walk: procfs is
+ *  memory (never a mount), it costs THE TREE (a list and a stat a member) — never all of /proc — no thread pool stands between a stop
+ *  and its first signal, and the stop's signal stays synchronous; bounded by `maxRows` and `maxMs` all the same. A zombie is no member (its children are re-parented already); nothing that started before `since`.
+ *  → {rows: [[pid, starttime, pgid, comm]], cut} — a CUT walk proves nothing (the caller says so). THE MODEL: it ends what a
+ *  MISTAKE left behind; a child that hides ON PURPOSE (a double fork that re-parents before the stop) is outside it, not chased. */
+function childTreeOf(root, { since = 0, maxRows = 512, maxMs = 50, procRoot = '/proc' } = {}) {
+  const rows = [], seen = new Set([Number(root)]), queue = [Number(root)], t0 = Date.now();
+  let cut = false;
+  walk: while (queue.length) {
+    const p = queue.shift();
+    let kids = '';
+    try { kids = fs.readFileSync(`${procRoot}/${p}/task/${p}/children`, 'utf8'); } catch { continue; }
+    for (const w of kids.split(/\s+/)) {
+      const c = Number(w);
+      if (!(c > 1) || seen.has(c)) continue;
+      if (rows.length >= maxRows || Date.now() - t0 > maxMs) { cut = true; break walk; }
+      seen.add(c);
+      let st = '';
+      try { st = fs.readFileSync(`${procRoot}/${c}/stat`, 'utf8'); } catch { continue; }
+      const o = st.indexOf('('), e = st.lastIndexOf(')');
+      if (o < 0 || e < o) continue;
+      const r = st.slice(e + 2).split(' ');
+      if (r[0] === 'Z' || !(Number(r[19]) >= since)) continue;
+      rows.push([c, Number(r[19]), Number(r[2]), st.slice(o + 1, e).slice(0, 32)]);
+      queue.push(c);
+    }
+  }
+  return { rows, cut };
+}
+// ── SHIPPED TWIN (B-c134) END ──
+/** the hub's form: the tree as identities ({pid, starttime, bootId, comm, pgid}), `.cut` on the list */
+function treeOf(roots, opts = {}, popts) {
+  const out = [], bootId = bootIdOf(popts);
+  let cut = false;
+  for (const r of (Array.isArray(roots) ? roots : [roots]).map(Number).filter(pidOk)) {
+    const t = childTreeOf(r, { ...opts, procRoot: rootOf(popts) });
+    cut = cut || t.cut;
+    for (const [pid, starttime, pgid, comm] of t.rows) if (pid !== process.pid && !out.some((m) => m.pid === pid)) out.push({ pid, starttime, bootId, comm, pgid });
+  }
+  out.cut = cut;
+  return out;
+}
+/** END A TREE (B-c134): `signal` to each member THROUGH signalIdentity (a refused one — EPERM — is said, never «ended») (its pid and start time judged at the act — a recycled
+ *  pid is never signalled), `graceMs` for them to end, `hard` for what is left, 1 s more to see it go. → {ended, left, stale}:
+ *  `ended` = what was ours and is gone (comm names), `left` = what is still there after the hard signal, `stale` = members
+ *  no longer ours at the act (gone before, or another process now). opts.kill: injectable (signalIdentity's). */
+async function endTree(members, { graceMs = 5000, signal = 'SIGTERM', hard = 'SIGKILL', pollMs = 50 } = {}, opts = {}) {
+  const sent = [], refused = [];
+  let stale = 0;
+  for (const m of members || []) { const r = signalIdentity(m, signal, opts); if (r.ok) sent.push(m); else if (r.why === 'not-ours') refused.push(m); else stale++; }
+  const alive = (m) => aliveIdentity(m, opts) === true;
+  const wait = async (ms, list) => { const t = Date.now(); let l = list.filter(alive); while (l.length && Date.now() - t < ms) { await new Promise((r) => setTimeout(r, pollMs)); l = l.filter(alive); } return l; };
+  let live = await wait(graceMs, sent);
+  if (live.length) { for (const m of live) signalIdentity(m, hard, opts); live = await wait(1000, live); }
+  const left = new Set(live.map((m) => m.pid)), name = (m) => m.comm || String(m.pid);
+  return { ended: sent.filter((m) => !left.has(m.pid)).map(name), left: [...live.map(name), ...refused.map((m) => `${name(m)} (not ours to signal)`)], stale };
+}
+/** THE ONE LINE a stop says of its tree: the count and the names of what it ended and of what it could not; a cut or blind read said */
+function treeLine(r, scan) {
+  const names = (l) => { const c = new Map(); for (const n of l) c.set(n, (c.get(n) || 0) + 1); return [...c].map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(', '); };
+  const parts = [];
+  if (r && r.ended.length) parts.push(`ended ${r.ended.length} process${r.ended.length === 1 ? '' : 'es'} it started (${names(r.ended)})`);
+  if (r && r.left.length) parts.push(`could not end ${r.left.length} (${names(r.left)})`);
+  if (scan && scan.cut) parts.push('its process tree was read only in part (past its bound): what it started may be left');
+  return parts.join('; ');
+}
+
 // ── SHIPPED TWIN BEGIN — data/bin/vibespace-remote-keeper carries these lines byte-for-byte: it ships to a host as ONE
 // file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
 /** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
@@ -307,6 +380,7 @@ function legacyOnce(door, pid, say) {
 }
 
 module.exports = {
+  childTreeOf, treeOf, endTree, treeLine,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
   hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
