@@ -631,6 +631,53 @@ console.log('— ③ the real bridge over a fake upstream: tab-owners after a ta
   bridge.shutdown?.(); upWss.close();
 }
 
+// ═══ ③b B-1626: a viewer's thaw is asked again once its relay knows the tab it streams ═══
+// heavy test-browser-hidden-paint c (red on .367/.370/.376/.391/.397/.399): a live view attaching to a FROZEN browser two
+// conversations hold streamed a hidden page — 0 frames. The bridge said its viewers when the viewer JOINED, before the relay
+// had read its `tabs` record, so the thaw's scope (activeTargetsFor) was empty and the view's own front stayed hidden.
+console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the view streams');
+{
+  const { WebSocket, WebSocketServer } = require('ws');
+  const viewersLeg = async (Bmod, tag) => {
+    const seen = []; let br = null;
+    const fk = {
+      setFor: () => ({ attachments: [{ profileId: 'bp-0000c0f1', alias: 'work', isDefault: true, label: 'Work' }], handles: ['work'], defaultId: 'bp-0000c0f1', children: [] }),
+      list: () => ({ profiles: [{ id: 'bp-0000c0f1', label: 'Work' }] }),
+      streamPortFor: async () => ({ ok: true, port: upPort }), inputStateFor: () => ({ input: 'agent' }),
+      tabOwnersFor: async () => ({ ok: true, owners: {}, mediated: false, adoptable: false }),
+      // the keeper's side of the thaw: what the dialog watch's scope (activeTargetsFor) reads at each report
+      noteViewers: (bk, pid, n) => { seen.push({ n, tabs: br ? br.activeTargetsFor({ browserKey: bk, profileId: pid }) : [] }); },
+    };
+    const upWss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await new Promise((r) => upWss.on('listening', r));
+    const upPort = upWss.address().port;
+    // the upstream says its tabs only a moment after it connects (the stream's first `tabs` record comes after the viewer joined)
+    upWss.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'status', connected: true })); const rec1 = JSON.stringify({ type: 'tabs', tabs: [{ tabId: 't1', targetId: T(1), title: 'A', url: 'https://a.example/', active: true }] }); setTimeout(() => ws.send(rec1), 80); setTimeout(() => ws.send(rec1), 200); }); // the same record twice: the second asks nothing more
+    const activeS = new Map([['sess-a', { _browserKey: KA, webuiId: 'sess-a' }]]);
+    br = Bmod.create({ keeper: fk, activeSessions: activeS, requestAuthed: () => true, log: quiet });
+    const hs = http.createServer(); servers.push(hs); hs.on('upgrade', (req, sock, head) => br.handleUpgrade(req, sock, head));
+    await new Promise((r) => hs.listen(0, '127.0.0.1', r));
+    const ws = new WebSocket(`ws://127.0.0.1:${hs.address().port}/api/browser/stream?session=sess-a`);
+    await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
+    await until(() => seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), 1500); // its reason to end: the report that names the tab
+    const tabsRecordSeen = await until(() => (br.activeTargetsFor({ browserKey: KA, profileId: 'bp-0000c0f1' }) || []).includes(T(1)), 1500);
+    await sleep(300); // past the second (identical) tabs record
+    ws.close(); br.shutdown?.(); upWss.close();
+    return { seen, tabsRecordSeen };
+  };
+  const Bmod = require('../src/server/browser-stream.js');
+  const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+  const ANCH = '      if (relay.activeTarget && relay.activeTarget !== relay.thawAskedFor && relay.viewers.size) { relay.thawAskedFor = relay.activeTarget; noteViewers(relay); }';
+  if (!bsrc.includes(ANCH)) ok(false, 'the anchor of the control «B-1626 re-ask» is not in the source (src/server/browser-stream.js)');
+  const Bc = bsrc.includes(ANCH) ? M.load('src/server/browser-stream.js', bsrc.replace(ANCH, '      // (no re-ask)'), 'b1626-no-reask') : null;
+  const [r, c] = await Promise.all([viewersLeg(Bmod, 'now'), Bc ? viewersLeg(Bc, 'control') : Promise.resolve(null)]); // the leg beside its control
+  const first = r.seen.find((x) => x.n >= 1);
+  ok(first && first.tabs.length === 0 && r.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `B-1626: the viewer's join is reported before its relay knows its tab (the thaw's scope then: ${JSON.stringify(first && first.tabs)}); once the stream's tabs record names the tab on show, the viewers are reported AGAIN with that tab in scope — the thaw shows the view's own front`, r.seen);
+  ok(r.seen.filter((x) => x.n >= 1 && x.tabs.includes(T(1))).length === 1, `B-1626: …once per tab (a later tabs record for the same tab asks nothing more) — ${r.seen.length} report(s)`, r.seen);
+  if (c) {
+    ok(c.tabsRecordSeen && !c.seen.some((x) => x.tabs.includes(T(1))), `CONTROL (B-1626, the release's bridge): the viewer is reported only at its join, with an EMPTY scope (${JSON.stringify(c.seen)}) — on a frozen browser two conversations hold, the view's own front stays hidden: RED`, c.seen);
+  }
+}
+
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════
 console.log('— ④ the words: every new key in zh + ja');
 {

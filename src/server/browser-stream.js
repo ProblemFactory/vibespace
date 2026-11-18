@@ -722,6 +722,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const act = msg.tabs.find((x) => x && x.active);
       const u = act && typeof act.url === 'string' ? act.url : '';
       { const prevAct = relay.activeTarget; relay.activeTarget = act && act.targetId ? String(act.targetId) : null; if (relay.bg.state && relay.activeTarget !== prevAct) clearBackground(relay, 'another tab is on show'); if (relay.activeTarget !== prevAct) xFollow(relay); } // verify r2: every `tabs` record re-says which tab the user is looking at; lane browser-windows: a background verdict is of ONE tab
+      // B-1626 (heavy test-browser-hidden-paint c: a live view on a frozen browser streamed a hidden page — 0 frames): a viewer's
+      // thaw is asked when it JOINS, before its relay has read which tab it streams, so on a browser two conversations hold the
+      // thaw's scope (activeTargetsFor) was empty and the view's own front stayed hidden. The moment the relay learns (or
+      // changes) the tab it streams while viewers watch, it says its viewers AGAIN — the thaw then shows THAT tab (only that one)
+      if (relay.activeTarget && relay.activeTarget !== relay.thawAskedFor && relay.viewers.size) { relay.thawAskedFor = relay.activeTarget; noteViewers(relay); }
       if (relay.mode === 'takeover' && relay.viewers.has(relay.holder) && relay.activeTarget && (!relay.copyWatch || relay.copyWatch.targetId !== relay.activeTarget)) armCopyWatch(relay); // lane live-input: the copy watch follows the tab on show
       if (relay.anchor) { // verify r3: …and the takeover's anchor judges it (an agent's switch while the user drives ⇒ `switched`, inputs refused tab_switched)
         const next = S.takeoverAnchorStep(relay.anchor, { activeTarget: relay.activeTarget, now: now() });
