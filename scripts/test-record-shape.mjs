@@ -356,10 +356,14 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   // here and once in claude-cli-dump's dumpBinary, on whatever binary it found (on a developer box the real CLI). The build is read
   // off the file now (versionOfBinary: the versions-dir name, else the bundle's VERSION stamp); a 0644 copy dumps the same.
   {
-    const runsBin = (src) => /\bexecFileSync\(\s*(?:bin|real|claude)\s*,|\bspawnSync\(\s*(?:bin|real|claude)\s*,/.test(src);
+    // B-5e52 cure (a reader's should): ANY process spawn whose program is not a string literal (node itself, process.execPath,
+    // aside) is a binary run — not only one spelled bin / real / claude; a RegExp's .exec( and comment lines are not spawns
+    const SPAWN_RE = /(?<![.\w$])(?:execFileSync|execFile|execSync|exec|spawnSync|spawn)\(\s*(?=\S)(?!['"`]|process\.execPath\b)/;
+    const runsBin = (src) => src.split('\n').some((l) => !/^\s*(?:\/\/|\*)/.test(l) && SPAWN_RE.test(l));
     const OLD_CALL = ['let ver = \'?\'; try { ver = execFile', 'Sync(bin, [\'--version\'], { encoding: \'utf8\' }); } catch { }'].join('');   // spelled in two pieces: this file is censused too
     ok('§4 B-5e52: no claude binary is RUN by this suite or by scripts/claude-cli-dump.mjs (no exec of the binary — the build is read off the file)', !runsBin(read('scripts/test-record-shape.mjs')) && !runsBin(read('scripts/claude-cli-dump.mjs')));
     ok('§4 B-5e52 NEG: the census sees the old call', runsBin(OLD_CALL));
+    ok('§4 B-5e52 NEG: …and the shapes the old spelling missed (any program name, execFile, spawn — each planted from pieces)', ['execFile' + 'Sync(binary, [\'--version\'])', 'execFile' + '(realPath, [\'--version\'], cb)', 'spawn' + 'Sync(found, [\'-v\'])'].every(runsBin) && runsBin('exec' + '(cmd, cb)') && !runsBin('spawn' + 'Sync(') && !runsBin('execFile' + 'Sync(\'strings\', [\'-n\', \'8\', bin])') && !runsBin('spawn' + '(process.execPath, [script])') && !runsBin('re.exec' + '(text)'));
     let said = null; try { DUMP.dumpBinary(path.join(os.tmpdir(), 'vs-record-shape-no-such', 'claude'), [], { text: 'strings with no stamp' }); } catch (e) { said = e.message; }
     ok('§4 B-5e52: dumpBinary over a binary that names no build REFUSES by name — it never runs the file to ask (a missing file proves no run was tried)', /names no build/.test(String(said)), said);
     ok('§4 B-5e52: …and reads the build off a 0644 copy\'s stamp, or its versions-dir name', DUMP.versionOfBinary('/x/claude-copy', 'a VERSION:"2.1.322" b VERSION:"2.1.322"') === '2.1.322' && DUMP.versionOfBinary('/x/claude/versions/2.1.322', '') === '2.1.322');
@@ -1115,6 +1119,8 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     // THE 2.1.322 PIN (B-9ff2, lane bl-tests-e, 2026-11-17) — the box's claude by 2026-11-13. Its dump: the tree's dump script over
     // the installed file, READ (strings), never run — the build named by its versions-dir name. It equals 2.1.321's in every key,
     // field, nested object and sentence text (only the minified names moved), so nothing is declared for it — the 2.1.308 case.
+    // Its `zod` is {} where 2.1.321.json carries ui_notify / ui_notify_cancel: the dump writes zod ONLY for the keys new against the
+    // previous dump (newKeys), and 2.1.322 has none — an empty zod here is not a lost shape.
     const d322 = dumps.find((d) => d.version === '2.1.322');
     const diff22 = d322 && d321 ? dumpDiff(d321, d322) : null;
     ok('2.1.322 against 2.1.321 (the dump diff, recomputed): 0 changes — no key added or gone, no field, no nested key, no sentence — so no FIELDS_322 and no list moves', !!diff22 && diff22.changes === 0 && diff22.newKeys.length === 0 && diff22.goneKeys.length === 0 && Object.keys(diff22.fields).length === 0 && Object.keys(diff22.nested).length === 0 && diff22.sentencesAdded.length === 0 && diff22.sentencesGone.length === 0, diff22);

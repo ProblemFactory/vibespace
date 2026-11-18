@@ -304,8 +304,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
     process.stdout.write(JSON.stringify(r) + '\n');
     process.exit(r.error ? 1 : 0);
   }
-  const [bin, prev] = process.argv.slice(2);
-  if (!bin) { console.error('usage: node scripts/claude-cli-dump.mjs <claude binary> [previous dump.json]'); process.exit(2); }
+  const [given, prev] = process.argv.slice(2);
+  if (!given) { console.error('usage: node scripts/claude-cli-dump.mjs <claude binary> [previous dump.json]'); process.exit(2); }
+  // the REAL path first (B-5e52 cure): ~/.local/bin/claude is a symlink named «claude» — its target's versions-dir name names the
+  // build, as --auto's installedClaude reads it; the path as given would leave the build to the VERSION-stamp vote alone
+  let bin = given; try { bin = fs.realpathSync(given); } catch { }
   let newKeys = [];
   if (prev) {
     const old = JSON.parse(fs.readFileSync(prev, 'utf8')).union;

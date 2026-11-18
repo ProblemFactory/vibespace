@@ -190,6 +190,16 @@ console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the 
   ok('`node scripts/claude-cli-dump.mjs --auto --bin … --data …` by hand: ONE JSON line, the draft written', o.version === '2.1.399' && o.wrote === true && fs.existsSync(path.join(tmp, 'data-cli/claude-cli-dumps/2.1.399.json')), o);
   const bad = spawnSync(process.execPath, [path.join(REPO, 'scripts/claude-cli-dump.mjs'), '--auto', '--bin', path.join(REPO, `scripts/fixtures/claude-cli/${NEWEST}.json`), '--data', path.join(tmp, 'data-cli2')], { encoding: 'utf8' });
   let badOut = null; try { badOut = JSON.parse(String(bad.stdout).trim()); } catch { }
+  // B-5e52 cure: the MANUAL road (`node scripts/claude-cli-dump.mjs <bin>`) on ~/.local/bin/claude — a link named «claude» whose
+  // target sits under versions/2.1.399 and whose stamp votes 2.1.398: the real path's name decides, as --auto's road does
+  const vdir2 = path.join(tmp, 'home2/.local/share/claude/versions'); fs.mkdirSync(vdir2, { recursive: true }); fs.mkdirSync(path.join(tmp, 'home2/.local/bin'), { recursive: true });
+  const tgt2 = path.join(vdir2, '2.1.399'), link2 = path.join(tmp, 'home2/.local/bin/claude');
+  fs.writeFileSync(tgt2, fixtureText(dump, { version: '2.1.398', union: planted }), { mode: 0o644 }); fs.symlinkSync(tgt2, link2);
+  const man = spawnSync(process.execPath, [path.join(REPO, 'scripts/claude-cli-dump.mjs'), link2], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  let manV = null; try { manV = JSON.parse(String(man.stdout)).version; } catch { manV = `exit ${man.status}: ${String(man.stderr).slice(0, 160)}`; }
+  let asGiven = null; try { asGiven = D.dumpBinary(link2, []).version; } catch (e) { asGiven = e.message; }
+  ok('the MANUAL road over ~/.local/bin/claude (a link named claude) reads the build off its REAL path — 2.1.399, its versions-dir name, never the stamp vote (2.1.398)', manV === '2.1.399', { manV });
+  ok('RED CONTROL: the path as given (the road before the cure) leaves the build to the stamp vote — 2.1.398, the wrong build', asGiven === '2.1.398', { asGiven });
   ok('…a file that names no build (here a JSON file: no versions-dir name, no VERSION stamp) ⇒ exit 1 and the error BY NAME, nothing written', bad.status === 1 && !!badOut && /names no version/.test(badOut.error || '') && !fs.existsSync(path.join(tmp, 'data-cli2/claude-cli-dumps')), { status: bad.status, out: bad.stdout });
 }
 
