@@ -5060,6 +5060,8 @@ export default {
   "Your presses today ({n})": "你今天的批量恢复（{n} 次）",
   "{time} — {planned} planned, {delivered} continued": "{time} —— 计划 {planned} 个，已继续 {delivered} 个",
   "{time} — {planned} planned, still running": "{time} —— 计划 {planned} 个，仍在进行",
+  "{time} — {planned} planned, cut short by a restart after {continued} continued": "{time} —— 计划 {planned} 个，已继续 {continued} 个时被重启打断",
+  "Today’s presses could not be read — the spending record is unreadable.": "今天的批量恢复记录读不到——花费记录无法读取。",
   "{member}: {n}": "{member}：{n}",
   "left stopped": "留在停止状态",
   "its billing account could not be named": "无法确定它的计费账号",

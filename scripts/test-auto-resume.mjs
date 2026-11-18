@@ -1956,6 +1956,37 @@ await (async () => {
     const w2 = await realWorld({ allow: true, overFromStart: ['B'] });
     ok('17b. (2) where the instance ALLOWS paid overage: the plan says so and names B as billed (1 continue) — and B IS continued (the press bills it, as the dialog says)', !!w2.plan.overage && w2.plan.overage.allowed === true && w2.plan.overage.billed.map((b) => b.name + ':' + b.n).join() === 'B:1' && w2.sent === 'a1,b1,a2,a3', JSON.stringify({ overage: w2.plan.overage, sent: w2.sent }));
   }
+  // A PRESS CUT OFF BY A RESTART (主开发 2026-11-18 21:55Z — the MUST): through the REAL engine and the REAL guard — a press of 3
+  // paced 10 s, its first continue delivered; the engine object RESTARTED (a fresh create over the same sessions and guard: the batch
+  // lived in memory); the row's words read «cut short by a restart after 1 continued». CONTROL FIRST: before the restart, with the
+  // batch running, the same row reads «still running»
+  {
+    const SGr = require(path.join(REPO, 'src/server/spend-guard.js')), SBr = require(path.join(REPO, 'src/stopped-by.js'));
+    const PRESS4 = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkrestart-'));
+    const guard = SGr.create({ dataDir: dir, serverSetting: () => undefined, identityOf: (s2) => (s2 && s2._slot ? { key: s2._slot, name: s2._slot } : null), log: () => { } });
+    const S4 = (slot, ago) => ({ backend: 'claude', mode: 'chat', name: slot + ago, _slot: slot, _stoppedBy: { kind: 'overload', at: Date.now() - ago * 3600e3 }, pty: {}, _isStreaming: false });
+    const active = new Map([['r1', S4('A', 3)], ['r2', S4('A', 2)], ['r3', S4('A', 1)]]);
+    const mk = (pace) => create({ dataDir: dir, activeSessions: active, serverSetting: () => undefined, log: () => { },
+      resumeVerb: () => ({ form: 'message', deliver: (session, text, d) => d.sendChatInput(session, text) }),
+      sendToSession: (id, s2) => { s2._isStreaming = true; return true; }, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+      previewSpendBatch: (items) => guard.previewBatch({ reason: 'bulk-resume', items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
+      authorizeSpendBatch: (items, reason) => guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
+      noteBatchSpend: (id, s2, identity, hold, reason, press) => guard.note({ reason, identity, hold, press }), notePress: (b, n, reason) => guard.notePress({ reason, press: b, n }), notePressEnd: (b, d) => guard.notePressEnd({ press: b, delivered: d }),
+      releaseSpend: (id, s2, hold) => guard.release({ hold }), renewSpend: (h) => guard.renewHolds(h), wallVerdict: () => null, bulkPaceMs: pace });
+    const ar1 = mk(10000);
+    const r0 = ar1.resumeBatch({ pressed: PRESS4 });
+    const until1 = Date.now() + 3000;
+    while (Date.now() < until1 && !(guard.pressesToday()[0] && guard.pressesToday()[0].byAccount.length)) await new Promise((r) => setTimeout(r, 10));
+    const clk = () => '09:00';
+    const before = SBr.pressWords(guard.pressesToday(), null, { clock: clk, running: ar1.stoppedPlan().running });
+    ok('17b. A PRESS CUT OFF BY A RESTART — CONTROL FIRST: the batch running (its first continue delivered, the next 10 s away) ⇒ «3 planned, still running»', !!before && before.rows[0].line === '09:00 — 3 planned, still running' && ar1.stoppedPlan().running === r0.batchId, JSON.stringify({ before, running: ar1.stoppedPlan().running }));
+    const ar2 = mk(5);   // THE RESTART: a fresh engine object over the same conversations and guard — the batch lived in memory
+    const after = SBr.pressWords(guard.pressesToday(), null, { clock: clk, running: ar2.stoppedPlan().running });
+    ok('17b. A PRESS CUT OFF BY A RESTART: after the engine restarts, the row reads «cut short by a restart after 1 continued» — never «still running» for a day', !!after && after.rows[0].line === '09:00 — 3 planned, cut short by a restart after 1 continued' && ar2.stoppedPlan().running === null, JSON.stringify({ after }));
+    ar1.stopBatch(r0.batchId); await new Promise((r) => setTimeout(r, 30));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   // THE OWNER'S RULING 2026-11-18 (B): the bulk press is the person's own act — the press its door minted selects the ATTENDED
   // reason for the batch's authorization, its every re-ask and its every charge; no press, or a press-shaped object no door
   // minted, is the gated twin (auto-resume) all through

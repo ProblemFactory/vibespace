@@ -210,14 +210,18 @@ const REFUSED_NAMED_KEYS = Object.freeze({
 });
 /** THE PRESSES OF THE DAY in a person's words (主开发 21:04Z (a)) — the spending view's lines: «14:02 — 30 planned, 28 continued»
  *  and, under each, the accounts it continued on. PURE: `presses` = the guard's pressesToday; `clock` the page's time words. */
-function pressWords(presses, tIn, { now = Date.now(), clock = isoClock } = {}) {
+function pressWords(presses, tIn, { now = Date.now(), clock = isoClock, running = null } = {}) {   // `running` = the batch running NOW (the reply's own)
   const t = tOf(tIn);
   const list = Array.isArray(presses) ? presses.filter((p) => p && Number(p.at) > 0) : [];
   if (!list.length) return null;
   return {
     head: t('Your presses today ({n})', { n: list.length }),
     rows: list.map((p) => ({
-      line: p.delivered === null || p.delivered === undefined ? t('{time} — {planned} planned, still running', { time: clock(p.at, now), planned: p.planned }) : t('{time} — {planned} planned, {delivered} continued', { time: clock(p.at, now), planned: p.planned, delivered: p.delivered }),
+      // a press not ended is RUNNING only if it is the batch running now — else a restart cut it short (主开发 21:55Z): said with
+      // how many it had continued (its folded rows), never «still running» for a day
+      line: p.delivered !== null && p.delivered !== undefined ? t('{time} — {planned} planned, {delivered} continued', { time: clock(p.at, now), planned: p.planned, delivered: p.delivered })
+        : running && p.press === running ? t('{time} — {planned} planned, still running', { time: clock(p.at, now), planned: p.planned })
+          : t('{time} — {planned} planned, cut short by a restart after {continued} continued', { time: clock(p.at, now), planned: p.planned, continued: (Array.isArray(p.byAccount) ? p.byAccount : []).reduce((n, a) => n + (Number(a && a.n) || 0), 0) }),
       accounts: (Array.isArray(p.byAccount) ? p.byAccount : []).map((a) => t('{member}: {n}', { member: memberWords(a.name || a.key, t), n: a.n })),
     })),
   };
@@ -277,7 +281,7 @@ const WORD_KEYS = Object.freeze([
   'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit', 'The stopped session cannot be resumed now', 'None of the {m} stopped sessions can be resumed now',
   ...Object.values(SKIP_KEYS), 'skipped', '{why} until {time}',
   'Resumed {n}', 'skipped {n} (still inside a limit)', 'skipped {n} ({w} still inside a limit)', 'skipped {n}', 'refused {n}', 'could not deliver {n}', 'not reached {n}',
-  ...Object.values(REFUSED_KEYS), ...Object.values(REFUSED_NAMED_KEYS), 'This machine’s own login', 'Your presses today ({n})', '{time} — {planned} planned, {delivered} continued', '{time} — {planned} planned, still running', '{member}: {n}', '{why} ({reason})', '{why} — {n}', 'stopped {n}',
+  ...Object.values(REFUSED_KEYS), ...Object.values(REFUSED_NAMED_KEYS), 'This machine’s own login', '{time} — {planned} planned, cut short by a restart after {continued} continued', 'Your presses today ({n})', '{time} — {planned} planned, {delivered} continued', '{time} — {planned} planned, still running', '{member}: {n}', '{why} ({reason})', '{why} — {n}', 'stopped {n}',
 ]);
 
 module.exports = {

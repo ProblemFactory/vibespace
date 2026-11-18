@@ -5059,6 +5059,8 @@ export default {
   "Your presses today ({n})": "今日の一括再開（{n} 回）",
   "{time} — {planned} planned, {delivered} continued": "{time} — 予定 {planned} 件、続行 {delivered} 件",
   "{time} — {planned} planned, still running": "{time} — 予定 {planned} 件、実行中",
+  "{time} — {planned} planned, cut short by a restart after {continued} continued": "{time} — 予定 {planned} 件、{continued} 件続行したところで再起動により中断",
+  "Today’s presses could not be read — the spending record is unreadable.": "今日の一括再開の記録を読めません — 支出の記録が読み取れません。",
   "{member}: {n}": "{member}：{n}",
   "left stopped": "停止したまま",
   "its billing account could not be named": "課金アカウントを特定できません",

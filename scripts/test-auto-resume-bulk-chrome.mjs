@@ -314,6 +314,20 @@ try {
   await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
   const pressesRow = await until(() => D.ev(`(() => { const h = document.querySelector('.auto-resume-bulk-presses'); const li = [...document.querySelectorAll('.auto-resume-bulk-press-list li')].map((x) => x.textContent); return h && li.length ? { head: h.textContent, li } : null; })()`), 10000, 200);
   check('desk: Settings → Spending lists the press of the day — «你今天的批量恢复（1 次）», «计划 3 个，已继续 3 个», on «本机自己的登录：3»', !!pressesRow && /你今天的批量恢复（1 次）/.test(pressesRow.head) && pressesRow.li.some((x) => /计划 3 个，已继续 3 个/.test(x) && /本机自己的登录：3/.test(x)), pressesRow);
+  // THE DIALOG'S WORDS, RENDERED (主开发 2026-11-18 21:55Z (2)): a crafted plan through the page's own fetch — (c) the quiet preview
+  // read NOTHING (overage null) ⇒ «现在读不到…是否会被拒绝», never «仍会被拒绝»; (d) an instance that ALLOWS paid overage and NO estimate ⇒
+  // the account billed is still named. Each scene proves its plant first (the crafted plan is what the dialog read)
+  for (const [tag, overage] of [['(c)', null], ['(d)', { allowed: true, billed: [{ name: 'B', n: 1 }] }]]) {
+    const PLAN = { ok: true, counts: { total: 1, on: 0, off: 1, globalDefault: false }, eligible: [{ id: 'crafted-1', name: 'Crafted', kind: 'overload', at: Date.now() - 60000, member: null }], skipped: [], total: 1, running: null, estimate: null, overage, presses: [] };
+    await D.ev(`(() => { window.__arbOrigFetch = window.__arbOrigFetch || window.fetch; window.__arbPlanReads = 0; const P = ${JSON.stringify(JSON.stringify(PLAN))}; window.fetch = (u, o) => (/\/api\/sessions\/stopped(\?|$)/.test(String((u && u.url) || u)) ? (window.__arbPlanReads++, Promise.resolve(new Response(P, { status: 200, headers: { 'Content-Type': 'application/json' } }))) : window.__arbOrigFetch(u, o)); return true; })()`);
+    await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
+    await press(D.S, D.ev, '.auto-resume-bulk .resume-stopped-open');
+    const r = await until(() => D.ev(`(() => { const o = document.getElementById('resume-stopped-dialog'); const l = o && o.querySelector('.resume-stopped-lead'); return l ? { reads: window.__arbPlanReads, lead: l.textContent, members: [...o.querySelectorAll('.resume-stopped-member')].map((x) => x.textContent), dollars: !!o.querySelector('.resume-stopped-dollars') } : null; })()`), 8000, 150);
+    check(`desk: ${tag} RENDERED — CONTROL FIRST: the dialog read the crafted plan`, !!r && r.reads >= 1, r);
+    if (tag === '(c)') check('desk: (c) RENDERED — no quiet preview read ⇒ «现在读不到正在使用付费超额的账号是否会被拒绝», never «仍会被拒绝»', !!r && /现在读不到正在使用付费超额的账号是否会被拒绝/.test(r.lead) && !/仍会被拒绝/.test(r.lead), r);
+    else check('desk: (d) RENDERED — paid overage ALLOWED and NO estimate ⇒ the account billed is still named («B：其中 1 个继续按付费超额计费»), no dollars drawn', !!r && /本实例允许在付费超额时运行/.test(r.lead) && r.members.some((x) => x === 'B：其中 1 个继续按付费超额计费') && r.dollars === false, r);
+    await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), window.__arbOrigFetch && (window.fetch = window.__arbOrigFetch), true)`);
+  }
   // FORM TWO ON THE PAGE (the cure, 主开发 2026-11-18 20:16Z): the machine's login reports PAID OVERAGE (its usage cache), the
   // fourth conversation stops on an overload ⇒ the dialog names the account BEFORE the press — «留在停止状态（本机自己的登录 正在使用
   // 付费超额）» — with the door (设置 → 花费), and offers nothing to start

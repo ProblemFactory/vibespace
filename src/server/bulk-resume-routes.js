@@ -101,7 +101,7 @@ function create({ activeSessions, pressesToday = null, getAutoResume = () => nul
     let estimate = null;
     try { estimate = estimateFor(plan.eligible, now); } catch (e) { log('[bulk-resume] estimate failed: ' + e.message); }
     const pub = (e) => ({ id: e.id, name: e.name, kind: e.kind, at: e.at, member: e.identity ? { key: e.identity.key, name: e.identity.name } : null });
-    return { ok: true, counts: ar.bulkCounts(), eligible: plan.eligible.map(pub), skipped: plan.skipped, total: plan.total, running: plan.running || null, estimate, overage: plan.overage || null, presses: (() => { try { return pressesToday ? pressesToday() : []; } catch { return []; } })() };   // (a): the presses of the day, for the spending view
+    return { ok: true, counts: ar.bulkCounts(), eligible: plan.eligible.map(pub), skipped: plan.skipped, total: plan.total, running: plan.running || null, estimate, overage: plan.overage || null, presses: (() => { try { return pressesToday ? pressesToday() : []; } catch (e) { log('[bulk-resume] the presses of the day could not be read: ' + ((e && e.message) || e)); return null; } })() };   // (a): the presses of the day, for the spending view — null = could not be read, never «none»
   }
 
   function register(app) {

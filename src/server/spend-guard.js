@@ -421,7 +421,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   function notePress({ reason, press, n = 0, now = Date.now() } = {}) { state = A.notePressRow(state, { at: now, reason, press, n }); persist(); return true; }
   /** …its end (主开发 21:04Z (b)): how many it delivered. And the presses of the day, for the owner's spending view (a). */
   function notePressEnd({ press, delivered = 0, now = Date.now() } = {}) { state = A.notePressEnd(state, { at: now, press, delivered }); persist(); return true; }
-  function pressesToday(now = Date.now()) { return A.pressesOf(state, { now }); }
+  function pressesToday(now = Date.now()) { return unreadable ? null : A.pressesOf(state, { now }); }   // the record unreadable ⇒ null (never «no presses»)
 
   /** A QUIET LOOK at what a batch's authorization WOULD answer, per account (the bulk dialog's plan, BEFORE the press — 主开发
    *  16:20Z: «… 10 on account B are left stopped: B is billing paid overage» is said before as well as after): nothing held,

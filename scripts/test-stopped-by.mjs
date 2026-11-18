@@ -207,10 +207,17 @@ console.log('§6 wiring pins');
 {
   const P = [{ at: 2, press: 'rb-2', planned: 3, delivered: null, byAccount: [] }, { at: 1, press: 'rb-1', planned: 30, delivered: 28, byAccount: [{ key: '__global__', name: '__global__', n: 20 }, { key: 'B', name: 'B', n: 8 }] }];
   const clk = (ms) => (ms === 1 ? '14:02' : '15:10');
-  const en = SB.pressWords(P, null, { clock: clk }), zhP = SB.pressWords(P, tZh, { clock: clk });
+  const en = SB.pressWords(P, null, { clock: clk, running: 'rb-2' }), zhP = SB.pressWords(P, tZh, { clock: clk, running: 'rb-2' });   // rb-2 is the batch running now
   ok('PRESSES OF THE DAY (en): the head counts them; a press says planned and continued, a running one says so; the accounts with the machine\'s login in words', en.head === 'Your presses today (2)' && en.rows[0].line === '15:10 — 3 planned, still running' && en.rows[1].line === '14:02 — 30 planned, 28 continued' && en.rows[1].accounts.join(' · ') === 'This machine’s own login: 20 · B: 8', JSON.stringify(en));
   ok('PRESSES OF THE DAY (zh)', zhP.head === '你今天的批量恢复（2 次）' && /计划 30 个，已继续 28 个/.test(zhP.rows[1].line) && /本机自己的登录：20/.test(zhP.rows[1].accounts[0]), JSON.stringify(zhP));
   ok('PRESSES OF THE DAY: none ⇒ no block at all (null)', SB.pressWords([], null) === null && SB.pressWords(null, null) === null);
+  // 主开发 21:55Z (the MUST): a press not ended is RUNNING only while it is the running batch — else a restart cut it short, said
+  // with how many it had continued; CONTROL first: the same row while its batch IS the running one reads «still running»
+  const cutRow = [{ at: 3, press: 'rb-9', planned: 30, delivered: null, byAccount: [{ key: 'A', name: 'A', n: 7 }, { key: 'B', name: 'B', n: 2 }] }];
+  const live9 = SB.pressWords(cutRow, null, { clock: () => '09:00', running: 'rb-9' }), cut9 = SB.pressWords(cutRow, null, { clock: () => '09:00', running: null }), cut9zh = SB.pressWords(cutRow, tZh, { clock: () => '09:00', running: 'rb-other' });
+  ok('PRESSES OF THE DAY — CONTROL FIRST: the row of the batch running NOW reads «still running»', live9.rows[0].line === '09:00 — 30 planned, still running', live9.rows[0].line);
+  ok('PRESSES OF THE DAY: the same row with NO batch running (a restart) reads «cut short by a restart after 9 continued» — never «still running» for a day (zh too, with another batch running)', cut9.rows[0].line === '09:00 — 30 planned, cut short by a restart after 9 continued' && /被重启打断/.test(cut9zh.rows[0].line) && /已继续 9 个/.test(cut9zh.rows[0].line), JSON.stringify({ en: cut9.rows[0].line, zh: cut9zh.rows[0].line }));
+  ok('the page (21:55Z): the Settings row hands the running batch to the words, and an UNREADABLE record (null) says so — never an empty list read as no presses', /pressWords\(plan && plan\.presses, t, \{ clock: [^}]*\}\), running: plan && plan\.running \}\)/.test(read('src/lib/bulk-resume.js')) && /if \(plan && plan\.presses === null\) box\.appendChild/.test(read('src/lib/bulk-resume.js')));
   const page = read('src/lib/bulk-resume.js');
   ok('the page (21:04Z (c)): no quiet preview read ⇒ «could not be read now», never «still refused»', /!overKnown \? t\('[^']*Whether an account in paid overage would be refused could not be read now/.test(page));
   ok('the page (21:04Z (d)): the account billed as overage is named OUTSIDE the cost box\'s condition (an estimate missing names it too)', /if \(n && overAllowed && Array\.isArray\(p\.overage\.billed\) && p\.overage\.billed\.length\) \{/.test(page) && !/if \(cw\) \{[^}]*bill paid overage/.test(page));

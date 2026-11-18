@@ -4900,6 +4900,7 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const gL = guardMod.create({ dataDir: dU, serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
     ok('§13 (4) CONTROL FIRST: the guard reads its budget file as UNREADABLE (the plant)', !!gL.snapshot().ledgerUnreadable, JSON.stringify(gL.snapshot().ledgerUnreadable));
     const tL = gL.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1')] }), pL = gL.previewBatch({ reason: TWIN, items: [sess('A', 'a1')] });
+    ok('§13 (21:55Z (1)) GUARD: an unreadable record answers the presses of the day with NULL — never an empty list read as «no presses»', gL.pressesToday() === null);
     ok('§13 (4) GUARD: the twin batch AND its quiet preview refuse BY NAME on the unreadable ledger (every layer of the money gate fails closed)', tL.ok === false && tL.why === 'ledger-unreadable' && pL.refusedSlots.length === 1 && pL.refusedSlots[0].why === 'ledger-unreadable', JSON.stringify({ tL: tL.why, pL }));
   }
   { // FORM TWO on the guard: B in paid overage — A's items go on, B's come back SKIPPED by name; the plan's preview is QUIET
@@ -4981,6 +4982,13 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask, every charge and the press record', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 4);
   { const rt = read('src/server/bulk-resume-routes.js'), h = rt.indexOf("app.post('/api/sessions/resume-stopped'"), body = rt.slice(h, rt.indexOf('app.post(', h + 10));
     ok('§13 THE DOOR: POST /api/sessions/resume-stopped refuses EVERY bearer first, then the page, and mints the press it hands the batch (pressOf(req))', h > 0 && /try \{\s*(?:\/\/[^\n]*\n\s*)*if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(body) && /ar\.resumeBatch\(\{ limit, ids, pressed: pressOf\(req\) \}\)/.test(body)); }
+  { // (21:55Z (1)) THE ROUTE: the presses of the day that THROW are said as null and journalled — never «no presses»; read ⇒ the list
+    const R2 = require(path.join(REPO, 'src/server/bulk-resume-routes.js'));
+    const logs2 = [], arP = { stoppedPlan: () => ({ eligible: [], skipped: [], total: 0, running: null }), bulkCounts: () => ({ total: 0, on: 0 }) };
+    const thrown = R2.create({ activeSessions: new Map(), getAutoResume: () => arP, pressesToday: () => { throw new Error('the record could not be read'); }, log: (l) => logs2.push(String(l)) }).stopped();
+    const fine = R2.create({ activeSessions: new Map(), getAutoResume: () => arP, pressesToday: () => [{ at: 1, press: 'rb-1', planned: 2, delivered: 2, byAccount: [] }] }).stopped();
+    ok('§13 (21:55Z (1)) THE ROUTE: pressesToday throwing ⇒ `presses: null` and one journal line naming it; read ⇒ the list as it is', thrown.presses === null && logs2.some((l) => /the presses of the day could not be read: the record could not be read/.test(l)) && Array.isArray(fine.presses) && fine.presses.length === 1, JSON.stringify({ thrown: thrown.presses, logs2, fine: fine.presses }));
+  }
   { // THE REAL DOOR, driven (the read's should): a person's page reaches the batch WITH a press; every bearer is refused first; a header-less local request is not a press
     const R = require(path.join(REPO, 'src/server/bulk-resume-routes.js'));
     const seen = [], routes = {};

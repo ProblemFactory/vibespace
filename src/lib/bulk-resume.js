@@ -298,7 +298,8 @@ export function renderAutoResumeBulk(container, app) {
     if (w.passive) box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-passive', w.passive));
     box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-note', t('These buttons change the sessions you have now — the default above decides for new ones.')));
     // (a) THE PRESSES OF THE DAY (主开发 21:04Z): when, how many planned, how many continued, by account — words only
-    const pw = pressWords(plan && plan.presses, t, { clock: (ms) => stampAt(ms, { now: Date.now(), words: true }) });
+    const pw = pressWords(plan && plan.presses, t, { clock: (ms) => stampAt(ms, { now: Date.now(), words: true }), running: plan && plan.running });   // a press not ended and not running: cut short by a restart
+    if (plan && plan.presses === null) box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-presses', t('Today’s presses could not be read — the spending record is unreadable.')));   // the record unreadable — never read as «no presses»
     if (pw) {
       box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-presses', pw.head));
       const ul = el('ul', 'dialog-list auto-resume-bulk-press-list');
