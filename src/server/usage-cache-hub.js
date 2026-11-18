@@ -24,15 +24,24 @@ const UW = require('../usage-cache-write.js');
 
 let _W = null, _dropRun = null;
 const HUB = { pendingText: (f) => pendingText(f), pendingIn: (d) => pendingIn(d), handOff: (...a) => handOff(...a) };   // what the cache module's hook calls
-const _pending = new Map();   // file → { bytes, gen, v, bytesV, calls: [{v, at, args}] | null (a sidecar), reading, again, producedGen, producedV, epoch }
+const _pending = new Map();   // file → { bytes, gen, v, bytesV, calls: [{v, at, args}] | null (a sidecar), reading, again, producedGen, producedV, landedGen, epoch }
 const PACED_MS = 60000;       // the R1 hand-off's pace: only the exit's net (the exit writes whatever is dirty) and a re-merge that never came — R2's urgent bytes come first
 const cloneData = (x) => (x == null || typeof x !== 'object' ? x : JSON.parse(JSON.stringify(x)));
-/** THE HUB'S INJECTION: its store writer (src/store-writer.js) and run-reads' dropRun. null ⇒ synchronous again (and nothing kept). */
-function useStoreWriter(writer, { dropRun = null } = {}) { _W = writer || null; _dropRun = typeof dropRun === 'function' ? dropRun : null; if (!_W) _pending.clear(); UW.useHub(_W ? HUB : null); }
+const readFileOffLoop = (f) => fs.promises.readFile(f, 'utf-8');
+let _readFile = readFileOffLoop;
+/** THE HUB'S INJECTION: its store writer (src/store-writer.js) and run-reads' dropRun. null ⇒ synchronous again (and nothing kept).
+ *  `readFile` — a suite's seam only (a read it can hold open, to land a write inside it); the hub's is fs.promises. */
+function useStoreWriter(writer, { dropRun = null, readFile = null } = {}) { _W = writer || null; _dropRun = typeof dropRun === 'function' ? dropRun : null; _readFile = typeof readFile === 'function' ? readFile : readFileOffLoop; if (!_W) _pending.clear(); UW.useHub(_W ? HUB : null); }
 /** the hook's two readers (R1): a pending reading's bytes, and the pending files of a folder */
 function pendingText(file) { const p = _pending.get(file); return p ? p.bytes : null; }
 function pendingIn(dir) { const at = path.resolve(dir), out = []; for (const f of _pending.keys()) if (path.dirname(path.resolve(f)) === at) out.push(path.basename(f)); return out; }
 const dropRunNow = () => { if (_dropRun) { try { _dropRun(); } catch { } } };
+/** THE LAW (the U6.5 cure — 主开发 13:44Z; three readers' one must: a landing during a re-merge's read left the copy in memory
+ *  for good, answered ahead of the file): the pending copy is CLEARED when its NEWEST bytes are on disk and nothing is left to
+ *  replay — ONE condition, asked at a landing and at EVERY exit of a re-merge (its early returns, its end, its catch) */
+function settle(file, p) {
+  if (_pending.get(file) === p && p.landedGen === p.gen && !p.reading && !p.again && (!p.calls || !p.calls.length)) _pending.delete(file);
+}
 function handTo(file, p, { urgent = false } = {}) {
   _W.dirty(file, { name: 'usage-cache.write', rank: 0, makeDir: true, ...(urgent ? {} : { debounceMs: PACED_MS }),
     produce: () => { p.producedGen = p.gen; p.producedV = p.bytesV; return p.bytes; },
@@ -41,13 +50,13 @@ function handTo(file, p, { urgent = false } = {}) {
       if (!ok || _pending.get(file) !== p) return;
       p.epoch++;   // what the file holds changed: a re-merge whose read began before this is over an older file
       if (p.calls) p.calls = p.calls.filter((c) => c.v > p.producedV);   // the calls these bytes held are on disk now
-      if (p.producedGen === p.gen && !p.reading && !p.again) _pending.delete(file);   // the NEWEST bytes landed: the file is the reading again
+      p.landedGen = p.producedGen; settle(file, p);   // the NEWEST bytes landed, nothing to replay ⇒ the file is the reading again
     } });
   if (urgent && typeof _W.durable === 'function') _W.durable(file).catch(() => { });   // an ACT: the writer's next writes (nobody awaits it)
 }
 function handOff(file, call, out, { sidecar = false } = {}) {
   let p = _pending.get(file);
-  if (!p) { p = { bytes: null, gen: 0, v: 0, bytesV: 0, calls: sidecar ? null : [], reading: false, again: false, producedGen: 0, producedV: 0, epoch: 0 }; _pending.set(file, p); }
+  if (!p) { p = { bytes: null, gen: 0, v: 0, bytesV: 0, calls: sidecar ? null : [], reading: false, again: false, producedGen: 0, producedV: 0, landedGen: 0, epoch: 0 }; _pending.set(file, p); }
   p.v++; p.gen++; p.bytes = sidecar ? out : JSON.stringify(out); p.bytesV = p.v;
   if (!sidecar) { const a = call.args; p.calls.push({ v: p.v, at: call.at, args: { ...a, obj: cloneData(a.obj), set: cloneData(a.set), absentWindows: cloneData(a.absentWindows), passiveAnswer: cloneData(a.passiveAnswer), refused: cloneData(a.refused), refusalMarks: cloneData(a.refusalMarks) } }); }   // cloned: a caller may change its objects after the write returns
   dropRunNow();
@@ -59,10 +68,11 @@ function handOff(file, call, out, { sidecar = false } = {}) {
  *  mount refused keeps the R1 bytes (never a reading wiped); a write that landed while the read ran makes it stale (again). */
 function remerge(file, p) {
   const epoch0 = p.epoch;
-  fs.promises.readFile(file, 'utf-8').then((t) => { try { return { base: JSON.parse(t) || null }; } catch { return { base: null } } }, (e) => (e && e.code === 'ENOENT' ? { base: null } : { refused: true })).then(({ base, refused }) => {
+  // every exit: another re-merge if a call came meanwhile, else THE LAW's one question (settle)
+  const next = () => { if (p.again) { p.again = false; p.reading = true; setImmediate(() => remerge(file, p)); } else settle(file, p); };
+  Promise.resolve().then(() => _readFile(file)).then((t) => { try { return { base: JSON.parse(t) || null }; } catch { return { base: null } } }, (e) => (e && e.code === 'ENOENT' ? { base: null } : { refused: true })).then(({ base, refused }) => {
     if (_pending.get(file) !== p) return;
     p.reading = false;
-    const next = () => { if (p.again) { p.again = false; p.reading = true; setImmediate(() => remerge(file, p)); } };
     if (refused || !p.calls.length) { next(); return; }
     if (p.epoch !== epoch0) { p.again = true; next(); return; }
     const v = p.v;
@@ -82,7 +92,7 @@ function remerge(file, p) {
     }
     if (cur) { p.bytes = JSON.stringify(cur); p.bytesV = v; p.gen++; if (_W) handTo(file, p, { urgent: true }); }
     next();
-  }).catch(() => { p.reading = false; });
+  }).catch(() => { p.reading = false; try { next(); } catch { } });   // a body that threw strands neither the copy nor a queued «again»
 }
 
 module.exports = { useStoreWriter, pendingText, pendingIn };

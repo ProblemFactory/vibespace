@@ -446,8 +446,14 @@ await (async () => {
     ok(util(bytes1, 'fiveHour') === 30 && util(bytes1, 'sevenDay') === 63 && w1.durables.includes('sub-B.json'),
       '⑪ R2: the re-merge over the file hands BOTH limits in ONE write, as an act (durable asked: the writer\'s next writes)', JSON.stringify({ bytes1, durables: w1.durables }));
     const drops0 = drops; w1.land();
-    ok(fs.existsSync(fileOf(d11, 'sub-B')) && util(UW.readCacheJson(fileOf(d11, 'sub-B')), 'sevenDay') === 63 && drops > drops0 && !UW.listCacheDir(d11).filter((n) => n === 'sub-B.json').slice(1).length,
-      '⑪ a LANDING: the file holds the reading, the pending copy is gone (the reader reads the file), the run\'s memo dropped again (a synchronous flush inside a run)', JSON.stringify({ drops, drops0 }));
+    // the copy is GONE (the cure: this check can fail — see its RED copy in (6)): a later DIRECT write of the file is what the reader answers
+    // the burst queued a second re-merge (its read may still be in flight at this landing): the copy goes when the LAW holds —
+    // the newest bytes on disk and nothing left to replay — i.e. once that re-merge ends; bounded by turns, never a clock
+    for (let i = 0; i < 4000 && HUB.pendingText(fileOf(d11, 'sub-B')) !== null; i++) await new Promise((r) => setImmediate(r));
+    const goneAfterLanding = HUB.pendingText(fileOf(d11, 'sub-B')) === null;
+    fs.writeFileSync(fileOf(d11, 'sub-B'), JSON.stringify({ fetchedAt: 9000, source: 'statusline', fiveHour: { utilization: 0.31, resetsAt: 1786900000 }, sevenDay: { utilization: 0.66, resetsAt: 1787500000 } }));
+    ok(goneAfterLanding && util(UW.readCacheJson(fileOf(d11, 'sub-B')), 'sevenDay') === 66 && drops > drops0,
+      '⑪ a LANDING: the pending copy is gone — a later direct write of the file (the statusline\'s) is what the reader answers; the run\'s memo dropped again (a synchronous flush inside a run)', JSON.stringify({ goneAfterLanding, drops, drops0 }));
     // (2) THE PENDING COPY BEFORE THE MEMO: run-reads has the file's OLDER text memoized in this run; the door answers the
     // pending reading, the memo still holds the old one (a dropRun that does nothing here: the order alone is tested)
     RR.watch(d11);
@@ -481,12 +487,52 @@ await (async () => {
     ok(util(s1, 'fiveHour') === 30 && util(s1, 'sevenDay') === 77, '⑪ R2: a STATUSLINE write landing while the hub\'s write was queued is the BASE of the hub\'s write — its newer 7d stands (the hub\'s carried 7d keeps its older stamp), the hub\'s 5h on top', JSON.stringify(s1));
     const src = fs.readFileSync(HUBF, 'utf8');   // the hub module: a mutant copy compiled at its own path (its requires resolve as the real one's)
     const loadAs = (text) => { const mod = new Module(HUBF, null); mod.filename = HUBF; mod.paths = Module._nodeModulePaths(path.dirname(HUBF)); mod._compile(text, HUBF); return mod.exports; };
-    const aSet = 'set: cloneData(a.set),', aBase = "fs.promises.readFile(file, 'utf-8').then(";
+    const aSet = 'set: cloneData(a.set),', aBase = '() => _readFile(file)).then(';
     ok(src.split(aSet).length === 2 && src.split(aBase).length === 2, '⑪ ANCHORS: the call kept as merged (its typed set) and the re-merge\'s one read of the file');
     const s2 = await scene(loadAs(src.replace(aSet, 'set: null,')), 'relift');
     ok(util(s2, 'sevenDay') === 50, '⑪ R2 CONTROL: the replay lifting the call\'s object again (a mutant copy) ⇒ the carried old 7d, re-stamped as measured now, overwrites the statusline\'s newer one', JSON.stringify(s2));
-    const s3 = await scene(loadAs(src.replace(aBase, "Promise.resolve('null').then(")), 'memory');
+    const s3 = await scene(loadAs(src.replace(aBase, "() => 'null').then(")), 'memory');
     ok(util(s3, 'sevenDay') !== 77, '⑪ R2 CONTROL: the re-merge\'s base taken from memory (a mutant copy) ⇒ the statusline\'s 7d is overwritten', JSON.stringify(s3));
+    // (6) THE U6.5 CURE (主开发 13:44Z — three readers' one must, a MONEY FACT): A PENDING READING NEVER STAYS FOR GOOD. A burst of
+    // two events; the first re-merge hands its bytes; the store writer LANDS them while the second re-merge's read is IN
+    // FLIGHT (a read held open by the suite's seam — a stall placed there, never a clock): afterwards no pending copy, and a
+    // later direct write of the file is what the reader answers. RED copies: the law not asked at the re-merge's exit; the
+    // landing not asking it (the leg (1) check that the copy is gone, made able to fail)
+    const held = async (M, tag, { land = 'inRead' } = {}) => {
+      const gates = [];
+      // the seam: a read held open until the suite releases it; released, it answers at once (the hub's own part is then measured alone)
+      const readFile = (f) => new Promise((res, rej) => gates.push({ go: () => { try { res(fs.readFileSync(f, 'utf-8')); } catch (e) { rej(e); } } }));
+      const w = standIn(); M.useStoreWriter(w, { dropRun: () => { }, readFile });
+      const key = 'sub-H-' + tag, f = UW.cacheFileFor(d11, key), base = path.basename(f);
+      captureRateLimitEvent({ cacheDir: d11, key, identityIds: [key], ev: ev('five_hour', 21, 1786900000), now: 7000 });
+      captureRateLimitEvent({ cacheDir: d11, key, identityIds: [key], ev: ev('seven_day', 42, 1787500000), now: 7100 });   // the burst: «again»
+      const until = async (cond) => { for (let i = 0; i < 4000 && !cond(); i++) await new Promise((r) => setImmediate(r)); return cond(); };
+      const handed = () => w.durables.filter((x) => x === base).length;
+      await until(() => gates.length === 1); gates[0].go();
+      let turnsToHand = 0; while (handed() < 1 && turnsToHand < 4000) { await new Promise((r) => setImmediate(r)); turnsToHand++; }   // the hub's part of the race window
+      await until(() => gates.length === 2);   // the second re-merge's read: IN FLIGHT
+      if (land === 'inRead') w.land();          // THE LANDING, inside that read
+      gates[1].go();
+      if (land === 'inRead') { await until(() => gates.length === 3); if (gates[2]) gates[2].go(); }   // the landing made the read stale: one more re-merge, nothing left to replay
+      else { await until(() => handed() >= 2); w.land(); }   // the landing AFTER the re-merges: the law asked at the landing
+      await until(() => M.pendingText(f) === null);
+      const stuck = M.pendingText(f) !== null;
+      fs.writeFileSync(f, JSON.stringify({ fetchedAt: 9500, source: 'statusline', fiveHour: { utilization: 0.12, resetsAt: 1786900000 }, sevenDay: { utilization: 0.44, resetsAt: 1787500000 } }));
+      const answered = util(UW.readCacheJson(f), 'sevenDay');
+      M.useStoreWriter(null);
+      return { stuck, answered, turnsToHand, reads: gates.length };
+    };
+    const h1 = await held(HUB, 'cure');
+    ok(!h1.stuck && h1.answered === 44, '⑪ THE CURE: a write that LANDS while the next re-merge\'s read is in flight leaves NO pending copy — a later direct write of the file (the statusline\'s) is what every hub reader answers', JSON.stringify(h1));
+    ok(h1.turnsToHand <= 1, `⑪ the hub's part of the cross-process window, MEASURED on the stand-in: the re-merge hands its bytes ${h1.turnsToHand} turn(s) after its read answered (the rest is the store writer's queue ahead of an act)`, JSON.stringify(h1));
+    const aExit = '} else settle(file, p); };', aLand = 'p.landedGen = p.producedGen; settle(file, p);';
+    ok(src.split(aExit).length === 2 && src.split(aLand).length === 2, '⑪ ANCHORS: the law asked at every re-merge exit and at a landing');
+    const h2 = await held(loadAs(src.replace(aExit, '} };')), 'red-exit');
+    ok(h2.stuck && h2.answered !== 44, '⑪ CURE CONTROL: the law NOT asked at the re-merge\'s exit (the tip as read: a mutant copy) ⇒ the copy stays in memory for good and the reader answers its frozen bytes AHEAD of the file', JSON.stringify(h2));
+    const h0 = await held(HUB, 'after', { land: 'after' });
+    ok(!h0.stuck && h0.answered === 44, '⑪ THE CURE: the newest bytes landing AFTER the re-merges leave no pending copy either (the law asked at the landing)', JSON.stringify(h0));
+    const h3 = await held(loadAs(src.replace(aLand, 'p.landedGen = p.producedGen;')), 'red-land', { land: 'after' });
+    ok(h3.stuck, '⑪ CURE CONTROL (leg (1)\'s check made able to fail): the landing NOT asking the law ⇒ the copy stays after its newest bytes are on disk', JSON.stringify(h3));
     // (4) a SIDECAR (the `.window-` stamp) is handed whole; its one reader sees it before it lands
     const w4 = standIn(); HUB.useStoreWriter(w4, { dropRun: () => { } });
     UW.writeSidecar(d11, '.window-sub-B', { sevenDay: { resetsAt: 1787500000 }, at: 5000 });
