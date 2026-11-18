@@ -503,7 +503,9 @@ export function installSetupFlows(App) {
         // inc-mun7qjmw-iksh); a point from before the field existed has none
         const change = Array.isArray(e.change) && e.change.length
           ? e.change.map(([n, a, b]) => `${n || t('Desktop')} ${a} → ${b}`).join(' · ') : '';
-        return `<div class="lh-row"><div class="lh-main"><b>${escHtml(when(e.at))}</b>
+        // the point the hub's restart found (B-b05e — pinned: no burst after the restart pushes it out) says so
+        return `<div class="lh-row"><div class="lh-main"><b>${escHtml(when(e.at))}</b>${e.restart ? `
+            <div class="lh-sub lh-restart">${escHtml(t('As it was before the server restarted'))}</div>` : ''}
             <div class="lh-sub">${escHtml(t('{n} windows', { n: e.totalWindows || 0 }))}${per ? ' — ' + escHtml('') + per : ''}</div>${change ? `
             <div class="lh-sub lh-change">${escHtml(t('Then: {changes}', { changes: change }))}</div>` : ''}${desks ? `
             <div class="lh-desks">${desks}</div>` : ''}</div>

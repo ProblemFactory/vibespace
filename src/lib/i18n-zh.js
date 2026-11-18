@@ -6701,6 +6701,7 @@ export default {
   "its window did not appear": "它的窗口没有出现",
   "“{window}” is on “{desktop}”": "“{window}”在“{desktop}”上",
   "Then: {changes}": "之后的改动：{changes}",
+  "As it was before the server restarted": "服务器重启之前的样子",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "重新连接后无法重新读取布局——本页面的窗口改动将暂存，直到能读取为止",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "布局已重新读取——本页面一分钟多以前做的窗口改动未能保留（{n} 项）",
   "Stop drawing in a browser nobody watches": "停止绘制没人看的浏览器",

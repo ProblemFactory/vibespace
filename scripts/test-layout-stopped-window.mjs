@@ -51,6 +51,11 @@
 //      router); the phone switcher's row of a window that asked first goes when it closes (the REAL _buildWindowItem); a
 //      group close asks ONE question naming the tile it deletes for good, all or nothing (the REAL requestCloseGroup + the
 //      REAL requestClose)
+//   §9 BATCH bl-windows (the backlog push, 2026-11-17), each row with a RED control (the real module's text with ONE line
+//      changed — scripts/mutant-copy.mjs):
+//      B-b05e the rollback ring is SPREAD OVER TIME — the REAL router restarted over forty days of points, then a phone's
+//        burst of 100 shape changes: every recent day and hour keeps its point, the point from before the restart is pinned
+//        and named in the dialog (the base kept the first ten ever written + the burst)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -829,6 +834,118 @@ await section('§8 r4 a group close asks ONE question naming the tile it deletes
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', '{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.'];
   ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')), '§8 …both words have a zh AND a ja entry');
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// §9 BATCH bl-windows — a RED control is the REAL module's text with ONE line changed (scripts/mutant-copy.mjs: the copy lives
+// in this run's scratch dir, its relative imports reach the real files)
+const { mutantCopies } = await import('./mutant-copy.mjs');
+const MUT = mutantCopies('lsw-b9', REPO);
+const mutantSrc = (rel, find, repl) => { const src = read(rel); if (!src.includes(find)) throw new Error('mutant anchor missing in ' + rel + ': ' + find.slice(0, 120)); return src.replace(find, repl); };
+const mutantModule = (rel, find, repl) => MUT.load(rel, mutantSrc(rel, find, repl), 'b9');
+const mutantEsm = async (rel, find, repl) => import(pathToFileURL(MUT.write(rel, mutantSrc(rel, find, repl), 'b9', { esm: true })).href);
+const HOUR = 3600000, DAY = 86400000;
+const ringName = (ms, seq) => 'layout-' + new Date(ms).toISOString().replace(/[:.]/g, '-') + '-' + seq.toString(36) + '.json';
+/** B-b05e's scene on persistence module `P`: a hub restarted NOW over a ring of forty days — the first ten points ever written
+ *  (forty days ago), one point at the noon of each day 3…20 days back, one point an hour for the last thirty hours, one at the
+ *  start of THIS hour — then a phone's burst of 100 shape changes through writeLayouts (the production read-modify-write). */
+async function ringBurst(P, { dialog = false } = {}) {
+  const dd = scratchDir('lsw-ring'), H = path.join(dd, 'layout-history');
+  try {
+    fs.mkdirSync(H, { recursive: true });
+    const now = Date.now();
+    let seq = 0;
+    const put = (ms) => { const id = ringName(ms, seq++), meta = { at: ms, summary: { 个人: 3 }, totalWindows: 3, change: null }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ ...meta, layouts: DOC(P_BEFORE().slice(0, 3)) })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J(meta)); return id; };
+    const first = []; for (let i = 0; i < 10; i++) first.push(put(now - 40 * DAY + i * 60000));
+    const noons = {}; for (let d = 20; d >= 3; d--) noons[d] = put(Math.floor(now / DAY) * DAY - d * DAY + 12 * HOUR);
+    const hourly = {}; for (let h = 30; h >= 1; h--) hourly[h] = put(Math.floor(now / HOUR) * HOUR - h * HOUR + 5 * 60000);
+    const thisHour = put(Math.floor(now / HOUR) * HOUR);
+    const yesterday = Object.values(hourly).filter((f) => Math.floor(Date.parse(f.slice(7, 17) + 'T00:00:00Z') / DAY) === Math.floor(now / DAY) - 1).sort()[0];
+    fs.writeFileSync(path.join(dd, 'layouts.json'), J(DOC(P_BEFORE()))); // the layout as the restart finds it: 个人 eleven
+    P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    const R = P.router;
+    for (let i = 0; i < 100; i++) { const d = R.readLayouts(); d.desktops['desk-p'].autoSave.windows = P_SENT().slice(0, 1 + (i % 9)); R.writeLayouts(d); await new Promise((r) => setImmediate(() => setImmediate(r))); }
+    await tick(20); R.flushLayouts();
+    const left = fs.readdirSync(H).filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort();
+    const list = R.listLayoutHistory();
+    const boot = list.find((e) => e.restart) || null;
+    const bootIds = boot ? JSON.parse(fs.readFileSync(path.join(H, boot.id), 'utf8')).layouts.desktops['desk-p'].autoSave.windows.map((w) => w.winId) : null;
+    const burst = left.filter((f) => f > thisHour);
+    let html = null;
+    if (dialog) {
+      const route = R.stack.find((l) => l.route && l.route.path === '/api/layout-history' && l.route.methods.get);
+      globalThis.__lswShell = () => { const body = { _h: '', set innerHTML(v) { this._h = String(v); }, get innerHTML() { return this._h; }, querySelectorAll: () => [], querySelector: () => null }; html = body; return { body, close() {}, raised: false, ready: Promise.resolve(true), live: () => true }; };
+      globalThis.__lswFetch = async (u) => { let out = null; await route.route.stack[0].handle({ query: Object.fromEntries(new URL(u, 'http://x').searchParams) }, { json: (j) => { out = j; } }); return out; };
+      class F {} (await loadFlows())(F);
+      await F.prototype._showLayoutHistory.call(new F(), null);
+      html = html && html._h;
+    }
+    return { now, end: Date.now(), left, list, boot, bootIds, burst, first, noons, hourly, thisHour, yesterday, html };
+  } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+}
+
+await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router restarted over forty days of points, then a burst of 100', async () => {
+  delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
+  const P = require(path.join(REPO, 'src/routes/persistence.js'));
+  const r = await ringBurst(P, { dialog: true });
+  const has = (f) => r.left.includes(f);
+  const days3to13 = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((d) => r.noons[d]);
+  ok(days3to13.every(has) && !!r.yesterday && has(r.yesterday), '§9 after the burst every recent DAY keeps its point — yesterday\'s first, and each noon 3…13 days back (b06f36e90: all evicted, the ring held the first ten ever written + 30 of the burst)', { missing: days3to13.filter((f) => !has(f)), yesterday: r.yesterday, left: r.left.length });
+  const hours = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map((h) => r.hourly[h]);
+  ok(hours.every(has) && has(r.thisHour), '§9 …and every one of the newest 24 HOURS that hold a point keeps its oldest one (this hour\'s from before the burst, the 23 before it)', hours.filter((f) => !has(f)));
+  ok([15, 16, 17, 18, 19, 20].every((d) => !has(r.noons[d])) && r.first.filter(has).length <= 1 && [24, 25, 26, 27, 28, 29, 30].some((h) => !has(r.hourly[h])), '§9 …the older ones leave: days past the newest fourteen, the hours past the newest 24 (unless the first of their day), at most the first of the forty-day-old ten', { first: r.first.filter(has).length, noons: [15, 16, 17, 18, 19, 20].filter((d) => has(r.noons[d])) });
+  ok((r.burst.length === 11 || (r.burst.length === 12 && Math.floor(r.end / HOUR) !== Math.floor(r.now / HOUR))) && r.left.length <= 10 + 24 + 14 + 1, `§9 …the burst keeps its newest ten (+ the pinned point); the ring holds at most 10 + 24 + 14 + 1 points (here ${r.left.length}, the burst ${r.burst.length})`, r.burst);
+  ok(!!r.boot && J(r.bootIds) === J(P_BEFORE().map((w) => w.winId)) && has(r.boot.id), '§9 THE POINT FROM BEFORE THE RESTART is PINNED: the first point after the boot holds the layout the restart found (个人\'s eleven) and stays through the burst — named `restart` in the list', { boot: r.boot && r.boot.id, ids: r.bootIds });
+  ok(r.list.filter((e) => e.restart).length === 1 && /<div class="lh-sub lh-restart">As it was before the server restarted<\/div>/.test(r.html || '') && (r.html.match(/lh-restart/g) || []).length === 1, '§9 …the dialog (⚙ → System → Restore a previous layout…) says it on that row alone: «As it was before the server restarted»', (r.html || '').slice(0, 300));
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  ok(zh.includes('"As it was before the server restarted": "') && ja.includes('"As it was before the server restarted": "'), '§9 …with a zh AND a ja entry');
+  const RK = P.ringKeep;
+  const names = []; let s = 0; const T0 = Date.UTC(2026, 9, 1, 0, 0, 0, 0);
+  for (let d = 0; d < 30; d++) names.push(ringName(T0 + d * DAY + 9 * HOUR, s++));
+  for (let i = 0; i < 500; i++) names.push(ringName(T0 + 30 * DAY + 10 * HOUR + i * 200, s++));
+  const k = RK(names, { pinned: names[31] });
+  ok(k.size === 35 && names.slice(7, 32).every((f) => k.has(f)) && names.slice(-10).every((f) => k.has(f)) && !k.has(names[6]) && !k.has(names[32]), `§9 PURE ringKeep: thirty days of one point each, then a 500-write burst inside one hour ⇒ the newest ten + the oldest point of each of the newest 24 hours (the burst's first + 23 days) + the pin = 35 (${k.size}); the burst's middle leaves`);
+  const kd = RK(names, { hours: 0 });
+  ok(kd.size === 10 + 14 && names.slice(17, 31).every((f) => kd.has(f)) && !kd.has(names[16]), `§9 PURE ringKeep, the days alone: the oldest point of each of the fourteen newest days (13 days + the burst's day), the fifteenth gone (${kd.size})`);
+  ok(J([...RK(names.slice().reverse())].sort()) === J([...RK(names)].sort()) && RK([]).size === 0, '§9 PURE ringKeep: any input order, an empty ring');
+  const ms = Date.UTC(2026, 10, 17, 9, 0, 0, 0), same = Array.from({ length: 12 }, (_, i) => ringName(ms, 30 + i)); // one millisecond: seq u, v … z, 10, 11 … 15
+  const ks = RK(same, { hours: 0, days: 0 });
+  ok(ks.has(ringName(ms, 36)) && ks.has(ringName(ms, 41)) && !ks.has(ringName(ms, 30)) && !ks.has(ringName(ms, 31)), '§9 PURE ringKeep: inside one millisecond the writer\'s sequence orders (base 36: «10» comes after «z») — the newest ten are seq 32…41, never the name\'s letters', [...ks]);
+  const odd = RK([...names.slice(-11), 'layout-backup.json'], { hours: 0, days: 0 });
+  ok(!odd.has('layout-backup.json') && odd.size === 10, '§9 PURE ringKeep: a name with no stamp is the OLDEST — it never holds one of the newest ten', [...odd]);
+  ok(RK(names, { pinned: [names[2], names[3]], hours: 0, days: 0 }).has(names[2]) && RK(names, { pinned: [names[2], names[3]], hours: 0, days: 0 }).has(names[3]), '§9 PURE ringKeep: `pinned` takes a list (the newest boot points)');
+  // RED CONTROLS: the base's prune (the first ten + the newest thirty); the pin taken out
+  delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
+  const PIN = 'const keep = ringKeep(files, { pinned: _boots.slice(-RING_KEEP.boots) });';
+  const base = await ringBurst(mutantModule('src/routes/persistence.js', PIN, "if (files.length <= 40) return; const keep = new Set([...files.slice(0, 10), ...files.slice(-30)]);"));
+  ok(!base.left.includes(base.yesterday) && [3, 4, 5].every((d) => !base.left.includes(base.noons[d])) && !base.left.includes(base.boot && base.boot.id), '§9 CONTROL: with b06f36e90\'s prune (the oldest ten + the newest thirty) the same burst evicts yesterday, every recent day and the point from before the restart (the legs above go RED)', { left: base.left.length, yesterday: base.left.includes(base.yesterday) });
+  const nopin = await ringBurst(mutantModule('src/routes/persistence.js', PIN, 'const keep = ringKeep(files, { pinned: null });'));
+  ok(!!nopin.boot === false && nopin.yesterday && nopin.left.includes(nopin.yesterday), '§9 CONTROL: the pin taken out ⇒ the point from before the restart is pushed out by the burst (it is neither its hour\'s nor its day\'s oldest) — the pin leg goes RED', { boot: nopin.boot });
+  // A SECOND RESTART AFTER A BAD ONE (the adversarial read): restart 1 finds the good layout, a burst damages it, the person restarts
+  // again — the point before restart 1 must stay (one pin moved to restart 2's point, the damaged state, and let the good one go)
+  const twice = async (load) => {
+    const dd = scratchDir('lsw-ring2'), H = path.join(dd, 'layout-history');
+    try {
+      fs.mkdirSync(H, { recursive: true });
+      const now = Date.now(); let seq = 900;
+      const meta = { at: now, summary: { 个人: 3 }, totalWindows: 3, change: null }, early = ringName(Math.floor(now / HOUR) * HOUR, seq++); // earlier THIS hour and day
+      fs.writeFileSync(path.join(dd, 'layout-history', early), J({ ...meta, layouts: DOC(P_BEFORE().slice(0, 3)) })); fs.writeFileSync(path.join(dd, 'layout-history', early.replace(/\.json$/, '.meta.json')), J(meta));
+      fs.writeFileSync(path.join(dd, 'layouts.json'), J(DOC(P_BEFORE())));
+      const boot = async (n) => { const P = load(); P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null }); const R = P.router;
+        for (let i = 0; i < n; i++) { const d = R.readLayouts(); d.desktops['desk-p'].autoSave.windows = P_SENT().slice(0, 1 + (i % 9)); R.writeLayouts(d); await new Promise((r) => setImmediate(() => setImmediate(r))); }
+        await tick(10); R.flushLayouts(); return R; };
+      await boot(20); // restart 1, then a burst
+      const R2 = await boot(100); // restart 2 (over the damaged layout), then another burst
+      const list = R2.listLayoutHistory(), boots = list.filter((e) => e.restart);
+      const firstIds = boots.length ? JSON.parse(fs.readFileSync(path.join(H, boots[boots.length - 1].id), 'utf8')).layouts.desktops['desk-p'].autoSave.windows.map((w) => w.winId) : null;
+      return { boots: boots.length, firstIds };
+    } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+  };
+  const fresh = () => { delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))]; return require(path.join(REPO, 'src/routes/persistence.js')); };
+  const t2 = await twice(fresh);
+  ok(t2.boots === 2 && J(t2.firstIds) === J(P_BEFORE().map((w) => w.winId)), '§9 …a SECOND restart after a bad one keeps the point from before the FIRST (个人\'s eleven), both named in the dialog (the newest three boot points are pinned)', t2);
+  const t2red = await twice(() => mutantModule('src/routes/persistence.js', PIN, 'const keep = ringKeep(files, { pinned: _boots.slice(-1) });'));
+  ok(t2red.boots === 1 && J(t2red.firstIds) !== J(P_BEFORE().map((w) => w.winId)), '§9 CONTROL: one pin only ⇒ the point before the first restart is pushed out by the second burst (the leg above goes RED)', t2red);
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

@@ -6700,6 +6700,7 @@ export default {
   "its window did not appear": "ウィンドウが表示されませんでした",
   "“{window}” is on “{desktop}”": "「{window}」は「{desktop}」にあります",
   "Then: {changes}": "その後の変更: {changes}",
+  "As it was before the server restarted": "サーバー再起動前の状態",
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "再接続後にレイアウトを再読み込みできませんでした — このページのウィンドウ変更は、読み込めるまで保留されます",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "レイアウトを再読み込みしました — このページで1分以上前に行ったウィンドウ変更は保持されませんでした（{n} 件）",
   "Stop drawing in a browser nobody watches": "誰も見ていないブラウザの描画を止める",

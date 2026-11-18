@@ -64,6 +64,39 @@ function wordlessTitles(node, depth = 0) {
   return n;
 }
 
+// THE RING IS SPREAD OVER TIME (B-b05e — userW 2026-11-05: a phone wrote 17 rollback points in 2 minutes after a restart and
+// every point of the last weeks was gone; the ring held the first 10 points ever written + 30 from the burst, and «Restore a
+// previous layout» offered only damaged ones). A point is KEPT when it is one of the newest RING_KEEP.last writes, the OLDEST
+// point of one of the newest RING_KEEP.hours hours that hold a point, the OLDEST point of one of the newest RING_KEEP.days
+// days that hold a point (UTC buckets — the same answer in every zone), or `pinned` (the newest RING_KEEP.boots «before a
+// restart» points: a person who restarts again after a bad restart still finds the point before the first one). Buckets
+// count hours / days THAT HOLD A POINT, never the clock: a hub idle for a month keeps its spread, and a burst — however
+// long — fills one hour of one day, so it never evicts a day. Time order is the stamp's, then the writer's sequence (a
+// base-36 suffix of growing width); a name with no stamp is the oldest. At most 10 + 24 + 14 + 3 points.
+const RING_KEEP = { last: 10, hours: 24, days: 14, boots: 3 };
+/** layout-history file name → its write time (ms), from the ISO stamp the writer puts in it; NaN when it has none. */
+function ringStampMs(name) {
+  const m = /^layout-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/.exec(String(name || ''));
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], +m[7]) : NaN;
+}
+/** The writer's sequence suffix of a rollback point name (base 36) — the order inside one millisecond; -1 when it has none. */
+function ringSeq(name) {
+  const m = /Z-([0-9a-z]+)(?:\.json)?$/.exec(String(name || ''));
+  return m ? parseInt(m[1], 36) : -1;
+}
+/** PURE: the rollback point file names to KEEP (a Set) out of `names` (any order); `pinned` = a name or a list of names. */
+function ringKeep(names, { pinned = null, last = RING_KEEP.last, hours = RING_KEEP.hours, days = RING_KEEP.days } = {}) {
+  const at = (f) => { const t = ringStampMs(f); return Number.isFinite(t) ? t : -Infinity; };
+  const all = [...new Set((names || []).map(String))].sort((a, b) => (at(a) - at(b)) || (ringSeq(a) - ringSeq(b)) || (a < b ? -1 : a > b ? 1 : 0));
+  const newest = (a, n) => a.slice(Math.max(0, a.length - n)); // n = 0 keeps none (a bare slice(-0) is the whole list)
+  const keep = new Set(newest(all.filter((f) => Number.isFinite(ringStampMs(f))), last));
+  for (const p of [].concat(pinned || [])) if (all.includes(String(p))) keep.add(String(p));
+  const firstOf = (span) => { const m = new Map(); for (const f of all) { const t = ringStampMs(f); if (!Number.isFinite(t)) continue; const k = Math.floor(t / span); if (!m.has(k)) m.set(k, f); } return [...m.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]); };
+  for (const f of newest(firstOf(3600000), hours)) keep.add(f);
+  for (const f of newest(firstOf(86400000), days)) keep.add(f);
+  return keep;
+}
+
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
 function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null, userStateClock = () => Date.now(), userStateMono = () => performance.now() }) {   // (lane sidebar-echo-order r7: the facts' clock — a test's virtual one)
   const broadcast = (msg) => {
@@ -115,9 +148,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // desktop→window SHAPE changes — geometry drags and z-order churn are
   // deliberately ignored, or a drag would evict every useful restore point in
   // seconds. A destructive write therefore always leaves the last good shape
-  // on disk. Bounded: 40 files, newest kept, tiny JSON.
+  // on disk. Bounded and spread over time (ringKeep above — B-b05e), tiny JSON.
   const HISTORY_DIR = path.join(dataDir, 'layout-history');
-  const HISTORY_MAX = 40;
   // shape = per-desktop sorted window ids. Catches windows moving between
   // desktops, disappearing, or a desktop being emptied — the damage classes.
   // CRITICAL (adversarial review, verified against a real production
@@ -173,6 +205,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
   let _histSeq = 0;
   let _histWarned = false;
+  // «BEFORE THIS RESTART» (B-b05e): the first point this process writes holds the layout as the restart found it (the first
+  // write's previous state is what is ON DISK); its meta says so (`restart`). The newest RING_KEEP.boots such points are
+  // PINNED (`_boots`: read once off the ring's metas at the first prune, then kept) — no burst pushes one out, and a second
+  // restart after a bad one keeps the point before the first. The rollback dialog names exactly those (listLayoutHistory).
+  let _bootPending = true, _boots = null;
   // CRITICAL (adversarial review): readLayouts() hands out the LIVE cache
   // object and EVERY production caller mutates it in place before calling
   // writeLayouts (ws layout-sync, desktop create/delete/rename/reorder,
@@ -210,6 +247,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       try { change = next ? desktopChanges(prev, next) : null; } catch { change = null; } // computed NOW — the caller mutates `next` in place later
       const snap = detach(prev);
       if (!snap) return;
+      const restart = _bootPending; _bootPending = false; // this process's first point (above)
       const seen = {}; // what the ring saw (above): the write that made this point and the refusals since the last one
       if (notes && notes.writer) seen.writer = notes.writer;
       if (notes && Array.isArray(notes.refused) && notes.refused.length) seen.refused = notes.refused.splice(0);
@@ -226,6 +264,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           const stamp = new Date().toISOString().replace(/[:.]/g, '-') + '-' + (_histSeq++).toString(36);
           const total = Object.values(before).reduce((a, b) => a + b, 0);
           const at = Date.now();
+          if (restart) { seen.restart = true; if (_boots) _boots.push(`layout-${stamp}.json`); }
           // atomic like layouts.json next door — a torn rollback point fails
           // exactly when it is finally needed
           writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, change, ...seen, layouts: snap });
@@ -243,13 +282,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // TIERED retention (adversarial review): a flat newest-40 ring is exactly
   // wrong for this feature's motivating case — a mass-resume storm produces
   // dozens of shape changes in seconds and would evict every PRE-storm point,
-  // i.e. the only ones worth having. Keep the newest N *and* the oldest few,
-  // so the state from before a burst always survives it.
-  const KEEP_OLDEST = 10;
+  // i.e. the only ones worth having. The oldest-10 tier that followed kept the
+  // FIRST points ever written and let a burst evict every day since (B-b05e):
+  // the keep is spread over time now (ringKeep) + this boot's point pinned.
   function pruneHistory() {
     const files = fs.readdirSync(HISTORY_DIR).filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort();
-    if (files.length <= HISTORY_MAX) return;
-    const keep = new Set([...files.slice(0, KEEP_OLDEST), ...files.slice(-(HISTORY_MAX - KEEP_OLDEST))]);
+    if (!_boots) _boots = listLayoutHistory().filter((e) => e.wasRestart).map((e) => e.id).reverse(); // oldest first (the list is newest first)
+    const keep = ringKeep(files, { pinned: _boots.slice(-RING_KEEP.boots) });
+    _boots = _boots.filter((f) => keep.has(f));
     for (const f of files) {
       if (keep.has(f)) continue;
       try { fs.unlinkSync(path.join(HISTORY_DIR, f)); } catch {}
@@ -309,13 +349,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           // layouts.json each) is read only when actually restoring
           try {
             const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
-            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}) };
+            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(m.restart ? { wasRestart: true } : {}) };
           } catch {}
           try {
             const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
-            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null };
+            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null, ...(j.restart ? { wasRestart: true } : {}) };
           } catch { return null; } // unparseable → omit, never a 1970/0-window row
-        }).filter(Boolean);
+        }).filter(Boolean)
+        // the dialog names the PINNED «before a restart» points (the newest RING_KEEP.boots — B-b05e), not every older one
+        .map((e, _i, list) => (e.wasRestart && list.filter((x) => x.wasRestart).indexOf(e) < RING_KEEP.boots ? { ...e, restart: true } : e));
     } catch { return []; }
   }
 
@@ -1258,4 +1300,4 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   return router;
 }
 
-module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES };
+module.exports = { router, setup, wordlessTitles, WORDLESS_TITLES, ringKeep, ringStampMs, ringSeq, RING_KEEP };
