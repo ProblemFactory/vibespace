@@ -42,6 +42,9 @@ const STORES = Object.freeze({
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
+  'hosts.write': row('write', 'hosts', 'src/hosts.js', ['_save']),   // B-48a4: every save of hosts.json, through the store writer (the coordinator's word (e))
+  'device-audit.write': row('write', 'device-audit', 'src/device-audit.js', ['askDevice']),   // B-48a4: the device-act ring's appends, through the store writer (THE ONE APPENDER)
+  'exit-audit.write': row('write', 'exit-audit', 'src/exit-proxy.js', ['_auditJournal']),   // B-48a4: the exit ring's appends, through the store writer (THE ONE APPENDER)
   // channel-store-off-loop (commit 1): the field-named doors through the store writer (it records each write's time here)
   'channels-adapters.write': row('write', 'channels/adapters', 'src/channel-store.js', ['adaptersUpdate']),
   'channels-outbox.write': row('write', 'channels/outbox', 'src/channel-store.js', ['outboxUpdate']),

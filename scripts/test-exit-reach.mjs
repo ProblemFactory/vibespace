@@ -313,7 +313,7 @@ function world({ Mgr = ExitProxyManager, Todos = UserTodoManager } = {}) {
   const mgr = new Mgr({ hosts, grants, log: () => {}, dataDir, userTodos: todos, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), now: () => clock, timers: T,
     emitCard: (s, c) => { cards.push({ s: s.name, ...c }); return true; },
     groupsOf: (s) => { if (groupsThrow) throw new Error('task store unreadable'); return (membership[s.claudeSessionId] || []).map((id) => ({ id })); } });
-  return { mgr, grants, recs, hosts, online, runs, dm, todos, sessions, membership, cards, bc, dataDir, advance, setGate: (p) => { runGate = p; }, setThrow: (b) => { groupsThrow = b; }, audit: () => fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) };
+  return { mgr, grants, recs, hosts, online, runs, dm, todos, sessions, membership, cards, bc, dataDir, advance, setGate: (p) => { runGate = p; }, setThrow: (b) => { groupsThrow = b; }, audit: () => { const out = [], ids = new Set(); let t = ''; try { t = fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8'); } catch { } for (const l of [...t.split('\n'), ...(mgr._jr ? mgr._jr.pending() : []).map((x) => x.replace(/\n$/, ''))]) { if (!l.trim()) continue; let j = null; try { j = JSON.parse(l); } catch { continue; } if (j && j.id) { if (ids.has(j.id)) continue; ids.add(j.id); } out.push(j); } return out; } };
 }
 const tick = () => new Promise((r) => setImmediate(r));
 const settle = async (p) => { try { return { v: await p }; } catch (e) { return { e }; } };

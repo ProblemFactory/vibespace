@@ -1621,6 +1621,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const HM = new HostManager({ dataDir: path.join(r2, 'data') });
     const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { }, hosts: HM }), r2).find((x) => x.id === ID);
     ok(res2.status === 'ran' && res2.report.via === 'hosts' && HM.get('host-dial-Macbook').exit.use.mode === 'everyone' && !('allowExit' in HM.get('host-dial-Macbook')), 'with a live HostManager the IN-MEMORY records are reshaped', res2.report);
+    HM.flushThrottled();   // B-48a4: the live HostManager's save goes through the store writer — what it owes, on disk now
     ok(JSON.parse(fs.readFileSync(path.join(r2, 'data', 'hosts.json'), 'utf-8')).hosts.every((h) => !('allowExit' in h) && h.exit), '…and its own save puts them on disk');
     // (c) an unreadable hosts.json FAILS the run by name, the ledger stays unstamped, nothing touched
     const r3 = mkInst('ex-bad');

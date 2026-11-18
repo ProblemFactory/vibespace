@@ -203,11 +203,18 @@ class HostManager {
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
   }
 
+  /** B-48a4 (the exit door's cost; the coordinator's word (e), 2026-11-18): EVERY write of hosts.json goes through THE STORE
+   *  WRITER — the bytes produced at its write (the latest state in memory; a burst is one write) and written whole on its own
+   *  thread (temp + rename), at once (`durable`: its pace set aside, as the old synchronous write was immediate); the main loop
+   *  never waits on the data dir for it. Before: writeFileSync + renameSync on the main thread at every save — the run ledger's
+   *  throttled one once a minute per machine under exit commands. ONE writer of the file, so a later state always lands last.
+   *  A failure is the writer's to say (and it retries); `persisted()` = the file holds the state saved so far (a reader of it). */
   _save() {
-    const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2));
-    fs.renameSync(tmp, this._file);
+    const W = this._storeWriter || require('./store-writer.js').storeWriter();
+    W.dirty(this._file, { name: 'hosts.write', produce: () => JSON.stringify(this._state, null, 2) });
+    W.durable(this._file).catch(() => { });
   }
+  persisted() { return (this._storeWriter || require('./store-writer.js').storeWriter()).durable(this._file); }
 
   list() {
     // dial hosts carry a live `online` field (server wires dialOnline to the
@@ -361,6 +368,9 @@ class HostManager {
     let pending = false;
     for (const t of (this._throttle || new Map()).values()) if (t.timer) { clearTimeout(t.timer); t.timer = null; pending = true; }
     if (pending) this._save();
+    // B-48a4: what the store writer still owes of hosts.json is written NOW (its own bounded synchronous flush — a suite's read of
+    // the file, the stop; during the exit the writer's exit flush writes it once)
+    try { (this._storeWriter || require('./store-writer.js').storeWriter()).flushSync([this._file], { waitedBy: 'hosts.flushThrottled' }); } catch { }
   }
 
   /**
@@ -1504,18 +1514,24 @@ class HostManager {
   // ── In-app key generation (optional; default is the user's own ~/.ssh) ──
 
   keyInfo() {
+    // B-48a4 (b): GET /api/hosts read the public key from the data dir at EVERY call — one synchronous read per open page per
+    // exit command (measured). The facts are KEPT for the process: read once (the first ask), again only when this process
+    // makes the key (generateKey reads fresh before and after); a key placed in data/ssh by hand is seen at the next start
     const priv = path.join(this._sshDir, 'id_ed25519');
-    try {
-      const pub = fs.readFileSync(priv + '.pub', 'utf-8').trim();
-      return { exists: true, path: priv, publicKey: pub };
-    } catch { return { exists: false, path: priv, publicKey: null }; }
+    if (this._key) return { ...this._key.v };
+    let v;
+    try { v = { exists: true, path: priv, publicKey: fs.readFileSync(priv + '.pub', 'utf-8').trim() }; } catch { v = { exists: false, path: priv, publicKey: null }; }
+    this._key = { at: Date.now(), v };
+    return { ...v };
   }
 
   generateKey() {
+    this._key = null;   // B-48a4: a fresh read before making one (a key made outside this process since: never overwritten — ssh-keygen would ask)
     if (this.keyInfo().exists) return this.keyInfo();
     fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
     return new Promise((resolve, reject) => {
       execFile('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'vibespace', '-f', path.join(this._sshDir, 'id_ed25519')], (err) => {
+        this._key = null;   // B-48a4: the kept key facts are read again (made, or a failure left something)
         if (err) return reject(new Error('ssh-keygen failed: ' + err.message));
         resolve(this.keyInfo());
       });

@@ -141,7 +141,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  at a stop), `allowEmpty` (an empty file is a valid state of it), `makeDir` (channel-store-off-loop cure r1: the ONE
    *  store that may make its missing parent directory — a new account's people.json; any other store whose directory is
    *  gone fails its write ENOENT, said, as before). */
-  function dirty(file, { name, produce, debounceMs, mode, onWritten, rank, allowEmpty, makeDir } = {}) {
+  function dirty(file, { name, produce, debounceMs, mode, onWritten, rank, allowEmpty, makeDir, rotateAt } = {}) {
     const s = store(file);
     if (s.forgotten) s.forgotten = false;   // a new owner of the file: the pending unlink after the write in flight is off
     if (name) s.name = name;
@@ -152,6 +152,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (Number.isFinite(debounceMs)) s.debounceMs = debounceMs;
     if (mode !== undefined) s.mode = mode;
     if (makeDir) s.makeDir = true;
+    if (Number.isFinite(rotateAt) && rotateAt > 0) s.rotateAt = rotateAt;   // B-48a4: an append store that is a RING — the thread moves the live file to `.1` past this size, before the append
     if (typeof onWritten === 'function') s.onWritten = onWritten;
     if (!s.dirty) { s.dirty = true; s.dirtySince = now(); }
     schedule();
@@ -197,7 +198,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
     posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, parts: p.parts, append: p.append }, p.transfer); }
+    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); }
   }
   function onMessage(m) {
@@ -291,7 +292,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function writeHere(s, p, since) {
     const t0 = now(), tmp = `${s.file}.tmp-${process.pid}`;
     try {
-      W().writeJob({ file: s.file, tmp, parts: p.parts, mode: s.mode, makeDir: !!s.makeDir, append: p.append }, fs);
+      W().writeJob({ file: s.file, tmp, parts: p.parts, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append }, fs);
       finish(s, null, now() - t0, p.size, since, true, p.append);
       return true;
     } catch (e) { if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }
@@ -329,7 +330,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
     posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, parts: p.parts, append: p.append }, p.transfer); }
+    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); return 'failed'; }
     if (exiting) publishExit();   // round 6's amend: the keeper's line names this write as IN FLIGHT, not «still owed»
     if (!settleInflight(deadline, waitedBy)) return 'held';

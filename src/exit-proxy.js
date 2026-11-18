@@ -107,6 +107,7 @@ class ExitProxyManager {
   /** @param deps { hosts, log, groupsOf(session, webuiId), userTodos, emitCard(session, card), dataDir, now, sessionsMap(), bcastAll } */
   constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
     grants = null,   // lane grants-unify: THE grants store (or a getter); absent ⇒ the instance's installed one
+    storeWriter = null,   // B-48a4: the store writer the audit's appender hands its lines to (absent ⇒ the process's own)
     timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
     this._grants = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
     this.timers = timers; // the ask's 60 s clock (a suite drives it with a fake one)
@@ -121,6 +122,7 @@ class ExitProxyManager {
     this.bcastAll = bcastAll || (() => {});
     this.settingOf = typeof settingOf === 'function' ? settingOf : () => undefined; // lane exit-transfer: the user's transfer bound (exit.transferMaxBytes)
     this.auditMaxBytes = Math.max(64 * 1024, Number(auditMaxBytes) || AUDIT_MAX_BYTES);
+    this._storeWriter = storeWriter;
     this._live = new Map(); // hostId → { server, sockets:Set, localPort, deviceSocksPort, users:Set<sessionId> }
     this._pullTargets = new Set(); // fix r1: the local paths a pull is writing now — one pull per local target at a time
     this._asks = new Map(); // askId → { askId, hostId, machine, sessionKey, sessionId, name, cmd, askedAt, timer, resolve, todoId }
@@ -233,22 +235,28 @@ class ExitProxyManager {
     // (the row's lastRun and the card keep their 120 / 80-char heads by design)
     // lane exit-see-whole: its LINES and tabs kept (the owner's Commands list shows the command as itself; JSON holds them)
     if (typeof rec.cmd === 'string') rec.cmd = E.cleanLines(rec.cmd, E.CMD_MAX);
+    // B-48a4: the line costs the main loop NO synchronous file call — THE ONE APPENDER (src/device-audit.js journal) queues it,
+    // in order, for the store writer's thread; the ring (verify r1 F2: the live file → `.1` past the bound, the history the last
+    // ~16 MB of lines) is kept there. Before: mkdirSync + statSync + appendFileSync on the data dir per line, on the main thread
     if (this.dataDir) {
-      try {
-        fs.mkdirSync(this.dataDir, { recursive: true });
-        const f = path.join(this.dataDir, AUDIT_FILE), text = JSON.stringify(rec) + '\n';
-        // verify r1 F2: the ring — the live file rotates to `.1` when this line would carry it past the bound (the
-        // previous `.1` is gone: the history is the last ~16 MB of lines, said in the owner's list)
-        let size = 0; try { size = fs.statSync(f).size; } catch { }
-        if (size > 0 && size + Buffer.byteLength(text) > this.auditMaxBytes) { try { fs.renameSync(f, f + '.1'); } catch (e) { this.log(`audit not rotated: ${e.message}`); } }
-        fs.appendFileSync(f, text);
-      } catch (e) { this.log(`audit line not written: ${e.message}`); }
+      try { this._auditJournal().append(JSON.stringify(rec) + '\n', { id: rec.id }); }
+      catch (e) { this.log(`audit line not queued: ${e.message}`); }
     }
     // lane-exit-run-output E4: the ONE audit writer NOTIFIES — an open command list (the machine's "Commands…" dialog)
     // patches its keyed row in place off this broadcast instead of re-reading the tail (the 2.309.0 rule)
     try { this.bcastAll({ type: 'exit-audit', line: rec }); } catch { }
     return rec;
   }
+  _auditJournal() {
+    if (this._jr) return this._jr;
+    const f = path.join(this.dataDir, AUDIT_FILE), W = () => this._storeWriter || require('./store-writer.js').storeWriter();
+    // the ring's hand-off to THE STORE WRITER under its timed-sync row's name (src/timed-sync.js 'exit-audit.write')
+    this._jr = require('./device-audit.js').journal({ file: f, bound: this.auditMaxBytes, ask: (o) => W().dirty(f, { name: 'exit-audit.write', ...o }), durable: () => W().durable(f), log: (m) => this.log(m) });
+    return this._jr;
+  }
+  /** B-48a4: resolves once every audit line written so far is on disk (a reader of the FILE itself — a suite; the hub's own
+   *  readers judge the queued lines first, auditTail). */
+  auditWritten() { return this._jr ? this._jr.whenWritten() : Promise.resolve(true); }
   /** THE ONE run/attempt history: `run` lines with a command, newest first, ≤ RUNS_MAX (verify: a hand-written
    *  line is re-bounded by E.runRow). `agent: true` drops names / keys. */
   _runs({ hostId = null, sessionKeys = null, machine = null, limit = E.RUNS_DEFAULT, agent = false } = {}) {
@@ -312,6 +320,12 @@ class ExitProxyManager {
       out.push(j);
     };
     const out = []; // newest first while collecting
+    // B-48a4: the lines not on disk yet are the NEWEST — judged first; every record ONCE by its own id (its first field: a line
+    // that landed but whose answer is not back, a rotation on the writer's thread between the reads of the two ring files)
+    const judged = new Set(), idIn = require('./device-audit.js').idIn;
+    const judgeFile = (raw, o) => { const id = raw ? idIn(raw, 'first') : null; if (id) { if (judged.has(id)) return; judged.add(id); } judge(raw, o); };
+    const pend = this._jr ? this._jr.pending() : [];
+    for (let i = pend.length - 1; i >= 0 && out.length < n; i--) judgeFile(pend[i].replace(/\n$/, ''), out);
     for (const name of [AUDIT_FILE, AUDIT_FILE + '.1']) {
       if (out.length >= n) break;
       const f = path.join(this.dataDir, name);
@@ -326,10 +340,10 @@ class ExitProxyManager {
           const firstNl = buf.indexOf(0x0a);
           if (firstNl < 0) { carry = buf; continue; }                 // no whole line yet: keep reading backwards
           const lines = buf.subarray(firstNl + 1).toString('utf8').split('\n');
-          for (let i = lines.length - 1; i >= 0 && out.length < n; i--) judge(lines[i], out);
+          for (let i = lines.length - 1; i >= 0 && out.length < n; i--) judgeFile(lines[i], out);
           carry = buf.subarray(0, firstNl);                            // the head is a partial line (unless at the start)
         }
-        if (pos === 0 && out.length < n && carry.length) judge(carry.toString('utf8'), out);
+        if (pos === 0 && out.length < n && carry.length) judgeFile(carry.toString('utf8'), out);
       } catch { /* no such file: the next ring file, or nothing */ }
       finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
     }

@@ -248,7 +248,8 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   check('the server keeps the refusal: hosts.json dial.lastRefusal.code token-mismatch, the daemon\'s streak as `attempt`, its previous failure', !!ref && ref.code === 'token-mismatch' && ref.attempt >= 1 && ref.last && ref.last.code && ref.daemon, JSON.stringify(ref));
   check('THE ROW reads `refused (token mismatch)` — never a bare "offline" (attack 17)', DF.dialRowState(rowB()).state === 'refused' && DF.dialRowState(rowB()).reason === 'token-mismatch');
   check('the refusal broadcast hosts-updated (the row repaints)', casts.some((m) => m.type === 'hosts-updated'));
-  const onDisk = JSON.parse(fs.readFileSync(path.join(dataB, 'hosts.json'), 'utf8')).hosts.find((h) => h.deviceId === 'devB');
+  // B-48a4: hosts.json is written on the store writer's thread — an urgent write lands at once (its pace set aside), not inside this tick
+  const onDisk = await waitFor(() => { const h = JSON.parse(fs.readFileSync(path.join(dataB, 'hosts.json'), 'utf8')).hosts.find((x) => x.deviceId === 'devB'); return h && h.dial && h.dial.lastRefusal ? h : null; }, 2000, 50);
   check('…and it is on disk at once (a NEW refusal code is an urgent write)', onDisk && onDisk.dial && onDisk.dial.lastRefusal && onDisk.dial.lastRefusal.code === 'token-mismatch');
   // the RIGHT token: connected, after failures
   fs.writeFileSync(path.join(stB, 'dial.json'), JSON.stringify({ url: urlB, token: pair.dialToken }), { mode: 0o600 });

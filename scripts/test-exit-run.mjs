@@ -65,6 +65,9 @@ let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
 const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const section = async (name, fn) => { console.log(name); try { await fn(); } catch (e) { fail++; console.error(`  ✗ ${name} threw: ${e.stack || e.message}`); } };
+/** B-48a4: the audit's RECORD = the lines on disk + the lines the one appender (src/device-audit.js journal) still queues for the store
+ *  writer's thread, in order, each once (its id) — what the hub's own readers judge too */
+const auditLines = (mgr, dataDir) => { const out = [], ids = new Set(); let t = ''; try { t = fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8'); } catch { } for (const l of [...t.split('\n'), ...(mgr._jr ? mgr._jr.pending() : []).map((x) => x.replace(/\n$/, ''))]) { if (!l.trim()) continue; let j = null; try { j = JSON.parse(l); } catch { continue; } if (j && j.id) { if (ids.has(j.id)) continue; ids.add(j.id); } out.push(j); } return out; };
 const SCR = scratch('exo'); // /tmp/vs-exo-<pid>: the daemons' roots, the fake audits, the CLI's worlds
 fs.mkdirSync(SCR, { recursive: true });
 stampScratchRun(SCR);
@@ -564,7 +567,9 @@ function world({ Mgr = ExitProxyManager, caps = ['run-shell'], platform = 'linux
   grantLists(grants, 'host-dial-win1', { use: 'nobody', run: 'everyone' });
   const cards = [], bc = [];
   const mgr = new Mgr({ hosts, log: () => {}, dataDir, grants, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), emitCard: (s, c) => { cards.push({ s: s.name, ...c }); return true; }, ...mgrOpts });
-  return { mgr, recs, hosts, grants, sessions, calls, cards, bc, dataDir, dm, setAnswer: (fn) => { answer = fn; }, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
+  // B-48a4: the legs that read the audit FILE itself (the ring, a hand-planted line after a run) — each run's lines on disk before it answers here
+  const run0 = mgr.run.bind(mgr); mgr.run = async (...a) => { try { return await run0(...a); } finally { if (typeof mgr.auditWritten === 'function') await mgr.auditWritten(); } };
+  return { mgr, recs, hosts, grants, sessions, calls, cards, bc, dataDir, dm, setAnswer: (fn) => { answer = fn; }, audit: () => auditLines(mgr, dataDir) };
 }
 const settle = async (p) => { try { return { v: await p }; } catch (e) { return { e }; } };
 await section('§3 the manager over fake daemons: the capability picks the form; a spawn failure, the heads, the broadcast, the history', async () => {
@@ -699,6 +704,7 @@ await section('§3 the manager over fake daemons: the capability picks the form;
   { const { AUDIT_MAX_BYTES } = require(path.join(REPO, 'src/exit-proxy.js'));
     const wLine = world({ tag: 'line' }); const headsL = E.outputHeads({ stdout: '"'.repeat(5000), stderr: '\\'.repeat(5000) });
     wLine.mgr.audit({ hostId: 'h', machine: 'M'.repeat(120), sessionId: 'x'.repeat(64), sessionKey: 'k'.repeat(200), name: '"'.repeat(120), grant: 'run', verb: 'run', cmd: '"'.repeat(E.CMD_MAX), code: 0, ms: 1, ok: true, via: 'everyone', asked: true, interpreter: 'cmd.exe', platform: 'x'.repeat(16), timedOut: true, truncated: true, 'revoked-during-run': true, stdout: headsL.stdout, stderr: headsL.stderr, cut: headsL.cut });
+    await wLine.mgr.auditWritten();   // B-48a4: the line is queued for the store writer's thread — on disk before its size is read
     const lineBytes = fs.statSync(path.join(wLine.dataDir, 'exit-audit.jsonl')).size;
     ok(lineBytes < AUDIT_MAX_BYTES / 100 && lineBytes > 20000, `the worst-case audit line (every field at its bound, JSON-escaped) is ${lineBytes} B — the 8 MB ring never rotates on one line and a 512 KiB chunk always holds many (W2a)`);
     // (b) the ring's crash states never throw and never read as "no runs"
@@ -1136,7 +1142,7 @@ function xworld({ caps = ['run-shell', 'fs-portable', E.PUSH_CAP], hashes = true
   const cards = [], items = [];
   const userTodos = { add: (key, it) => { const x = { id: 'todo' + items.length, status: 'open', ...it }; items.push(x); return x; }, onStatus: () => {}, get: (id) => items.find((x) => x.id === id), setStatus: (id, st) => { const x = items.find((y) => y.id === id); if (x) x.status = st; } };
   const mgr = new Mgr({ hosts, log: () => {}, dataDir, grants, sessionsMap: () => sessions, emitCard: (s2, c) => { cards.push(c); return true; }, userTodos, settingOf: (k) => (k === E.TRANSFER_SETTING ? settingMb : undefined) });
-  return { mgr, recs, grants, files, reads, writes, dm, sessions, A: sessions.get('wa'), proj, cards, items, dataDir, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
+  return { mgr, recs, grants, files, reads, writes, dm, sessions, A: sessions.get('wa'), proj, cards, items, dataDir, audit: () => auditLines(mgr, dataDir) };
 }
 const MiB8 = 1024 * 1024;
 // fix r1: each pull's part is its OWN fresh name (`<target>.<8 hex>.vs-part`) — "no part left" = no part of any name
