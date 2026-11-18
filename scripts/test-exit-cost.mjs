@@ -19,6 +19,12 @@
 //      queued (landed, its answer not back) once, and a queued id inside another line's text hides nothing
 //   ④ THE RING ON THE WRITER'S THREAD (the real store writer): 400 device acts at a 64 KiB bound ⇒ no synchronous call on the data dir,
 //      the live file and .1 each at most the bound, the newest line live; a stop's synchronous flush writes every queued line
+//   ⑤ U3 — THE MEMBERSHIP ONCE (a world granted to Task Group G): a command asks the membership ONCE, asked by the user or not; a
+//      removal from G during the run (its re-judge) is asked again and RECORDED (revokedDuringRun, the card); RED CONTROLS: U3's first
+//      form (never asked after the run) records nothing; today's two re-asks ⇒ 3 a command
+//   ⑥ U3 — THE AMPLIFIER LAW (a slow hub is never sent more requests because it is slow): the REAL CLI `vibespace-exit run` against a
+//      stand-in hub that answers the run only after the 1 s note was said ⇒ ONE request; RED CONTROL: today's note (a copy outside the
+//      tree, scripts/mutant-copy.mjs), side by side ⇒ a second request, GET /api/agent/exit (causal: the hub answers its run after it)
 // Run: node scripts/test-exit-cost.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,25 +79,28 @@ const compileAt = (rel, pairs) => {
 
 /** THE WORLD: a scratch data dir with one dial machine on record, a REAL HostManager, a REAL ExitProxyManager, one conversation */
 let wn = 0;
-async function world({ Mgr = ExitProxyManager, HM = HostManager } = {}) {
+async function world({ Mgr = ExitProxyManager, HM = HostManager, byGroup = false, ask = false } = {}) {
   const dataDir = path.join(SCR, 'w' + (++wn)); fs.mkdirSync(path.join(dataDir, 'ssh'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'hosts.json'), JSON.stringify({ hosts: [{ id: 'host-dial-standin', name: 'standin', transport: 'dial', deviceId: 'standin', createdAt: 1 }] }));
   fs.writeFileSync(path.join(dataDir, 'ssh', 'id_ed25519.pub'), 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStandInKeyOnly vibespace\n');
   const hm = new HM({ dataDir });
   hm.dialOnline = () => true;
-  const acts = [];
+  const acts = [], gate = { p: null };
+  const member = new Set(['A']);   // the conversations in Task Group G (by claudeSessionId)
+  let groupAsks = 0;
   const dm = {
     status: () => ({ info: { capabilities: ['run-shell'], platform: 'linux' } }),
     // the stand-in device link: its act line goes through hosts.noteAct, as src/agentd/client.js _act → onAct does
-    runShell: async (line, opts) => { acts.push(line); hm.noteAct('host-dial-standin', DA.lineOf({ at: Date.now(), payload: { op: 'run-cmd', shell: line }, by: opts.by, ok: true, ms: 1 })); return { code: 0, stdout: 'ok\n', stderr: '', timedOut: false, signal: null, truncated: false, interpreter: 'sh' }; },
+    runShell: async (line, opts) => { acts.push(line); if (gate.p) await gate.p; hm.noteAct('host-dial-standin', DA.lineOf({ at: Date.now(), payload: { op: 'run-cmd', shell: line }, by: opts.by, ok: true, ms: 1 })); return { code: 0, stdout: 'ok\n', stderr: '', timedOut: false, signal: null, truncated: false, interpreter: 'sh' }; },
   };
   hm.deviceBounded = async () => dm;
   const grants = GS.create({ dataDir });
   const sessions = new Map([['wa', { name: 'agent A', backend: 'claude', claudeSessionId: 'A', cwd: '/w/a' }]]);
   const cards = [], bc = [];
-  const mgr = new Mgr({ hosts: hm, grants, log: () => {}, dataDir, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), emitCard: (s, c) => { cards.push(c); return true; }, groupsOf: () => [] });
-  await mgr.setAccess('host-dial-standin', { run: { mode: 'everyone', ask: false } });
-  return { dataDir, hm, mgr, dm, acts, sessions, cards, bc };
+  const mgr = new Mgr({ hosts: hm, grants, log: () => {}, dataDir, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), emitCard: (s, c) => { cards.push(c); return true; },
+    groupsOf: (sess) => { groupAsks++; return member.has(sess.claudeSessionId) ? [{ id: 'G' }] : []; } });
+  await mgr.setAccess('host-dial-standin', { run: byGroup ? { mode: 'only', who: [{ kind: 'group', id: 'G' }], ask: !!ask } : { mode: 'everyone', ask: !!ask } });
+  return { dataDir, hm, mgr, dm, acts, sessions, cards, bc, gate, member, asks: () => groupAsks, resetAsks: () => { groupAsks = 0; } };
 }
 const N = 40;
 const drive = async (w) => {
@@ -243,6 +252,83 @@ console.log('④ the ring on the writer\'s thread (the real store writer)');
   for (let k = 0; k < 10; k++) SW.storeWriter().flushSync([path.join(dirS, DAU.AUDIT_FILE)]);   // a stop's synchronous flush, as the exit does
   const onDisk = fs.readFileSync(path.join(dirS, DAU.AUDIT_FILE), 'utf8').trim().split('\n').length;
   ok(onDisk === 50, `a stop's flush writes every queued line (${onDisk} of 50) — produce() never answers «nothing» while lines wait`);
+}
+
+// ═══ ⑤ ═══
+console.log('⑤ U3 — the Task Group membership is asked once per command');
+{
+  /** one command on a world granted to Task Group G: `during(w)` runs while the device holds the run (the gate) */
+  const one = async (Mgr, { ask = false, during = null } = {}) => {
+    const w = await world({ Mgr, byGroup: true, ask });
+    if (ask) w.mgr._ask = async () => 'allowed';   // the user allows (the real ask only waits; it asks no membership)
+    let open = null;
+    if (during) w.gate.p = new Promise((r) => { open = r; });
+    w.resetAsks();
+    const p = w.mgr.run(w.sessions.get('wa'), 'wa', 'standin', 'true');
+    if (during) { for (let i = 0; i < 20 && w.acts.length === 0; i++) await tick(); await during(w); open(); }
+    const r = await p;
+    await w.mgr.auditWritten(); await w.hm.deviceAudit.whenWritten();
+    return { asks: w.asks(), ran: !!r && r.code === 0, revoked: !!(r && r.revokedDuringRun), card: String((w.cards.at(-1) || {}).text || '') };
+  };
+  const removal = async (w) => { w.member.delete('A'); w.mgr.rejudgeAll('task-groups'); };   // the person removes the conversation from G
+  const plain = await one(ExitProxyManager), asked = await one(ExitProxyManager, { ask: true }), gone = await one(ExitProxyManager, { during: removal });
+  ok(plain.ran && plain.asks === 1 && asked.ran && asked.asks === 1, `an unasked command asks the membership ${plain.asks}×, an asked one ${asked.asks}× — once, when no re-judge ran meanwhile`, { plain, asked });
+  ok(gone.ran && gone.revoked && gone.asks === 2 && /\(access was removed while it ran\)/.test(gone.card), `a removal from the group DURING the run (its re-judge) is asked again and recorded: revokedDuringRun ${gone.revoked}, the card says so (${gone.asks} asks)`, gone);
+  const EPa = compileAt('src/exit-proxy.js', [   // U3's first form: the membership as judged, never asked again after the run
+    ["    const ctxAfter = (this._memberGen || 0) !== gen1 ? this.ctxFor(session, sessionId) : ctxNow;", "    const ctxAfter = ctxNow;"],
+  ]);
+  const goneA = await one(EPa.ExitProxyManager, { during: removal });
+  ok(goneA.ran && !goneA.revoked, `CONTROL (RED): the membership never asked after the run ⇒ the removal during it is not recorded (revokedDuringRun ${goneA.revoked})`);
+  const EP3 = compileAt('src/exit-proxy.js', [   // today's re-asks: the stillGranted verdict and revokedDuringRun each ask again
+    ["    const ctxNow = gen1 !== gen0 ? this.ctxFor(session, sessionId) : j.ctx;", "    const ctxNow = this.ctxFor(session, sessionId);"],
+    ["    const ctxAfter = (this._memberGen || 0) !== gen1 ? this.ctxFor(session, sessionId) : ctxNow;", "    const ctxAfter = this.ctxFor(session, sessionId);"],
+  ]);
+  const today = await one(EP3.ExitProxyManager);
+  ok(today.ran && today.asks === 3, `CONTROL (RED): today's re-asks ⇒ ${today.asks} membership asks a command`);
+}
+
+// ═══ ⑥ ═══
+console.log('⑥ U3 — the amplifier law: a slow hub is never sent more requests because it is slow');
+{
+  const http = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  // the stand-in hub: each CLI by its own token; a run is answered only AFTER the CLI's 1 s note was said (`release`) or the old
+  // note's list request was answered — causal, never a race with the clock (cap 8 s)
+  const logs = new Map(), held = new Map();
+  const answerRun = (tok) => { const h = held.get(tok); if (!h || h.done) return; h.done = true; clearTimeout(h.cap); h.res.writeHead(200, { 'content-type': 'application/json' }); h.res.end(JSON.stringify({ machine: 'standin', code: 0, stdout: 'ok\n', stderr: '', ms: 1300, timedOut: false, truncated: false, interpreter: 'sh', line: '# ran on standin — exit 0, 1.3 s (recorded)' })); };
+  const srv = http.createServer((req, res) => {
+    const tok = String(req.headers.authorization || '').replace(/^Bearer\s+/, '');
+    if (!logs.has(tok)) logs.set(tok, []);
+    logs.get(tok).push(`${req.method} ${req.url.split('?')[0]}`);
+    if (req.method === 'POST' && req.url.startsWith('/api/agent/exit/run')) { req.resume(); held.set(tok, { res, done: false, cap: setTimeout(() => answerRun(tok), 8000) }); return; }
+    if (req.url.startsWith('/api/agent/exit')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ exits: [{ id: 'host-dial-standin', name: 'standin', grants: { run: true, runAsk: true } }] })); setTimeout(() => answerRun(tok), 50); return; }
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}');
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const api = `http://127.0.0.1:${srv.address().port}`;
+  const home = path.join(SCR, 'cli-home'); fs.mkdirSync(home, { recursive: true });
+  const NOTE = /# waiting for the user's approval \(up to 60 s\) if the machine asks… — an approval card in this conversation and in the For-you tray/;
+  const runCli = (file, tok) => new Promise((resolve) => {
+    const c = spawn(process.execPath, [file, 'run', 'standin', '--', 'true'], { env: { PATH: path.dirname(process.execPath) + ':/usr/bin:/bin', HOME: home, VIBESPACE_API: api, VIBESPACE_SESSION_TOKEN: tok }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '', out = '';
+    const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 20000);   // our own child, by its handle
+    c.stdout.on('data', (d) => { out += d; });
+    c.stderr.on('data', (d) => { err += d; if (NOTE.test(err)) answerRun(tok); });   // the note said ⇒ the hub answers the run
+    c.on('close', (code) => { clearTimeout(kill); resolve({ code, err, out }); });
+  });
+  const M = mutantCopies('exitcost', REPO);
+  const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-exit'), 'utf8');
+  const NEW = `    const waitNote = setTimeout(() => console.error("# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"), 1000);\n`;
+  const OLD = "    const waitNote = setTimeout(async () => {\n      try {\n        const res = await CC.call(api + '/api/agent/exit', { headers: { Authorization: 'Bearer ' + token }, onExpiry: 'throw' });\n        const { exits } = res.ok ? await res.json() : { exits: [] };\n        const r0 = String(machine || '').toLowerCase();\n        const hit = (exits || []).filter((e) => !r0 || e.id === machine || String(e.name).toLowerCase().includes(r0));\n        if (hit.some((e) => e.grants && e.grants.runAsk)) console.error(\"# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray\");\n      } catch { }\n    }, 1000);\n";
+  if (cliSrc.split(NEW).length !== 2) throw new Error("the control's anchor moved in data/bin/vibespace-exit — update this suite");
+  const copy = M.write('data/bin/vibespace-exit', cliSrc.replace(NEW, OLD), 'oldnote');
+  const TA = 'vsst_' + 'a'.repeat(24), TB = 'vsst_' + 'b'.repeat(24);
+  const [now, old] = await Promise.all([runCli(path.join(REPO, 'data/bin/vibespace-exit'), TA), runCli(copy, TB)]);   // side by side: one wait, not two
+  const nowAsked = logs.get(TA) || [], oldAsked = logs.get(TB) || [];
+  ok(now.code === 0 && nowAsked.length === 1 && nowAsked[0] === 'POST /api/agent/exit/run' && NOTE.test(now.err) && /ok/.test(now.out), `a call that outlives a second sends ONE request (${nowAsked.join(', ')}) and still says its note`, now.err.slice(0, 300));
+  ok(old.code === 0 && oldAsked.length === 2 && oldAsked.includes('GET /api/agent/exit'), `CONTROL (RED): today's note asks the hub to word itself ⇒ ${oldAsked.length} requests for one command (${oldAsked.join(', ')})`);
+  srv.close();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

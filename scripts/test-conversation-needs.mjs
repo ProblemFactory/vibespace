@@ -326,7 +326,7 @@ ok(/filed: CN\.filedLine\('vault-grant-ask', r\.todoId, OF\.tray\(\)\)/.test(SRC
   ok(calls.length === 6 && !off.length,   // lane vault-entry-description: + vault-words-ask
  `the ${calls.length} filedLine calls each name a registry row or pass the item (${calls.join(', ')})`, off);
 }
-ok((SRC.exit.match(/an approval card in this conversation and in the For-you tray|Filed for you: an approval — answer it on the card in this conversation or in the For-you tray/g) || []).length === 2, 'vibespace-exit (ask me each time): the 60 s wait line names the card in this conversation');
+ok((SRC.exit.match(/an approval card in this conversation and in the For-you tray|Filed for you: an approval — answer it on the card in this conversation or in the For-you tray/g) || []).length === 2, 'vibespace-exit (ask me each time): the 60 s wait line names the card in this conversation');   // stale-pins: kept — B-48a4 U3: run's note is the pull / push one now; the older words stay accepted
 
 // ── ⑦ THE STORE's `about` ────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑦ the store keeps `about` — the conversation an item filed under a group key addresses');

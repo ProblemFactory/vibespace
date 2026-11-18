@@ -281,7 +281,7 @@ console.log('⑥ bandDoorsOf\'s types are rows; every field from its closed set;
     for (const r of rows) {
       if (!['filed', 'wait', 'own'].includes(r.cli.line)) badC.push(`${r.type}: line ${r.cli.line}`);
       if (r.cli.line === 'filed' && !/console\.log\((?:answer|r|d)\.filed\)/.test(src)) badC.push(`${r.type}: ${bin} prints no hub line`);
-      if (r.cli.line === 'wait' && !/card in this conversation|answer it on the card|answer on the card/.test(src)) badC.push(`${r.type}: ${bin}'s wait note names no card`);
+      if (r.cli.line === 'wait' && !/card in this conversation|answer it on the card|answer on the card/.test(src)) badC.push(`${r.type}: ${bin}'s wait note names no card`);   // stale-pins: kept — the older wait-note words stay accepted (B-48a4 U3)
     }
   }
   ok(!badC.length, `the CLI line of every row that names one (${Object.keys(bins).join(', ')}): 'filed' ⇒ the CLI prints the hub's line, 'wait' ⇒ its note names the card`, badC);

@@ -439,6 +439,7 @@ class ExitProxyManager {
    * with a non-enumerable `done` (the stops' device-side unserve).
    */
   rejudgeAll(why = 'task-groups', { goneSessions = [], goneHosts = [] } = {}) {
+    this._memberGen = (this._memberGen || 0) + 1;   // B-48a4 U3: a run in flight asks the membership again only after one of these
     const out = { stopped: [], settled: [], asks: [], hosts: [] };
     const stopping = [];
     if (/^hosts-/.test(String(why))) this.pruneLists();   // lane grants-unify: a hosts.json write that dropped a machine drops its lists
@@ -649,6 +650,7 @@ class ExitProxyManager {
     if (encoded && !encoded.ok) throw namedError('bad_command', E.refusalText('bad_command', { encoded }), { encoded: encoded.code });
     if (encoded && encoded.hidden.length) throw namedError('bad_command', E.refusalText('bad_command', { hidden: encoded.hidden, encoded }), { hidden: encoded.hidden, encoded: 'hidden' });
     const j = this._judge(session, sessionId, ref, 'run');
+    const gen0 = this._memberGen || 0;   // B-48a4 U3: the re-judges counted so far (the membership the judge asked is good until one runs)
     if (j.refusal) throw this._refused(session, sessionId, { code: j.refusal.code, grant: 'run', cmd, error: j.refusal.error });
     const h = j.h, machine = h.name || h.id;
     const card = (rec) => this._card(session, machine, rec);
@@ -679,7 +681,12 @@ class ExitProxyManager {
     // stillGranted: the verdict AGAIN after the await (a revoke during the wait refuses and the answer is not spent)
     // — and the CALLER again (verify-r2 ask-a): a conversation that died while its ask waited is nobody to run for
     if (!this._stillLive(session, sessionId)) throw this._refused(session, sessionId, { code: 'conversation_gone', grant: 'run', h, cmd });
-    const again = E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId));
+    // B-48a4 U3: the Task Group membership is asked ONCE per command (the judge's ctx) — again only when a re-judge ran since
+    // (rejudgeAll counts itself: every Task Group store change, a hosts.json write, an access change reach it), on the asked road
+    // or not; the lists are read fresh at every verdict (a revoke of a list is caught whatever the count)
+    const gen1 = this._memberGen || 0;
+    const ctxNow = gen1 !== gen0 ? this.ctxFor(session, sessionId) : j.ctx;
+    const again = E.exitVerdict(this.access(h.id), 'run', ctxNow);
     if (!again.ok) { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: again.code, grant: 'run', h, has: j.has, cmd }); }
     const t0 = this.now();
     let r, interpreter = XS.POSIX_SHELL, platform = null, outdated = null;
@@ -735,7 +742,8 @@ class ExitProxyManager {
       throw namedError('device_agent_outdated', E.refusalText('device_agent_outdated', { machine, cmd, agentVersion }), { grant: 'run', platform, agentVersion, needVersion: XS.RUN_SHELL_SINCE });
     }
     // a revoke DURING the daemon's run cannot stop the command (no cancel op; ≤ 30 s) — it is recorded as such
-    const revokedDuringRun = !E.exitVerdict(this.access(h.id), 'run', this.ctxFor(session, sessionId)).ok;
+    const ctxAfter = (this._memberGen || 0) !== gen1 ? this.ctxFor(session, sessionId) : ctxNow;   // B-48a4 U3: a group removal during the run is recorded too
+    const revokedDuringRun = !E.exitVerdict(this.access(h.id), 'run', ctxAfter).ok;
     const by = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' };
     // lane-exit-run-output E2: the child NEVER STARTED (`cmd-result.spawnError`, the daemon's judge) — distinct from a
     // non-zero exit: the row, the audit line, the card and the agent all say WHY (pre-fix: "exit 1 · 0.0 s", a guess)

@@ -433,7 +433,7 @@ try {
   const cliCode = await cliDone;
   const cliText = Buffer.concat(cliOut).toString();
   ok(cliCode === 1 && /the user did not allow `echo nope` on "exmac"/.test(cliText), 'the REAL vibespace-exit CLI exits 1 naming the refusal', cliText);
-  ok(/# waiting for the user's approval \(up to 60 s\)…/.test(cliText), '…after saying it waits for the user\'s approval', cliText);
+  ok(/# waiting for the user's approval \(up to 60 s\)(?: if the machine asks)?…/.test(cliText), '…after saying it waits for the user\'s approval', cliText);
   // an ungranted conversation (3) and a job token
   await P.evalJs(`app.attachSession(${JSON.stringify(S[2].sid)}, 'conv3', ${JSON.stringify(path.join(W.home, 'proj3'))}, { mode: 'chat', backend: 'claude' }); true`);
   await sleep(1500);
