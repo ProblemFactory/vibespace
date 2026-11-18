@@ -306,7 +306,12 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   // re-pinned by lane ui-language (43b4907f5e0b → 7eb3a7d04bc1, measured on the box at 8fde20d8b): the fixture's bar runs in
   // bypassPermissions, and the perm chip now carries .danger there (the walk's chat-status-bar-2: a mode that asks nothing is
   // drawn in the warning colour) — span.chat-status-perm.chat-status-clickable.danger
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '7eb3a7d04bc1';
+  // re-pinned .411 for lane bl-chat-c's B-02a3 (8a4b93e94, the coordinator's ruling (1): THE GROUP PRESS) by lane
+  // bl-tests-chrome (7eb3a7d04bc1 → 98f87f3662f7, by arithmetic: the .362 signature kept whole in the logs + .danger hashes
+  // to 7eb3a7d04bc1, and + exactly button.chat-stash-go.chat-stash-groups-go(span.chat-stash-go-label,span.chat-stash-cost)
+  // right after span.chat-stash-nobutton hashes to 98f87f3662f7, the hash the block's first checkpoint 8cef0006a printed) —
+  // the stash strip's hidden group press, drawn only mid-turn where Enter steers
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '98f87f3662f7';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('desk: no camera input on the desk (lane phone-take-photo)', deskCam === 0, deskCam);
