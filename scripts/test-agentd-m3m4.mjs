@@ -30,7 +30,11 @@ process.env.VIBESPACE_AGENTD_ROOT = AGENTD_ROOT;
 // discovery reads ~/.claude — point HOME at a fixture so the test is hermetic
 const fakeHome = path.join(tmp, 'home');
 fs.mkdirSync(path.join(fakeHome, '.claude', 'sessions'), { recursive: true });
-fs.mkdirSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj'), { recursive: true });
+// the fixture's project folder (the EXCLUDED package): the lock's cwd is DATA — nothing opens it — so it names no /tmp path (test-ci-gate-tiers:
+// no gated suite claims a fixed /tmp path) and none under this run's /tmp/vs-… scratch either (the discovery fixture guard hides
+// project folders of a /tmp/vs-* cwd — the jsonl legs would go vacuous); PROJ_DIR is the CLI's own encoding of it
+const PROJ_CWD = '/work/m34-proj', PROJ_DIR = PROJ_CWD.replace(/[/._]/g, '-');
+fs.mkdirSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR), { recursive: true });
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
 let failed = 0;
@@ -110,10 +114,10 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
   fs.writeFileSync(claudeLn, 'setTimeout(() => {}, 300000);\n');
   const fakeClaude = (await import('node:child_process')).spawn(process.execPath, [claudeLn], { stdio: 'ignore' });
   await new Promise((r) => setTimeout(r, 200));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', fakeClaude.pid + '.json'), JSON.stringify({ pid: fakeClaude.pid, sessionId: 'live-1', cwd: '/tmp/proj' }));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'pid-reused-1', cwd: '/tmp/proj' }));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'dead-1', cwd: '/tmp/proj' }));
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj', 'aaaa.jsonl'), '{"type":"user"}\n');
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', fakeClaude.pid + '.json'), JSON.stringify({ pid: fakeClaude.pid, sessionId: 'live-1', cwd: PROJ_CWD }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'pid-reused-1', cwd: PROJ_CWD }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'dead-1', cwd: PROJ_CWD }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR, 'aaaa.jsonl'), '{"type":"user"}\n');
   const snap = await dm.discoverySnapshot();
   check('live claude lock reported; dead AND pid-reused locks filtered', snap.locks.length === 1 && snap.locks[0].sessionId === 'live-1', JSON.stringify(snap.locks));
   try { fakeClaude.kill(); } catch { }
@@ -121,7 +125,7 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
   let dirty = false;
   await dm.watchDiscovery(() => { dirty = true; });
   await sleep(300);
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj', 'bbbb.jsonl'), '{"type":"user"}\n');
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', PROJ_DIR, 'bbbb.jsonl'), '{"type":"user"}\n');
   for (let i = 0; i < 20 && !dirty; i++) await sleep(200);
   check('fs.watch dirty PUSH on a new transcript', dirty, '');
   const snap2 = await dm.discoverySnapshot();
