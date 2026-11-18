@@ -74,6 +74,8 @@ const acorn = require('acorn');
 const TABLE_REL = 'scripts/fixtures/agent-leak-census.json';
 const TABLE = JSON.parse(fs.readFileSync(path.join(REPO, TABLE_REL), 'utf-8'));
 let pass = 0, fail = 0;
+// each part's own time, said (the hosted fast job warned of 12.3 s over the tier's 10 s, 2.369.410's close): said, never judged
+const lap = (() => { let t = performance.now(); return (what) => { const n = performance.now(); console.log(`    (${what}: ${Math.round(n - t)} ms)`); t = n; }; })();
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : '')); } };
 const READ = new Map();
 const readRepo = (f) => { if (!READ.has(f)) READ.set(f, fs.readFileSync(path.join(REPO, f), 'utf-8')); return READ.get(f); };
@@ -361,6 +363,7 @@ const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
 // through the same scope), `make` (a census-built value: a real store on the scratch root, or a stand-in) or `inert`
 // (a stand-in whose every member is a no-op, for an engine whose only part on the touched roads is a side effect).
 // A construction with no row, a stand-in member nobody gave, a program started, a row nothing touched = RED.
+lap('①–④ the static census');
 console.log('⑤ the world (the hub\'s real wiring, evaluated in-process over a scratch root)');
 const WIRING = new Set(FILES.filter((f) => f === 'server.js' || /^src\/server\/[a-z0-9-]+-wiring\.js$/.test(f)));
 // A FIXTURE CARRIER RE-HOMES ITS OWN PROCESS (test-fixture-isolation (c): this suite mints session ids with fixtureSid): the
@@ -772,6 +775,7 @@ WORLD.world.value('server.js', 'convOps');   // the boot provides conversation-o
   ok(!B.gaps.size, 'no stand-in member read that its row did not give', [...B.gaps].join(' | '));
   ok(!B.dirnameReads.size, 'no evaluated wiring code outside server.js reads its own __dirname (the real tree\'s folder — only server.js\'s is the scratch root; a data path built from another would land in the checkout)', [...B.dirnameReads].join(' | '));
 }
+lap('⑤ the world');
 console.log('⑥ the mount (the bearer routes the real wiring registers, against ③\'s static list)');
 {
   const V = mountVerdict(WORLD.app, ROUTES_STATIC, TABLE);
@@ -787,6 +791,7 @@ console.log('⑥ the mount (the bearer routes the real wiring registers, against
 // URI-encoded. CRITICAL: B's tokens, a vault secret's bytes, a website login's password; LAW: an ungranted login's user
 // name; CONV: B's name, folder, words, Task Group, progress, job, For-you item, meta. A hit is a FINDING: a row of the
 // table's `findings` (listed for the coordinator, never fixed here) — a new hit or a row no hit answers = RED.
+lap('⑥ the mount');
 console.log('⑧ the sweep (every mounted bearer route × every bearer, over sentinels planted through the real writers)');
 const crypto = require('node:crypto');
 const http = require('node:http');
@@ -938,7 +943,16 @@ if (minted && minted.ok) for (const verb of [...AKEYS.VERBS].sort((a, b) => (lay
 // membership, listed), and no CRITICAL sentinel even then ──
 tasksStore.bind(gB.id, KEY_A);
 const MAIN = RESULTS.length;
-await pool(reads.flatMap((r) => [() => sweepOne(r, 'A-related', TA)]), 12);
+// THE HOOK READS FIRST, IN THE HOOK'S ORDER, EACH AWAITED (the train 2.369.410's close: a hosted red, green on its retry).
+// GET /api/agent/task-context (SessionStart) and GET /api/agent/prompt-context (the prompt) move A's OWN seen marks: a
+// caller with no confirm header marks as it composes (src/turn-carry.js), and B's group has no context rows (no signature
+// read to wait on). Fired in the pool together, whichever the server composed first told A the group and the other found
+// nothing new — prompt-context carried bGroup + bProgress once (two NEW hits), nothing on the retry. Both answer A while A
+// is a member (bound above, unbound below after every read answered): an order race, never a leak. The next read starts
+// once the previous answer is composed and its marks moved — that event, never a sleep; the rest of the pass is pooled.
+const HOOK_READS = ['GET /api/agent/task-context', 'GET /api/agent/prompt-context'];
+for (const r of HOOK_READS) if (reads.includes(r)) await sweepOne(r, 'A-related', TA);
+await pool(reads.filter((r) => !HOOK_READS.includes(r)).flatMap((r) => [() => sweepOne(r, 'A-related', TA)]), 12);
 tasksStore.unbind(gB.id, KEY_A);
 const RELATED = RESULTS.splice(MAIN);
 for (const x of RELATED) x.who = 'A-related';
@@ -1057,6 +1071,7 @@ ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a list
 }
 
 
+lap('⑧ the sweep and its verdicts');
 console.log('⑦ controls of the world (planted copies, each world on its own scratch root)');
 {
   let n = 0;
@@ -1132,6 +1147,7 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
   ok(SPAWNED.length > sp0 && e.B.threw.some((t) => /no program runs/.test(t)), 'CONTROL: a site that starts a program is refused and RED (the world starts none)', e.B.threw);
   SPAWNED.length = sp0;
 }
+lap('⑦ the controls');
 
 // ── the REAL home is untouched (this process was re-homed before the world loaded) ──
 {
