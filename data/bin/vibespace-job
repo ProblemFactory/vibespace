@@ -283,6 +283,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (j.state === 'waiting') console.log(`waiting: ${j.id} (${j.kind} ${j.name}) was created and is NOT started${renamed} — ${j.waitWords || 'poll it for what it waits on'}`);
       else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled: ${j.id} (${j.kind} ${j.name})${renamed} — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
       else console.log(`started ${j.id} (${j.kind} ${j.name})${renamed}`);
+      if (r.where) console.log(`where: ${r.where}`);   // B-70f9: a job runs on the hub's machine — said with the path
       // RESOLVED-TIME ECHO: always show WHEN it actually fires, absolute (the
       // owner's zone, named — B-7960) + countdown — a timezone mis-parse (bare
       // datetimes are server-local) must be visible the second the job is created.
@@ -333,6 +334,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(pos[1])}`);
       const j = r.job;
       console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : j.mine === false ? NOT_MINE : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
+      if (r.machine) console.log(`machine: ${r.machine} (a job runs on the hub's machine)`);   // B-70f9
       if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + atWords(j, 'nextFireAt') : ''}`);
       // lane job-notify-user r3: a notify cron's reminder (the snapshot kept none)

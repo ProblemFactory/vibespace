@@ -8,6 +8,8 @@
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
 const os = require('os');
+const fs = require('fs');
+const mountDoor = require('./mount-door.js'); // B-70f9: a job's folder on the hub is asked only through the blocked-path door
 const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
@@ -2693,7 +2695,7 @@ app.get('/api/agent/pages', (req, res) => {
   if (!a.sessionId && !a.conversationId) return res.json({ pages: [] }); // a caller with no scope sees nothing (no all-pages oracle — review-caught)
   res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }).map(pageAnswer) : [] });   // verify r6 F3: every name through the belt
 });
-app.post('/api/agent/jobs', (req, res) => {
+app.post('/api/agent/jobs', async (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
   // verify r5: a job is OWNED for good by the conversation that makes it — a borrowed id (a pending fork) is refused
@@ -2724,6 +2726,17 @@ app.post('/api/agent/jobs', (req, res) => {
   if (!spec.cmd && b.action && b.action.type === 'spawn-task') { /* notify-cron / cron shapes carry cmd inside action */ }
   else if (!spec.cmd && b.action && b.action.type === 'notify') { /* pure notify cron */ }
   else if (!spec.cmd) return res.status(400).json({ error: 'cmd required' });
+  // B-70f9: A JOB RUNS ON THE HUB'S MACHINE. A conversation on ANOTHER machine (its session's host) asking for a folder the hub's
+  // machine does not have is refused NOW, by name — the folder asked off the loop, through the blocked-path door first
+  const hubMachine = os.hostname(), remoteHost = a.session && a.session.host ? String(a.session.hostName || a.session.host) : null;
+  const jobCwd = spec.cmd && typeof spec.cmd.cwd === 'string' && spec.cmd.cwd ? spec.cmd.cwd : null;
+  let cwdExists = null, cwdBlocked = false;
+  if (remoteHost && jobCwd) {
+    if (mountDoor.pathBlocked(jobCwd)) cwdBlocked = true;
+    else { try { cwdExists = (await fs.promises.stat(jobCwd)).isDirectory(); } catch { cwdExists = false; } }
+  }
+  const where = jobModel.jobWhereVerdict({ hubMachine, sessionMachine: remoteHost, cwd: jobCwd, cwdExists, cwdBlocked });
+  if (!where.ok) return res.status(400).json({ error: where.error, code: where.code, machine: hubMachine });
   const r = a.jm.create(spec, a.caller);
   if (r.error) return res.status(400).json({ error: r.error });
   // Tell the creating agent up front whether ITS conversation will hear back
@@ -2731,7 +2744,7 @@ app.post('/api/agent/jobs', (req, res) => {
   // resume / off, with the deciding layer named.
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
-  res.json({ success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
+  res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
 });
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -2784,6 +2797,7 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   const mine = a.selfJob ? true : jobModel.isOwner(job, a.caller);
   res.json({
     success: true,
+    machine: os.hostname(),   // B-70f9: a job runs on the hub's machine — the show names it
     job: jobWhen({
       ...jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine }),   // lane job-notify-user r3: `author` (a notify cron's --text whole for its lineage) · verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
       mine,

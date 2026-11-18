@@ -744,5 +744,23 @@ console.log('B-70f9 ② ownedJobsView — the jobs a conversation OWNS, attentio
   ok(plants.every(([, src]) => src && src !== wrap && !removed(src)), `CONTROL: each patched copy is RED — ${plants.map(([n, src]) => `${n}: ${!src ? 'ANCHOR GONE' : removed(src) ? 'GREEN (WRONG)' : 'red'}`).join('; ')}`);
 }
 
+// ── B-70f9 ① (the owner's option A, 2026-11-18): A JOB RUNS ON THE HUB'S MACHINE — where, said; a wrong machine's folder refused by name ──
+console.log('B-70f9 ① a job says where it runs; a folder the hub\'s machine does not have is refused at once');
+{
+  const V = (o) => M.jobWhereVerdict({ hubMachine: 'hub-box', ...o });
+  const here = V({ cwd: '/work/x' }), remoteOk = V({ sessionMachine: 'laptop', cwd: '/srv/shared', cwdExists: true }), missing = V({ sessionMachine: 'laptop', cwd: '/home/u/proj', cwdExists: false }), blocked = V({ sessionMachine: 'laptop', cwd: '/mnt/dav/x', cwdBlocked: true });
+  ok(here.ok && here.words === 'runs on hub-box in /work/x', 'a conversation ON the hub\'s machine: the job runs there, said with its path', here);
+  ok(remoteOk.ok && /^runs on hub-box in \/srv\/shared — not on laptop, where your conversation runs \(the path is used as it is on hub-box\)$/.test(remoteOk.words), 'a conversation on ANOTHER machine, a folder the hub has too (a shared mount): it runs — on hub-box, said; never a guess that the two folders are one', remoteOk);
+  ok(!missing.ok && missing.code === 'wrong-machine' && /^jobs run on hub-box, not on laptop where your conversation runs; this folder is not there: \/home\/u\/proj — nothing was created/.test(missing.error), 'a folder the hub\'s machine does NOT have: refused at once, by name — never a job that fails later', missing);
+  ok(!blocked.ok && blocked.code === 'folder-blocked' && /on a mount of hub-box that does not answer right now — nothing was created/.test(blocked.error), 'a folder on a mount that does not answer: refused by name, never read', blocked);
+  ok(V({ sessionMachine: 'laptop' }).ok && M.jobWhereVerdict({}).words === "runs on the hub's machine", 'no folder asked (a notify cron): nothing to refuse; no machine name: «the hub\'s machine»');
+  // WIRING: the agent create route asks the verdict BEFORE it creates; the folder is asked only for a REMOTE conversation, through the
+  // blocked-path door first, off the loop; the create and the show answers name the machine; the CLI prints both
+  const ar = fs.readFileSync(path.join(__dirname_jm, '..', 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(__dirname_jm, '..', 'data/bin/vibespace-job'), 'utf8');
+  const iV = ar.indexOf('const where = jobModel.jobWhereVerdict('), iC = ar.indexOf('const r = a.jm.create(spec, a.caller);', iV), iD = ar.indexOf('if (mountDoor.pathBlocked(jobCwd)) cwdBlocked = true;'), iS = ar.indexOf('await fs.promises.stat(jobCwd)');
+  ok(iV > 0 && iC > iV && iD > 0 && iS > iD && iV > iS && /if \(remoteHost && jobCwd\) \{/.test(ar) && /if \(!where\.ok\) return res\.status\(400\)\.json\(\{ error: where\.error, code: where\.code, machine: hubMachine \}\);/.test(ar), 'WIRING: the route asks the folder (remote only, the mount door first, fs.promises) and the verdict BEFORE it creates; a refusal answers 400 with its code');
+  ok(/res\.json\(\{ machine: hubMachine, where: where\.words,/.test(ar) && /machine: os\.hostname\(\),   \/\/ B-70f9/.test(ar) && /if \(r\.where\) console\.log\(`where: \$\{r\.where\}`\);/.test(cli) && /if \(r\.machine\) console\.log\(`machine: \$\{r\.machine\} \(a job runs on the hub's machine\)`\);/.test(cli), 'WIRING: the create and the show answers name the machine; the CLI prints «where:» at a run and «machine:» at a show');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

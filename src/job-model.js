@@ -1082,7 +1082,20 @@ function ownedJobsView(jobs, cid) {
     .sort((a, b) => ((ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)) || a.name.localeCompare(b.name));
 }
 
-module.exports = { FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
+/** B-70f9 (the owner's option A, 2026-11-18): A JOB RUNS ON THE HUB'S MACHINE — never on another. A conversation that runs on
+ *  ANOTHER machine asking for a job in a folder the hub's machine does not have is refused AT ONCE, by name (it would only fail
+ *  later); a folder that exists there (a shared mount, the same path on both) runs, and the answer says on which machine. Two
+ *  same-named folders are never told apart: the machine and the path are said, that is the honest part.
+ *  → {ok: true, words} | {ok: false, code: 'wrong-machine' | 'folder-blocked', error} — PURE (the caller asks the disk) */
+function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null, cwdExists = null, cwdBlocked = false } = {}) {
+  const hub = String(hubMachine || "the hub's machine").slice(0, 80), at = cwd ? String(cwd).slice(0, 400) : '';
+  if (!sessionMachine) return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''}` };
+  const there = String(sessionMachine).slice(0, 80);
+  if (at && cwdBlocked) return { ok: false, code: 'folder-blocked', error: `jobs run on ${hub}, not on ${there} where your conversation runs; ${at} is on a mount of ${hub} that does not answer right now — nothing was created` };
+  if (at && cwdExists === false) return { ok: false, code: 'wrong-machine', error: `jobs run on ${hub}, not on ${there} where your conversation runs; this folder is not there: ${at} — nothing was created. Give --cwd a folder ${hub} has, or run the command on ${there} yourself` };
+  return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs (the path is used as it is on ${hub})` };
+}
+module.exports = { jobWhereVerdict, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
