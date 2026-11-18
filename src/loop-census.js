@@ -121,7 +121,7 @@ const HELPERS = Object.freeze([
   ['src/file-disposition.js', 'PURE: the one spelling of a Content-Disposition that names a file'],
   ['src/file-type-table.js', 'PURE data: extension → category, icon, viewer'],
   ['src/sock-path.js', 'a path helper: where a unix socket may live (fs and crypto handed in, nothing kept)'],
-  ['src/server/hub-tmp.js', 'a path helper: the hub’s own folder under the temp folder, made and judged per call (fs handed in, nothing kept)'],
+  ['src/server/hub-tmp.js', 'a path helper: the hub’s own folder under the temp folder, made and judged per call, and its age sweep run unawaited (fs handed in, nothing kept)'],
   ['src/safe-fetch.js', 'one request to a non-vendor URL with its decoding belt; nothing kept between calls'],
   ['src/egress-fence.js', 'the address verdict and one fenced request to an owner-configured address; nothing kept between calls'],
   ['src/cache-bounds.js', 'PURE: no fs, no clock, nothing at module level — the ceilings, and eviction and slab classes acting on the map or slab their CALLER owns'],

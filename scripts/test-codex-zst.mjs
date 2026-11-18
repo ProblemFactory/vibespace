@@ -1946,12 +1946,17 @@ console.log('⑦ the zst cache and the ssh control folder are judged before use 
     const refused = new HM1({ dataDir: dataA });
     const argsRefused = refused.sshArgs(h, { multiplex: true }).join(' ');
     const warnOnce = warned.filter((w) => /ssh connection sharing is off/.test(w));
+    const cmdRefused = refused.sshCmd(h);   // read while the planted name is still there
+    fs.unlinkSync(path.join(T, `vs-cm-${uid}`));   // the planted name goes: sharing comes back at the next ask, no restart
+    const argsBack = refused.sshArgs(h, { multiplex: true }).join(' ');
+    const warnAfter = warned.filter((w) => /ssh connection sharing is off/.test(w)).length;
     process.env.TMPDIR = good;
     const fine = new HM1({ dataDir: path.join(T, 'data-b') });
     const argsFine = fine.sshArgs(h, { multiplex: true }).join(' ');
-    ok(hostsSrc.includes(HA) && !/ControlMaster|ControlPath/.test(argsRefused) && !/ControlPath/.test(refused.sshCmd(h)) && warnOnce.length === 1 && warnOnce[0].includes(path.join(T, `vs-cm-${uid}`)) && /the way out/.test(warnOnce[0]) && /ControlPath=/.test(argsFine) && argsFine.includes(path.join(good, `vs-cm-${uid}`)),
-      `B-3767 unit 2: a link at the ssh control folder's name turns connection sharing OFF (no ControlPath into it), said once with the path and the way out; a private folder keeps it (${JSON.stringify({ refusedHasCM: /ControlMaster/.test(argsRefused), warned: warnOnce.length })})`);
+    ok(hostsSrc.includes(HA) && !/ControlMaster|ControlPath/.test(argsRefused) && !/ControlPath/.test(cmdRefused) && warnOnce.length === 1 && warnOnce[0].includes(path.join(T, `vs-cm-${uid}`)) && /the way out/.test(warnOnce[0]) && /ControlPath=/.test(argsFine) && argsFine.includes(path.join(good, `vs-cm-${uid}`)) && argsBack.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`) && warnAfter === 1,
+      `B-3767 unit 2: a link at the ssh control folder's name turns connection sharing OFF (no ControlPath into it), said once with the path and the way out; once the planted name is gone sharing comes back by itself (no restart, no second warning); a private folder keeps it (${JSON.stringify({ refusedHasCM: /ControlMaster/.test(argsRefused), warned: warnOnce.length })})`);
     process.env.TMPDIR = T;
+    fs.rmSync(path.join(T, `vs-cm-${uid}`), { recursive: true, force: true }); fs.symlinkSync(away, path.join(T, `vs-cm-${uid}`));   // planted again for the control
     const HM0 = M.load('src/hosts.js', hostsSrc.replace(HA, '    const cm = { ok: true }; try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }\n'), 'old').HostManager;
     const oldArgs = new HM0({ dataDir: path.join(T, 'data-c') }).sshArgs(h, { multiplex: true }).join(' ');
     ok(oldArgs.includes(`ControlPath=${path.join(T, `vs-cm-${uid}`)}`), 'CONTROL B-3767 unit 2: the release put its ControlPath into the planted link (red)');

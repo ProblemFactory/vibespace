@@ -650,7 +650,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     fs.rmSync(path.join(root, 'uploads'), { recursive: true, force: true });
     fs.symlinkSync(path.join(DIR, 'elsewhere10'), path.join(root, 'uploads'));
     const b = await post();
-    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && b.j.error.includes(path.join(root, 'uploads')) && /SYMLINK/.test(b.j.error) && /the way out: remove that folder .*TMPDIR/.test(b.j.error),
+    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && b.j.error.includes(path.join(root, 'uploads')) && /SYMLINK/.test(b.j.error) && /the way out: .*TMPDIR/.test(b.j.error),
       `B-3767: a temp folder the hub cannot use (here a link) is the upload's answer BY NAME, with the path and the way out — never a hang: ${JSON.stringify(b)}`);
     const st = (o) => ({ isSymbolicLink: () => !!o.link, isDirectory: () => o.dir !== false, uid: o.uid ?? uid, mode: o.mode ?? 0o40700 });
     ok(/owned by uid/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && !/socket/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40777 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40755 }), { uid })) && /not a directory/.test(HT.ownVerdict(st({ dir: false }), { uid })) && HT.ownVerdict(st({}), { uid }) === null,

@@ -43,7 +43,7 @@ function zstCacheDir() {
   try { uid = String(os.userInfo().uid); } catch { uid = 'u'; }
   const dir = path.join(os.tmpdir(), `vibespace-zst-${uid}`);
   const v = SOCK.ensureSocketDir(dir);
-  if (!v.ok) throw Object.assign(new Error(`the compressed-transcript cache ${dir} is refused: ${String(v.why).split(' — a socket')[0]} (the way out: remove that folder if this hub did not make it, or start the hub with TMPDIR set to a private folder)`), { code: 'EZSTCACHE' });
+  if (!v.ok) throw Object.assign(new Error(`the compressed-transcript cache ${dir} is refused: ${String(v.why).split(' — a socket')[0]} (the way out: start the hub again with TMPDIR set to a private folder — or have the folder's owner remove it (in a shared, sticky temp folder only its owner or root can))`), { code: 'EZSTCACHE' });
   return (_zstCacheDir = dir);
 }
 function fileIsZst(fp) {

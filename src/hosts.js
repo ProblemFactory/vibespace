@@ -37,6 +37,18 @@ const USAGE_HARVEST_LIMITS = Object.freeze({ maxBuffer: 128 * 1024 * 1024, timeo
 const usageScanBound = (L) => ({ maxBytes: Math.floor(L.maxBuffer / 2), maxMs: Math.floor(L.timeoutMs / 3) });
 // …and a harvest that failed backs off: 1 min, doubling, at most 30 min (a forced harvest — the owner's own ask — goes)
 const HARVEST_BACKOFF_MS = 60 * 1000, HARVEST_BACKOFF_MAX_MS = 30 * 60 * 1000;
+/** B-3767 unit 2 (the reader's should): is the ssh control folder ours (sharing on)? A REFUSED folder is judged again at each ask
+ *  (one lstat), so its removal turns sharing back on without a restart; a new reason is said once. Ours once, ours after: a 0700
+ *  folder of this uid cannot be swapped by another user. */
+function cmUsable(hm) {   // a function of the manager, so a method borrowed onto a bare object (a suite's) keeps sharing on
+  if (!hm._cmRefused) return true;
+  const cm = SOCK.ensureSocketDir(hm._cmDir);
+  const why = cm.ok ? null : `${hm._cmDir}: ${cm.why}`;
+  if (why && why !== hm._cmRefused) console.warn(`[hosts] ssh connection sharing is off — its control folder is refused: ${why} (the way out: start the hub again with TMPDIR set to a private folder — or have the folder's owner remove it (in a shared, sticky temp folder only its owner or root can); sharing comes back by itself once the folder is gone)`);
+  hm._cmRefused = why;
+  return !why;
+}
+
 const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=6',
@@ -152,7 +164,7 @@ class HostManager {
     // WITHOUT connection sharing — never a control socket in somebody else's folder (before: a mkdir in a catch, then used)
     const cm = SOCK.ensureSocketDir(this._cmDir);
     this._cmRefused = cm.ok ? null : `${this._cmDir}: ${cm.why}`;
-    if (this._cmRefused) console.warn(`[hosts] ssh connection sharing is off — its control folder is refused: ${this._cmRefused} (the way out: remove that folder if this hub did not make it, or start the hub with TMPDIR set to a private folder)`);
+    if (this._cmRefused) console.warn(`[hosts] ssh connection sharing is off — its control folder is refused: ${this._cmRefused} (the way out: start the hub again with TMPDIR set to a private folder — or have the folder's owner remove it (in a shared, sticky temp folder only its owner or root can); sharing comes back by itself once the folder is gone)`);
     this._state = { hosts: [] };
     this._discoveryCache = new Map(); // hostId -> {at, sessions}
     // LAST-KNOWN discovery results, persisted across restarts (2.124.0): the
@@ -706,7 +718,7 @@ class HostManager {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
-    if (multiplex && !this._cmRefused) {
+    if (multiplex && cmUsable(this)) {
       args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
     }
     if (tty) args.push('-t');
@@ -732,7 +744,7 @@ class HostManager {
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
-    if (!this._cmRefused) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
+    if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
     return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
   }
 
@@ -956,7 +968,8 @@ class HostManager {
       out = await this._ssh(h, probe, { timeoutMs: 10000, fresh: true });
     } catch (freshErr) {
       let muxAlive = false;
-      try { muxAlive = String(await this._ssh(h, 'echo VS-MUX', { timeoutMs: 6000 })).includes('VS-MUX'); } catch {}
+      // B-3767 unit 2: with sharing off there is no established channel to ask — a second fresh try would name a false cause
+      if (cmUsable(this)) { try { muxAlive = String(await this._ssh(h, 'echo VS-MUX', { timeoutMs: 6000 })).includes('VS-MUX'); } catch {} }
       if (muxAlive) {
         throw new Error(`new SSH connections fail (${String(freshErr.message || freshErr).slice(0, 120)}) while an already-established channel still responds — the network path to this host changed (firewall/NAT/address). File transfers over the old channel may still work, but sessions cannot connect until the address is fixed.`);
       }

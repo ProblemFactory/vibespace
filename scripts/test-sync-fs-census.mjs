@@ -353,7 +353,7 @@ const ROWS = [
   ["src/session-store.js", "tmuxOnPath", 1, "local-only", "the hub process's PATH dirs + \"tmux\" (TTL-memoized)"],
   ["src/session-store.js", "*", 18, "local-only", "transcripts under ~/.claude/projects (cwd only names the projDir), ~/.claude/sessions, <checkout>/data/remote-jsonl, <dataDir>/session-buffers"],
   ["src/slot-transitions.js", "*", 2, "local-only", "<dataDir>/slot-transitions.jsonl and <dataDir>/archive/slot-transitions-*.jsonl"],
-  ["src/sock-path.js", "ensureSocketDir", 3, "local-only", "dir = a socket dir pick: mounts rcSocketPath (XDG_RUNTIME_DIR or data dir, network fs refused) / agentd's own socket dir."],
+  ["src/sock-path.js", "ensureSocketDir", 3, "local-only", "dir = a socket dir pick: mounts rcSocketPath (XDG_RUNTIME_DIR or data dir, network fs refused) / agentd's own socket dir; B-3767 unit 2: HostManager's ssh control folder (os.tmpdir()/vs-cm-<uid>, at construction and while refused) and the codex zst cache (os.tmpdir()/vibespace-zst-<uid>, once)."],
   ["src/sock-path.js", "witnessOrRule", 2, "local-only", "root = VIBESPACE_AGENTD_ROOT or ~/.vibespace/agentd (agentd/client.js:120); p = the daemon's own socket path it wrote."],
   ["src/ssh-key.js", "*", 4, "local-only", "a 0700 scratch dir mkdtemp(os.tmpdir()/vs-key-) per imported key (exit-routes key import): the key body is the request's, every path is the hub's own scratch"],
   ["src/sync-store.js", "*", 5, "local-only", "filePath = <checkout>/data/{drafts,settings-sync,uploads-sync,stage-sync}.json (server.js new SyncStore, the only constructions)"],

@@ -1333,7 +1333,7 @@ async function runDirect(action, { r, head, profileId, wantsJson, shotPath = nul
       try { fs.mkdirSync(d, { mode: 0o700 }); } catch (e) { if (e.code !== 'EEXIST') { console.error(`the picture's folder ${d} could not be made (${e.code || e.message}) — pass a path to write it elsewhere [shot_dir_unsafe]`); await audit(false); process.exit(1); } }
       let st = null; try { st = fs.lstatSync(d); } catch { st = null; }
       const mine = !!st && (typeof process.getuid !== 'function' || st.uid === process.getuid());
-      if (!st || st.isSymbolicLink() || !st.isDirectory() || !mine || (st.mode & 0o077)) { console.error(`${d} is not a private folder of yours (a link, a file, another user's, or open to others) — remove it if you did not make it, set TMPDIR to a private folder, or pass a path to write the picture elsewhere [shot_dir_unsafe]`); await audit(false); process.exit(1); }
+      if (!st || st.isSymbolicLink() || !st.isDirectory() || !mine || (st.mode & 0o077)) { console.error(`${d} is not a private folder of yours (a link, a file, another user's, or open to others) — pass a path to write the picture elsewhere, or set TMPDIR to a private folder (in a shared, sticky temp folder only the folder's owner or root can remove it) [shot_dir_unsafe]`); await audit(false); process.exit(1); }
       file = path.join(d, `vibespace-screenshot-${Date.now()}.png`);
     }
     try { fs.writeFileSync(file, Buffer.from(String(a.data || ''), 'base64')); } catch (e) { console.error(`the picture could not be written to ${file} (${e.message}) [write_failed]`); await audit(false); process.exit(1); }
