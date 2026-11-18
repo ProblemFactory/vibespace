@@ -191,7 +191,7 @@ const STATUS = Object.freeze({
   vault_not_set_up: 409, vault_locked: 423, bad_flag: 400, bad_reference: 400, bad_env_name: 400, duplicate_name: 400, no_command: 400,
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
   env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400, url_userinfo: 403,
-  entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
+  entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403,   // B-a14b: + grant_expired
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
@@ -397,7 +397,33 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  once-grant's run ('used'), its 8 hours ('time'), a restart (the vault locks at each start: 'restart') — through the
    *  store's noteFact (the first end stands). The card, the tray and the window read it through foryou-actions grantLifeOf. */
   const endTimers = new Map();   // pair → the timer that ends the grant at its `until`
+  /** B-a14b: THE GRANTS THAT ENDED, per conversation × entry — memory only, ≤ ENDED_MAX, read back for ENDED_MS: the run after
+   *  an end says the end (grant_expired, VR.endedWhy), `uses` lists them («ended», how to ask again); a new grant of the pair or
+   *  the owner's switch-off (its own words: entry_not_runnable) drops the record. A restart forgets them (the vault locks then). */
+  const ENDED_MS = 24 * 3600e3, ENDED_MAX = 200, ENDS_SAID = new Set(['time', 'used', 'lock']);
+  const endedGrants = new Map();
+  const offAt = new Map();   // entry id → when the owner last switched it OFF (≤ ENDED_MAX): an end of a grant given BEFORE that OFF is not the news
+  function noteEnded(g, endedBy, endedAt) {
+    if (!g || !g.conv || !Array.isArray(g.entries) || !g.entries.length || !ENDS_SAID.has(endedBy)) return;
+    for (const id of g.entries) {
+      const p = pairOf(g.conv, id);
+      endedGrants.delete(p);
+      endedGrants.set(p, { conv: g.conv, id, endedAt: Number(endedAt) || now(), endedBy, once: !!g.once, purpose: g.purpose || '', grantAt: Number(g.at) || 0 });
+    }
+    while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);   // the oldest end goes first
+  }
+  function endedOf(scope, id) {
+    const e = endedGrants.get(pairOf(scope, id));
+    if (!e) return null;
+    if (now() - e.endedAt > ENDED_MS) { endedGrants.delete(pairOf(scope, id)); return null; }
+    return e;
+  }
   function grantEnded(g, endedBy, t = now()) {
+    // B-a14b (the adversarial read): THE FIRST END STANDS — a switch-off, a spend or a lock ends a grant once; its 8-hour timer
+    // firing later (it stays armed) must not write «its 8 hours ran out» over «revoked» / «used»
+    if (g && g.endedBy) return;
+    if (g && typeof g === 'object') g.endedBy = endedBy;
+    noteEnded(g, endedBy, endedBy === 'time' ? g && g.until : Math.min(t, Number(g && g.until) || t));
     if (!g || !g.todoId || !userTodos || typeof userTodos.noteFact !== 'function') return;
     try { userTodos.noteFact(g.todoId, { endedAt: endedBy === 'time' ? g.until : Math.min(t, Number(g.until) || t), endedBy }); } catch { }
   }
@@ -771,6 +797,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
+    if (!on) { for (const [p, e] of endedGrants) if (e.id === key) endedGrants.delete(p); offAt.delete(key); offAt.set(key, now()); while (offAt.size > ENDED_MAX) offAt.delete(offAt.keys().next().value); }   // B-a14b: the owner's OFF is its own news (entry_not_runnable) — and an end of a grant given before it never speaks over it
     if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
     const r = save({ runnable, suspended, always, opened, touched });
@@ -1693,6 +1720,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
       if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess
+      endedGrants.delete(pairOf(q.conv, q.id));   // B-a14b: a standing approval of the pair — the old end is no longer the news
       settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
       return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
     }
@@ -1701,6 +1729,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (prev) grantEnded(prev, 'replaced', t);
     const g = { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose, todoId: q.todoId || null };
     grants.set(q.pair, g);
+    endedGrants.delete(q.pair);   // B-a14b: a new approval of the pair — the old end is no longer the news
     armGrantEnd(q.pair, g);
     audit('vault-grant', { ...said, answer: a, until });
     // r4: the item says which of its verbs. r6 (主开发: «an answer never carries a value an old reader cannot name»): the
@@ -1745,6 +1774,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!scope) return named('unauthorized');
     const t = now(), mine = [];
     for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); grantEnded(g, 'time'); continue; } if (g.conv === scope) mine.push(g); }
+    const dOn = load(), onNowOf = (id) => !!(dOn && !dOn.refused && dOn.runnable.has(id));   // B-a14b: switched ON now
     const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
     const wordsOfId = (id) => { const r = VI.parseRef(id), row = r && rowOf(r); if (!row) return {}; const ew = wordsOfRow(row); return { name: ew.name, ...(ew.note ? { note: ew.note } : {}) }; };   // lane vault-entry-description
     return {
@@ -1753,6 +1783,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), ...wordsOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
       requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString(), ...(q.standing ? { standing: true, hosts: q.hosts, ...(q.commandWords ? { command: q.commandWords } : {}) } : {}) })),
       standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
+      // B-a14b: the approvals of this conversation that ENDED in the last 24 h — newest first — so an agent never reads a gone
+      // approval as a bug: how it ended, when, and the request that asks again
+      ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !onNowOf(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry switched ON — or held by a standing grant, which needs the switch — is usable: never «ask again»)
+        .map((e) => ({ entry: refOfId(e.id), ...wordsOfId(e.id), endedBy: e.endedBy, endedAt: new Date(e.endedAt).toISOString(), once: e.once, purpose: e.purpose })),
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
     };
   }
@@ -1999,9 +2033,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
       const suspended = refused || !!(row && d && d.suspended && d.suspended.has(r.id));   // round 2 MAJOR: the owner turned this entry OFF — every grant is suspended while it is (kept, not deleted); round 3: a refused store suspends EVERYTHING
       const open = sw || !!g;   // round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant his answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
+      const e0 = !open && row && !own && !refused ? endedOf(scope, r.id) : null;
+      const ended = e0 && !(suspended && (offAt.get(r.id) || 0) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
       let bytes = 0;
       if (row && (open || own)) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
-      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}) });
+      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString() } } : {}) });
     }
     // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
     // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).

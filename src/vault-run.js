@@ -130,6 +130,9 @@ const WORDS = Object.freeze({
   entry_has_its_own_door: 'that entry is never referenced by a run — it has its own door',
   entry_unknown: 'no such entry (vibespace-vault list names the ones this conversation may use)',
   entry_not_runnable: 'the user has not opened that entry for runs (⚙ System ▸ Vault…: the row\'s «Usable by agent runs», off by default) — ask them for it with its purpose: vibespace-vault request <vault://…> --for "<why>" (a question in their For you tray; nothing waits on it)',
+  // B-a14b: an approval the user GAVE that has since ENDED (its 8 hours ran out, its one run was used, a lock) is said as
+  // itself — never «the user has not opened that entry» (an agent then reports a lost approval as a bug); the door adds the end
+  grant_expired: 'the user\'s approval for that entry has ended — nothing ran; the entry was not switched off: ask them again with its purpose: vibespace-vault request <vault://…> --for "<why>" (a question in their For you tray; nothing waits on it)',
   entry_too_short_to_mask: `that value is shorter than ${MIN_MASK_BYTES} bytes and cannot be scrubbed from the output — it is never referenced`,
   use_not_granted: 'this conversation may not use that entry — ask the user for it with its purpose: vibespace-vault request <vault://…> --for "<why>" (another conversation\'s own entry stays its own)',
   // ── THE DOOR's codes (lane vault-run-door, P0-f — src/server/vault-run-door.js) ──
@@ -150,6 +153,14 @@ const WORDS = Object.freeze({
   spawn_failed: 'the program could not be started',
 });
 function refuse(code, extra = {}) { return { ok: false, code, words: WORDS[code] || code, ...extra }; }
+/** B-a14b: how an approval ended, in the agent's words — `ended` = { by: 'time'|'used'|'lock', at: ISO } (the door's record). */
+function endedWhy(ended) {
+  const iso = ended && typeof ended.at === 'string' ? ended.at : '', at = iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : 'a moment ago';
+  if (ended && ended.by === 'time') return `its 8 hours ran out at ${at}`;
+  if (ended && ended.by === 'used') return `its one run was used at ${at}`;
+  if (ended && ended.by === 'lock') return `a lock of the vault ended it at ${at} (a lock ends every approval)`;
+  return `it ended at ${at}`;
+}
 const refusalOf = refuse;   // the door's refusals in the same shape (one spelling of a code and its words)
 
 // ── THE REFERENCE ──
@@ -1490,7 +1501,9 @@ function runVerdict({ state, plan, shape = null, entries = [], granted = false, 
     if (door) return refuse('entry_has_its_own_door', { ref: r.ref, door, words: `${WORDS.entry_has_its_own_door}: ${door}` });
     const e = facts.get(r.id);
     if (!e || !e.exists) return refuse('entry_unknown', { ref: r.ref });
-    if (e.open !== true && e.own !== true) return refuse('entry_not_runnable', { ref: r.ref });   // lane vault-agent-own: its own entry is open to its conversation by construction
+    if (e.open !== true && e.own !== true) return e.ended   // B-a14b: an approval that ENDED is said as itself, with how and when
+      ? refuse('grant_expired', { ref: r.ref, ended: e.ended, words: WORDS.grant_expired.replace(' — nothing ran;', ` (${endedWhy(e.ended)}) — nothing ran;`) })
+      : refuse('entry_not_runnable', { ref: r.ref });   // lane vault-agent-own: its own entry is open to its conversation by construction
     if (!(Number(e.bytes) >= MIN_MASK_BYTES)) return refuse('entry_too_short_to_mask', { ref: r.ref });
   }
   if (granted !== true) return refuse('use_not_granted');
@@ -2037,6 +2050,7 @@ function compileTextScrubber(secrets) {
 }
 
 module.exports = {
+  endedWhy,   // B-a14b
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, urlHostsBad, parseCfgLine, cfgRouteHosts, repoHostOf, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
   parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, ghCredEnvFor, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,

@@ -1499,7 +1499,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a view\'s held tail ignored', 'if (!final) { const len = r ? r.sk.length : end, ss = len - W;', 'if (false) { const len = r ? r.sk.length : end, ss = len - W;', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)).filter(([, n]) => READ_ROWS.some(([r]) => r === n)) : chunkEscapes(Vm, READ_ROWS))],
     // lane vault-agent-own: each rule of the own road, broken in a copy ⇒ its rows RED
     ['an own stored entry still asks', "  if (!why.length) return { ok: true, by: away0.length ? 'always' : 'own' };\n", '\n', ownRoad],
-    ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return refuse(', 'if (e.open !== true) return refuse(', ownRoad],
+    ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return e.ended', 'if (e.open !== true) return e.ended', ownRoad],   // (B-a14b moved the line: the refusal is entry_not_runnable or grant_expired)
     ['a minted value\'s own host never matches', '  if (!f || !h) return false;\n  if (h.startsWith', '  return false;\n  if (h.startsWith', ownRoad],
     ['a minted value goes anywhere', "const away0 = awayOf(plan.refs, facts, sh, passes, { shapePasses: mode === 'allow' }), away = away0.filter((x) => !(x.unknown && live));", 'const away0 = [], away = [];', ownRoad],
     ['another conversation owns it', '  return !!sc && callerIdsOf(caller).includes(sc);', '  return !!sc;', ownRoad],

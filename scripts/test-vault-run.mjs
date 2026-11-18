@@ -972,9 +972,9 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(!w.door._grants.size, 'Allow once is SPENT by that run (before it started)');
   { const i1b = w.userTodos.get(it.id), sb = FA.decidedStamp(i1b); ok(i1b.resolvedFact?.endedBy === 'used' && sb && /^allowed once · ended (\d+\/\d+ )?\d\d:\d\d$/.test(sb.text) && FA.decisionCard(i1b).state === 'ended', 'r6: A CARD FOLLOWS THE GRANT\'S LIFE — the once-grant that ran ends on its record: «allowed once · ended HH:MM» (the card\'s state ended)', { fact: i1b.resolvedFact, stamp: sb && sb.text }); }
   const run2 = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
-  ok(run2.code === 'entry_not_runnable', 'the same (now seen) shape again ⇒ entry_not_runnable — once is once');
+  ok(run2.code === 'grant_expired' && /its one run was used at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(run2.words || '') && !/has not opened/.test(run2.words || ''), 'the same (now seen) shape again ⇒ refused — once is once; B-a14b: said as the approval that ENDED (its one run was used, when, how to ask again), never «not opened»', run2);
   const uses = w.door.usesFor(caller).uses;
-  ok(uses.some((u) => u.outcome === 'ok' && u.entry === M1 && u.door === 'run' && u.purpose === PURPOSE && u.receipt === run1.r.receipt) && uses[0].outcome === 'entry_not_runnable' && !w.door.usesFor(other).uses.some((u) => u.outcome === 'ok'),
+  ok(uses.some((u) => u.outcome === 'ok' && u.entry === M1 && u.door === 'run' && u.purpose === PURPOSE && u.receipt === run1.r.receipt) && uses[0].outcome === 'grant_expired' && !w.door.usesFor(other).uses.some((u) => u.outcome === 'ok'),
     'THE USE LINES: `uses` reads back THIS conversation\'s own — the entry, the purpose its grant carried, the outcome, the run\'s receipt (one receipt: the answer, the run line, the use line), newest first; another conversation\'s are not its', uses.slice(0, 3));
   const lines = auditOf(w).split('\n').filter(Boolean).map((l) => JSON.parse(l));
   ok(lines.filter((l) => l.event === 'vault-request').length === 2 && lines.some((l) => l.event === 'vault-grant' && l.answer === 'once' && l.conv === 'webui-1') && lines.some((l) => l.event === 'vault-grant' && l.answer === 'deny') && !leaks(auditOf(w), VALUE).length, 'the audit: each request and each answer is a line (conversation, entry, purpose, answer) — never a value');
@@ -999,6 +999,69 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(w.door.request({ caller, entry: M1, purpose: 'x' }).already === 'granted' && w.door.runnableFor(caller).entries.some((e) => e.ref === M1 && e.by === 'grant') && !w.door.runnableFor(other).entries.length, 'a request for an entry already granted answers so (nothing filed); `list` names it to THAT conversation alone');
   { const i3n = w.userTodos.get(i3id), at9 = (i3n.resolvedFact?.until || 0) + 3600e3, s9 = FA.decidedStamp(i3n, { now: at9 });
     ok(FA.decisionCard(i3n, { now: at9 }).state === 'ended' && s9 && /^allowed for 8 hours · ended (\d+\/\d+ )?\d\d:\d\d$/.test(s9.text) && FA.decisionCard(i3n, { now: (i3n.resolvedFact?.until || 0) + 3 * 86400e3 }).state === 'ended', 'r6: the SAME record read at +9 h (and +3 d) ⇒ «allowed for 8 hours · ended HH:MM», the card\'s state ended (was: «allowed by you for 8 h · …», approved, for ever)', { stamp: s9 && s9.text }); }
+  // B-a14b (fb-5a9b87b6e8): AN APPROVAL THAT ENDED IS SAID AS ITSELF — a second conversation's 8 hours run out: its next run names
+  // the end (grant_expired: how, when, how to ask again), never «the user has not opened that entry»; `uses` lists it as ENDED
+  {
+    const c8 = { ...w.caller, conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Lane Eight', scope: 'webui-8' };
+    const endedLeg = async (ww) => {
+      const q8 = ww.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+      ww.door.answerRequest(q8.askId, { answer: '8h', reauthed: true, person: true });
+      const r8a = await runAnswered(ww, ENV('env'), { caller: c8 });
+      const g8 = [...ww.door._grants.values()].find((g) => g.conv === 'webui-8');
+      if (g8) g8.until = Date.now() - 1;   // its 8 hours ran out
+      const r8b = await ww.door.run({ caller: c8, args: ENV('env'), cwd: ww.work });
+      return { ranFirst: !!(r8a.r && r8a.r.ok && g8), r8b, u8: ww.door.usesFor(c8) };
+    };
+    const e8 = await endedLeg(w);
+    ok(e8.ranFirst && e8.r8b.code === 'grant_expired' && /its 8 hours ran out at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(e8.r8b.words || '') && /ask them again with its purpose: vibespace-vault request/.test(e8.r8b.words || '') && !/has not opened/.test(e8.r8b.words || ''),
+      'the run AFTER its 8 hours names the END — grant_expired, the time, how to ask again — never «the user has not opened that entry»', e8.r8b);
+    ok(e8.u8.ended.length === 1 && e8.u8.ended[0].entry === M1 && e8.u8.ended[0].endedBy === 'time' && /^\d{4}-\d\d-\d\dT/.test(e8.u8.ended[0].endedAt) && e8.u8.ended[0].purpose === 'nightly backup' && !e8.u8.grants.length && !w.door.usesFor(other).ended.length,
+      '…and `uses` lists it as ENDED for that conversation only (how, when, its purpose) — never as a live grant, never in another conversation\'s', e8.u8.ended);
+    const r8c = await w.door.run({ caller: other, args: ENV('env'), cwd: w.work });
+    ok(r8c.code === 'entry_not_runnable', 'a conversation that never held an approval still reads entry_not_runnable (the switch is the news there)', r8c.code);
+    const q8b = w.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+    w.door.answerRequest(q8b.askId, { answer: '8h', reauthed: true, person: true });
+    const r8d = await w.door.run({ caller: c8, args: ENV('env'), cwd: w.work });
+    ok(r8d.ok && !w.door.usesFor(c8).ended.length && w.door.usesFor(c8).grants.length === 1, 'asked again and allowed ⇒ it runs, and the old end is no longer listed', { ok: r8d.ok, code: r8d.code });
+    const SRCd = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), from = '  function noteEnded(g, endedBy, endedAt) {\n';
+    const md = SRCd.split(from).length === 2 ? M.load('src/server/vault-run-door.js', SRCd.replace(from, from + '    return;   // MUTANT: no end is kept\n'), 'endednote') : null;
+    let mr = null;
+    if (md) { const mw = await world({ doorMod: md }); mr = await endedLeg(mw); }
+    ok(md && mr && mr.ranFirst && mr.r8b.code === 'entry_not_runnable', 'RED control: a door that keeps no end (the .407 shape) ⇒ the same run reads «the user has not opened that entry» — the misnamed cause the agent reported as a bug', mr && mr.r8b.code);
+    // THE FIRST END STANDS (the adversarial read's must): a grant's 8-hour timer stays armed after a switch-off or a spend; when it
+    // fires it must not write «its 8 hours ran out» over «revoked» (the owner's OFF) or «used» — the door's timers held by hand here
+    const firstEnd = async (mod) => {
+      const ww = await world(), held = [];
+      ww.door = ww.mk(mod, { timers: { set: (fn, ms) => { held.push({ fn, ms }); return held.length; }, clear: () => { } } });
+      const fire8h = () => { for (const h of held.filter((x) => x.ms > 3600e3)) h.fn(); };
+      const qa = ww.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+      ww.door.answerRequest(qa.askId, { answer: '8h', reauthed: true, person: true });
+      openRow(ww); ww.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner switches the entry OFF (the grant revoked)
+      fire8h(); held.length = 0;
+      const offList = ww.door.usesFor(c8).ended.length, offRun = (await ww.door.run({ caller: c8, args: ENV('env'), cwd: ww.work })).code;
+      const wb = await world(), heldB = [];   // a fresh hub: the entry CLOSED (never switched), a once-grant spent by its run
+      wb.door = wb.mk(mod, { timers: { set: (fn, ms) => { heldB.push({ fn, ms }); return heldB.length; }, clear: () => { } } });
+      const qb = wb.door.request({ caller: c8, entry: M1, purpose: 'one upload' });
+      wb.door.answerRequest(qb.askId, { answer: 'once', reauthed: true, person: true });
+      const rb = await runAnswered(wb, ENV('env'), { caller: c8 });
+      for (const h of heldB.filter((x) => x.ms > 3600e3)) h.fn();
+      const used = wb.door.usesFor(c8).ended[0];
+      return { offList, offRun, ranOnce: !!(rb.r && rb.r.ok), usedBy: used && used.endedBy };
+    };
+    const fe = await firstEnd(DOOR);
+    ok(fe.offList === 0 && fe.offRun === 'entry_not_runnable', 'the owner switched the entry OFF, then the grant\'s 8-hour timer fired ⇒ no «ended» record (the OFF stands: entry_not_runnable, never «the entry was not switched off»)', fe);
+    ok(fe.ranOnce && fe.usedBy === 'used', 'a once-grant spent by its run, then its timer fired ⇒ the end stays «its one run was used»', fe);
+    const SRCf = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), g0 = '    if (g && g.endedBy) return;\n';
+    const mf = SRCf.split(g0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, ''), 'firstend') : null;
+    const fr = mf ? await firstEnd(mf) : null;
+    ok(!!(mf && fr && fr.usedBy === 'time'), 'RED control: no first-end guard (the batch\'s first shape) ⇒ the timer writes «its 8 hours ran out» over the spent run', fr);
+    // the OFF half takes BOTH guards away: the first-end guard AND the list's «an OFF after the approval is the owner's news» —
+    // either alone keeps the OFF from reading as «ran out» (the restack's tb run showed the one-guard mutant listing nothing there)
+    const f0 = " && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)";
+    const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, '').replace(f0, ''), 'firstend-off') : null;
+    const fr2 = mf2 ? await firstEnd(mf2) : null;
+    ok(!!(mf2 && fr2 && fr2.offList === 1), 'RED control: no first-end guard AND no «an OFF after the approval» filter ⇒ the timer\'s «its 8 hours ran out» is listed over the owner\'s OFF', fr2);
+  }
   openRow(w); w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
   ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');
   { const i3r = w.userTodos.get(i3id), sr = FA.decidedStamp(i3r); ok(i3r.resolvedFact?.endedBy === 'revoked' && sr && /^allowed · revoked (\d+\/\d+ )?\d\d:\d\d$/.test(sr.text) && FA.decisionCard(i3r).state === 'revoked', 'r6: the entry\'s switch OFF in the Vault window REVOKES the grant ⇒ its record says «allowed · revoked HH:MM» (the card\'s state revoked)', { fact: i3r.resolvedFact, stamp: sr && sr.text }); }
@@ -1033,7 +1096,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   { const i8 = w.userTodos.get(i8id), s8 = i8 && FA.decidedStamp(i8); ok(i8 && i8.resolvedFact?.endedBy === 'lock' && s8 && /^allowed for 8 hours · ended (\d+\/\d+ )?\d\d:\d\d$/.test(s8.text) && FA.decisionCard(i8).state === 'ended', 'r6: …and each grant\'s RECORD says so: the 8-hour grant locked ⇒ «allowed for 8 hours · ended HH:MM» at once (was: «allowed for 8 h» after the lock)', { fact: i8 && i8.resolvedFact, stamp: s8 && s8.text }); }
   await w.vault.unlock(PW);
   const r9 = await w.door.run({ caller, args: ['--env', 'T=vault://app-secrets/app1/item.0.1', '--', NODE, PRINTER, 'env'], cwd: w.work });
-  ok(r9.code === 'entry_not_runnable', 'after the unlock the 8-hour grant is gone — the entry is closed again');
+  ok(r9.code === 'grant_expired' && /a lock of the vault ended it at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(r9.words || ''), 'after the unlock the 8-hour grant is gone — the entry is closed again, and the run says the LOCK ended its approval (B-a14b)', r9);
   { // r6: A RESTART ENDS EVERY GRANT (the grant rows are memory; the vault locks at each start) — a record still reading live says so
     const qR = w.door.request({ caller, entry: M1, purpose: PURPOSE });
     const iRid = (reqsOf().find((x) => x.action.askId === qR.askId) || {}).id;
@@ -1070,7 +1133,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   // the owner's silence / the hub's tray / the agent's own cancel never count toward the daily-failure card
   const two = await w.door.run({ caller, args: ['--env', 'A=vault://app-secrets/app1/item.0.1', '--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], cwd: w.work });
   const twoLines = w.door.usesFor(caller).uses.slice(0, 2);
-  ok(two.code === 'entry_not_runnable' && twoLines.length === 2 && twoLines.every((u) => u.outcome === 'entry_not_runnable' && /^vr-[0-9a-f]{16}$/.test(u.receipt)) && twoLines[0].receipt === twoLines[1].receipt && !JSON.stringify(two).includes('vr-'),
+  ok(two.code === 'grant_expired' && twoLines.length === 2 && twoLines.every((u) => u.outcome === 'grant_expired' && /^vr-[0-9a-f]{16}$/.test(u.receipt)) && twoLines[0].receipt === twoLines[1].receipt && !JSON.stringify(two).includes('vr-'),
     'a refused run naming two entries: one use line each, ONE receipt between them (the audit\'s — never in the refused answer)', twoLines);
   openRow(w);
   const ac = new AbortController(), pidF = path.join(w.work, 'gone.pid');
