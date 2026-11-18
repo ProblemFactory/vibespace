@@ -142,7 +142,7 @@ if (!isMainThread) {
     // (its reader's M2) THE PRODUCT'S OWN READ: the last …/task/<main>/stat text the watchdog itself read (ask() reads it just before it
     // posts — src/server/sync-fs-witness-worker.js readProc → fs.readFileSync) — never a second read of its own
     let lastStat = null;
-    fs.readFileSync = function (p, ...a) { const r = ofs.call(this, p, ...a); if (typeof p === 'string' && p.endsWith(me)) lastStat = r; return r; };
+    fs.readFileSync = function (p, ...a) { const mine = typeof p === 'string' && p.endsWith(me); try { const r = ofs.call(this, p, ...a); if (mine) lastStat = r; return r; } catch (e) { if (mine) lastStat = null; throw e; } };   // (主开发 22:50Z, 4) a read that threw stamps «?», never the read before it
     const st = () => { const t = String(lastStat || ''), i = t.lastIndexOf(')'); return (i >= 0 && t.charAt(i + 2)) || '?'; };
     insp.Session.prototype.post = function (m, ...a) { if (m === 'Runtime.evaluate') { try { fs.writeSync(2, '[lh-post] ' + st() + ' ' + mono().toFixed(3) + '\\n'); } catch { } } return orig.call(this, m, ...a); }; }
   if (process.env.LH_POSTWATCH) { const insp = require('inspector'), b = new BroadcastChannel('lh-posts'); b.unref(); const orig = insp.Session.prototype.post;
@@ -172,8 +172,11 @@ const exitJudge = (err) => {
   const e = String(err || ''), line = e.includes('Waiting for the debugger'), end = Number((/\[kid\] call end ([\d.]+)/.exec(e) || [])[1]);
   const posts = [...e.matchAll(/\[lh-post\] ([A-Z?]) ([\d.]+)/g)].map((m) => ({ st: m[1], at: Number(m[2]) }));
   const last = posts.length ? posts[posts.length - 1] : null;   // the LAST ask before the exit (主开发 20:19Z's form; its second reader's N2)
-  const onCpu = Number.isFinite(end) && !!last && last.st === 'R' && last.at >= end - LH.SESSION_MS - 5;
-  return { line, residual: line && onCpu, broken: line && !onCpu, posts: posts.length, asleepPosts: posts.filter((p) => p.st === 'S' || p.st === 'D').length, lastAsleep: !!last && (last.st === 'S' || last.st === 'D'), stamped: Number.isFinite(end) };
+  const inWin = (p) => Number.isFinite(end) && p.at >= end - LH.SESSION_MS - 5, asleep = (p) => p.st === 'S' || p.st === 'D';
+  const onCpu = !!last && last.st === 'R' && inWin(last);
+  // (主开发 22:50Z, 1) an asleep ask can show the regression only when it was posted INSIDE this window of the exit — the product
+  // closes a kept link SESSION_MS after an ask — so only such an ask, with no line, EXERCISES the law (asleepInWin)
+  return { line, residual: line && onCpu, broken: line && !onCpu, posts: posts.length, asleepPosts: posts.filter(asleep).length, asleepInWin: posts.some((p) => asleep(p) && inWin(p)), lastAsleep: !!last && asleep(last), lastSt: last ? last.st : null, stamped: Number.isFinite(end) };
 };
 // THE BOOT through the REAL boot-trace start (server.js's 6th line): the off switch read from data/settings.json BEFORE anything is asked
 const BOOTKID = path.join(ROOT, 'bootkid.js');
@@ -468,7 +471,10 @@ function run1(cfg, { node = process.execPath, args = [], timeoutMs = 30000, onRe
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; if (onReady && !readied && err.includes('[kid] ready')) { readied = true; onReady(c); } });
     const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, timeoutMs);
     // (主开发 21:55Z, law 1) atClose: a run whose stderr is JUDGED resolves when its pipes close — at 'exit' its last bytes (the
-    // «Waiting…» line, the call's stamp) may be unread; a pipe still open 2 s after the exit resolves anyway, marked cutShort (red by name)
+    // «Waiting…» line, the call's stamp) may be unread; a pipe still open 2 s after the exit resolves anyway, marked cutShort (red by name).
+    // WHY 2 s (主开发 22:50Z, 5): an exited child's pipes close within milliseconds when nothing else holds them (these plans start no
+    // process that outlives them); 2 s is two orders past that, so only a stray holder of the pipe reaches it, and it stays short
+    // against the run's own timeout
     let done1 = false;
     const finish = (code, cutShort) => { if (done1) return; done1 = true; exitAt = exitAt || Date.now(); clearTimeout(kill); let j = null; try { j = JSON.parse(out); } catch { } if (j && j.cpuMs) cpuMs += j.cpuMs; resolve({ cutShort: !!cutShort, code, out: j, err, lines: err.split('\n').filter(Boolean), wallMs: exitAt - t0, exitAt });  };
     if (atClose) { let code0 = null; c.on('exit', (code) => { code0 = code; exitAt = Date.now(); const t = setTimeout(() => finish(code0, true), 2000); t.unref?.(); }); c.on('close', (code) => finish(code0 != null ? code0 : code, false)); }
@@ -657,15 +663,15 @@ async function legAcceptance() {
   const W8 = 'Waiting for the debugger to disconnect...\n';
   const jW = exitJudge('[lh-post] R 100.000\n[kid] call end 400.000\n' + W8), jL = exitJudge('[lh-post] R 399.000\n[lh-post] S 399.500\n[kid] call end 400.000\n' + W8);
   const jB = exitJudge('[lh-post] S 100.000\n[kid] call end 400.000\n' + W8), jS1 = exitJudge('[lh-post] S 399.000\n[kid] call end 400.000\n' + W8), jNoEnd = exitJudge('[lh-post] R 399.000\n' + W8), jR = exitJudge('[lh-post] S 100.000\n[lh-post] R 401.000\n[kid] call end 400.000\n' + W8);
-  const parsed = jB.posts === 1 && jB.stamped && jB.lastAsleep && jS1.posts === 1 && jS1.lastAsleep && jNoEnd.posts === 1 && !jNoEnd.stamped && jR.posts === 2 && jR.stamped && jW.posts === 1 && !jW.lastAsleep && jL.posts === 2 && jL.lastAsleep;
+  const parsed = jB.posts === 1 && jB.stamped && jB.lastAsleep && jS1.posts === 1 && jS1.stamped && jS1.lastAsleep && jNoEnd.posts === 1 && !jNoEnd.stamped && jR.lastSt === 'R' && jW.stamped && jW.lastSt === 'R' && jL.stamped && jR.posts === 2 && jR.stamped && jW.posts === 1 && !jW.lastAsleep && jL.posts === 2 && jL.lastAsleep;
   ok(parsed && nat.some((x) => x.asleepPosts >= 1) && jB.broken && !jB.residual && jS1.broken && !jS1.residual && jNoEnd.broken && !jNoEnd.residual && jW.broken && !jW.residual && jL.broken && !jL.residual && jR.residual && !jR.broken, `5 — exitJudge reads what it claims: ${nat.reduce((n, x) => n + x.asleepPosts, 0)} asks stamped asleep inside the calls (the main thread's state, not the poster's); RED CONTROLS, each parse proved first: a line whose last ask was posted asleep is «broken» — 300 ms before the call's end AND 1 ms before it (the state term alone); one with no call-end stamp; one whose last ask ran 300 ms before the end (the window term alone); one whose running ask in the window was followed by an asleep one (the last-ask term); one posted running at the call's end is the residual`, nat.map((x) => ({ row: x.row, posts: x.posts, asleep: x.asleepPosts })));
   ok(nat.every((x) => x.code === 0 && !x.cutShort && x.stamped && x.posts >= 1 && !x.broken), `5 — an exit right after a 0.35 s native hold, twice each: exitNative (ONE ask a hold, abandoned asleep) and exitNativeCross (the second ask met in the exit) exit by themselves (code 0), their stderr read whole (at close), each with its call and its asks stamped; NO line without its last ask posted on the CPU within SESSION_MS of the call's end (${nat.filter((x) => x.broken).length} broken) — red in every branch`, nat);
   // (主开发 21:55Z, law 3; its reader's M1 / S2) A SKIP IS NOT A GREEN: the asleep-ask law is EXERCISED by an exit with NO line after an
   // ask stamped asleep (the product's own read); an exit excused as the residual, or one that was asked nothing asleep, exercised
   // nothing. None exercised ⇒ a counted site's named skip (a broken exit is red above, whatever this count)
-  const natJudged = nat.filter((x) => !x.line && x.asleepPosts >= 1).length;
-  site(); if (!natJudged) skip('5 — the asleep-ask law exercised at an exit right after a 0.35 s native hold', `no exit this run had an ask posted asleep and no line (the stated residual: ${natSay('exitNative')}, ${natSay('exitNativeCross')})`);
-  else ok(natJudged >= 1 && !nat.some((x) => x.broken), `5 — the asleep-ask law exercised: ${natJudged} of ${nat.length} exits had an ask posted asleep and NO line; the stated residual counted: ${natSay('exitNative')}, ${natSay('exitNativeCross')}`, nat);
+  const natJudged = nat.filter((x) => !x.line && x.asleepInWin).length;   // (主开发 22:50Z, 1) exercised = an asleep ask INSIDE the judge's window, no line
+  site(); if (!natJudged) skip('5 — the asleep-ask law exercised at an exit right after a 0.35 s native hold', `no exit this run had an ask posted asleep within SESSION_MS of the call's end and no line (exitNative's one ask comes ~270 ms before it; the stated residual: ${natSay('exitNative')}, ${natSay('exitNativeCross')})`);
+  else ok(natJudged >= 1 && !nat.some((x) => x.broken), `5 — the asleep-ask law exercised: ${natJudged} of ${nat.length} exits had an ask posted asleep within SESSION_MS of the call's end and NO line; the stated residual counted: ${natSay('exitNative')}, ${natSay('exitNativeCross')}`, nat);
   { const exN = nat.filter((x) => x.row === 'exitNative' && x.residual).length;
     if (exN) console.log(`  · 5 — A STARVED-RUNNER SIGN: exitNative (ONE ask a hold) was excused ${exN} of 2 — its only ask was posted on the CPU at the exit, so the watchdog was late past the whole 0.35 s call`); }
   // 6. a debugger that arrives DURING the hold stands the sampler down (the sample checks it on the main thread)
@@ -803,11 +809,11 @@ async function legRound3(node, tag) {
     // posted, at its high end past the second's due — so every point is judged by exitJudge: a line excused only by an ask posted
     // on the CPU within SESSION_MS of the call's end (counted, said), any other line red
     const resid = [], unstamped = []; let judged7 = 0;
-    for (let x = X0; x <= 220; x += 10) { nX++; const r = await run({ plan: 'exitNativeX', x }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' }, atClose: true }); const j = exitJudge(r.err); if (!j.stamped || r.cutShort) unstamped.push(x); if (j.broken) hits.push(x); if (j.residual) resid.push(x); if (!j.line && j.asleepPosts >= 1) judged7++; }
+    for (let x = X0; x <= 220; x += 10) { nX++; const r = await run({ plan: 'exitNativeX', x }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTLOG: '1' }, atClose: true }); const j = exitJudge(r.err); if (!j.stamped || r.cutShort) unstamped.push(x); if (j.broken) hits.push(x); if (j.residual) resid.push(x); if (!j.line && j.asleepInWin) judged7++; }
     ok(!unstamped.length && !hits.length, `(7) every point's child stamped its call's end and closed its stderr whole (${nX} points); NO line without its last ask posted on the CPU within SESSION_MS of the call's end (${hits.length} broken${hits.length ? ' at X = ' + hits.join(' / ') : ''}) — red in every branch`, { unstamped, hits });
     console.log(`  · (7) the stated residual (an ask posted on the CPU within SESSION_MS of the call's end): ${resid.length} of ${nX}${resid.length ? ' at X = ' + resid.join(' / ') + ' ms' : ''} — counted, never asserted`);
-    site(); if (!judged7) skip('(7) the asleep-ask law exercised at an exit right after a sync child', `no point this run had an ask posted asleep and no line (${resid.length} the stated residual, the rest asked nothing asleep)`);
-    else ok(judged7 >= 1 && !hits.length, `(7) the asleep-ask law exercised at ${judged7} of ${nX} points (an ask posted asleep, NO line) — a sync child of X ms (X = ${X0} … 220, across the first ask at ~${F7} ms and its old 50 ms window, and past the second at ${SECOND_ASK_MS} ms) then process.exit(): «Waiting for the debugger to disconnect…» without an ask posted on the CPU within SESSION_MS of the call's end 0 of ${nX} — an ask of a main thread asleep in a call keeps NO session`, hits); }
+    site(); if (!judged7) skip('(7) the asleep-ask law exercised at an exit right after a sync child', `no point this run had an ask posted asleep within SESSION_MS of the call's end and no line (${resid.length} the stated residual, the rest asked nothing asleep)`);
+    else ok(judged7 >= 1 && !hits.length, `(7) the asleep-ask law exercised at ${judged7} of ${nX} points (an ask posted asleep within SESSION_MS of the call's end, NO line) — a sync child of X ms (X = ${X0} … 220, across the first ask at ~${F7} ms and its old 50 ms window, and past the second at ${SECOND_ASK_MS} ms) then process.exit(): «Waiting for the debugger to disconnect…» without an ask posted on the CPU within SESSION_MS of the call's end 0 of ${nX} — an ask of a main thread asleep in a call keeps NO session`, hits); }
   // (8) THE PRESS: a debugger port opened in the same tick, and a watchdog that died
   { const r = await run({ plan: 'pressSameTick' }, { node });
     const pr = r.out && r.out.checks.press;
@@ -1001,7 +1007,8 @@ async function legRound4(node, tag, tree = null) {
   // SECOND ask (the next ask lands at ≥ 780 / 900 ms — past the 700 ms hold's end: the hold carries fewer than 3 asks, red by the
   // count; lateness only pushes it later), and at the HOLD'S END (the next hold starts ≥ 150 ms later, so its first ask comes ≥ 550 ms
   // into it — past its due + 250 = 330, or past that 400 ms hold altogether; the margin is ~220 ms, a child's late timer eats it only
-  // past that). NOT covered: a read at the THIRD ask (its delay ends inside the gap before the next hold). (At 300 ms a read at the
+  // past that). NOT covered: a read at the THIRD ask — its delay ends at 400 + 700 = 1100 ms, about 250 ms INTO the next hold (it starts
+  // ≥ 850), so that hold's first ask still lands under its own bound of FIRST_ASK_MS + 250 = 330 (主开发 22:50Z, 2). (At 300 ms a read at the
   // first ask landed the second at about 385, under 450; at 500 the hold's end kept only ~20 ms of margin)
   const SLOW_READ_MS = 700;
   const C = await run({ plan: 'slowNames', tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTWATCH: '1', LH_SLOW_SRC_MS: String(SLOW_READ_MS), LH_SLOW_ROOT: ROOT }, timeoutMs: 30000 });
