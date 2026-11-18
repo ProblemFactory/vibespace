@@ -2980,21 +2980,26 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   // downloading) ⇒ the words are drawn; the download ends, a NEW one starts ⇒ the old answer goes
   const BUSY = 'its kernel is already downloading';
   const judgeSaid = (BM) => {
-    const dl = [{ id: 'eng-x', kernel: { state: 'downloading' } }], done = [{ id: 'eng-x', kernel: { state: 'installed' } }];
+    const dl = [{ id: 'eng-x', kernel: { state: 'downloading' } }], failed = [{ id: 'eng-x', kernel: { state: 'failed', code: 'build_fetch_failed' } }];
     const s1 = BM.kernelSaidStep({ engines: dl });
     const pressed = new Map(s1.said); pressed.set('eng-x', BUSY); // the press on the busy door
     const s2 = BM.kernelSaidStep({ said: pressed, states: s1.states, engines: dl }); // the redraw the press asks for: still downloading
-    const s3 = BM.kernelSaidStep({ said: new Map([['eng-x', 'the kernel could not be downloaded: disk']]), states: s2.states, engines: done });
-    const s4 = BM.kernelSaidStep({ said: s3.said, states: s3.states, engines: dl }); // a NEW download starts
-    return { drawn: s2.said.get('eng-x') === BUSY, keptOverDone: s3.said.has('eng-x'), endsAtStart: !s4.said.has('eng-x') };
+    const s3 = BM.kernelSaidStep({ said: s2.said, states: s2.states, engines: failed }); // cure 2: the download ENDED (it failed)
+    const refused = new Map(s3.said); refused.set('eng-x', 'the kernel could not be downloaded: not enough free disk space'); // a press now, refused by code
+    const s4 = BM.kernelSaidStep({ said: refused, states: s3.states, engines: failed }); // nothing changed since
+    const s5 = BM.kernelSaidStep({ said: s4.said, states: s4.states, engines: dl }); // a NEW download starts
+    return { drawn: s2.said.get('eng-x') === BUSY, endsAtEnd: !s3.said.has('eng-x'), standsWhileSame: s4.said.has('eng-x'), endsAtStart: !s5.said.has('eng-x') };
   };
   const js = judgeSaid(BMk);
-  ok(js.drawn && js.keptOverDone && js.endsAtStart, `B-0bc7 (its verdict's must): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); an answer stands while nothing downloads (${js.keptOverDone}); a download that STARTS ends it (${js.endsAtStart})`, js);
-  const saidNeedle = "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);";
+  ok(js.drawn && js.endsAtEnd && js.standsWhileSame && js.endsAtStart, `B-0bc7 (its verdict's must + cure 2): a press on a busy door, then a read that still says downloading — its words are DRAWN (${js.drawn}); the download then FAILS — «already downloading» is gone (${js.endsAtEnd}, never beside a fact line that says it failed); a refusal stands while nothing changes (${js.standsWhileSame}); a download that STARTS ends it (${js.endsAtStart})`, js);
+  const saidNeedle = "    if (st.has(id) ? st.get(id) !== now : now === 'downloading') s.delete(id);";
   ok(msrc.split(saidNeedle).length === 2, 'B-0bc7 control setup: the «ends at the start» rule is found once in src/lib/browser-build-model.js');
-  const fCopy3 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading') s.delete(id);"), 'said-every-read', { esm: true });
+  const fCopy3 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading') s.delete(id);"), 'said-every-read', { esm: true }); // stale-pins: kept — the batch's first rule, planted back
   const BMz = await import('file://' + fCopy3);
   ok(!judgeSaid(BMz).drawn, 'CONTROL (B-0bc7, its verdict\'s must): the batch\'s own rule — a downloading read ends the answer (settings-ui\'s old line) — erases the busy press\'s words before they are drawn ⇒ RED', judgeSaid(BMz));
+  const fCopy4 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(saidNeedle, "    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);"), 'said-only-at-start', { esm: true }); // stale-pins: kept — the first cure's rule, planted back as this control's mutant
+  const BMw = await import('file://' + fCopy4);
+  ok(!judgeSaid(BMw).endsAtEnd && judgeSaid(BMw).drawn, 'CONTROL (B-0bc7 cure 2): the first cure\'s rule — the answer ends only when a download STARTS — keeps «its kernel is already downloading» beside a download that FAILED ⇒ RED', judgeSaid(BMw));
   const ui2 = read('src/lib/settings-ui.js');
   ok(ui2.includes('kernelSaidStep({ said: this._kernelSaid, states: this._kernelStates || new Map(), engines: r.engines })') && !ui2.includes("if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id));") && ui2.includes('if (box._doorsSig === sig) { if (step.tick) tick(); return; }') && /if \(focused\) \{ const fb = \[\.\.\.box\.querySelectorAll\('button\.settings-engine-download'\)\]\.find\(\(x\) => x\.dataset\.engine === focused\); if \(fb\) fb\.focus\(\); \}/.test(ui2), // stale-pins: kept — a deliberate absence check: the old delete-on-every-read line is gone
     'B-0bc7 wiring (its verdict): the Settings row asks the PURE step for its answers (the old delete-on-every-downloading-read line gone — stale-pins: kept), redraws only when the doors moved, and gives the focus back to its door');

@@ -213,14 +213,17 @@ export function kernelPollStep(r, polling = false) {
   return { polling: due, tick: due, redraw: true };
 }
 /** B-0bc7 (its verdict's must): a door's old answer ends when its download STARTS — an engine whose kernel moves INTO
- *  `downloading` from another state (or at the row's first read) — never on a read that still says downloading, so a press on a
- *  busy door shows its own words. `said` / `states` = id → the answer / id → the last state seen. PURE (new Maps). → {said, states} */
+ *  `downloading` from another state (or at the first read this Settings view makes of it) — never on a read that still says
+ *  downloading, so a press on a busy door shows its own words. Cure 2 (主开发, as a must): …and when a download ENDS — ANY change
+ *  of a known state ends the answer beside the door (never «its kernel is already downloading» beside a fact line that says it
+ *  FAILED). `said` / `states` = id → the answer / id → the last state seen (the SettingsUI's own: a row redrawn by Reset keeps
+ *  them — an answer still ends at the next change). PURE (new Maps). → {said, states} */
 export function kernelSaidStep({ said = new Map(), states = new Map(), engines = [] } = {}) {
   const s = new Map(said), st = new Map(states);
   for (const e of engines || []) {
     if (!e || e.id == null) continue;
     const id = String(e.id), now = e.kernel && typeof e.kernel === 'object' ? String(e.kernel.state || '') : '';
-    if (now === 'downloading' && st.get(id) !== 'downloading') s.delete(id);
+    if (st.has(id) ? st.get(id) !== now : now === 'downloading') s.delete(id); // a known state that CHANGED (a start, an end) — else only a download running at the first read
     st.set(id, now);
   }
   return { said: s, states: st };

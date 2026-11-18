@@ -754,7 +754,8 @@ class SettingsUI {
     const said = doors.filter((d) => this._kernelSaid.get(d.id));
     if (!doors.length) { if (box) box.remove(); } else {
       if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
-      // its verdict's should: the 1.5 s tick redraws only when the doors MOVED, and a redraw gives the focus back to its door
+      // its verdict's should: the 1.5 s tick redraws only when the doors MOVED, and a redraw gives the focus back to its door.
+      // (a kept draw keeps its buttons' onclick closures over the OLD `d`: every field an onclick reads must be in this signature)
       const sig = JSON.stringify(doors.map((d) => [d.id, d.label, !!(d.busy || this._kernelAsks.has(d.id)), this._kernelSaid.get(d.id) || '']).concat([doors.length]));
       if (box._doorsSig === sig) { if (step.tick) tick(); return; }
       box._doorsSig = sig;
