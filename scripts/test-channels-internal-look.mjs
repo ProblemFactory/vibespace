@@ -115,7 +115,7 @@ async function page(w, h, query, ready = null) {
 }
 
 // the LOOK, read off the real DOM: the band, every row's avatar / badge / chip, computed colours' chroma
-const LOOK = `(() => {
+const LOOK = `(() => { /* stale-pins: kept — the page probe's own DOM walk (firstElementChild), not a pin of a product line */
   const chroma = (c) => { const n = (String(c).match(/[\\d.]+/g) || []).map(Number); if (!n.length) return null; const v = /^color\\(/.test(c) ? n.slice(0, 3).map((x) => x * 255) : n.slice(0, 3); return Math.max(...v) - Math.min(...v); };
   const list = document.querySelector('.chan-groups');
   const band = list && list.querySelector(':scope > .chan-iband');

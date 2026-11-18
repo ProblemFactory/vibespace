@@ -920,7 +920,7 @@ function installedList(m, { onPick }) {
       : ans.truncated ? t('{machine} has {total} apps — the first {n} are listed; filter to find one', { machine, total: ans.total, n: rows.length })
       : q && !shown.length ? t('Nothing matches “{q}”', { q: filter.value.trim() }) : '';
     note.textContent = words;
-    noteDoor.replaceChildren(...(!ans.loading && isAgentOld(ans.code) ? [agentUpdateDoor(m, { cls: 'file-tool-btn agent-update-door' })] : [])); // B-bd27 X1
+    noteDoor.replaceChildren(...(!ans.loading && isAgentOld(ans.code) ? [agentUpdateDoor(m, { cls: 'btn-cancel agent-update-door' })] : [])); // B-bd27 X1
     note.classList.toggle('is-bad', ans.code === 'host_needs_daemon' || (!!ans.code && ans.code !== 'offline'));
     filter.hidden = !rows.length;
     const keyOf = (r) => r.launch || `pending:${r.name}`;

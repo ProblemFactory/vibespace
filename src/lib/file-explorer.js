@@ -737,7 +737,7 @@ class FileExplorer {
     } catch (err) {
       if (seq !== this._navSeq) return; // superseded — its error is not this view's truth
       this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`;
-      if (err && err.agentOld && this.listEl.firstElementChild) this.listEl.firstElementChild.append(' ', agentUpdateDoor(this._host, { cls: 'file-tool-btn agent-update-door', app: this.app })); // B-bd27 X1
+      if (err && err.agentOld) { const d = document.createElement('div'); d.className = 'empty-hint empty-hint-door'; d.style.flexBasis = '100%'; d.style.gridColumn = '1 / -1'; d.append(agentUpdateDoor(this._host, { cls: 'btn-cancel agent-update-door', app: this.app })); this.listEl.append(d); } // B-bd27 X1: its own slot (never inside the red words)
     } finally { donePending(); }
   }
 

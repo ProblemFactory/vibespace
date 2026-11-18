@@ -14,14 +14,15 @@ export const AGENT_OLD_CODES = Object.freeze(['host_needs_daemon', 'host_needs_u
 export const isAgentOld = (code) => AGENT_OLD_CODES.includes(String(code || ''));
 /** PURE: where the door leads for a host row — 'pairing' (a paired dial device) | 'machines' (any other, or none). */
 export function agentDoorTarget(row) { return row && row.transport === 'dial' && row.deviceId ? 'pairing' : 'machines'; }
-/** PURE: the host row a reference names — a row, its id, `{hostId}`, or the machine's name — among `hosts`; null when none. */
+/** PURE: the host row a reference names — a row, its id or `{hostId}` — among `hosts`; null when none. BY ID ONLY: two machines
+ *  may share a name (a peer's word), and the door opens the machine of the row it was drawn on. */
 export function hostRowOf(ref, hosts = []) {
   if (!ref) return null;
   if (typeof ref === 'object' && ref.transport && ref.id) return ref;
   const key = typeof ref === 'object' ? String(ref.hostId || ref.id || '') : String(ref);
   if (!key) return null;
   const list = Array.isArray(hosts) ? hosts : [];
-  return list.find((h) => h && h.id === key) || list.find((h) => h && h.name === key) || null;
+  return list.find((h) => h && h.id === key) || null;
 }
 /** Open the door: the pairing sheet of that machine, or Manage agents › Machines. → the target opened. */
 export function openAgentUpdate(ref, { app = globalThis.app } = {}) {

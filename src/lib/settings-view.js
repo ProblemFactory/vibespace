@@ -147,7 +147,8 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
     }
     const chips = [];
     if (advanced) chips.push({ kind: 'advanced', text: t('advanced'), title: t('An advanced setting — shown while “Show advanced settings” is on') });
-    if (why) chips.push({ kind: 'unused', text: t('not in use here: {why}', { why }), title: why });
+    const fc = why ? failingClause(row, ctx) : null; // B-544d r2: a harness folded because its CLI is not found here carries the Re-check door
+    if (why) chips.push({ kind: 'unused', text: t('not in use here: {why}', { why }), title: why, ...(fc && clauseKind(fc) === 'harness' ? { recheck: String(fc.harness) } : {}) });
     if (!row.liveApply) chips.push({ kind: 'reload', text: t('reload'), title: t('Requires page reload to take effect') });
     sec.rows.push({ path, schema: row, chips, advanced, modified, why });
   }

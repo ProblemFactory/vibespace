@@ -132,6 +132,11 @@ console.log('§4 the shipped schema');
   const none = { vnc: false, desktopApps: false, harnesses: new Set(['claude']), channels: new Set() };
   const all = { vnc: true, desktopApps: true, harnesses: new Set(['claude', 'codex', 'opencode', 'antigravity']), channels: new Set(['lark', 'gmail']) };
   const m0 = real(none), m1 = real(all, { showAdvanced: true }), mu = real({});
+  { // B-544d r2: a harness folded because its CLI is not found here carries the Re-check door on its chip; another fold does not
+    const found = real(none, { query: 'codex' }), cx = Object.values(found.byCategory).flatMap((s) => s.rows).filter((r) => r.why);
+    const dk = Object.values(real(none, { query: 'desktop' }).byCategory).flatMap((s) => s.rows).filter((r) => r.why && /display backend/.test(r.why));
+    ok(cx.length > 0 && cx.every((r) => r.chips.some((c) => c.kind === 'unused' && c.recheck === 'codex')) && dk.length > 0 && dk.every((r) => r.chips.every((c) => !c.recheck)), 'B-544d r2: a row folded because the codex CLI is not found here, found by a search, carries the Re-check door on its «not in use here» chip; a fold for another reason (no display backend) does not', { cx: cx.length, dk: dk.length });
+  }
   ok(!m0.byCategory.Codex.show && !m0.byCategory.OpenCode.show && m0.byCategory.Claude.show, 'a machine without the codex / opencode CLIs: the WHOLE Codex and OpenCode sections vanish (the table-level `when`), Claude stays');
   ok(m1.byCategory.Codex.show && m1.byCategory.Codex.rows.length === S.harnessSettingPaths('codex').length, '…with them installed, every derived Codex row draws');
   ok(!m0.byCategory['Desktop apps'].show && m1.byCategory['Desktop apps'].rows.length === 9 && mu.byCategory['Desktop apps'].show, 'Desktop apps: hidden without a display backend, its 9 rows with one (lane agent-window-no-steal: + Agent-opened windows come to the front; lane app-display-portal: + file dialogs in their own window; lane app-display-notify-sink: + notifications in their own window; lane app-display-secrets: + apps keep their logins), SHOWN while the fact is unknown');

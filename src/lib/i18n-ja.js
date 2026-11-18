@@ -8302,6 +8302,7 @@ export default {
   "This machine keeps no app system.": "このマシンにはアプリシステムがありません。",
   "This machine already has an app system.": "このマシンにはすでにアプリシステムがあります。",
   "An app system cannot be created on this machine — its image carries neither a base system nor debootstrap.": "このマシンではアプリシステムを作れません — イメージにベースシステムも debootstrap もありません。",
+  "This machine's system does not name its release (VERSION_CODENAME in /etc/os-release), so no app system can be made for it.": "このマシンのシステムはリリース名（/etc/os-release の VERSION_CODENAME）を示していないため、アプリシステムを作れません。",
   "Delete the previous app system first — it is kept until you do.": "先に前のアプリシステムを削除してください — 削除するまで保持されます。",
   "Set up the app system on {machine}": "{machine}にアプリシステムを用意",
   "Repair the app system on {machine}": "{machine}のアプリシステムを修復",

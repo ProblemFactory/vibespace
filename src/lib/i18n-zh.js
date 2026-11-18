@@ -8303,6 +8303,7 @@ export default {
   "This machine keeps no app system.": "这台机器没有应用系统。",
   "This machine already has an app system.": "这台机器已经有应用系统了。",
   "An app system cannot be created on this machine — its image carries neither a base system nor debootstrap.": "这台机器建不了应用系统——它的镜像既没有基础系统包，也没有 debootstrap。",
+  "This machine's system does not name its release (VERSION_CODENAME in /etc/os-release), so no app system can be made for it.": "这台机器的系统没有写明它的发行版本（/etc/os-release 里的 VERSION_CODENAME），所以无法为它建立应用系统。",
   "Delete the previous app system first — it is kept until you do.": "请先删除上一个应用系统——你删除之前它一直保留。",
   "Set up the app system on {machine}": "在{machine}上建立应用系统",
   "Repair the app system on {machine}": "修复{machine}上的应用系统",

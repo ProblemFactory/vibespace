@@ -71,8 +71,8 @@ export function paintRow(node, r) {
   const main = el('div', 'exit-runs-main');
   const outcome = el('div', 'exit-runs-outcome');
   outcome.append(el('span', 'exit-runs-verdict', runVerdictText(r)), ' · ', el('span', 'exit-runs-ms', durationText(r.ms)));
-  if (r.outcome === 'refused' && isAgentOld(r.refusal)) outcome.append(' ', agentUpdateDoor(r.hostId, { cls: 'file-tool-btn agent-update-door' })); // B-bd27 X1
   main.append(el('code', 'exit-runs-cmd', flat.length > CMD_HEAD ? flat.slice(0, CMD_HEAD - 1) + '…' : flat), outcome);
+  if (r.outcome === 'refused' && isAgentOld(r.refusal)) { const d = el('div', 'exit-runs-door'); d.append(agentUpdateDoor(r.hostId, { cls: 'btn-cancel agent-update-door' })); main.append(d); } // B-bd27 X1: its own slot under the outcome line
   sum.append(main);
   let body = node.querySelector(':scope > .exit-runs-out');
   if (!body) { body = el('div', 'exit-runs-out'); node.appendChild(body); }

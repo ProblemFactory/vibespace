@@ -188,6 +188,8 @@ const DOORS = {
     reach: [[/sessionKey\s*:\s*['"`](?:accounts|machines)['"`]|,\s*['"`](?:accounts|machines)['"`]\s*,\s*\{/, /\.ut-item\b|\bjump\(/]] },
   vault: { door: 'the Vault window\'s Add… → «Account…»', at: ['src/lib/vault-window.js'],
     names: { 'src/lib/vault-window.js': ["t('Account…')", "'vw-add vw-primary'"] }, reach: [[/vw-add\b/, /Account…/]] },
+  recheck: { door: 'the Settings «not in use here» chip of a harness whose CLI is not found here: «Re-check» (B-544d r2 — Manage agents, its next status read re-asks the shell)', at: ['src/lib/settings-ui.js'],
+    names: { 'src/lib/settings-ui.js': ["'btn-cancel settings-chip-recheck'", 'a._cliRecheckDue = true'] }, reach: [/settings-chip-recheck/] },
   agentold: { door: 'the old agent\'s «Update its agent…» on a machine with no pairing sheet (B-bd27: Manage agents on its Machines tab)', at: ['src/lib/agent-update-door.js'],
     names: { 'src/lib/agent-update-door.js': ["agentDoorTarget(row) === 'pairing'", "'vibespace.agentsTab', 'machines'", "t('Update its agent…')"] }, reach: [/agent-update-door|agentUpdateDoor|Update its agent/] },
   loginwatch: { door: 'a machine login the watch noticed re-opens the manager', at: [RENDERER],

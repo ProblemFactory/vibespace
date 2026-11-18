@@ -554,6 +554,11 @@ async function filterLegs(mod) {
   try { await c.forSpawn('opencode', 'opencode'); } catch { /* refused: the shell holds none */ }
   const acpAfter = typeof c.resolvedHere === 'function' ? c.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
   leg('…and once ITS shell found no program, the ACP harness is not here either (unaskedBare applies only before the ask)', acpAfter === false && c.census('opencode').missing === true, String(acpAfter));
+  const cu = mod.createCliCmds({ ask: async () => ({ kind: 'unanswered', why: 'timeout', shell: '/bin/zsh' }), resolve: async () => null, usable: async () => false, log: () => {} });
+  cu.register('opencode', { name: 'opencode', current: 'opencode' });
+  try { await cu.forSpawn('opencode', 'opencode'); } catch { /* refused: neither the shell nor the hub has it */ }
+  const un = typeof cu.resolvedHere === 'function' ? cu.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
+  leg('…ASKED AND NOT ANSWERED (the shell timed out, failed to start) is unknown like not asked: the ACP harness stays here — only a real «none» says absent', un === true && cu.census('opencode').missing === false && cu.census('opencode').answer === 'unanswered', String(un));
   const c2 = mod.createCliCmds({ ask: async () => ({ kind: 'path', path: NVMP, via: 'program', shell: '/bin/zsh', shellPath: '/u/.nvm/bin' }), resolve: async () => null, usable: async () => true, log: () => {} });
   c2.register('opencode', { name: 'opencode', current: 'opencode' });
   const got = await c2.forSpawn('opencode', 'opencode');
@@ -570,7 +575,7 @@ const SEVEN = (() => {
     ['fail-closed removed (found nothing ⇒ spawn the old path)', '      if (p) return p;\n      const r = refusal(backend, e);', '      if (p || true) return p || cmd;\n      const r = refusal(backend, e);', (m) => registryLegs(m, { slow: false }), /FAIL CLOSED|REFUSED by that word|refused too/],
     ['sentinel parse removed (the first printed line is the answer)', '      const p = LS.parseShellAnswer(out);', "      const p = { complete: true, pathDone: true, cv: out.split('\\n').map((l) => l.trim()).filter(Boolean)[0] || '', path: null };", (m) => rungLegs(m, { groups: ['noisy'] }), /LAST pair wins|kind:none/],
     ['env unsanitized (the hub\'s process.env handed to the shell)', "env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } })", "env: { ...env, SHELL: shell }", (m) => rungLegs(m, { groups: ['env'] }), /SANITIZED ENV/],
-    ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      return isAbs(e.current) || (!e.answer && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
+    ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      // asked and NOT answered (the shell failed to start, timed out) is unknown, like not asked — only a real «none» says absent\n      return isAbs(e.current) || ((!e.answer || e.answer.kind === \'unanswered\') && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
     ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 }), /unanswered:timeout/],
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)

@@ -468,6 +468,12 @@ class SettingsUI {
       badge.textContent = c.text;
       if (c.title) badge.title = c.title;
       (c.kind === 'reload' ? label : chipLine).appendChild(badge);
+      if (c.recheck) { // B-544d r2: the CLI was not found here — Manage agents' Re-check asks the login shell again (a person's press)
+        const rb = document.createElement('button'); rb.type = 'button'; rb.className = 'btn-cancel settings-chip-recheck'; rb.textContent = t('Re-check');
+        rb.title = t('Re-check there asks your shell again once {cli} is installed', { cli: c.recheck });
+        rb.onclick = (e) => { e.preventDefault(); const a = this.app || {}; a._cliRecheckDue = true; a._showAgentsDialog?.(); };
+        chipLine.appendChild(rb);
+      }
     }
     const desc = document.createElement('div');
     desc.className = 'settings-row-desc';

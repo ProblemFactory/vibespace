@@ -864,8 +864,9 @@ export async function showLaunchDialog(app, opts = {}) {
     const note = document.createElement('p'); note.className = 'desktop-launch-file-note';
     const said = refusal && refusal.code !== 'app-absent' ? (openWithRefusalText(refusal.code, { file: doc.label, machine: doc.hostLabel || null }) || refusal.error || '') : '';
     note.textContent = said; note.style.display = said ? '' : 'none';
-    if (refusal && isAgentOld(refusal.code)) note.append(' ', agentUpdateDoor(machineOf(host), { app, before: close })); // B-bd27 X1
-    intro?.after(note);
+    const noteDoor = document.createElement('div'); noteDoor.className = 'desktop-launch-file-door'; // B-bd27 X1: the door's own slot — the note keeps its words
+    if (refusal && isAgentOld(refusal.code)) noteDoor.append(agentUpdateDoor(machineOf(host), { app, before: close }));
+    intro?.after(note); note.after(noteDoor);
     $('.desktop-launch-browsers-sec').style.display = 'none';
     $('.desktop-launch-adv').style.display = 'none';
     $('.desktop-launch-desk-sec').style.display = 'none'; // agents on the real desktop: not this dialog's question
@@ -1178,16 +1179,19 @@ export async function showLaunchDialog(app, opts = {}) {
   // when its listing lands (the open never waited for it) or Check again answers; the distro's own entries wait behind
   // "Show them" (the person's choice, user state)
   let showSystem = false, rechecking = false;
+  let availDoor = null; // B-bd27 X1: «Update its agent…» beside the head's words
   const render = ({ seenOnly = false } = {}) => {
     if (!seenOnly) cardKey = cardSig(data && data.apps); // lane app-launch-singleton: the instance set these cards show
     const mName = host === 'local' ? null : machineName(machineOf(host));
     availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
-    if (listError && isAgentOld(listError.code)) availEl.append(' ', agentUpdateDoor(machineOf(host), { app, before: close })); // B-bd27 X1
+    if (!availDoor) { availDoor = document.createElement('div'); availDoor.className = 'desktop-launch-avail-door'; } // B-bd27 X1: the door's own slot, kept beside the words wherever they go
+    availDoor.replaceChildren(...(listError && isAgentOld(listError.code) ? [agentUpdateDoor(machineOf(host), { app, before: close })] : []));
     const availBad = !!listError || !!(data && data.availability && !data.availability.backend);
     availEl.classList.toggle('desktop-launch-avail-bad', availBad);
     // design 009 §B3: a backend that works is footer small print; one that is missing or fell back is said at the top
     if (availBad || !!(data && data.availability && data.availability.fallbackWhy)) { if (availEl.parentElement !== availHead) availHead.appendChild(availEl); }
     else { const shareEl = availFoot.querySelector('.desktop-launch-share-row'); if (availEl.previousElementSibling !== shareEl) shareEl.after(availEl); }
+    if (availEl.nextElementSibling !== availDoor) availEl.after(availDoor);
     renderInstall();
     const dead = !!listError || !data?.availability?.backend;
     const scales = !dead && !!data?.availability?.caps?.scales; // lane D: only a rung that scales apps offers a default scale (the row's cell)
@@ -1336,7 +1340,6 @@ export async function showLaunchDialog(app, opts = {}) {
     if (!regEl.children.length) regEl.innerHTML = doc
       ? `<div class="desktop-launch-empty">${escHtml(listError ? '' : t('LibreOffice is not offered by {machine} — its VibeSpace agent may be too old; reconnect it to upgrade', { machine: machineInSentence(machineOf(host)) }))}</div>`
       : `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
-    if (doc && !listError && regEl.firstElementChild && regEl.firstElementChild.classList.contains('desktop-launch-empty')) regEl.firstElementChild.append(' ', agentUpdateDoor(machineOf(host), { app, before: close })); // B-bd27 X1: «may be too old» ⇒ its door
     renderRunning();
     // ── advanced: recents + the form ──
     recEl.innerHTML = '';
