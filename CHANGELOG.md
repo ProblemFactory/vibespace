@@ -81,6 +81,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A job command given as several unquoted words is refused with the quoted form to use; only its first word used to run, reported as done.
 - Starting a job while its stop is still ending now starts it once the stop ends, instead of «already running»; vibespace-job restart does both.
 - Right after VibeSpace starts, the groups list no longer freezes it while unread messages are counted; a count shown as zero fills in a moment later.
+- An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
 - An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
 - After a restart, Resume all no longer calls a folder gone when its machine or storage mount waits for the vault or is not up; it asks you to unlock first.
@@ -114,7 +115,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - New Session: a channel account whose Except list leaves out a Task Group you picked is no longer shown as granted.
 - An open New Session form now updates what the conversation may use when a grant, a Task Group or a channel account changes elsewhere.
 - A resumed conversation that ran a turn, then ended with no page open, no longer comes back as ended while the server was down, with its old account.
-- An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
