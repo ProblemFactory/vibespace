@@ -235,7 +235,7 @@ const armSessions = [];
   }
 }
 const cleanup = () => {
-  for (const k of kids) { try { if (groupKids.has(k) && Number.isInteger(k.pid) && k.pid > 1) { groupKids.delete(k); process.kill(-k.pid, 'SIGKILL'); } else k.kill('SIGKILL'); } catch { } }   // a group is ended once (cleanup runs again at exit)
+  for (const k of kids) { try { if (groupKids.has(k) && Number.isInteger(k.pid) && k.pid > 1) { groupKids.delete(k); if (k.exitCode === null && k.signalCode === null) process.kill(-k.pid, 'SIGKILL'); } else k.kill('SIGKILL'); } catch { } }   // a group only while its leader is not reaped (it holds the id)   // a group is ended once (cleanup runs again at exit)
   try { fs.rmSync(HOME, { recursive: true, force: true }); } catch { }
 };
 process.on('exit', cleanup);
@@ -714,7 +714,7 @@ console.log('\n§11 a fixture ends with its children');
   ctl.kill('SIGKILL');
   await until(() => !alive(ctl.pid));
   ok(ctlKids.length === 2 && !alive(ctl.pid) && ctlKids.every(alive), `§11 CONTROL: a forking shell ended by its own pid (the old teardown) leaves its children alive (red: ${ctlKids.filter(alive).length} of ${ctlKids.length})`);
-  try { if (Number.isInteger(ctl.pid) && ctl.pid > 1) process.kill(-ctl.pid, 'SIGKILL'); } catch { }
+  try { if (ctlKids.some(alive) && Number.isInteger(ctl.pid) && ctl.pid > 1) process.kill(-ctl.pid, 'SIGKILL'); } catch { }   // its members, read alive, hold the group id
   cleanup();
   const gone = await until(() => !grand.some(alive) && !ctlKids.some(alive));
   ok(grand.length >= Number(process.env.VS_WEBUI_N || 20) * 2 && gone, `§11 the teardown ends every forking fixture's group: ${grand.length} children of ${shells} shells gone (${grand.filter(alive).length} alive), the control's 2 by its group`);

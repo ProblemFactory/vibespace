@@ -93,11 +93,14 @@ const closes = () => { try { return fs.readFileSync(path.join(AB_STATE, 'closes.
 const servers = new Set();
 let dmReal = null;
 let daemonEnded = false;   // B-b403: ③'s daemon is ended ONCE — by the leg at the end, else by cleanup (a red, a throw, a signal)
+// …by the IDENTITY of this run's own unique root (endDaemonsAndWait: VIBESPACE_AGENTD_ROOT under ROOT), never a pid by name; the
+// ender takes a /tmp scratch root only (scratch.mjs endDaemonsOf), and the leg follows that rule (a TMPDIR elsewhere is said)
+const enderTakes = () => path.resolve(String(process.env.VIBESPACE_AGENTD_ROOT || '')).startsWith('/tmp/');
 function cleanup() {
   for (const l of launches()) if (l.pid) { try { process.kill(l.pid, 'SIGKILL'); } catch { /* gone */ } }
   for (const s of servers) { try { s.close(); } catch { /* gone */ } }
   try { dmReal?.stop?.(); } catch { /* gone */ }
-  if (!daemonEnded) try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { /* not a /tmp root */ }   // B-b403: stop() drops the link only; the daemon is setsid-detached by design
+  if (!daemonEnded && enderTakes()) try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { /* gone */ }   // B-b403: stop() drops the link only; the daemon is setsid-detached by design
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
 process.on('exit', cleanup);
@@ -524,8 +527,11 @@ console.log('— ⑥ the allowlisting egress proxy (§7.2.1: enforcing, not obse
 // the link only — so it outlived every run, adopted by the user manager. The suite ends the daemon of its own root, and waits.
 {
   try { dmReal?.stop?.(); } catch { /* gone */ }
-  let e = null; daemonEnded = true; try { e = endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch (err) { e = { error: err.message }; }
-  ok(!!e && e.pids?.length >= 1 && e.gone === true, `B-b403: the suite ends ③'s device daemon before it ends (${JSON.stringify(e)})`);
+  if (!enderTakes()) console.log(`  ○ SKIP B-b403's daemon end: the daemon root ${process.env.VIBESPACE_AGENTD_ROOT} lies outside /tmp, and endDaemonsOf refuses such a root by its rule (a /tmp scratch root only): the daemon is left to its own exit and the gate's reaper`);
+  else {
+    let e = null; daemonEnded = true; try { e = endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch (err) { e = { error: err.message }; }
+    ok(!!e && e.pids?.length >= 1 && e.gone === true, `B-b403: the suite ends ③'s device daemon (by its own root's identity) before it ends (${JSON.stringify(e)})`);
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

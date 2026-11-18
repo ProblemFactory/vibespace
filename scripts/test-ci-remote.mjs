@@ -103,7 +103,10 @@ try {
   ok(kids.every((k) => !alive(k.pid)), '⑥ the run\'s processes are gone (by env, by cwd, by argv)', td.stdout.trim().slice(0, 300));
   ok(['env', 'cwd', 'argv'].every((w) => td.stdout.includes(`(by ${w})`)) && /3 process\(es\) TERMed/.test(td.stdout), '⑥ each one named with what tied it to the run');
   ok(alive(by.pid), '⑥ the bystander survives');
-  for (const k of [...kids, by]) { try { if (Number.isInteger(k.pid) && k.pid > 1) process.kill(-k.pid, 'SIGKILL'); } catch { } }   // each leads its group (detached)
+  // B-b403 cure (the readers, 02:39Z): a GROUP is signalled only while something of it is known alive — its leader not yet reaped
+  // (the handle: a live or zombie leader holds the group id) or a member read alive (`sub`) — so an id that died and came back is
+  // never a stranger's group
+  for (const k of [...kids, by]) { try { const held = (k.exitCode === null && k.signalCode === null) || (k === kids[2] && sub.some(alive)); if (held && Number.isInteger(k.pid) && k.pid > 1) process.kill(-k.pid, 'SIGKILL'); } catch { } }
   { const end = Date.now() + 5000; while (sub.some(alive) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); }
   ok(sub.length === 1 && !sub.some(alive), `⑥ B-b403: the fixtures end with their groups — the bash fixture's own sleep too (${sub.length} child, ${sub.filter(alive).length} alive)`);
   // ⑦ the desktop batch
