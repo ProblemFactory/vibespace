@@ -24,7 +24,7 @@
 //      files (closure 4 found 12 the spellings hid — oat-identity `t = T()`, engine-distribution `ut = T()`, the frp plugin
 //      `ut = forYou()` with relay-token.js's words, browser-dialogs' eight `forYou.add?.(`, the store's own set-aside notice); ONE
 //      filing the store REFUSES (browser-dialogs promptAsk: its i18n.detail is an object, not an array of lines — add() throws, the
-//      sign-in ask is never filed) is REFUSED_DEBT, named. THE RELEASE IS FOUND BY ANCESTRY, never by a subject's words: the newest
+//      sign-in ask is never filed) was REFUSED_DEBT, named (B-ebb7 files it on 2.369.410: the row left). THE RELEASE IS FOUND BY ANCESTRY, never by a subject's words: the newest
 //      commit at or below HEAD that changed package.json's "version" line (git log -G'"version":' -- package.json) whose version
 //      differs from its parent's (content) — a lane never bumps the version, so that is what the tree was cut from (a lane commit
 //      titled «2.N.N: …» is no release); a HEAD that is such a commit is checked against the one before it; a shallow clone holds
@@ -43,7 +43,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const SKIPS = [];   // closure 4 (item 3): a leg that did not run is named and counted in the last line
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 1400) : '')); } };
+const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs, B-1747)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 1400) : '')); } };
 const TABLES = [['machine', 'src/machine-needs.js'], ['ui', 'src/ui-needs.js']].filter(([, f]) => fs.existsSync(path.join(REPO, f))).map(([scope, f]) => ({ scope, file: f, T: require(path.join(REPO, f)) }));
 ok(TABLES.some((x) => x.scope === 'ui'), 'the ui table exists (src/ui-needs.js)');
 console.log(`tables: ${TABLES.map((x) => x.scope + ' (' + x.file + ')').join(' · ')}`);
@@ -2020,11 +2020,11 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
     ALIASED.filter((f) => !SWN.filings.some((x) => x.f === f && x.words.size > 0)));
   // A FILING THE STORE REFUSES (its i18n.detail not an array of lines: add() throws, the item is never filed) is NAMED — the known
   // one is a debt (the sign-in ask, browser-dialogs promptAsk); another is red, and a fix of it removes its row
-  const REFUSED_DEBT = ['src/server/browser-dialogs.js «A page in the agent browser asks you to sign in ({host})»'];
+  const REFUSED_DEBT = [];   // the sign-in ask's row left at the restack for 2.369.411: B-ebb7 (2.369.410) files it, its detail an array of lines
   const refusedNow = SWN.filings.filter((x) => x.refused && x.refused.length).map((x) => `${x.f} «${[...x.words][0] || '?'}»`).sort();
   if (refusedNow.length) console.log(`  · ${refusedNow.length} filing(s) the store refuses (i18n.detail not an array of lines — never filed): ${refusedNow.join(', ')}`);
   ok(JSON.stringify(refusedNow) === JSON.stringify(REFUSED_DEBT),
-    'stored words (closure 4): a filing the store REFUSES (i18n.detail not an array of lines — add() throws, the item is never filed) is named: the known one (REFUSED_DEBT, the sign-in ask) and no other', refusedNow);
+    'stored words (closure 4): a filing the store REFUSES (i18n.detail not an array of lines — add() throws, the item is never filed) is named: none since B-ebb7 filed the sign-in ask (REFUSED_DEBT empty) — a new one is red', refusedNow);
   // CONTROLS: a planted producer that files its words through a model (a constant, a WORDS param, a helper handed to .map BY NAME),
   // beside a live route answer in the same model — the census finds the three stored keys and never the answer
   const PLANT_STORE = ['src/user-todos.js', "'use strict';\nclass UserTodoManager { add(key, { text, i18n } = {}) { return key; } redrawItem(pred, { i18n } = {}) { return pred; } }\nmodule.exports = { UserTodoManager };\n"];

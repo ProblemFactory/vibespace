@@ -129,7 +129,7 @@ check('⑤ the disk notice is the need line on its OWN row under the toolbar (bo
 // RED CONTROL, its plant proven first: the release's mark put back on the notice's show line
 const SHOW = "if (this.modified) { this._diskSeen = m; this._diskChip.style.display = ''; }";
 const plantedED = ED.replace(SHOW, "if (this.modified) { this._diskSeen = m; this._diskChip.style.display = ''; this._toolbarEl?.classList.add('ce-disk-changed'); }");
-const plantIn = ED.includes(SHOW) && plantedED !== ED && /classList\.add\('ce-disk-changed'\)/.test(plantedED);
+const plantIn = ED.includes(SHOW) && plantedED !== ED && /classList\.add\('ce-disk-changed'\)/.test(plantedED);   // stale-pins: kept — the release's wrap mark, read in the copy this RED control plants
 check('⑤ RED CONTROL: the plant is in its copy (the release\'s wrap mark on the show line) — and the law reads that copy red', plantIn && !diskLaw(plantedED, VW).noMark, { plantIn });
 
 // ⑥ THE CHECK ROW

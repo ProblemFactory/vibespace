@@ -224,7 +224,7 @@ console.log('— ⑦ B-53df: the three RESTART doors say a refusal by its CODE (
   ok(by === BH.humanRefusalText('browsing_yourself', { label: 'Bank', act: 'restart' }) && /then restart it/.test(by) && W({ code: 'browsing_yourself' }, tz) !== by && W({ code: 'browsing_yourself' }, tz).includes('Bank'), 'browsing_yourself: the person\'s restart words (en; zh in its own words, the label kept)', by);
   const land = 'The browser kernel is being replaced — try again in a moment.';
   ok(W({ code: 'engine_kernel_landing', error: 'raw' }, en) === land && W({ code: 'engine_kernel_landing' }, tz) === zh[land] && W({ code: 'engine_kernel_landing' }, tj) === ja[land], 'engine_kernel_landing: en / zh / ja (the row\'s named code)');
-  const un = "That engine's plugin did not answer — restart it in ⚙ → Plugins.";
+  const un = "That engine's plugin did not answer — restart the plugin, then try again.";
   ok(W({ code: 'browser_engine_unanswered' }, tj) === ja[un] && W({ code: 'browser_build_missing' }, en) === BM.buildRefusalWords({ code: 'browser_build_missing' }, en), 'an engine / build refusal of the start inside the restart: the build words (ja; en)');
   ok(/pid 4242/.test(W({ code: 'profile_locked', holderPid: 4242 }, en)) && W({ code: 'browser_unstable' }, tz) === zh['Its browser keeps closing — press Stop on its row first, then try again.'], 'profile_locked names the holder pid; browser_unstable in zh');
   ok(W({ code: 'launch_failed', error: 'chrome exited' }, en) === '' && W({ code: 'backend_no_key', error: 'x' }, en) === '' && W({ error: 'boom' }, en) === '' && W(null, en) === '', 'a launch failure (what failed and why — the server\'s facts), no code ⇒ no words — the door says the server\'s sentence');
