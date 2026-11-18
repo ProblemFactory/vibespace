@@ -551,6 +551,21 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
   return out.concat(last);
 }
 
+// B-37f9: THE TEN-SECOND EVALUATION GATE FOR KICKS (PURE — the engine only applies it). A KICK (src/server/usage-pool-engine.js
+// kickPoolEval: every usage record, and a few readings — a rate_limit_event, a reset credit's answer, a re-read probe, the codex
+// fresh window, a workflow tailer, the ledger's added rows) evaluates a pool again at most once per EVAL_GATE_MS after the pool's
+// LAST EVALUATION — any pass that got past the pool's own guards. Only kicks: every other caller (the 30 s tick, a walled turn's
+// end, the codex cold wall, the pre-fire first decision, the ledger's catch-up, a compaction's end) owes its decision and is never
+// held by it. Open when forced, with no evaluation yet, and on a clock stepped BACK (a negative age never shuts a pool for the
+// minutes the clock moved).
+const EVAL_GATE_MS = 10000;
+function evalGateOpen({ now, last = 0, force = false } = {}) {
+  const at = Number(last) || 0;
+  if (force || !(at > 0)) return true;
+  const age = Number(now) - at;
+  return age < 0 || !(age < EVAL_GATE_MS);
+}
+
 // readLogin = (accountId) => loginState info (src/login-expiry.js) or null.
 // OPTIONAL: omit it and every rule below is inert — this function decides
 // exactly as it did before logins were readable.
@@ -1842,7 +1857,7 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 }
 
 module.exports = {
-  wallDoor,
+  wallDoor, evalGateOpen, EVAL_GATE_MS,
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
   classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, recordCacheFact, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

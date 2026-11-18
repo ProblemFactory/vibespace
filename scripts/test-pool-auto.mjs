@@ -1078,6 +1078,7 @@ await (async () => {
           && lL.some((l) => /^\[pool\] hold l1-idle: warm cache \(a request in flight since (59|60|61)s\) — proactive move to Member B deferred$/.test(l)),
           JSON.stringify({ r: rI, f: seen['l1-idle'], link: at(wL, 'l1-idle'), l: lineOf('l1-idle') }));
         console.log = console.warn = () => { }; try { await new Promise((r) => setImmediate(r)); } finally { console.log = o0; console.warn = o1; } // the usage record's kicked pass
+        if (wL && wL.eng && wL.eng._poolKickTrail) { for (const t of wL.eng._poolKickTrail.values()) clearTimeout(t); wL.eng._poolKickTrail.clear(); }   // B-37f9: a held kick's re-run is not this leg's to run
       }
     }
     // ── LANE CACHE-WARMTH-COMPACT (2026-11-03 — userW inc-mw1aanqt-994q, B-9769; amendment 1, the owner: «缓存时间这个你没有个
@@ -1089,6 +1090,8 @@ await (async () => {
     {
       const metasM = new Map();
       const metaM = { readSessionMeta: (k) => metasM.get(k) || {}, writeSessionMeta: (k, m) => { metasM.set(k, m); } };
+      const engsM = [];   // B-37f9: every world's engine — a held kick's ONE re-run (10 s on) is not these legs' to run
+      const unTrail = () => { for (const e of engsM) if (e && e._poolKickTrail) { for (const t of e._poolKickTrail.values()) clearTimeout(t); e._poolKickTrail.clear(); } };
       const shapeM = (kind, extra, mod = engMod) => {
         const x = world(mod, { burnA: 0, extra, metaStore: metaM });
         if (!x) return null;
@@ -1101,6 +1104,7 @@ await (async () => {
           rw(x.Bm, (c) => ({ ...c, sevenDay: { utilization: 0.3, resetsAt: nowS + 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: nowS + 86400 }] }));
         }
         x.credits = (inUse) => rw(x.A, (c) => ({ ...c, overage: { inUse, status: 'allowed', asOf: Date.now() } }));
+        engsM.push(x.eng);
         return x;
       };
       const recM = (id, { read = 0, h1 = 0, m5 = 0, sub = false } = {}) => ({ type: 'assistant', message: { id, role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 3, output_tokens: 40, cache_read_input_tokens: read, cache_creation_input_tokens: h1 + m5, cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 } } }, parent_tool_use_id: sub ? 'toolu_sub' : null, uuid: 'u-' + id });
@@ -1244,7 +1248,7 @@ await (async () => {
         console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
         Date.now = () => realNowR() + skew;
         try { fn((ms) => { skew = ms; }); } finally { Date.now = realNowR; }
-        try { await drain(); await drain(); } finally { console.log = o0; console.warn = o1; }
+        try { await drain(); await drain(); } finally { console.log = o0; console.warn = o1; unTrail(); }
         return lines;
       };
       const st = (state, n) => ({ type: 'system', subtype: 'session_state_changed', state, uuid: 'u-st-' + state + n });
@@ -3175,6 +3179,93 @@ await (async () => {
       ck('r3 4a RED: a proving decision handed the member\'s OWN FILE only (no identity group) places a spawn on UCI to confirm a reset its identity already read', !!gwRed && gwRed.proving === true, JSON.stringify(gwRed));
       for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, r.pass);
     } else ck('proving engine SKIP — pools unsupported', true);
+    fs.rmSync(scr, { recursive: true, force: true });
+  }
+  // B-37f9: THE TEN-SECOND GATE HOLDS EVERY PER-RECORD KICK — a kick waits 10 s after the pool's last EVALUATION (the release
+  // stamped only at a switch: a kick was held only within 10 s of one). Only kicks: an un-forced pass that OWES its decision (the
+  // tick, a walled turn's end, the cold wall, the pre-fire first decision) is never held by it. A held kick arms ONE re-run.
+  {
+    const PA = require(path.resolve('src/account-pool-auto.js'));
+    ck('B-37f9 PURE: the kicks\' gate is closed 9 s after the last evaluation, open at 10 s, open when forced, open with no evaluation yet, OPEN when the clock stepped back',
+      typeof PA.evalGateOpen === 'function' && PA.evalGateOpen({ now: 10000, last: 1000 }) === false && PA.evalGateOpen({ now: 11000, last: 1000 }) === true && PA.evalGateOpen({ now: 2000, last: 1000, force: true }) === true
+      && PA.evalGateOpen({ now: 5 }) === true && PA.evalGateOpen({ now: 5, last: 0 }) === true && PA.evalGateOpen({ now: Date.now(), last: Date.now() - 3000 }) === false && PA.evalGateOpen({ now: 1000, last: 600000 }) === true && PA.EVAL_GATE_MS === 10000);
+    fs.mkdirSync(scr, { recursive: true });
+    const kicks = (engine) => {
+      const g = world({ engine });
+      if (!g) return null;
+      const E = g.eng, held = () => (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, at = () => (E._poolEvalAt && E._poolEvalAt.get(g.P)) || 0;
+      const fresh = () => at() > Date.now() - 2000, trails = () => (E._poolKickTrail ? E._poolKickTrail.size : 0);
+      E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolEvalAt) E._poolEvalAt.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+      quietly(() => E.maybePoolAutoSwitchForPool(g.P, { kick: true }));
+      const r = { s1: at(), back: Date.now() - 3000 };
+      if (E._poolEvalAt && r.s1 > 0) E._poolEvalAt.set(g.P, r.back);   // that evaluation (when it stamped), wound to 3 s ago: a held kick must leave it there
+      for (let i = 0; i < 4; i++) quietly(() => E.maybePoolAutoSwitchForPool(g.P, { kick: true }));   // five records in one moment
+      Object.assign(r, { held: held(), s2: at(), trails: trails() });
+      // the ONE armed re-run, fired with the gate wound open (ten seconds on): it EVALUATES — no record's decision is lost
+      const tm = E._poolKickTrail ? [...E._poolKickTrail.values()][0] : null, fire = tm && tm._onTimeout;
+      if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 11000);
+      r.trailFired = typeof fire === 'function';
+      if (r.trailFired) { clearTimeout(tm); quietly(() => fire.call(tm)); }
+      Object.assign(r, { trailEvaluated: fresh(), trailsAfter: trails() });
+      // an un-forced pass that OWES its decision (the tick's form; a walled turn's end, the cold wall, the pre-fire first decision
+      // are the same call): an evaluation 3 s ago shuts the kicks' gate, never this pass
+      E._poolAutoLast.clear(); if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 3000);
+      let h0 = held();
+      quietly(() => E.maybePoolAutoSwitchForPool(g.P));
+      Object.assign(r, { tickHeld: held() - h0, tickEvaluated: fresh() });
+      E._poolAutoLast.clear(); if (E._poolEvalAt) E._poolEvalAt.set(g.P, Date.now() - 3000);
+      h0 = held();
+      quietly(() => E.maybePoolAutoSwitchForPool(g.P, { force: true, kick: true }));   // forced: never held
+      Object.assign(r, { forcedHeld: held() - h0, forcedEvaluated: fresh() });
+      if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }   // a re-run armed above: not this leg's to wait for
+      return r;
+    };
+    const K = kicks(engMod);
+    if (!K) ck('B-37f9 engine SKIP — pools unsupported', true);
+    else {
+      console.log(`    B-37f9: five kicks in one moment ⇒ held ${K.held}, re-runs armed ${K.trails} (fired: evaluated ${K.trailEvaluated}); a tick-form pass 3 s after an evaluation ⇒ held ${K.tickHeld}, evaluated ${K.tickEvaluated}; forced ⇒ held ${K.forcedHeld}`);
+      ck('B-37f9: five per-record kicks in one moment ⇒ ONE evaluation and FOUR held (a held kick stamps nothing, decides nothing), ONE re-run armed',
+        K.s1 > 0 && K.s2 === K.back && K.held === 4 && K.trails === 1);
+      ck('B-37f9: the armed re-run, ten seconds on, EVALUATES the pool and arms no other (no record\'s decision is lost)', K.trailFired && K.trailEvaluated && K.trailsAfter === 0);
+      ck('B-37f9: an un-forced pass that OWES its decision (not a kick) is NEVER held by the kicks\' gate, 3 s after an evaluation; a forced pass is never held',
+        K.tickHeld === 0 && K.tickEvaluated && K.forcedHeld === 0 && K.forcedEvaluated);
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const M37 = mutantCopies('pool-gate-37f9', path.resolve('.'));
+      const ENG = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
+      const STAMP = "    _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not)\n";
+      const GATE = "    if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n";
+      const okAnchor = ENG.split(STAMP).length === 2 && ENG.split(GATE).length === 2;
+      ck('ANCHOR: the kicks\' stamp and the kicks\' gate, each spelled once (a missing anchor builds no control: RED by name)', okAnchor);
+      // A COMPACTION'S END owes its ask (the free move window closes at the next request-out): never held by the kicks' gate
+      const compactAsk = async (engine) => {
+        const g = world({ engine });
+        if (!g || typeof g.eng.noteCompacted !== 'function') return null;
+        const E = g.eng, s = g.mk('s-cb', 'uci');
+        E._poolSwitchAt.clear(); E._poolAutoLast.clear(); if (E._poolGateHeld) E._poolGateHeld.clear();
+        const back = Date.now() - 3000;
+        if (E._poolEvalAt) E._poolEvalAt.set(g.P, back);   // the tick evaluated 3 s ago: the kicks' gate is shut
+        const o = console.log, w2 = console.warn; console.log = console.warn = () => { };
+        try { E.noteCompacted(s, { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto' }, uuid: 'u-cb-37f9' }); await new Promise((r) => setImmediate(r)); }
+        finally { console.log = o; console.warn = w2; }
+        const r = { compacted: !!s._compactedAt, held: (E._poolGateHeld && E._poolGateHeld.get(g.P)) || 0, at: (E._poolEvalAt && E._poolEvalAt.get(g.P)) || 0, back };
+        if (E._poolKickTrail) { for (const t of E._poolKickTrail.values()) clearTimeout(t); E._poolKickTrail.clear(); }
+        return r;
+      };
+      const C = await compactAsk(engMod);
+      ck('B-37f9: a compaction\'s end, 3 s after the tick evaluated, ASKS the pool at once — not held (the release\'s road)', !!C && C.compacted && C.held === 0 && C.at > C.back, C);
+      const ASK = "  kickPoolEval({ kick: false });   // B-37f9: OWED — the free move window closes at the next request-out; never held by the kicks' gate (the release's road)\n";
+      ck('ANCHOR: the compaction\'s owed ask, spelled once', ENG.split(ASK).length === 2);
+      if (ENG.split(ASK).length === 2) {
+        const CM = await compactAsk(M37.load('src/server/usage-pool-engine.js', ENG.replace(ASK, '  kickPoolEval();\n'), 'compaction-kicks'));
+        ck('MUTANT RED: the compaction\'s ask as a KICK ⇒ the tick\'s evaluation 3 s earlier holds it — the free window can close unasked', !!CM && CM.compacted && CM.held === 1 && CM.at === CM.back, CM);
+      }
+      if (okAnchor) {
+        const KO = kicks(M37.load('src/server/usage-pool-engine.js', ENG.replace(STAMP, ''), 'stamp-gone'));
+        ck('MUTANT RED: no evaluation stamp (the release\'s gate for kicks) ⇒ no kick is held — five records, five evaluations', !!KO && KO.held === 0);
+        const KG = kicks(M37.load('src/server/usage-pool-engine.js', ENG.replace(GATE, "    if (!evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n"), 'gate-every-pass'));
+        ck('MUTANT RED: the gate on EVERY un-forced pass (not only kicks) ⇒ the pass that owes its decision is held, nothing evaluated', !!KG && KG.tickHeld === 1 && !KG.tickEvaluated);
+      }
+    }
     fs.rmSync(scr, { recursive: true, force: true });
   }
 })();

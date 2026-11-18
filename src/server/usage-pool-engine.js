@@ -68,7 +68,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCheckingNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { evalGateOpen, EVAL_GATE_MS, decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCheckingNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, cacheTtlSecFor, recordCacheFact, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const { requestInFlight } = require('../turn-state.js'); // PURE: is a request in flight (never a turn paused on the owner) — the prompt cache's in-flight fact (lane cache-warmth-tiles r3)
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
@@ -97,7 +97,10 @@ const harnesses = require('../harnesses');
 const { harnessSetting, harnessDeclares } = (injectedHarnessSetting && injectedHarnessDeclares)
   ? { harnessSetting: injectedHarnessSetting, harnessDeclares: injectedHarnessDeclares }
   : require('./harness-config-sync').accessorsFor({ serverSetting, harnesses });
-const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
+const _poolAutoLast = new Map(); // poolId → ts of the last default SWITCH: every un-forced pass waits 10 s after one (B-37f9: what it always was — «last DECISION» since 2.266.1 named the kicks' gate below)
+const _poolEvalAt = new Map(); // B-37f9: poolId → ts of the last EVALUATION (any pass past the pool's own guards) — the per-record KICKS' gate
+const _poolGateHeld = new Map(); // B-37f9: poolId → kicks the gate held (a count the legs read; a held kick decides nothing)
+const _poolKickTrail = new Map(); // B-37f9: poolId → the ONE re-run a held kick arms for the gate's opening (no record's decision is lost)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // A 'spare-lane' move (B-8a65 S5) is pure convenience — the member it leaves can serve — so it waits
 // an HOUR after the conversation's last move, not the belt's 3 min (design desk 2026-10-02, verify r1
@@ -4396,7 +4399,7 @@ function noteCompacted(session, rec, now = Date.now()) {
   session._compactedAt = Number(now) || Date.now();
   session._compactedBy = rec.uuid || null;
   persistRequestStamp(session);
-  kickPoolEval();
+  kickPoolEval({ kick: false });   // B-37f9: OWED — the free move window closes at the next request-out; never held by the kicks' gate (the release's road)
 }
 /** THE MEMBER THAT SERVED A REQUEST = the member the conversation's link named when that request went out (round 4). The
  *  CLI re-reads its credential at EVERY request (inc-mttbrtc0-6049: a re-point inside a single turn reached its very next
@@ -6334,14 +6337,14 @@ function autoCliReady(id) {
 // burns are seen the moment the CLI streams them, not when the ledger scan
 // catches up. Zero network; decision reads memory + local files only.
 let _poolEvalKickAt = 0;
-function kickPoolEval() {
+function kickPoolEval({ kick = true } = {}) {   // B-37f9: `kick: false` = an ask that OWES its decision (a compaction's end) — never held by the kicks' gate
   const now = Date.now();
   if (now - _poolEvalKickAt < 5000) return;
   _poolEvalKickAt = now;
   setImmediate(() => {
     try {
       for (const a of accounts.list().accounts || []) {
-        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
+        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id, kick ? { kick: true } : undefined); } catch { } }   // B-37f9: a KICK — the evaluation gate holds it
       }
     } catch { }
     try { sweepResetCreditAsks(); } catch { } // an ask item whose carrier is gone (r3)
@@ -7640,7 +7643,7 @@ function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
     return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(burnPtPerMin * 100) / 100 };
   } catch { return null; }
 }
-function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null } = {}) {
+function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null, kick = false } = {}) {
   try {
     if (!poolId) return;
     const a = accounts.get(poolId);
@@ -7653,10 +7656,21 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // move owed at the first stop is decided in THAT call); a released reset hold (releaseResetHold); a basis flip found by
     // another reader (redecideOnBasis); the pre-fire gate's re-decision on its fresh probe (beforeAutoResumeFire). None is a
     // kick: each is a fact the decision was missing. The 180s dwell belt below is deliberately NOT forced, so an
-    // evaluation forced here can no more oscillate than any other one. (The gate's stamp is set only after a default
-    // switch — `_poolAutoLast` was born a switch floor and renamed «last DECISION» in 2.266.1 with its setter left where
-    // it was; filed as its own row, not changed here.)
+    // evaluation forced here can no more oscillate than any other one. Every un-forced pass waits 10 s after a default switch (as
+    // the release). B-37f9: a per-record KICK also waits 10 s after the pool's last EVALUATION (`_poolEvalAt`, stamped below) —
+    // the release stamped only at a switch, so a kick was gated only within 10 s of one. The open / closed answer is PURE
+    // (account-pool-auto evalGateOpen). A held kick is counted and arms ONE re-run at the gate's opening: no record's decision is lost.
     if (!force && (now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
+    if (kick && !evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {
+      _poolGateHeld.set(poolId, (_poolGateHeld.get(poolId) || 0) + 1);
+      if (!_poolKickTrail.has(poolId)) {
+        const wait = Math.max(0, EVAL_GATE_MS - (now - (_poolEvalAt.get(poolId) || 0)));
+        const tm = setTimeout(() => { _poolKickTrail.delete(poolId); try { maybePoolAutoSwitchForPool(poolId, { kick: true }); } catch { } }, wait + 50);
+        if (tm && typeof tm.unref === 'function') tm.unref();
+        _poolKickTrail.set(poolId, tm);
+      }
+      return;
+    }
     // (lane pool-provider-latents, q-055 M2) a default a deletion left UNPLACED decides FROM its deleted member: its own
     // provider only (the default never crosses one) — and the per-session pass below still runs for every conversation
     const currentId = accounts.poolCurrent(poolId) || accounts.unplacedOf(poolId, null)?.member || null;
@@ -7665,6 +7679,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // still on the way (r3): the cache's spent mark is the WALL's, not a fact
     // about now — no decision off it until the reading (or 30 s) arrives
     if (resetCreditPendingFor(currentId, now)) return;
+    _poolEvalAt.set(poolId, now);   // B-37f9: THE KICKS' STAMP — this pass evaluates the pool (forced or not)
     // Capability-gated (P4 slice, src/backend-caps.js): hot only where a
     // live re-read is VERIFIED (codex: experimentally refuted, 2026-08-24 —
     // CODEX_HOME canonicalized at startup + tokens held in process memory);
@@ -8128,7 +8143,7 @@ function maybeStopOnFallback(session, id, from, to) {
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
-    _poolAutoLast, _poolSwitchAt, // the eval gate (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them
+    _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
