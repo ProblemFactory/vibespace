@@ -1511,6 +1511,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // int349 (lane browser-x-in-window, B2): the X picture's CDP window — a CONVERSATION lease's own window found by its browser
     // key (`l.windowId`); his key names no lease, so his window is read off his own tab (holderTabs) after it
     holderWindowOf: 1,
+    // B-1626 / K23 (its cure 2): the window a viewer's CONVERSATION owns — its lease's stamped windowId (a person's own key names no
+    // lease: that viewer's thaw reads the person's tabs off the person's row, through the watch's scope)
+    viewerWindowOf: 1,
     // lane browser-shared-profile-freeze: the scope road's url is minted only for a CONVERSATION lease that stands (an agent's
     // key — the user's own Browse-yourself key keeps the raw url, leaseRoadVerdict's `human` row)
     leaseUrlFor: 1,

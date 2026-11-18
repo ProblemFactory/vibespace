@@ -1037,10 +1037,17 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.thawing) return w.thawing.then(() => thawPaint(profileId, { holder }), () => thawPaint(profileId, { holder }));
     const scope = holder ? scopeFor(holder) : null;
     const need = [...(w.hiddenFronts || [])].filter((tid) => inScope(scope, tid));
-    if (w.paint !== 'frozen' && !need.length) return Promise.resolve({ ok: true, thawed: false });
+    // B-1626 / K23 (its cure 2, 主开发 13:03Z): a hidden front in the holder's OWN window (`holder.windowId`, the keeper's answer
+    // — one window per holder) is its own whatever a scope names yet: the bridge names a viewer's tab only after its relay has
+    // read a tabs record, and the witness and the grant can miss a tab. Its window is read off Chrome at the thaw; a front in
+    // another holder's window stays owed (heavy test-browser-hidden-paint e)
+    const ownWin = holder && holder.windowId != null ? holder.windowId : null;
+    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid));
+    if (w.paint !== 'frozen' && !need.length && !byWindow.length) return Promise.resolve({ ok: true, thawed: false });
     w.thawing = (async () => {
       try {
         if (w.paint === 'frozen') { for (const e of w.targets.values()) if (e.sid) await settle(call(w, 'Page.setWebLifecycleState', { state: 'active' }, e.sid, 1000)); w.paint = 'active'; w.thawedAt = now(); }
+        for (const tid of byWindow) if (w.targets.has(tid) && (await windowOfTarget(w, tid)) === ownWin) need.push(tid);
         const shown = [];
         for (const tid of need) { w.hiddenFronts.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
         return { ok: true, thawed: true, shown };
@@ -1048,6 +1055,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     })();
     return w.thawing;
   }
+  /** The CDP window a tab sits in (Browser.getWindowForTarget), null when Chrome does not say. */
+  async function windowOfTarget(w, id) { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result ? r.result.windowId : null; }
   /** One frozen front shown again IN ITS OWN WINDOW: activated first (its window becomes the last activated one — where a
    *  plain create lands), a blank opened, its window read off Chrome (getWindowForTarget), closed, the front activated. A
    *  blank that landed elsewhere (another holder's activation raced it) is closed at once and journaled — never kept. */

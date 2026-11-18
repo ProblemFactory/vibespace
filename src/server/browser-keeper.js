@@ -5437,7 +5437,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane browser-swiftshader-cpu: the viewer's last instant per browser (the idle-paint verdict) — a viewer arriving thaws now
     viewerSeen.set(k, { pid: profileId || `eph:${browserKey}`, n: v, at: now() });
     // r2: a viewer arriving shows ITS conversation's frozen front again (never another holder's window — heavy e)
-    if (v && paintWatch) { const er = profileId ? null : ephemeralFor(browserKey); const pid = profileId || (er && er.profileId); if (pid) Promise.resolve().then(() => paintWatch.thawPaint(pid, { holder: { profileId: pid, browserKey, ephemeral: !profileId } })).catch(() => { /* the next verb thaws */ }); }
+    if (v && paintWatch) { const er = profileId ? null : ephemeralFor(browserKey); const pid = profileId || (er && er.profileId); if (pid) Promise.resolve().then(() => paintWatch.thawPaint(pid, { holder: { profileId: pid, browserKey, ephemeral: !profileId, windowId: profileId ? viewerWindowOf(pid, browserKey) : null } })).catch(() => { /* the next verb thaws */ }); }
+  }
+  /** B-1626 / K23 (its cure 2, 主开发 13:03Z): the window a viewer's CONVERSATION owns in this browser run — its lease's stamped
+   *  `windowId` while the lease has a window of its own (WIN.hasOwnWindow), else null (a shared window of an older run names no
+   *  window: its fronts are never judged by window). The KEEPER's answer, read when the viewer is noted — never the bridge's,
+   *  which names nothing until its relay has read a tabs record. The watch shows a hidden front in that window (thawPaint). */
+  function viewerWindowOf(profileId, browserKey) {
+    const rec = reg.browsers[String(profileId || '')] || null;
+    const l = rec && browserKey ? B.findLease(reg.leases, String(profileId), String(browserKey)) : null;
+    return l && WIN.hasOwnWindow(l, WIN.instanceOf(rec)) ? WIN.windowIdOf(l.windowId) : null;
   }
   // ── lane browser-swiftshader-cpu: IDLE PAINT STOPS (src/browser-idle.js) — the page watch's socket does the act ──
   const viewerSeen = new Map(); // inputKey → {pid: profileId | 'eph:<browserKey>', n, at}
