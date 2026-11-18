@@ -66,6 +66,11 @@ const DIR = scratch('record-clear-stores');
 fs.rmSync(DIR, { recursive: true, force: true });
 const DATA = path.join(DIR, 'data'); const CTX = path.join(DIR, 'ctx'); const CTX2 = path.join(DIR, 'ctx2');
 for (const d of [DATA, CTX, CTX2, path.join(DATA, 'bin')]) fs.mkdirSync(d, { recursive: true });
+// THE BARE MANAGER — stated ONCE (bl-jobs, the train's red at dcb435719, 主开发 11:48Z: a manager made from the prototype with a
+// handful of fields lacked the unread marks clearJobs reads). It is a REAL construction without its init: the constructor makes
+// fields only (no file, no timer, no child), so the manager carries EVERY field the constructor gives — the next one it gains needs
+// no edit here — and a drive replaces only what it lists (its deps view `d`, its records, the writers it stubs)
+const bareManager = (Mod, fields = {}) => Object.assign(new Mod.JobManager({ dataDir: DATA, broadcast() { }, log() { } }), fields);
 const cleanup = () => { try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { } };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -561,7 +566,7 @@ console.log('§4 Background Work');
     const NEW_SNAP = "if (tail && run && job.clearedAt && !((run.startedAt || 0) > job.clearedAt)) { out.logTail = ''; out.logWithheld = true; }";
     ok(JB_SRC2.split(NEW_SNAP).length === 2, 'the snapshot\'s withheld rule is present once (the control swaps exactly it)');
     const PRE2 = MUT.load(JB_REL2, JB_SRC2.replace(NEW_SNAP, "if (tail && run && job.clearedAt) out.logTail = '';"), 'withheld-unsaid-and-forever');
-    const bare2 = Object.assign(Object.create(PRE2.JobManager.prototype), { d: { dataDir: DATA, broadcast() {}, log() {} }, logsDir: path.join(DATA, 'job-logs') });
+    const bare2 = bareManager(PRE2, { d: { dataDir: DATA, broadcast() {}, log() {} }, logsDir: path.join(DATA, 'job-logs') });
     const preNew = bare2.snapshot(C2, { tail: 5 }); // the later run is the job's last run here
     const laterRun = C2.runs.pop();
     const preOld = bare2.snapshot(C2, { tail: 5 }); // …and here the run the clear covered is
@@ -587,7 +592,7 @@ console.log('§4 Background Work');
   ok(JB_SRC.split(NEW_STASH).length === 2, 'the stash rewrite is present once (the control swaps exactly it)');
   const PRE = MUT.load(JB_REL, JB_SRC.replace(NEW_STASH, OLD_STASH), 'announced-only-stash');
   const bare = (Mod) => {
-    const jmx = Object.create(Mod.JobManager.prototype);
+    const jmx = bareManager(Mod);
     Object.assign(jmx, { d: { broadcast() {}, log() {} }, readOnly: false, jobs: new Map(), events: [], pendingNotifs: new Map(), archive: [], _dirty: false });
     jmx._loadArchive = () => []; jmx._writeArchive = () => ({ ok: true }); jmx._rewriteSpills = () => {}; jmx._save = () => {};
     jmx.jobs.set('jb-0000dd01', jobRec('jb-0000dd01', { name: `reminder ${MARK}`, action: { type: 'notify', text: `check the ${MARK} thread` } }));
@@ -596,6 +601,12 @@ console.log('§4 Background Work');
     return { out, stash: jmx.pendingNotifs.get(ME_CID) };
   };
   const realBare = bare(require(path.join(ROOT, JB_REL)));
+  { // the bare maker's law (stated once above): it carries every field the constructor gives — the unread marks clearJobs reads among them
+    const RM = require(path.join(ROOT, JB_REL)), fresh = new RM.JobManager({ dataDir: DATA, broadcast() { }, log() { } }), b = bareManager(RM), proto = Object.create(RM.JobManager.prototype);
+    const own = Object.keys(fresh);
+    ok(own.length > 20 && own.every((k) => Object.prototype.hasOwnProperty.call(b, k)) && b._unread && b._unread.archive === null, `the bare manager carries every field the constructor gives (${own.length}) — the unread marks clearJobs reads among them`);
+    ok(!Object.prototype.hasOwnProperty.call(proto, '_unread'), 'CONTROL (the manager made from the prototype alone, the train\'s red): it has no unread marks — clearJobs threw on them');
+  }
   ok(realBare.out.cleared.length === 1 && realBare.stash[0].text === CT, 'the same bare drive on the REAL module: the notify reminder\'s held text is the sentence (the control\'s baseline)', realBare.stash);
   const preBare = bare(PRE);
   ok(preBare.out.cleared.length === 1 && has(preBare.stash[0].text) && preBare.stash[0].jobName === CT, 'NEGATIVE CONTROL: with the announced-only rewrite the held notification keeps the marker (the name went, the words stayed) — the stash leg above would go red', preBare.stash);
@@ -608,7 +619,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
   const RCM_REL = 'src/record-clear.js', RCM_SRC = fs.readFileSync(path.join(ROOT, RCM_REL), 'utf8');
   const UT_REL = 'src/user-todos.js', UT_SRC = fs.readFileSync(path.join(ROOT, UT_REL), 'utf8');
   const bareJm = (Mod, extra = {}) => {
-    const jmx = Object.create(Mod.JobManager.prototype);
+    const jmx = bareManager(Mod);
     Object.assign(jmx, { d: { dataDir: DATA, broadcast() {}, log() {}, ...extra }, readOnly: false, jobs: new Map(), events: [], pendingNotifs: new Map(), archive: [], _dirty: false, logsDir: path.join(DATA, 'job-logs'), waiters: new Map(), ansWaiters: new Map() });
     jmx._loadArchive = () => []; jmx._writeArchive = () => ({ ok: true }); jmx._save = () => {};
     return jmx;
