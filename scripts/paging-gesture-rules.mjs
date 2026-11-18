@@ -126,18 +126,26 @@ export function formatGesture(row, verdict) {
 export const SNAP_SOURCE = `(function (topIdBefore, topOffBefore) {
   const v = window.__v, list = window.__list; const r = list.getBoundingClientRect();
   const st = list.scrollTop, sh = list.scrollHeight, ch = list.clientHeight;
-  let top = null, topOff = 0, topH = null;
-  for (const c of list.children) { if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st && c.dataset && c.dataset.msgId) { top = c; topOff = c.offsetTop - st; topH = c.offsetHeight; break; } }
+  let top = null, topOff = 0, topH = null, next = null, nextOff = 0;
+  for (const c of list.children) { if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st && c.dataset && c.dataset.msgId) { if (!top) { top = c; topOff = c.offsetTop - st; topH = c.offsetHeight; } else { next = c; nextOff = c.offsetTop - st; break; } } }
   let topDev = null;
   if (topIdBefore != null) {
     const el = list.querySelector('[data-msg-id="' + String(topIdBefore).replace(/"/g, '') + '"]');
     if (el && el.isConnected) {
-      // a folded card sits at its run header (the nearest visible thing above it)
-      let a = el; while (a && a.offsetParent === null) a = a.previousElementSibling;
-      const off = (a || el).offsetTop - st;
-      topDev = off - (topOffBefore || 0);
+      // THE PREMISE, RESTATED (lane bl-chat-c B-f1f0, 2.369.408): a top card that FOLDS is no longer replaced at its run header —
+      // the runs pass keeps the element BELOW it where the reader saw it. So a folded card's displacement is that element's (the
+      // previous snapshot's next one, kept in the page: window.__snapPrev); only when it does not show either (the whole view
+      // folded) the card stands at its run header (the nearest visible thing above it), as before
+      const prev = window.__snapPrev, n = el.offsetParent === null && prev && prev.topId === String(topIdBefore) && prev.nextId ? list.querySelector('[data-msg-id="' + prev.nextId.replace(/"/g, '') + '"]') : null;
+      if (n && n.isConnected && n.offsetParent !== null) topDev = (n.offsetTop - st) - prev.nextOff;
+      else {
+        let a = el; while (a && a.offsetParent === null) a = a.previousElementSibling;
+        const off = (a || el).offsetTop - st;
+        topDev = off - (topOffBefore || 0);
+      }
     }
   }
+  window.__snapPrev = { topId: top ? String(top.dataset.msgId) : null, nextId: next ? String(next.dataset.msgId) : null, nextOff: Math.round(nextOff) };
   let empty = 0, unrendered = 0, samples = 0;
   const x = Math.round(r.x + r.width * 0.5);
   for (let y = r.y + 4; y < r.y + r.height - 4; y += 20) {

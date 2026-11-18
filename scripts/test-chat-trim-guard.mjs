@@ -1445,42 +1445,73 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   const CVm = CVS.split(from).length === 2 ? (await import(mutantCopies('f1f0', REPO).write('src/lib/chat-view.js', CVS.replace(from, 'keep = null;'), 'no-below'))).ChatView : null;
   const red = CVm ? scene(CVm, [1]) : null;
   ok(`B-f1f0 CONTROL: the patched copy that never keeps an element below the anchor moves the reader (E2 ${red && red.before[2]} → ${red && red.after[2]}) — the leg goes red`, !!red && red.after[2] !== red.before[2], JSON.stringify(red));
+  const fromH = 'changed = anchorEl.offsetParent === null || anchorEl.offsetHeight !== anchor.h;';
+  const CVh = CVS.split(fromH).length === 2 ? (await import(mutantCopies('f1f0h', REPO).write('src/lib/chat-view.js', CVS.replace(fromH, 'changed = anchorEl.offsetParent === null;'), 'no-height'))).ChatView : null;
+  const redH = CVh ? scene(CVh, 'compact') : null;
+  ok(`B-f1f0 CONTROL (the height clause — a reader's should on 487a63379): the patched copy that keeps a COMPACTED anchor's top moves the reader (E2 ${redH && redH.before[2]} → ${redH && redH.after[2]}) — the compact leg goes red`, !!redH && redH.after[2] !== redH.before[2], JSON.stringify(redH));
 }
 
 // B-ef04 (int358's race hunt on 571f1903: a turn landing grew the drafted row and the tail pin scrolled the card ~110 px between the
 // person's aim and the press — the click opened the NEIGHBOUR's conversation): THE PRESS-ARM RULE FOR A ROW THAT OPENS A
-// CONVERSATION. The REAL _pressMovedUnder: a row OTHER than the aimed one, the list moved after the aim within ARM_MS ⇒ refused;
-// the aimed row itself (a finger's landing, a still mouse on the same row while a turn streams — the adversarial read), re-aimed
-// since, long ago, never moved ⇒ answered. The REAL capture handler (its source, bound to a fake view): a mouse press the rule
-// refuses is said; a key's press and a press elsewhere pass. A patched copy whose rule never refuses goes RED by name
+// CONVERSATION, and ITS CURE (主开发's must on 487a63379 — a person who scrolls with the wheel and then clicks without moving the
+// mouse was refused for as long as a turn streamed). THE LAW: a press is refused only when the list moved BY ITSELF after the
+// person last chose where to point. The REAL _pressMovedUnder over row KEYS; the REAL _reaim (the person's own scroll ended: the
+// row under the pointer's last place is the aim); the REAL _runsMovedUnder (a pass that moved nothing in the view stamps nothing);
+// the REAL capture handler from its source. Patched copies, each RED by name
 {
-  const J = JSON.stringify, T = 1_000_000, A = { id: 'rowA' }, B = { id: 'rowB' };
-  const call = (CV, o, row) => { const v = Object.assign(Object.create(CV.prototype), o); return typeof v._pressMovedUnder === 'function' ? v._pressMovedUnder(row, T) : null; }; // (a tree without the rule: null, never a TypeError)
-  const caseOf = (CV) => ({ moved: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimRow: A }, B), offRow: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimRow: null }, B),
-    same: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimRow: A }, A), reaimed: call(CV, { _listMovedAt: T - 100, _aimAt: T - 50, _aimRow: B }, B),
-    old: call(CV, { _listMovedAt: T - 800, _aimAt: T - 900, _aimRow: A }, B), never: call(CV, { _aimAt: T - 50, _aimRow: A }, B) });
+  const J = JSON.stringify, T = 1_000_000, A = 'k:rowA', B = 'k:rowB', C = 'k:rowC';
+  const call = (CV, o, key, now = T) => { const v = Object.assign(Object.create(CV.prototype), o); return typeof v._pressMovedUnder === 'function' ? v._pressMovedUnder(key, now) : null; }; // (a tree without the rule: null, never a TypeError)
+  const caseOf = (CV) => ({ moved: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimKey: A }, B), offRow: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimKey: null }, B),
+    same: call(CV, { _listMovedAt: T - 100, _aimAt: T - 400, _aimKey: A }, A), chosen: call(CV, { _listMovedAt: T - 100, _aimAt: T - 50, _aimKey: B }, B),
+    old: call(CV, { _listMovedAt: T - 800, _aimAt: T - 900, _aimKey: A }, B), never: call(CV, { _aimAt: T - 50, _aimKey: A }, B) });
   const c = caseOf(ChatView);
-  ok(`B-ef04 RED-able (b06f36e90: no rule — every press opens what is under it): another row than the aimed one, the list moved after the aim within 700 ms ⇒ refused (aimed at a row or at none); the aimed row itself, re-aimed since, 800 ms ago, never moved ⇒ answered (${J(c)})`, J(c) === '{"moved":true,"offRow":true,"same":false,"reaimed":false,"old":false,"never":false}', J(c));
+  ok(`B-ef04 RED-able (b06f36e90: no rule — every press opens what is under it): another row than the aimed one, the list moved by itself after the last choice within 700 ms ⇒ refused (aimed at a row or at none); the aimed row itself, chosen since, 800 ms ago, never moved ⇒ answered (${J(c)})`, J(c) === '{"moved":true,"offRow":true,"same":false,"chosen":false,"old":false,"never":false}', J(c));
+  // THE CURE ① — THE PERSON'S OWN SCROLL IS A CHOICE: the pointer last moved over row A; the person turns the wheel (the mouse still)
+  // until row B stands under it; the scroll ends ⇒ _reaim asks the page what stands at the pointer's last place (B) — a press on B
+  // opens it, even with a move of the list's own stamped before the scroll ended; a fold under the still pointer AFTER it (C now
+  // there) is still refused
+  const page = (CV, under) => { const had = globalThis.document; const cell = { closest: (q) => (q.includes('.chat-channel-touch') ? under : null) };
+    globalThis.document = { elementFromPoint: () => cell }; try { const v = Object.assign(Object.create(CV.prototype), { _messageList: { contains: () => true }, _aimX: 300, _aimY: 400, _aimAt: performance.now() - 2000, _aimKey: A, _listMovedAt: performance.now() - 300 });
+      if (typeof v._reaim === 'function') v._reaim(); const now = performance.now();
+      const wheel = v._pressMovedUnder?.(B, now + 50), aimKey = v._aimKey; v._listMovedAt = now + 20; const fold = v._pressMovedUnder?.(C, now + 50);
+      return { aimKey, wheel, fold }; } finally { globalThis.document = had; } };
+  const w = page(ChatView, { dataset: { key: 'rowB' } });
+  ok(`B-ef04 CURE ① RED-able (487a63379: refused while a turn streamed): the wheel ends with row B under the still pointer ⇒ the aim is B (${w.aimKey}) and a press on B opens it (refused: ${w.wheel}); a fold that brings C under the still pointer after that ⇒ refused (${w.fold})`, w.aimKey === B && w.wheel === false && w.fold === true, J(w));
+  // THE CURE ② — A PASS THAT MOVED NOTHING IN THE VIEW STAMPS NOTHING: the REAL _runsMovedUnder over a fake laid-out list (E1 the view's
+  // topmost element, E2 / E3 below it): nothing folded ⇒ no move; E1 folds (the restore keeps E2) ⇒ a move; E2 shifts 30 px ⇒ a move
+  const mk = (list, id, h) => { const e = { id, h, shown: true, isConnected: true, get offsetParent() { return e.shown ? {} : null; }, get offsetHeight() { return e.shown ? e.h : 0; },
+    get offsetTop() { let y = 0; for (const x of list.children) { if (x === e) return e.shown ? y : 0; if (x.shown) y += x.h; } return 0; } }; return e; };
+  const movedOf = (CV) => { const scene = (act) => { const list = { children: [], scrollTop: 400 }; const E = [300, 196, 204, 200].map((h, k) => mk(list, 'E' + k, h)); list.children.push(...E);
+      const v = Object.create(CV.prototype); const anchor = { el: E[1], delta: E[1].offsetTop - 400, h: E[1].h, below: [[E[2], E[2].offsetTop - 400], [E[3], E[3].offsetTop - 400]] };
+      act(E, list); return typeof v._runsMovedUnder === 'function' ? v._runsMovedUnder(list, anchor) : null; };
+    return { none: scene(() => {}), fold: scene((E, list) => { E[1].shown = false; list.scrollTop = 400 - 196; }), shift: scene((E) => { E[0].h += 30; }) }; };
+  const m = movedOf(ChatView);
+  ok(`B-ef04 CURE ② RED-able (487a63379: every runs pass stamped): a pass that moved nothing in the view is no move (${m.none}); a fold, an element shifted ⇒ a move (${m.fold}, ${m.shift})`, m.none === false && m.fold === true && m.shift === true, J(m));
   const CVS = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   const h0 = CVS.indexOf("    this._messageList.addEventListener('click', (e) => {"), h1 = CVS.indexOf('    }, { capture: true });', h0);
   const arrow = h0 > 0 && h1 > h0 ? CVS.slice(CVS.indexOf('(e) =>', h0), h1 + '    }'.length) : null;
-  const pressOf = (moved) => { const said = []; let stopped = 0; const view = { _pressMovedUnder: (row) => moved && !!row };
-    const fn = arrow ? new Function('MOVED_PRESS_ROWS', 'showToast', 't', `return function () { return ${arrow}; };`)('.chat-channel-touch, .chat-peer-name', (m) => said.push(m), (k) => k).call(view) : null;
+  const pressOf = (moved) => { const said = []; let stopped = 0; const view = { _pressMovedUnder: (key) => moved && !!key };
+    const fn = arrow ? new Function('MOVED_PRESS_ROWS', 'showToast', 't', 'pressKeyOf', `return function () { return ${arrow}; };`)('.chat-channel-touch, .chat-peer-name', (m) => said.push(m), (k) => k, (r) => (r ? 'k:r' : null)).call(view) : null;
     const ev = (detail, row) => ({ detail, target: { closest: (q) => (q === '.chat-channel-touch, .chat-peer-name' && row ? {} : null) }, stopPropagation: () => { stopped++; }, preventDefault() {} });
     if (!fn) return null; fn(ev(1, true)); const mouse = [stopped, said.length]; fn(ev(0, true)); const key = [stopped, said.length]; fn(ev(1, false)); const other = [stopped, said.length];
     return { mouse, key, other, words: said[0] || null }; };
   const pr = pressOf(true), pr0 = pressOf(false);
   ok(`B-ef04: the capture handler refuses a mouse press the rule refuses and says why («${pr && pr.words}»); a key's press and a press elsewhere pass (${J(pr)}); the rule answering ⇒ nothing refused (${J(pr0)})`,
     !!pr && J(pr.mouse) === '[1,1]' && J(pr.key) === '[1,1]' && J(pr.other) === '[1,1]' && /moved under the pointer/.test(pr.words || '') && !!pr0 && J(pr0.other) === '[0,0]');
-  const wire = { pin: /        list\.scrollTop = sh;\n        this\._listMovedAt = performance\.now\(\);/.test(CVS), pass: /      this\._runsRestore\(list, anchor\);\n      this\._listMovedAt = performance\.now\(\);/.test(CVS),
+  const wire = { pin: /        list\.scrollTop = sh;\n        this\._listMovedAt = performance\.now\(\);/.test(CVS),
+    pass: CVS.includes('const anchor = this._runsAnchor(list), sig0 = this._runsSig(list);') && CVS.includes('      if (this._runsSig(list) !== sig0 || this._runsMovedUnder(list, anchor)) this._listMovedAt = performance.now();'),
     restore: CVS.includes('if (Math.abs(list.scrollTop - stBefore) > 1) { this._listMovedAt = performance.now();'),
-    aim: CVS.includes("this._messageList.addEventListener('pointermove', aim, { passive: true });") && CVS.includes("this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });") && CVS.includes('this._aimRow = e.target?.closest?.(MOVED_PRESS_ROWS) || null;'),
+    aim: CVS.includes("this._messageList.addEventListener('pointermove', aim, { passive: true });") && CVS.includes("this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });") && CVS.includes('this._aimKey = pressKeyOf(e.target?.closest?.(MOVED_PRESS_ROWS));'),
+    chose: ["this._messageList.addEventListener('wheel', chose, { passive: true });", "this._messageList.addEventListener('touchmove', chose, { passive: true });", "if (PAGING_KEYS.has(e.key)) chose();", "this._messageList.addEventListener('scrollend', () => { if (!this._reaimT) return;"].every((x) => CVS.includes(x)),
     rows: /^const MOVED_PRESS_ROWS = '\.chat-channel-touch, \.chat-peer-name';$/m.test(CVS), row: /rowEl\.className = 'chat-channel-touch';/.test(fs.readFileSync(path.join(REPO, 'src/lib/channel-touch-view.js'), 'utf8')) && /<span class="chat-peer-name" role="link"/.test(fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8')) };
-  ok(`B-ef04: the list's moves are stamped (the tail pin, a fold pass, its restore); the aim is the pointer's last move or a finger's / a pen's landing, with the row under it; the rule's rows are the ones the transcript draws (${J(wire)})`, Object.values(wire).every(Boolean));
-  const { mutantCopies } = await import('./mutant-copy.mjs'), from = '    return !pressVerdict({ since: moved, now }).ok;';
-  const CVm = CVS.split(from).length === 2 ? (await import(mutantCopies('ef04', REPO).write('src/lib/chat-view.js', CVS.replace(from, '    return false;'), 'never-refuses'))).ChatView : null;
-  const cm = CVm ? caseOf(CVm) : null;
-  ok(`B-ef04 CONTROL: the patched copy whose rule never refuses answers the press the list just moved under the pointer (${J(cm)}) — the leg goes red`, !!cm && cm.moved === false);
+  ok(`B-ef04: the list's own moves are stamped (the tail pin; a runs pass only when it moved what the view shows; its restore); the aim is the pointer's last move, a finger's / a pen's landing, or the end of the person's own scroll (a wheel, a touch pan, a paging key); the rule's rows are the ones the transcript draws (${J(wire)})`, Object.values(wire).every(Boolean), J(wire));
+  const { mutantCopies } = await import('./mutant-copy.mjs'), MU = mutantCopies('ef04', REPO);
+  const muts = { never: ['    return !pressVerdict({ since: moved, now }).ok;', '    return false;'], noReaim: ['    if (this._disposed) return;\n    this._aimAt = performance.now();\n    const x = this._aimX', '    return;\n    this._aimAt = performance.now();\n    const x = this._aimX'],
+    alwaysMoved: ['    if (!anchor) return false;\n    return [[anchor.el, anchor.delta], ...anchor.below]', '    if (!anchor) return true;\n    return true || [[anchor.el, anchor.delta], ...anchor.below]'] };
+  const red = {};
+  for (const [k, [from, to]] of Object.entries(muts)) { if (CVS.split(from).length !== 2) { red[k] = 'ANCHOR GONE'; continue; } const CVm = (await import(MU.write('src/lib/chat-view.js', CVS.replace(from, to), 'ef04-' + k))).ChatView;
+    red[k] = k === 'never' ? caseOf(CVm).moved : k === 'noReaim' ? page(CVm, { dataset: { key: 'rowB' } }).wheel : movedOf(CVm).none; }
+  ok(`B-ef04 CONTROLS: the copy whose rule never refuses answers the moved press (refused: ${red.never}); the copy without the scroll's re-aim refuses the wheel-then-click (refused: ${red.noReaim}); the copy whose pass always moved stamps a pass that moved nothing (moved: ${red.alwaysMoved}) — each RED by name`, red.never === false && red.noReaim === true && red.alwaysMoved === true, J(red));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

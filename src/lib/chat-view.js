@@ -17,6 +17,11 @@ import { pressVerdict } from './press-arm.js'; // B-ef04: a card row that opens 
 /** B-ef04: the transcript's rows that OPEN A CONVERSATION — a channel card's row, a peer's name — a press on one that the list just
  *  moved under a still pointer is refused */
 const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
+/** the cure: a row by a KEY that outlives a re-render — a channel row's own key, else its record and its words (a peer's name is
+ *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
+const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
+/** the paging keys whose scroll is the person's own (a choice of where to point) */
+const PAGING_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' ']);
 import { stampAt as when, num, span, stampSpan } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
@@ -706,16 +711,25 @@ class ChatView {
     // B-ef04 (int358's race hunt on 571f1903: a turn landing grew the drafted row and the tail pin scrolled the card ~110 px between
     // the person's aim and the press — the click opened the NEIGHBOUR's conversation): THE PRESS-ARM RULE FOR A ROW THAT OPENS A
     // CONVERSATION (MOVED_PRESS_ROWS). The AIM is the pointer's last real move — or where a finger / a pen lands (no hover before it)
-    // — and the row under it (`_aimAt`, `_aimRow`); the list's moves are stamped (`_listMovedAt`: the tail pin, a fold pass, its
+    // — and the row under it (`_aimAt`, `_aimKey`); the list's moves are stamped (`_listMovedAt`: the tail pin, a fold pass, its
     // restore). A press on a row OTHER than the aimed one, the list moved since the aim and within ARM_MS, landed on a row that came
     // under a still pointer — refused and said; the same row pressed passes however the list streams (the adversarial read: a rule
     // on the move alone refused every tap for a whole streamed turn). A key's press (detail 0) aims at its focus — never refused
-    const aim = (e) => { this._aimAt = performance.now(); this._aimRow = e.target?.closest?.(MOVED_PRESS_ROWS) || null; };
+    // THE CURE (主开发's must on 487a63379 — a person who scrolls with the wheel and then clicks without moving the mouse was refused
+    // for as long as a turn streamed): THE LAW — A PRESS IS REFUSED ONLY WHEN THE LIST MOVED BY ITSELF AFTER THE PERSON LAST CHOSE
+    // WHERE TO POINT. The person's own scroll (a wheel, a paging key, a touch pan) IS a choice: when it ends the aim is the row then
+    // under the pointer (`_reaim` — its last known place, one hit test a scroll). The aim is kept as the row's KEY, never its node
+    const aim = (e) => { this._aimAt = performance.now(); this._aimX = e.clientX; this._aimY = e.clientY; this._aimKey = pressKeyOf(e.target?.closest?.(MOVED_PRESS_ROWS)); };
     this._messageList.addEventListener('pointermove', aim, { passive: true });
     this._messageList.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') aim(e); }, { passive: true });
+    const chose = () => { clearTimeout(this._reaimT); this._reaimT = setTimeout(() => { this._reaimT = 0; this._reaim(); }, 160); };
+    this._messageList.addEventListener('wheel', chose, { passive: true });
+    this._messageList.addEventListener('touchmove', chose, { passive: true });
+    this._messageList.addEventListener('keydown', (e) => { if (PAGING_KEYS.has(e.key)) chose(); }, { passive: true });
+    this._messageList.addEventListener('scrollend', () => { if (!this._reaimT) return; clearTimeout(this._reaimT); this._reaimT = 0; this._reaim(); }, { passive: true });
     this._messageList.addEventListener('click', (e) => {
       const row = e.detail === 0 ? null : e.target?.closest?.(MOVED_PRESS_ROWS);
-      if (!row || !this._pressMovedUnder(row)) return;
+      if (!row || !this._pressMovedUnder(pressKeyOf(row))) return;
       e.stopPropagation(); e.preventDefault();
       showToast(t('That button moved under the pointer just now — read it, then press it again'));
     }, { capture: true });
@@ -6504,12 +6518,22 @@ class ChatView {
     this._forceScrollToBottom();
   }
 
-  /** B-ef04: did the list move `row` under a STILL pointer just now? — a row other than the aimed one, the list moved after the
-   *  aim and within ARM_MS of `now` (press-arm.js pressVerdict). Never moved, the aimed row itself, or re-aimed since ⇒ no. */
-  _pressMovedUnder(row, now = performance.now()) {
+  /** B-ef04: did the list move the row `key` under a STILL pointer just now? — a row other than the aimed one, the list moved BY
+   *  ITSELF after the person last chose where to point (a move of the pointer, the end of their own scroll) and within ARM_MS of
+   *  `now` (press-arm.js pressVerdict). Never moved, the aimed row itself, or chosen since ⇒ no. */
+  _pressMovedUnder(key, now = performance.now()) {
     const moved = this._listMovedAt;
-    if (moved == null || row === this._aimRow || (this._aimAt != null && this._aimAt > moved)) return false;
+    if (moved == null || key === this._aimKey || (this._aimAt != null && this._aimAt > moved)) return false;
     return !pressVerdict({ since: moved, now }).ok;
+  }
+
+  /** the cure: the person's own scroll ended — it is a choice of where to point: the aim is the row now under the pointer's last
+   *  known place (one hit test a scroll), stamped now */
+  _reaim() {
+    if (this._disposed) return;
+    this._aimAt = performance.now();
+    const x = this._aimX, y = this._aimY, at = x != null && y != null && typeof document.elementFromPoint === 'function' ? document.elementFromPoint(x, y) : null;
+    this._aimKey = at && this._messageList?.contains?.(at) ? pressKeyOf(at.closest?.(MOVED_PRESS_ROWS)) : null;
   }
 
   // Drag-and-drop file/folder upload onto the chat → saved into the session's
@@ -7647,8 +7671,22 @@ class ChatView {
    *  stays put; the fold closes above it); nothing below it still shows ⇒ the anchor's own top when it still shows, else as
    *  before: back to its run header (directly above, where the folded content was — a press on it restores the view), forward
    *  only when nothing visible precedes it */
+  /** B-ef04 cure: what a pass can change in the view — how many members it folded, cards it compacted, headers it drew (three
+   *  counts; a pass that changes none of them and moves no element of the view moved nothing under the pointer) */
+  _runsSig(list) {
+    return [':scope > .chat-run-collapsed', ':scope > .chat-channel-compact, :scope > .chat-machine-compact', ':scope > .chat-run-header'].map((q) => list.querySelectorAll(q).length).join(',');
+  }
+
+  /** B-ef04 cure: did the pass move an element the view showed (its distance changed, or it folded)? — after the restore */
+  _runsMovedUnder(list, anchor) {
+    if (!anchor) return false;
+    return [[anchor.el, anchor.delta], ...anchor.below].some(([e, d]) => e.isConnected && (e.offsetParent === null || Math.abs(e.offsetTop - list.scrollTop - d) > 1));
+  }
+
   _runsRestore(list, anchor) {
     if (!anchor || !anchor.el.isConnected) return;
+    // (a height change inside the pass is a fold's or a compaction's — the only two things a runs pass does to a card; a later pass
+    // that changes a card's height for another reason would also keep the element below still, never the card's top)
     const anchorEl = anchor.el, changed = anchorEl.offsetParent === null || anchorEl.offsetHeight !== anchor.h;
     const keep = changed ? anchor.below.find(([e]) => e.isConnected && e.offsetParent !== null) : null;
     let a = keep ? keep[0] : anchorEl;
@@ -7675,7 +7713,7 @@ class ChatView {
     // load in a loop (real report: 往上翻阅跳动+翻不回来). Keep the topmost
     // visible element fixed across the pass. Skip when pinned (bottom-follow
     // owns the scroll) and skip run headers/footers (removed by the pass).
-    const anchor = this._runsAnchor(list);
+    const anchor = this._runsAnchor(list), sig0 = this._runsSig(list);
     this._runsMutating = true;
     try {
       list.querySelectorAll(':scope > .chat-run-header, :scope > .chat-run-footer').forEach((h) => h.remove());
@@ -7945,7 +7983,7 @@ class ChatView {
     } finally {
       this._runsMutating = false;
       this._runsRestore(list, anchor);
-      this._listMovedAt = performance.now(); // B-ef04: a fold pass re-lays the rows (a card compacted, its rows a line of chips)
+      if (this._runsSig(list) !== sig0 || this._runsMovedUnder(list, anchor)) this._listMovedAt = performance.now(); // B-ef04 cure: only a pass that MOVED what stands in the view stamps (a fold, a compacted card, a header) — never every pass
       // Drain OUR OWN mutation records: the observer callback is delivered at
       // a microtask checkpoint AFTER this finally resets _runsMutating, so the
       // flag alone never suppressed self-triggering — every pass scheduled
