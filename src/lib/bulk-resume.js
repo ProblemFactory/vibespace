@@ -74,7 +74,7 @@ function answerWords(r) {
 function capDoorWords(why) {
   const setting = why === 'hour-cap' ? t('Unattended turns per account per hour') : why === 'day-cap' ? t('Unattended turns per account per day') : why === 'instance-cap' ? t('Unattended turns for this instance per day')
     : why === 'overage-in-use' ? t('\u26a0 Allow unattended turns while an account bills paid overage') : null;   // form two: the door where the person changes it
-  if (setting) return ' ' + t('Change it in Settings → Spending → «{setting}».', { setting });
+  if (setting) return ' ' + t('Change it in Settings → Spending → «{setting}»: {link}', { setting, link: spendRowLink({ why }) });   // the ROW it names carries its link (lane setting-doors' census) — the meeting: the checkpoint cure's link, the follow-up's doors below
   // (e) the two other account refusals have their door too (主开发 21:04Z): sign it in again; its spend control is the vendor's
   if (why === 'identity-cannot-serve') return ' ' + t('Sign the account in again (Accounts).');
   if (why === 'spend-control-reached') return ' ' + t('Its spend control is set with its vendor — raise it there.');
