@@ -23,6 +23,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratchHome, scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { gitEnvFrom } from './git-env.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -41,12 +42,17 @@ fs.mkdirSync(FAKE_BIN, { recursive: true }); fs.writeFileSync(PANES, '');
 fs.writeFileSync(path.join(FAKE_BIN, 'tmux'), `#!/bin/sh\ncat "${PANES}"\n`, { mode: 0o755 });
 process.env.PATH = FAKE_BIN + path.delimiter + (process.env.PATH || '');
 // the symlinked cwd lives OUTSIDE /tmp/vs-*: discovery's fixture guard ignores a project folder a suite's scratch cwd names
-const REAL = fs.mkdtempSync(path.join(os.tmpdir(), 'blsweep-real-')), LINK = REAL.replace('blsweep-real-', 'blsweep-link-');
+// rule (e) (the restack's read, M7): the leg CHOOSES its place — TMPDIR only when the fixture guard reads a folder there (a TMPDIR
+// under a /tmp/vs-* scratch root would name one it ignores), else the guard's own tmp roots: the guard itself is asked
+const FG = require(path.join(REPO, 'src/fixture-guard.js'));
+const FIX_ROOT = [os.tmpdir(), ...FG.TMP_ROOTS].find((r) => !FG.isFixtureCwd(path.join(r, 'blsweep-link-x')));
+const REAL = fs.mkdtempSync(path.join(FIX_ROOT, 'blsweep-real-')), LINK = REAL.replace('blsweep-real-', 'blsweep-link-');
 try { fs.rmSync(LINK, { force: true, recursive: true }); } catch { }
 fs.symlinkSync(REAL, LINK);
 // the two fixture folders live outside the scratch helper's /tmp/vs-* (discovery's fixture guard ignores a project folder a
 // scratch cwd names); this suite still ENDS them at exit, a throw or a red included
 process.on('exit', () => { try { fs.rmSync(LINK, { force: true }); fs.rmSync(REAL, { recursive: true, force: true }); } catch { } });
+ok(!FG.isFixtureCwd(REAL) && !FG.isFixtureCwd(LINK), `the symlinked fixture folders are ones discovery reads (the fixture guard ignores neither): ${LINK} → ${REAL}`);
 let seq = 0;
 const hex = (n) => { let s = ''; while (s.length < n) s += ((++seq * 2654435761) >>> 0).toString(16).padStart(8, '0'); return s.slice(0, n); };
 const uuid = () => `${hex(8)}-${hex(4)}-4${hex(3)}-8${hex(3)}-${hex(12)}`;
@@ -126,14 +132,14 @@ console.log('③b the held keys\' rows AS DISCOVERED, handed to the resume seam 
   const PAY = { order: ['other'], offLoop: null, others: { other: [B1] }, kept: [], bound: ['other'], signInPids: [] };
   const seam = async (S) => { const o = await S.sweepInThread(PAY); R._noteSweptRows(o.heldDisc); try { return await R.heldAccountOfNow('other', 'b1', { stopped: async () => [] }); } finally { R._noteSweptRows(null); } };
   const SW = fs.readFileSync(path.join(REPO, 'src/sessions-sweep.js'), 'utf8'), AS = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8');
-  const RET = 'return { buf, etag, count, held, heldDisc, onLoop: isMainThread, ms };', KEY = "discovered.get(`${h.backend || 'claude'}:${h.backendSessionId || h.sessionId}`)", FLD = 'accountId: r.accountId, ';
+  const RET = 'return { buf, etag, count, held, heldDisc, onLoop: isMainThread, ms };', KEY = "discovered.get(`${h.backend || 'claude'}:${h.backendSessionId || h.sessionId}`)", FLD = 'accountId: r.accountId, ', REQ = "require('./sessions-assemble.js')";
   const M3 = mutantCopies('sessions-sweep-held', REPO);
   const now3 = await seam(require(path.join(REPO, 'src/sessions-sweep.js')));
   const noDisc = await seam(M3.load('src/sessions-sweep.js', SW.replace(RET, 'return { buf, etag, count, held, onLoop: isMainThread, ms };'), 'no-heldDisc'));
   const drift = await seam(M3.load('src/sessions-sweep.js', SW.replace(KEY, "discovered.get(`${h.backendSessionId || h.sessionId}`)"), 'key-drift'));
   const asmNoAcct = M3.write('src/sessions-assemble.js', AS.replace(FLD, ''), 'no-account-field');
-  const noAcct = await seam(M3.load('src/sessions-sweep.js', SW.replace("require('./sessions-assemble.js')", `require(${JSON.stringify(asmNoAcct)})`), 'asm-no-account'));
-  ok([RET, KEY, FLD].every((x, i) => (i === 2 ? AS : SW).split(x).length === 2) && JSON.stringify(now3) === '{"accountId":"acc-own"}',
+  const noAcct = await seam(M3.load('src/sessions-sweep.js', SW.replace(REQ, `require(${JSON.stringify(asmNoAcct)})`), 'asm-no-account'));
+  ok([RET, KEY, FLD, REQ].every((x, i) => (i === 2 ? AS : SW).split(x).length === 2) && JSON.stringify(now3) === '{"accountId":"acc-own"}',
     `an account-bound row that names its own account, no kept copy: the seam over the sweep's rows answers it (${JSON.stringify(now3)})`, now3);
   ok(noDisc === null && drift === null && noAcct === null, `RED CONTROLS — no discovered rows handed (${JSON.stringify(noDisc)}), a drifted key (${JSON.stringify(drift)}), the kept fields without the account (${JSON.stringify(noAcct)}): the default login`, { noDisc, drift, noAcct });
 }
@@ -161,7 +167,7 @@ const routeOf = (src) => ({ pool: /out = await sweepPool\(\)\.call\('sessionsSwe
 const now = routeOf(fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'));
 ok(now.pool && now.others && now.noRows, 'the route sends the sweep to its pool; every harness but claude discovers here; no row is built here', now);
 let base = '';
-try { base = execFileSync('git', ['-C', REPO, 'show', 'b06f36e90:src/routes/sessions.js'], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { base = ''; }
+try { base = execFileSync('git', ['-C', REPO, 'show', 'b06f36e90:src/routes/sessions.js'], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'], env: gitEnvFrom(process.env) }); } catch { base = ''; }
 const was = routeOf(base);
 if (!base) skip('control (the release\'s route, b06f36e90): the release is not in this clone (a depth-one mirror) — ⑧ compares with the release\'s road everywhere');
 else ok(!was.pool && !was.noRows, `control (the release's route, b06f36e90): pool ${was.pool}, rows built on the loop ${!was.noRows} ⇒ RED`);

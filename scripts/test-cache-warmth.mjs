@@ -62,6 +62,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratchDir } from './scratch.mjs';
+import { gitEnvFrom } from './git-env.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -209,7 +210,7 @@ console.log('— ④ the session-list diff');
     const diff = R.warmthDiff(live, factsOf, 1000000), withDiff = R.sendSessions(fakeRes(), cache, diff);
     ok('…with the switch on: the diff joined after the sweep\'s keys — the spread\'s bytes, under a tag of its own (never the shared one; Express never hashes the bytes on the loop)', withDiff.body.toString() === realStringify({ sessions: sweep, ...diff }) && !!withDiff.headers.etag && withDiff.headers.etag !== cache.etag);
     let base = '';
-    try { base = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', 'b06f36e90:src/routes/sessions.js'], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { base = ''; }
+    try { base = require('node:child_process').execFileSync('git', ['-C', REPO, 'show', 'b06f36e90:src/routes/sessions.js'], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'], env: gitEnvFrom(process.env) }); } catch { base = ''; }
     if (!base) skip('control (the release\'s route, b06f36e90): the release is not in this clone (a depth-one mirror) — the bytes-made-once leg above needs no other commit');
     else ok('control (the release\'s route, b06f36e90): res.json per answer — the rows serialised again for every view ⇒ RED', (base.match(/res\.json\(answer\(/g) || []).length === 2 && !/sendSessions\(/.test(base));
   }

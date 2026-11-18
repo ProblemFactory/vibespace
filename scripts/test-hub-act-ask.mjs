@@ -285,9 +285,10 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   ok(row && row.repeats === 59 && row.since === fold.since && !('repeats' in DA.rowOf({ ...r.b.audit[2], id: 'x2' })), 'the stored line keeps its repeats on the way out (rowOf) — a single refusal has none');
   // RED CONTROL (a runtime mutant): no fold — every refusal is a journal line and an audit line again
   const keep = DeviceManager.prototype._foldCount;
-  DeviceManager.prototype._foldCount = () => false;
+  let foldAsked = 0;   // rule (b): the plant proves it is on the refusal road (the method exists and is asked)
+  DeviceManager.prototype._foldCount = () => { foldAsked++; return false; };
   let rc; try { rc = await run(world()); } finally { DeviceManager.prototype._foldCount = keep; }
-  ok(rc.a.journal === 60 && rc.a.audit === 60, `control (no fold): 60 refused acts ⇒ ${rc.a.journal} journal lines + ${rc.a.audit} audit lines ⇒ RED`);
+  ok(typeof keep === 'function' && foldAsked >= 1 && rc.a.journal === 60 && rc.a.audit === 60, `control (no fold; the plant asked ${foldAsked}×): 60 refused acts ⇒ ${rc.a.journal} journal lines + ${rc.a.audit} audit lines ⇒ RED`);
   // r1's must: ONLY IDENTICAL ACTS FOLD — another command of the same agent under the same verdict is its own line
   {
     const w = world({ hub: 'nobody' });

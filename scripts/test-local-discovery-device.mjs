@@ -181,16 +181,17 @@ ok(devMs < 4000, `device-facts sweep latency ${devMs}ms — under the sweep's ow
 // the gate (fresh AND the same list) must turn red, where the r2 gate (parity + devMs > 0) stayed green on the local list
 {
   const real = ctx.hosts.device;
-  ctx.hosts.device = async () => ({ discoverySnapshot: async () => ({ jsonls: [null], locks: [] }) });
+  let asked1 = 0, asked2 = 0;   // rule (b): each control proves its stand-in was ASKED (the route reached the device) before its verdict
+  ctx.hosts.device = async () => ({ discoverySnapshot: async () => { asked1++; return { jsonls: [null], locks: [] }; } });
   const t1 = Date.now();
   const bad = await call();
   const badFresh = fresh(t1), badSame = JSON.stringify(strip(bad.sessions || [])) === JSON.stringify(L);
   ctx.hosts.device = real;
-  ok(!badFresh, `RED CONTROL — a device snapshot holding a null entry (it passes the route's shape check, then throws in the sweep): the FRESH half turns the gate red (fresh ${badFresh}, the same list ${badSame}; r2's gate saw only the local list: green)`);
-  ctx.hosts.device = async () => ({ discoverySnapshot: async () => { throw new Error('the daemon could not take its snapshot (a stand-in)'); } });
+  ok(asked1 >= 1 && !badFresh, `RED CONTROL (its stand-in asked ${asked1}×) — a device snapshot holding a null entry (it passes the route's shape check, then throws in the sweep): the FRESH half turns the gate red (fresh ${badFresh}, the same list ${badSame}; r2's gate saw only the local list: green)`);
+  ctx.hosts.device = async () => ({ discoverySnapshot: async () => { asked2++; throw new Error('the daemon could not take its snapshot (a stand-in)'); } });
   const n0 = snapMetrics.length, t2 = Date.now(); await ttl(); const lost = await call();
   ctx.hosts.device = real;
-  ok(snapMetrics.length === n0 && fresh(t2) && JSON.stringify(strip(lost.sessions || [])) === JSON.stringify(L), `RED CONTROL — a device whose snapshot fails falls back to the local scan (fresh, the same list): only the USED half (${snapMetrics.length - n0} snapshots taken) turns the gate red`);
+  ok(asked2 >= 1 && snapMetrics.length === n0 && fresh(t2) && JSON.stringify(strip(lost.sessions || [])) === JSON.stringify(L), `RED CONTROL (its stand-in asked ${asked2}×) — a device whose snapshot fails falls back to the local scan (fresh, the same list): only the USED half (${snapMetrics.length - n0} snapshots taken) turns the gate red`);
   await ttl();
 }
 
