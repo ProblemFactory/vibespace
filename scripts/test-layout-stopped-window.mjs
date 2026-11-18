@@ -1139,7 +1139,7 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   const n3red = await rows3(MN0, { reopen: true });
   ok(n3red.redraws === 4, '§9 N3 CONTROL: the r4 line ⇒ four waits, four redraws (the leg above goes RED)', n3red);
   // N5 — the REAL Sidebar: showSessionsNamed + _renderInner over a list the person narrowed to Live
-  const hintOf = async (SidebarCls, filter, query = null, view = undefined) => {
+  const hintOf = async (SidebarCls, filter, query = null, view = undefined, archived = []) => {
     const input = { value: '' };
     const gid = document.getElementById; document.getElementById = (id) => (id === 'session-filter' ? input : gid(id));
     try {
@@ -1148,7 +1148,7 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
       const rowsAppended = [];
       const sb = Object.assign(Object.create(SidebarCls.prototype), {
         _activeTab: 'tasks', _statusFilter: new Set(filter), _activeView: null, _allSessions: rows, _backendFilter: new Set(), _hostFilter: new Set(), _agentKindFilter: null, _mobileMode: false,
-        isArchived: () => false, el: { classList: { toggle() {} } }, _hostsData: null, handed: null,
+        isArchived: (x) => archived.includes(x.sessionId), el: { classList: { toggle() {} } }, _hostsData: null, handed: null,
         _appendKindHint() {}, _ensureHostsData() {}, _wbHealHostSelections() {}, _renderServiceHintRows() {}, _updateTabs() {}, toggle() {}, _renderQuickTabs() {},
         _render() { rowsAppended.length = 0; SidebarCls.prototype._renderInner.call(this); },
         // as the REAL one (sidebar-workbench.js, pinned below): the list wiped, then its hints drawn again
@@ -1171,12 +1171,18 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   ok(J(all.first) === J([]) && all.handed.length === 3, '§9 N5 …nothing hidden ⇒ no line', all);
   const one = await hintOf(Sidebar, ['live', 'tmux', 'external']);
   ok(J(one.first) === J(['2 more matches are hidden by your status filter.']), '§9 N5 …the same count with Stopped alone left out', one.first);
+  const ar = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3']);
+  const ar2 = await hintOf(Sidebar, ['live'], null, undefined, ['old-3']);
+  ok(J(ar.first) === J(['1 more match is archived.']) && J(ar2.first) === J(['1 more match is hidden by your status filter.', '1 more match is archived.']), '§9 N5 …an ARCHIVED match is said as archived (the default filter hides Archived — the person narrowed nothing), its own line beside the filter\'s (the cure of the batch-4 verdict)', { ar: ar.first, ar2: ar2.first });
+  ok(['1 more match is archived.', '{n} more matches are archived.'].every((k) => read('src/lib/i18n-zh.js').includes(J(k) + ': "') && read('src/lib/i18n-ja.js').includes(J(k) + ': "')), '§9 N5 …the archived words have a zh AND a ja entry');
+  const { Sidebar: SBa } = await mutantEsm('src/lib/sidebar.js', '    this._statusHid = door ? searched - statusLeft - archivedHid : 0;', '    this._statusHid = door ? searched - statusLeft : 0;');
+  ok(J((await hintOf(SBa, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'])).first) === J(['1 more match is hidden by your status filter.', '1 more match is archived.']), '§9 N5 CONTROL: the first cut\'s count (archived inside the filter\'s) blames the person\'s filter for an archived match — the archived leg goes RED');
   const qv = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, 'live');
   ok(J(qv.later) === J([]), '§9 N5 …rows a QUICK VIEW (LIVE) hides are not worded as the status filter\'s', qv.later);
   ok(/this\.listEl\.innerHTML = '';[\s\S]{0,400}this\._appendKindHint\?\.\(\);[^\n]*\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-workbench.js')) && /this\.listEl\.innerHTML = '';\n\s*this\._appendKindHint\?\.\(\);\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-column.js')), '§9 N5 …the two renders that WIPE the list (the workbench, the column list) draw the line again after the wipe (the adversarial read: drawn once in _renderInner, it was wiped)');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   ok(['1 more match is hidden by your status filter.', '{n} more matches are hidden by your status filter.'].every((k) => zh.includes(J(k) + ': "') && ja.includes(J(k) + ': "')), '§9 N5 …both words have a zh AND a ja entry');
-  const { Sidebar: SB0 } = await mutantEsm('src/lib/sidebar.js', '    this._statusHid = f && this._doorQuery === f && statusLeft != null ? searched - statusLeft : 0;', '    this._statusHid = 0;');
+  const { Sidebar: SB0 } = await mutantEsm('src/lib/sidebar.js', '    this._statusHid = door ? searched - statusLeft - archivedHid : 0;', '    this._statusHid = 0;');
   const red = await hintOf(SB0, ['live']);
   ok(J(red.first) === J([]), '§9 N5 CONTROL: the line taken out ⇒ the narrowed list says nothing (the first N5 leg goes RED)', red.first);
   // N1 + N2 live in the heavy chrome suite (test-layout-placeholder-ui): the second tile's shot no longer stands in for the first;

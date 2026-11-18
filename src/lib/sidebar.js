@@ -1349,15 +1349,15 @@ class Sidebar {
 
   /** THE DOOR'S SEARCH SAYS WHAT THE FILTER HIDES (B-54d9 N5 — the layout-stopped-window r4 review: a status filter the person
    *  narrowed hid a conversation of the tile's name without a word): while the «Open the session list» search stands, the matches
-   *  the person's status filter (Archived included) leaves out are counted in one line — not a quick view's (LIVE / STOP), not the
-   *  Tasks tab's. The filter stays theirs. Drawn again by each render that wipes the list (sidebar-workbench, sidebar-column). */
+   *  the person's status filter leaves out are counted in one line, and the ARCHIVED ones in their own (the default filter hides
+   *  Archived — the person narrowed nothing: never blamed on their filter, the cure of the batch-4 verdict) — not a quick view's
+   *  (LIVE / STOP), not the Tasks tab's. The filter stays theirs. Drawn again by each render that wipes the list. */
   _appendStatusHint() {
-    const n = this._statusHid || 0;
-    if (!n || !this.listEl) return;
-    const row = document.createElement('div');
-    row.className = 'empty-hint sidebar-status-hint';
-    row.textContent = n === 1 ? tr('1 more match is hidden by your status filter.') : tr('{n} more matches are hidden by your status filter.', { n });
-    this.listEl.appendChild(row);
+    if (!this.listEl) return;
+    const say = (text) => { const row = document.createElement('div'); row.className = 'empty-hint sidebar-status-hint'; row.textContent = text; this.listEl.appendChild(row); };
+    const n = this._statusHid || 0, a = this._archivedHid || 0;
+    if (n) say(n === 1 ? tr('1 more match is hidden by your status filter.') : tr('{n} more matches are hidden by your status filter.', { n }));
+    if (a) say(a === 1 ? tr('1 more match is archived.') : tr('{n} more matches are archived.', { n: a })); // the default filter hides Archived: its own words (B-54d9 cure)
   }
 
   _renderInner() {
@@ -1378,7 +1378,7 @@ class Sidebar {
       sessions = sessions.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
     }
 
-    const searched = sessions.length; let statusLeft = null; // the rows the search and the other filters leave, before the status filter (B-54d9 N5)
+    const searched = sessions.length; let statusLeft = null, archivedHid = 0; // the rows the search and the other filters leave, before the status filter (B-54d9 N5)
     // Archive filter: hide archived sessions unless 'archived' filter is on
     const showArchived = this._statusFilter.has('archived');
     if (this._activeTab === 'tasks') {
@@ -1396,7 +1396,9 @@ class Sidebar {
         });
       } else {
         // Hide archived sessions, then apply status filter
+        const withArchived = sessions.length; // archived matches are said as ARCHIVED, never as the person's filter (B-54d9 cure)
         sessions = sessions.filter(s => !this.isArchived(s));
+        archivedHid = withArchived - sessions.length;
         // Status filter (apply only when not all 4 non-archived statuses are selected)
         const nonArchivedFilters = new Set([...this._statusFilter]);
         nonArchivedFilters.delete('archived');
@@ -1410,7 +1412,9 @@ class Sidebar {
         sessions = sessions.filter(s => s.status === this._activeView);
       }
     }
-    this._statusHid = f && this._doorQuery === f && statusLeft != null ? searched - statusLeft : 0; // what the person's status filter hides of the door's search
+    const door = f && this._doorQuery === f && statusLeft != null;
+    this._statusHid = door ? searched - statusLeft - archivedHid : 0; // what the person's status filter hides of the door's search…
+    this._archivedHid = door ? archivedHid : 0; // …and what is hidden because it is archived (the default filter hides Archived)
 
     // Rail panel tabs dispatch BEFORE the innerHTML wipe (2.195.0, real
     // report): _renderRailPanel's renders-once guard checks for the live

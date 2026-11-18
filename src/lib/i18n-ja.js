@@ -12132,6 +12132,8 @@ export default {
   "Open the session list": "セッション一覧を開く",
   "1 more match is hidden by your status filter.": "ほかに 1 件が、ステータスの絞り込みで隠れています。",
   "{n} more matches are hidden by your status filter.": "ほかに {n} 件が、ステータスの絞り込みで隠れています。",
+  "1 more match is archived.": "ほかに 1 件がアーカイブ済みです。",
+  "{n} more matches are archived.": "ほかに {n} 件がアーカイブ済みです。",
   "Remove this window?": "このウィンドウを削除しますか？",
   "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」はこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "選択済み：「{name}」の会話をまだ記録している最新のロールバックポイントです — 押すとそのデスクトップを当時の状態に戻します。",
