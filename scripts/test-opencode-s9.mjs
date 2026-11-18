@@ -2277,7 +2277,7 @@ console.log('\n— A REAL BOOT WITH THE SERVICE OFF (nothing of ours runs or wat
   const net = await import('node:net');
   const freePort = () => new Promise((res) => { const s2 = net.createServer(); s2.listen(0, '127.0.0.1', () => { const p2 = s2.address().port; s2.close(() => res(p2)); }); });
   let ocVersion = null;
-  try { ocVersion = execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim(); } catch { ocVersion = null; }
+  try { ocVersion = (process.env.VS_NO_REAL_CLI === '1' && !process.env.OPENCODE_CMD ? null : execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim())   /* B-ddb9: the real opencode is not started under the flag (a command the caller names is its own) */; } catch { ocVersion = null; }
   const wt = `/tmp/vs-oc-s9-boot-${process.pid}`;
   const ocHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-boot-home-'));
   const storeDir = path.join(ocHome, '.local/share/opencode');
@@ -2378,7 +2378,7 @@ console.log('\n— A REAL BOOT WITH THE SERVICE OFF (nothing of ours runs or wat
 console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —');
 {
   let version = null;
-  try { version = execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim(); } catch (e) { version = null; }
+  try { version = (process.env.VS_NO_REAL_CLI === '1' && !process.env.OPENCODE_CMD ? null : execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim())   /* B-ddb9: the real opencode is not started under the flag (a command the caller names is its own) */; } catch (e) { version = null; }
   if (!version) {
     skip('a REAL `opencode serve` answers the routes this feature set uses', 'no `opencode` on PATH (set OPENCODE_CMD) — the mock section above still ran');
   } else {
@@ -2545,7 +2545,7 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
 console.log('\n— REAL BINARY: THE PENDING-ASK LIST IS PER SERVE PROCESS —');
 {
   let version = null;
-  try { version = execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim(); } catch { version = null; }
+  try { version = (process.env.VS_NO_REAL_CLI === '1' && !process.env.OPENCODE_CMD ? null : execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim())   /* B-ddb9: the real opencode is not started under the flag (a command the caller names is its own) */; } catch { version = null; }
   if (!version) skip('a REAL serve restart makes a warm ask map unanswerable', 'no `opencode` on PATH (set OPENCODE_CMD)');
   else {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-qreal-'));
@@ -2591,7 +2591,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
 {
   const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((f) => fs.existsSync(f));
   let ocVersion = null;
-  try { ocVersion = execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim(); } catch { ocVersion = null; }
+  try { ocVersion = (process.env.VS_NO_REAL_CLI === '1' && !process.env.OPENCODE_CMD ? null : execFileSync(process.env.OPENCODE_CMD || 'opencode', ['--version'], { encoding: 'utf-8', timeout: 15000 }).trim())   /* B-ddb9: the real opencode is not started under the flag (a command the caller names is its own) */; } catch { ocVersion = null; }
   if (!CHROME) skip('the roll-back rows and the ask card render in a real browser', 'no chrome/chromium on this machine');
   else if (!ocVersion) skip('the roll-back rows and the ask card render in a real browser', 'no `opencode` on PATH — the chrome leg drives a REAL serve-backed conversation');
   else {

@@ -46,7 +46,10 @@ const S = JSON.stringify;
 
 // ── §A THE REAL CLI, A LOCAL MOCK ──
 console.log('§A the real claude CLI behind the real wrapper, a local mock of the messages API (no vendor traffic)');
-const claudeBin = (() => {
+// B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 (every acceptance run, every lane env, the test machine) means the
+// REAL CLI is not run here — SKIP by name, whatever the PATH holds (a claude on it ran this leg under the flag before)
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
+const claudeBin = NO_REAL_CLI ? null : (() => {
   const cands = [process.env.VS_CLAUDE_BIN, ...String(process.env.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, 'claude')), path.join(process.env.HOME || '/nonexistent', '.local/bin/claude')].filter(Boolean);
   for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;
@@ -135,7 +138,7 @@ async function realRun(name, wrapperPath, longMs, script, extraArgs = []) {
   }
 }
 if (!claudeBin) {
-  skip('§A ①–⑤ the real CLI', 'no claude binary ($VS_CLAUDE_BIN, `claude` on PATH, $HOME/.local/bin/claude) — the stand-in legs in test-queue-putback §6 / test-queue-steer ⑯ still ran');
+  skip('§A ①–⑤ the real CLI', `${NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real claude is not run here' : 'no claude binary ($VS_CLAUDE_BIN, `claude` on PATH, $HOME/.local/bin/claude)'} — the stand-in legs in test-queue-putback §6 / test-queue-steer ⑯ still ran`);
 } else {
   const LANE = path.join(REPO, 'data/bin/chat-wrapper.js');
   // a copy of the wrapper with the HOLD switched off (every user frame forwarded at once — the pre-.354 behaviour)

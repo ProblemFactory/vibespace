@@ -603,9 +603,9 @@ const mod = mkModule();
 {
   // real-cli-env: the oracle runner's child env is built from nothing but {PATH, HOME} (agentEnv stub below) — no ambient key can reach it, and each oracle is exit-awaited (B-5f0b audit)
   let codexPath = null;
-  try { codexPath = execSync('command -v codex', { encoding: 'utf8' }).trim() || null; } catch { codexPath = null; }
+  if (!(process.env.VS_NO_REAL_CLI === '1')) try { codexPath = execSync('command -v codex', { encoding: 'utf8' }).trim() || null; } catch { codexPath = null; }   // B-ddb9: not under the flag
   if (!codexPath) {
-    console.log('  SKIP: codex is not on PATH — the live oracle run is not exercised (`command -v codex` found nothing)');
+    console.log(process.env.VS_NO_REAL_CLI === '1' ? '  SKIP: VS_NO_REAL_CLI=1 — the real codex is not started here — the live oracle run is not exercised' : '  SKIP: codex is not on PATH — the live oracle run is not exercised (`command -v codex` found nothing)');
   } else {
     const live = mkModule({ codexCmdRef: () => codexPath, agentEnv: () => ({ PATH: process.env.PATH, HOME: path.join(TMP, 'oraclehome') }) });
     fs.mkdirSync(path.join(TMP, 'oraclehome'), { recursive: true });

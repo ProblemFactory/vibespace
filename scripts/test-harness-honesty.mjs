@@ -358,9 +358,9 @@ ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id ===
 // instead of rotting in the fixture. No binary = an explicit SKIP with evidence.
 {
   let cx = '';
-  try { cx = execSync('command -v codex', { encoding: 'utf8' }).trim(); } catch { }
+  if (!(process.env.VS_NO_REAL_CLI === '1')) try { cx = execSync('command -v codex', { encoding: 'utf8' }).trim(); } catch { }   // B-ddb9: not under the flag
   if (!cx) {
-    console.log('  SKIP: no `codex` on PATH — the fixture-vs-live schema diff did not run (the fixture still gates every reply)');
+    console.log(process.env.VS_NO_REAL_CLI === '1' ? '  SKIP: VS_NO_REAL_CLI=1 — the real codex is not started here — the fixture-vs-live schema diff did not run (the fixture still gates every reply)' : '  SKIP: no `codex` on PATH — the fixture-vs-live schema diff did not run (the fixture still gates every reply)');
   } else {
     const dumpDir = path.join(dir, 'schema-dump');
     fs.mkdirSync(dumpDir, { recursive: true });

@@ -1295,9 +1295,10 @@ console.log('— ⑥ the REAL wrapper against the REAL `codex app-server` (evide
   // codex that renames one must fail HERE, not in a fleet report. No turn is
   // started, so nothing is billed.
   const { spawnSync, spawn } = await import('node:child_process');
-  const which = spawnSync('codex', ['--version'], { encoding: 'utf8' });
+  // B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 — the real codex is not run here, not even for its --version
+  const which = process.env.VS_NO_REAL_CLI === '1' ? { status: null, noRealCli: true } : spawnSync('codex', ['--version'], { encoding: 'utf8' });
   if (which.status !== 0) {
-    console.log(`  SKIP: no working \`codex\` on PATH (${(which.error?.message || which.stderr || '').trim().slice(0, 80)})`);
+    console.log(which.noRealCli ? '  SKIP: VS_NO_REAL_CLI=1 — the real `codex app-server` is not run here' : `  SKIP: no working \`codex\` on PATH (${(which.error?.message || which.stderr || '').trim().slice(0, 80)})`);
   } else {
     const ver = (which.stdout || '').trim();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qs-real-'));
@@ -1358,9 +1359,10 @@ console.log('— ⑥ the REAL wrapper against the REAL `codex app-server` (evide
 console.log('— ⑩ the four new verbs against a REAL codex app-server (isolated, logged-out CODEX_HOME — nothing billed)');
 {
   const { spawnSync, spawn } = await import('node:child_process');
-  const which = spawnSync('codex', ['--version'], { encoding: 'utf8' });
+  // B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 — the real codex is not run here, not even for its --version
+  const which = process.env.VS_NO_REAL_CLI === '1' ? { status: null, noRealCli: true } : spawnSync('codex', ['--version'], { encoding: 'utf8' });
   if (which.status !== 0) {
-    console.log(`  SKIP: no working \`codex\` on PATH (${(which.error?.message || which.stderr || '').trim().slice(0, 80)})`);
+    console.log(which.noRealCli ? '  SKIP: VS_NO_REAL_CLI=1 — the real `codex app-server` is not run here' : `  SKIP: no working \`codex\` on PATH (${(which.error?.message || which.stderr || '').trim().slice(0, 80)})`);
   } else {
     const ver = (which.stdout || '').trim();
     // The wrapper's OWN pure builders, lifted out of the file it ships in (it

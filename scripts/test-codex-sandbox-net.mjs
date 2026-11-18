@@ -40,10 +40,11 @@ const sandboxed = new CodexAdapter({ codexCmd: 'codex', codexSandboxSupported: t
 ok(sandboxed.args.includes('workspace-write') && sandboxed.args.join(' ').includes('sandbox_workspace_write.network_access=true'), 'a supported sandbox keeps workspace-write AND opens loopback for the tools');
 
 // ── functional A/B (real codex sandbox) ──
-const which = await run('sh', ['-c', 'command -v codex']);
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';   // B-ddb9: under the flag the real codex is not started (not even for a lookup's sake)
+const which = NO_REAL_CLI ? { stdout: '' } : await run('sh', ['-c', 'command -v codex']);
 const codex = which.stdout.trim();
 if (!codex) {
-  SKIP('functional loopback A/B', 'codex binary not on PATH (CI runner)');
+  SKIP('functional loopback A/B', NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real codex is not started here' : 'codex binary not on PATH (CI runner)');
 } else {
   const ver = (await run(codex, ['--version'])).stdout.trim();
   const srv = net.createServer((s) => { s.on('error', () => {}); s.end('hi'); }); // the probe exits on connect → server-side ECONNRESET is expected

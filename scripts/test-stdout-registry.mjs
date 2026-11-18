@@ -471,7 +471,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
     // the helper's identifier left free.
     const hitsRe = (re) => { try { return Number(require('child_process').execFileSync('grep', ['-c', '-a', '-E', re, bin], { encoding: 'utf8' }).trim()) || 0; } catch { return 0; } };
     const schemaDecl = hitsRe('hook_type:[A-Za-z_$][A-Za-z0-9_$]*\\(\\["pre_compact"');
-    const ver = (() => { try { return require('child_process').execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim(); } catch { return '?'; } })();
+    const ver = process.env.VS_NO_REAL_CLI === '1' ? '(not started: VS_NO_REAL_CLI=1)' : (() => { try { return require('child_process').execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim(); } catch { return '?'; } })();   // B-ddb9: grepped, never started, under the flag
     ok(`${ver}: the installed CLI EMITS camelCase compact_progress (hookType ${camelHooks} sites, hintText ${camelHint} sites) — the compatibility rung is load-bearing, not defensive`, camelHooks > 0 && camelHint > 0, `hookType=${camelHooks} hintText=${camelHint}`);
     ok('…and it DECLARES snake_case in the same binary (both rungs are justified; the schema is not fiction)', schemaDecl > 0, `hook_type:<enum>(["pre_compact"…]) sites=${schemaDecl}`);
     ok('…and no emitter uses the declared spelling yet — the day one does, the schema-first read still wins (leg ⓑ pins that)', snakeHooksEmit === 0 && snakeHintEmit === 0, `snake emitters hooks=${snakeHooksEmit} hint=${snakeHintEmit}`);

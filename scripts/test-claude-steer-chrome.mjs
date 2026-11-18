@@ -677,7 +677,10 @@ try { fs.rmSync(scratchRoot, { recursive: true, force: true }); } catch { }
 
 // ── §A THE REAL CLI, A LOCAL MOCK ──
 console.log('§A the real claude CLI behind the real wrapper, a local mock of the messages API (no vendor traffic)');
-const claudeBin = (() => {
+// B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 (every acceptance run, every lane env, the test machine) means the
+// REAL CLI is not run here — SKIP by name, whatever the PATH holds (a claude on it ran this leg under the flag before)
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
+const claudeBin = NO_REAL_CLI ? null : (() => {
   const cands = [process.env.VS_CLAUDE_BIN, ...String(process.env.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, 'claude')), path.join(process.env.HOME || '/nonexistent', '.local/bin/claude')].filter(Boolean);
   for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;
@@ -863,7 +866,7 @@ async function realLateC(at) {
   };
   await r.end(); return out;
 }
-if (!claudeBin) skip('§A', 'no claude binary ($VS_CLAUDE_BIN, PATH, ~/.local/bin/claude) — the stand-in legs below still run');
+if (!claudeBin) skip('§A', `${NO_REAL_CLI ? 'VS_NO_REAL_CLI=1 — the real claude is not run here' : 'no claude binary ($VS_CLAUDE_BIN, PATH, ~/.local/bin/claude)'} — the stand-in legs below still run`);
 else {
   console.log(`  (claude ${(() => { try { return execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 20000, env: { HOME: os.tmpdir(), PATH: '/usr/bin:/bin' } }).trim(); } catch { return '?'; } })()})`);
   const [lands, stops, rl0, rlRes, rlSet, rl20, rl45, rride] = await Promise.all([
