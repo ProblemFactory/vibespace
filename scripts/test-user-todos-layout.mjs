@@ -2921,5 +2921,44 @@ console.log('㊳ A SHORT VIEW\'S STRIP IS THE PHONE\'S ONE ROW (B-16a9 — int36
   ok(c.joined === 19 && c.bare === 0 && c.touch === 1 && c.openHead === 2 && c.openBare === 0 && c.openHeight === 1 && c.copies === 22, `the phone row's 19 rules (its touch line too) and the open item's held head (sticky, its ▾) carry a short view's strip; the open's height stays the phone's (${J(c)})`, c);
   ok(cBase.joined === 0 && cBase.bare === 19 && cBase.openHead === 0, `CONTROL (B-16a9): the base's rules (unjoined) leave a short view's strip unruled (${J(cBase)}) — the leg goes red`, cBase);
 }
+console.log('㊴ A RECORD A CSS RULE HIDES WHOLE IS NO DRAWN RECORD (B-2adb — lane needs-card-tail r2\'s refuted[0..1]: an empty thinking block, a hook card, the stop-hook notice, a note to the assistant hidden by its setting, a superseded record, counted as drawn — the dock\'s host, the tail plan, drawnAt could pick it; the strip said «· N» over a card with no box)');
+{
+  const J = JSON.stringify, CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8'), CC = fs.readFileSync(path.join(ROOT, 'public/chat.css'), 'utf8');
+  // A — ONE LIST, PINNED AGAINST THE CSS: every rule of chat.css (any block, any indentation, inside @media too) whose display:none
+  // hides a WHOLE record — its last compound the record itself (`.chat-msg.X`), or a `body.hide-*` setting's record class — is a
+  // row of HIDDEN_RECORDS ('' = always) or a DECLARED exception: a run's folded member (the fold yields to a card) and the compact
+  // spelling of a rule the list holds already
+  const listOf = (src) => { const m = src.match(/const HIDDEN_RECORDS = Object\.freeze\((\[[^\n]*\])\);/); try { return m ? JSON.parse(m[1].replace(/'/g, '"')) : null; } catch { return null; } };
+  const cssOf = (css) => { const out = new Set(), flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) { if (!/display:\s*none/.test(m[2])) continue;
+      for (let part of m[1].split(',')) { part = part.trim(); if (!part || part.startsWith('@')) continue;
+        const comps = part.split(/\s+/), last = comps[comps.length - 1], b = (part.match(/body\.(hide-[a-z-]+)/) || [])[1];
+        const rec = /^\.chat-msg\.([a-z-]+)$/.exec(last), own = /^\.(chat-[a-z-]+)$/.exec(last);
+        if (b && (rec || own)) out.add(b + ' ' + (rec ? rec[1] : own[1]));
+        else if (!b && rec) out.add((comps.length > 1 ? comps.slice(0, -1).join(' ') : '*') + ' ' + rec[1]); } }
+    return [...out].sort(); };
+  const DECLARED = ['* chat-run-collapsed', '.chat-compact chat-run-collapsed', '.chat-compact chat-msg-superseded']; // (a run's folded member, both spellings — the fold yields to a card; the compact spelling of a rule the list holds)
+  const L = listOf(CARD), css = cssOf(CC), have = L ? L.map(([b, c]) => (b || '*') + ' ' + c).sort() : null, want = css.filter((x) => !DECLARED.includes(x));
+  ok(!!L && J(have) === J(want) && DECLARED.every((x) => css.includes(x)) && have.length >= 5, `the records a CSS rule hides whole are ONE list, the CSS's own: ${J(have)} ⇔ chat.css ${J(want)} (declared: ${J(DECLARED)})`, { have, css });
+  const css2 = cssOf(CC + '\n@media (max-width: 600px) {\n  body.hide-tool-cards .chat-msg.chat-msg-tool,\n  .x { display: none; }\n}\n.chat-msg.chat-msg-gone { color: red; display: none; }\n');
+  ok(css2.length === css.length + 2, `CONTROL (B-2adb): a new rule hiding whole records — a setting's inside @media over two lines, an always one — reds the census (${css2.length - css.length} new rows)`);
+  // B — the REAL _onScreen (its source, the list and the predicate sliced) over a fake view and body
+  const fn = (() => { const a = CARD.indexOf('  _onScreen(id) {'), b = CARD.indexOf('\n  }\n', a); return a >= 0 && b > a ? CARD.slice(a, b) : null; })();
+  const consts = (() => { const a = CARD.indexOf('const HIDDEN_RECORDS = '), b = CARD.indexOf('\n', CARD.indexOf('const hiddenRecord = ')); return a >= 0 && b > a ? CARD.slice(a, b) : null; })();
+  const onScreenOf = (fnSrc) => { const body = new Set(); const list = {}; const els = new Map();
+    const mk = (id, cls) => { const e = { isConnected: true, parentNode: list, classList: { contains: (c) => cls.includes(c) } }; els.set(id, e); return e; };
+    mk('r1', ['chat-msg']); mk('r2', ['chat-msg', 'chat-empty-thinking']); mk('r3', ['chat-msg', 'chat-msg-hook']); mk('r4', ['chat-msg', 'chat-msg-superseded']);
+    const run = new Function('document', `${consts}\nreturn function (id) {${fnSrc.slice(fnSrc.indexOf('{') + 1)}\n};`)({ body: { classList: { contains: (c) => body.has(c) } } });
+    const me = { view: { _elements: els, _messageList: list } }, ask = () => ['r1', 'r2', 'r3', 'r4'].map((id) => run.call(me, id));
+    const on = ask(); body.add('hide-empty-thinking'); body.add('hide-hook-cards'); const off = ask(); return { on, off }; };
+  const r = consts && fn ? onScreenOf(fn) : null;
+  ok(!!r && J(r.on) === '[true,true,true,false]' && J(r.off) === '[true,false,false,false]', `RED-able (B-2adb — b06f36e90: every record drawn): the settings off ⇒ every record drawn but the superseded one (${J(r && r.on)}); hide empty thinking + hook cards ⇒ those two records are no drawn record, the plain one still is (${J(r && r.off)})`, r);
+  const rx = fn && consts ? onScreenOf(fn.replace(' && !hiddenRecord(el);', ';')) : null;
+  ok(!!fn && fn.includes(' && !hiddenRecord(el);') && !!rx && J(rx.off) === '[true,true,true,true]', `CONTROL (B-2adb): the mutant _onScreen without the predicate counts the hidden records as drawn (${J(rx && rx.off)}) — the leg goes red`);
+  // C — A SETTING FLIPPED ASKS A PASS (the adversarial read: a hook card's switch only toggles the body's class, nothing else asked)
+  const watch = { mo: /this\._bodyMO = new MutationObserver\(\(\) => \{ const s = hiddenSig\(\); if \(s !== this\._hidSig\) \{ this\._hidSig = s; go\(\); \} \}\);/.test(CARD),
+    obs: CARD.includes("this._bodyMO.observe(document.body, { attributes: true, attributeFilter: ['class'] });"), stop: CARD.includes('try { this._bodyMO?.disconnect(); } catch { }') };
+  ok(Object.values(watch).every(Boolean), `a chat setting flipped (the body's class) asks the cards a pass — only when a hiding class changed — and the watch goes at stop (${J(watch)})`, watch);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

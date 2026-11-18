@@ -69,6 +69,14 @@ import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf
 
 /** B-16a9: a view shorter than this (a chat window under ~480 px) draws its strip as the phone's one row (_dockShort) */
 const SHORT_VIEW_PX = 450;
+/** B-2adb (lane needs-card-tail r2's refuted[0..1], pre-existing): a record a CSS rule hides WHOLE — a chat setting's body class
+ *  (display:none on the record's own class), or always (a superseded Claude record) — is no drawn record: the dock's host, the
+ *  tail plan's rendered() and drawnAt skip it, as they skip a record that is not in the list (a record a closed run folds is NOT
+ *  in this list: the fold yields to a card). Class reads only (a pass reads no layout). public/chat.css's rules are pinned against
+ *  this list by test-user-todos-layout ㊴. [the body's class ('' = always), the record's class] */
+const HIDDEN_RECORDS = Object.freeze([['hide-hook-cards', 'chat-msg-hook'], ['hide-assistant-notes', 'chat-vs-note'], ['hide-stop-hook-notice', 'chat-stop-hook-notice'], ['hide-empty-thinking', 'chat-empty-thinking'], ['', 'chat-msg-superseded']]);
+const hiddenRecord = (el) => !!el && HIDDEN_RECORDS.some(([b, c]) => !!el.classList?.contains(c) && (!b || !!document.body?.classList?.contains(b)));
+const hiddenSig = () => HIDDEN_RECORDS.map(([b]) => (b && document.body?.classList?.contains(b) ? 1 : 0)).join('');
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -153,6 +161,11 @@ export class NeedsCards {
     this._mo.observe(this.view._messageList, { childList: true });
     // r10: THE ATTENTION DOCK — a box left in the dock's row ends its keep the same way (the dock lives outside the list)
     this.view._attnDock?.addEventListener('ut-box-left', go, { signal: own });
+    // B-2adb (the adversarial read): a chat setting flipped (its body class) hides or shows whole records, and nothing else asks a
+    // pass (a hook card's switch only toggles the class) — a card standing in a record that just hid moves at once
+    this._hidSig = hiddenSig();
+    this._bodyMO = new MutationObserver(() => { const s = hiddenSig(); if (s !== this._hidSig) { this._hidSig = s; go(); } });
+    if (document.body) this._bodyMO.observe(document.body, { attributes: true, attributeFilter: ['class'] });
     this.schedule();
   }
 
@@ -160,6 +173,7 @@ export class NeedsCards {
     try { this._giveBack(); } catch { } // the room a hold borrowed never outlives the view (round 5, #3)
     try { this._ctl?.abort(); } catch { }
     try { this._mo?.disconnect(); } catch { }
+    try { this._bodyMO?.disconnect(); } catch { }
     try { this._dockRO?.disconnect(); } catch { }
     try { this._shortRO?.disconnect(); } catch { }
     // the OPENED strip's own observers (its place's ResizeObserver, its column's MutationObserver) end with the view too — a window
@@ -416,10 +430,10 @@ export class NeedsCards {
     return out;
   }
 
-  /** Is the record `id` on screen (its element in this list)? */
+  /** Is the record `id` on screen (its element in this list, not a record a CSS rule hides whole — B-2adb)? */
   _onScreen(id) {
     const el = id != null ? this.view._elements.get(id) : null;
-    return !!el && el.isConnected && el.parentNode === this.view._messageList;
+    return !!el && el.isConnected && el.parentNode === this.view._messageList && !hiddenRecord(el);
   }
 
   /** THE ATTENTION DOCK (lane needs-card-tail r10 — the owner 2026-10-30: «…不要停靠在聊天内容本身里了，而是体现出"这是专门停靠
