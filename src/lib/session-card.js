@@ -952,6 +952,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           o.value = opt.value || opt.id || '';
           // the default row (no value) is the page's own «Default» — never the server's English label (the walk's sidebar-sessions-2)
           o.textContent = !(opt.value || opt.id) ? tr('Default') : (opt.label || opt.value);
+          if (opt.disabled) o.disabled = true;   // a row that cannot run here (a provider on another machine) is shown, not offered
           if (String(o.value) === String(isDefault ? defaultVal : curVal)) o.selected = true;
           sel.appendChild(o);
         }
@@ -1004,7 +1005,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           // Pooled pseudo-account (either backend): names its CURRENT target —
           // the old else-branch labeled it "— API …undefined" (2.369.18, same
           // class as the New Session dialog's fix)
-          ...acctList.map(a => ({ value: a.id, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
+          ...acctList.map(a => ({ value: a.id, disabled: a.type === 'provider' && !!s.host, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
             : a.type === 'provider' ? tr('{name} (third party)', { name: a.name }) + (s.host ? ' — ' + tr('this machine only') : '')   // lane lg-providers chain cure: as New Session / Session Properties name it
             : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : (a.tail ? `${a.name} — API …${a.tail}` : a.name) })),
         ], 'account'));

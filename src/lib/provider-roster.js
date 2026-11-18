@@ -5,8 +5,22 @@
 import { t } from './i18n.js';
 import { agoText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 import { VERDICT_WORDS, REFUSAL_WORDS } from '../provider-test-model.js';
-import { KEY_ERRORS } from '../model-providers.js';
+import { KEY_ERRORS, conversationsOn } from '../model-providers.js';
 import { openAccountModelsDialog } from './account-models.js';
+import { nameHelpers } from './browser-who-dialog.js';   // the name a conversation wears in the sidebar (the remove confirm names it so)
+
+/** the page's live conversations with the names the SIDEBAR shows them by → [{ accountId, name }] (the remove confirms read it) */
+export function namedLiveRows(app) {
+  const sb = (app && app.sidebar) || {};
+  let names = null;
+  try { names = nameHelpers(app); } catch { names = null; }
+  return (Array.isArray(sb._webuiSessions) ? sb._webuiSessions : []).map((s) => ({ accountId: s && s.accountId, name: (names && (() => { try { return names.nameOfLive(s); } catch { return ''; } })()) || (s && s.name) || '' }));
+}
+/** the sentence both remove doors add — the roster's Remove… and the Vault window's (one wording) — or '' when none runs on it */
+export function runningOnWords(rows, providerId) {
+  const on = conversationsOn(rows, providerId);
+  return on.n ? ' ' + t('Running on it now: {names}', { names: on.names.join(', ') + (on.more ? ' ' + t('and {n} more', { n: on.more }) : '') }) : '';
+}
 
 // the roster's own ⋯ (manage-agents ROSTER_ICONS.DOTS, the same marks — not imported: manage-agents imports this file)
 const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>';
@@ -38,7 +52,7 @@ function askKey(id, name) {
   });
 }
 
-export async function renderProviderRows(body, backend, { refresh = () => { } } = {}) {
+export async function renderProviderRows(body, backend, { refresh = () => { }, sessions = () => [] } = {}) {   // sessions: the page's live rows (the remove confirm names those on a provider)
   // the section's PLACE is taken now, right under its roster (the read below is async — appended later it would land under
   // whatever the card drew meanwhile: another harness's heading, adversarial read r1); it stays empty and hidden until filled
   const sec = document.createElement('div');
@@ -67,7 +81,8 @@ export async function renderProviderRows(body, backend, { refresh = () => { } } 
         { label: t('New key…'), action: async () => { const k = await askKey(p.id, p.label); if (!k) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}/key`, 'POST', { key: k }); showToast(x && x.ok ? t('The new key is kept in the vault') : words(x), { type: x && x.ok ? 'info' : 'error' }); refresh(); } },
         { separator: true },
         { label: t('Remove…'), action: async () => {
-          const yes = await showConfirmDialog({ title: t('Remove the model provider "{name}"?', { name: p.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.'), confirmText: t('Remove'), danger: true });
+          const running = runningOnWords((() => { try { return sessions(); } catch { return []; } })(), p.id);   // the conversations it would leave without a provider at their next start — named as the sidebar names them
+          const yes = await showConfirmDialog({ title: t('Remove the model provider "{name}"?', { name: p.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.') + running, confirmText: t('Remove'), danger: true });
           if (!yes) return;
           const x = await send(`/api/providers/${encodeURIComponent(p.id)}`, 'DELETE');
           if (!x || !x.ok) showToast(words(x), { type: 'error' });

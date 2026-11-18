@@ -10541,6 +10541,7 @@ export default {
   "Which model answers in new conversations": "新しい会話でどのモデルが答えるか", // lane lg-providers
   "Get the model list from {provider}": "{provider} からモデル一覧を取得", // lane lg-providers
   "Get the model list first — {provider} has no model yet": "先にモデル一覧を取得してください — {provider} にはまだモデルがありません", // lane lg-providers chain cure
+  "{provider} answered an empty model list — try again later, or pick another provider": "{provider} の返したモデル一覧は空でした — 後でもう一度試すか、別のプロバイダーを選んでください", // lane lg-providers remainders
   "Type a model id first — {provider} has no model yet": "先にモデル ID を入力してください — {provider} にはまだモデルがありません", // lane lg-providers chain cure
   "the provider could not be changed": "プロバイダーを変更できませんでした", // lane lg-providers chain cure
   "the provider list could not be written": "プロバイダー一覧を書き込めませんでした", // lane lg-providers chain cure
@@ -10577,6 +10578,7 @@ export default {
   "Only a person on this page can run a test": "テストを実行できるのはこのページにいる人だけです", // lane lg-providers
   "Remove the model provider \"{name}\"?": "モデルプロバイダー「{name}」を削除しますか？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "キーは保管庫から消え、プロバイダーはすべてのエージェントのアカウント一覧から外れます。すでに使っている会話は再起動するまで動き続けます。", // lane lg-providers
+  "Running on it now: {names}": "これを使っている会話：{names}", // lane lg-providers remainders
   "Always for this pool": "常に（このプール）",
   "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します",
   "Moved — this pool now moves a conversation to another provider by itself": "移しました — 今後このプールは会話を別のプロバイダーへ自動で移します",

@@ -32,6 +32,7 @@ import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVau
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords, askRevealPassword } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
+import { namedLiveRows, runningOnWords } from './provider-roster.js';   // the Vault window's provider Remove says which conversations run on it (one wording with the roster)
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf, SEARCHED_FIELDS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-grants: «Who may use it» — the members (hosts, end, uses) + 「Who may use it…」
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
@@ -117,11 +118,11 @@ const CONFIRM_WORDS = {
   'agent-secret': (row) => ({ title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).'), confirm: t('Delete') }),   // B-3fb5: an agent's own entry (mint / put)
   'web-login': (row) => ({ title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') }),   // lane browser-login
   totp: (row) => ({ title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') }),
-  provider: (row) => ({ title: t('Remove the model provider "{name}"?', { name: row.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.'), confirm: t('Remove') }),   // lane lg-providers (B-d578)
+  provider: (row, app) => ({ title: t('Remove the model provider "{name}"?', { name: row.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.') + runningOnWords(namedLiveRows(app), String((row && row.entry) || '').replace(/^provider:/, '')), confirm: t('Remove') }),   // lane lg-providers (B-d578); the conversations on it named as the roster's Remove… names them (the remainders' read, F3)
 };
-function confirmWords(key, row) {
+function confirmWords(key, row, app = null) {
   const w = Object.prototype.hasOwnProperty.call(CONFIRM_WORDS, key) ? CONFIRM_WORDS[key] : null;
-  return w ? w(row) : { title: t('Delete'), message: row.label, confirm: t('Delete') };
+  return w ? w(row, app) : { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
 
 const STATE_WORD = { unlocked: () => t('Unlocked'), locked: () => t('Locked'), not_set_up: () => t('Not set up') };
@@ -326,7 +327,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       if (await removeAccount(app, a)) refresh();
       return;
     }
-    const w = confirmWords(d.confirm, row);
+    const w = confirmWords(d.confirm, row, app);
     if (!(await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true }))) return;
     const r = await fetchJson(d.path, { method: d.method, headers: { 'Content-Type': 'application/json' }, ...(d.method === 'POST' ? { body: '{}' } : {}) });
     if (!r || r.error || r.ok === false) { showToast(t('Could not delete — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }

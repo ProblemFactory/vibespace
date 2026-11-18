@@ -616,6 +616,14 @@ const MODEL_ERRORS = Object.freeze({
   'too-many': i18nKey('At most 200 models'),
 });
 
+/** THE CONVERSATIONS ON A PROVIDER (the remove confirm names them — lane lg-providers, the coordinator's remainder): the live
+ *  rows (`accountId`, `name`) whose account is this provider → { n, names (at most `max`), more } — a name a person reads */
+function conversationsOn(rows, id, max = 8) {
+  const on = (Array.isArray(rows) ? rows : []).filter((x) => x && x.accountId === id);
+  const names = on.slice(0, max).map((x) => { const n = String(x.name || '').trim(); return n ? (n.length > 60 ? n.slice(0, 59) + '…' : n) : '—'; });   // a name renamed from outside has no cap: 60 characters each
+  return { n: on.length, names, more: Math.max(0, on.length - names.length) };
+}
+
 module.exports = {
   KINDS, KIND_IDS, AUTHS, MODELS_SOURCES, LISTED_BY, CAPS, CAP_WORDS, PROVIDER_FIELDS, MODEL_FIELDS, PRESETS, ACCOUNT_PRESETS,
   ID_PATTERNS, ID_MAX, LABEL_MAX, CONTEXT_MAX, MODELS_MAX, MODEL_ERRORS,
@@ -623,5 +631,5 @@ module.exports = {
   normalizeProvider, validateProvider, listedRows, withListed, sameModel, namedModel, MODEL_NAME_MAX, resolveModel, servesModel, modelsOf, sourceOf,
   MENU_EMPTY, menuOf, resolvePick, REFRESH, LISTABLE_KINDS, REFRESH_WORDS, modelsEndpointOf, refreshable, refreshVerdict, authHeaders, parseListed,
   SHIPPED, SHIPPED_AT, shippedOf, REGIONS, REGION_WORDS, FIT_HARNESSES, fits, fitsHarness, FIT_WORDS, WIRES,
-  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf, ownNetworkUrl, SPAWN_HARNESSES,
+  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf, ownNetworkUrl, SPAWN_HARNESSES, conversationsOn,
 };

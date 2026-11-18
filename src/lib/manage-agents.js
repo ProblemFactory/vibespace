@@ -29,7 +29,7 @@ import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
-import { renderProviderRows } from './provider-roster.js'; // lane lg-providers U5 (B-d578): a third party's rows under the roster
+import { renderProviderRows, namedLiveRows } from './provider-roster.js'; // lane lg-providers U5 (B-d578): a third party's rows under the roster
 import { openProviderWizard } from './provider-wizard.js'; // lane lg-providers U5: Add a third-party model… (four screens)
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
 import { openOatShapeDialog } from './oat-shape-dialog.js';
@@ -2089,7 +2089,7 @@ export function installManageAgents(App, ctx = {}) {
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);
-    if (!selectedHost) renderProviderRows(body, 'codex', { refresh }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Codex
+    if (!selectedHost) renderProviderRows(body, 'codex', { refresh, sessions: () => namedLiveRows(this) }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Codex
     left.onclick = async (e) => {
       const keyRow = e.target.closest?.('.acct-key-row');
       if (!keyRow) return;
@@ -3539,7 +3539,7 @@ export function installManageAgents(App, ctx = {}) {
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);
-    if (!selectedHost) renderProviderRows(body, 'claude', { refresh }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Claude Code
+    if (!selectedHost) renderProviderRows(body, 'claude', { refresh, sessions: () => namedLiveRows(this) }).catch(() => { }); // lane lg-providers U5: this machine's third-party providers that serve Claude Code
     // Per-key row actions (event delegation on the section)
     // The login chip is role=button: Enter/Space must do what a click does.
     left.onkeydown = (e) => { const c = (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('.acct-login-chip'); if (c) { e.preventDefault(); c.click(); } };

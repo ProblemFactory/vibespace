@@ -411,6 +411,21 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(setA.ok && ca.spawned.length === 1 && caModel === 'deepseek-reasoner', 'an instance default the provider serves through ITS aliases (opus ⇒ deepseek-reasoner) is resolved as before; only an id it does not serve falls to its own default', { caModel, setA: setA.ok });
   const ci = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus', spawnOriginHint: { model: 'instance' } }, { accounts: am });
   ok(ci.spawned.length === 1 && (() => { const a = ci.spawned[0].args; const i = a.indexOf('--model'); return i >= 0 && a[i + 1] === 'deepseek-chat'; })(), 'the INSTANCE\'S default (claude.defaultModel = opus, the client says it is no pick) at a third party is no pick: the provider\'s own default, never a refusal of «opus» (U2 cure)', ci.sent.map((m) => m.type + (m.code ? ':' + m.code : '')));
+  // «opus[1m]» as the INSTANCE DEFAULT meets the provider's «opus» alias (the coordinator's accepted note); an «opus[1m]» the
+  // PERSON picked is still refused by name — a third party's row has no long context to give it, never silently a short one
+  const dsA = store.get(ds.id);
+  const dsRowsA = dsA.models.map((m) => ({ id: m.id, label: m.label, context: m.context, caps: m.caps }));
+  store.setModels(ds.id, { models: dsRowsA, aliases: { opus: 'deepseek-reasoner' }, defaultModel: dsA.defaultModel }); await store.durable();
+  const argModel = (x) => { const a = (x.spawned[0] || { args: [] }).args; const i = a.indexOf('--model'); return i >= 0 ? a[i + 1] : null; };
+  const d1m = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus[1m]', spawnOriginHint: { model: 'instance' } }, { accounts: am });
+  const c1m = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus[1m]' }, { accounts: am });
+  const e1m = c1m.sent.find((m) => m.type === 'error');
+  const BARE = "const bare = String(data.model || '').replace(/\\[1m\\]$/i, '');";
+  if (src.split(BARE).length !== 2) throw new Error('the anchor of the control «the instance default\'s [1m] retry» is not in the source once');
+  const d1m0 = await drive(M.load('src/ws-create.js', src.replace(BARE, "const bare = String(data.model || '');"), 'pv-no1m'), { backend: 'claude', accountId: ds.id, model: 'opus[1m]', spawnOriginHint: { model: 'instance' } }, { accounts: am });
+  store.setModels(ds.id, { models: dsRowsA, aliases: dsA.aliases || {}, defaultModel: dsA.defaultModel }); await store.durable();
+  ok(argModel(d1m) === 'deepseek-reasoner' && c1m.spawned.length === 0 && !!e1m && e1m.code === 'model-not-served' && /opus\[1m\]/.test(e1m.message), 'an instance default «opus[1m]» meets the provider\'s «opus» alias (deepseek-reasoner); the SAME pick made by the person is refused by name (never a silent short context)', { d1m: argModel(d1m), c1m: e1m && e1m.code });
+  ok(argModel(d1m0) === 'deepseek-chat', 'CONTROL: without the instance default\'s [1m] retry «opus[1m]» falls to the provider\'s default ⇒ the leg goes RED', argModel(d1m0));
   ok(PSP.modelFor(store, ds.id, '', 'opencode').code === 'provider-unfit' && /DeepSeek does not offer what OpenCode needs/.test(PSP.modelFor(store, ds.id, '', 'opencode').message) && PSP.modelFor(store, ds.id, '', 'claude').ok && PSP.modelFor(store, ds.id, '').ok, 'the fence refuses a harness the provider does not serve (a hand-made create on OpenCode: no spawn road — never its row id on the machine\'s own login)', PSP.modelFor(store, ds.id, '', 'opencode'));
   const cm = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'deepseek-reasoner' }, { accounts: am });
   const cd = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am });

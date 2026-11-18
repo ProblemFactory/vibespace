@@ -10542,6 +10542,7 @@ export default {
   "Which model answers in new conversations": "新对话用哪个模型回答", // lane lg-providers
   "Get the model list from {provider}": "从 {provider} 获取模型列表", // lane lg-providers
   "Get the model list first — {provider} has no model yet": "请先获取模型列表——{provider} 还没有模型", // lane lg-providers chain cure
+  "{provider} answered an empty model list — try again later, or pick another provider": "{provider} 返回了空的模型列表——请稍后再试，或换一家提供方", // lane lg-providers remainders
   "Type a model id first — {provider} has no model yet": "请先输入模型 ID——{provider} 还没有模型", // lane lg-providers chain cure
   "the provider could not be changed": "未能更改该提供方", // lane lg-providers chain cure
   "the provider list could not be written": "未能写入提供方列表", // lane lg-providers chain cure
@@ -10578,6 +10579,7 @@ export default {
   "Only a person on this page can run a test": "只有在此页面上的人才能运行测试", // lane lg-providers
   "Remove the model provider \"{name}\"?": "移除模型提供方「{name}」？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "它的密钥会离开保险库，这个提供方也会从每个 agent 的账号列表里消失。已经在用它的对话会继续工作，直到重启。", // lane lg-providers
+  "Running on it now: {names}": "正在使用它的对话：{names}", // lane lg-providers remainders
   "Always for this pool": "一直（这个池）",
   "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "从现在起，这个池可以自己把对话切到另一个提供方，每次都会在对话里留一行",
   "Moved — this pool now moves a conversation to another provider by itself": "已切换——这个池以后会自己把对话切到另一个提供方",

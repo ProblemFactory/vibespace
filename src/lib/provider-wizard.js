@@ -138,7 +138,7 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
         <div class="pw-error" role="alert">${escHtml(st.error)}</div>
         <div class="pw-actions"><button type="button" class="agent-btn primary pw-done">${escHtml(t('Done'))}</button></div>${fold(techRows())}`;
       const lb = body.querySelector('.pw-list');
-      if (lb) lb.onclick = async () => { if (st.busy) return; st.busy = true; lb.disabled = true; const x = await fetchJson(`/api/providers/${encodeURIComponent(p.id)}/models/refresh`, { method: 'POST' }); st.busy = false; if (!live()) return; if (x && x.ok) { st.provider = { ...p, ...x.provider, fits: p.fits }; st.error = ''; } else st.error = errorWords(x); draw(); };
+      if (lb) lb.onclick = async () => { if (st.busy) return; st.busy = true; lb.disabled = true; const x = await fetchJson(`/api/providers/${encodeURIComponent(p.id)}/models/refresh`, { method: 'POST' }); st.busy = false; if (!live()) return; if (x && x.ok) { st.provider = { ...p, ...x.provider, fits: p.fits }; st.listFetched = true; st.error = ''; } else st.error = errorWords(x); draw(); };
       const dn = body.querySelector('.pw-done');
       dn.onclick = async () => {
         if (st.busy) return;
@@ -146,7 +146,7 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
         const pick = body.querySelector('.pw-pick') ? body.querySelector('.pw-pick').value : '';
         // nothing chosen and nothing to choose from (a listed provider whose list was never fetched): say what is missing — a
         // press that sends nothing never says «ready» (the chain cure)
-        if (!other && !pick && !rows.length && !hasModel(st.provider)) { st.error = listed ? t('Get the model list first — {provider} has no model yet', { provider: p.label }) : t('Type a model id first — {provider} has no model yet', { provider: p.label }); draw(); return; }
+        if (!other && !pick && !rows.length && !hasModel(st.provider)) { st.error = listed ? (st.listFetched ? t('{provider} answered an empty model list — try again later, or pick another provider', { provider: p.label }) : t('Get the model list first — {provider} has no model yet', { provider: p.label })) : t('Type a model id first — {provider} has no model yet', { provider: p.label }); draw(); return; }
         st.busy = true; dn.disabled = true;
         let r = { ok: true }, model = p.defaultModel;
         if (other && !rows.some((m) => m.id === other)) { r = await post(`/api/accounts/${encodeURIComponent(p.id)}/models`, { models: [...rows, { id: other }], aliases: p.aliases || {}, defaultModel: other }, 'PUT'); model = other; }
