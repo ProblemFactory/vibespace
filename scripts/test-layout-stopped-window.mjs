@@ -1196,7 +1196,7 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   const n3red = await rows3(MN0, { reopen: true });
   ok(n3red.redraws === 4, '§9 N3 CONTROL: the r4 line ⇒ four waits, four redraws (the leg above goes RED)', n3red);
   // N5 — the REAL Sidebar: showSessionsNamed + _renderInner over a list the person narrowed to Live
-  const hintOf = async (SidebarCls, filter, query = null, view = undefined, archived = []) => {
+  const hintOf = async (SidebarCls, filter, query = null, view = undefined, archived = [], { press = false } = {}) => {
     const input = { value: '' };
     const gid = document.getElementById; document.getElementById = (id) => (id === 'session-filter' ? input : gid(id));
     try {
@@ -1214,6 +1214,12 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
       sb.listEl = { insertAdjacentHTML() {}, appendChild: (c) => { rowsAppended.push(c); return c; }, querySelectorAll: () => [] };
       sb.showSessionsNamed(VAN);
       const first = rowsAppended.filter((c) => /sidebar-status-hint/.test(c.className)).map((c) => c.textContent);
+      if (press) { // the person presses the archived line's door (cure 3)
+        const door = rowsAppended.filter((c) => /sidebar-status-hint/.test(c.className)).flatMap((c) => c.children).find((b) => b && b.tagName === 'BUTTON');
+        if (!door) return { handed: sb.handed, first, door: null, filter: [...sb._statusFilter] };
+        const label = door.textContent; door.onclick();
+        return { handed: sb.handed, first, door: label, after: rowsAppended.filter((c) => /sidebar-status-hint/.test(c.className)).map((c) => c.textContent), filter: [...sb._statusFilter] };
+      }
       let later = null;
       if (view !== undefined) sb._activeView = view; // the person picks a quick view (LIVE / STOP…) after the door
       if (query != null || view !== undefined) { if (query != null) input.value = query; sb._render(); later = rowsAppended.filter((c) => /sidebar-status-hint/.test(c.className)).map((c) => c.textContent); }
@@ -1230,10 +1236,16 @@ await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the do
   ok(J(one.first) === J(['2 more matches are hidden by your status filter.']), '§9 N5 …the same count with Stopped alone left out', one.first);
   const ar = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3']);
   const ar2 = await hintOf(Sidebar, ['live'], null, undefined, ['old-3']);
-  ok(J(ar.first) === J(['1 more match is archived.']) && J(ar2.first) === J(['1 more match is hidden by your status filter.', '1 more match is archived.']), '§9 N5 …an ARCHIVED match is said as archived (the default filter hides Archived — the person narrowed nothing), its own line beside the filter\'s (the cure of the batch-4 verdict)', { ar: ar.first, ar2: ar2.first });
-  ok(['1 more match is archived.', '{n} more matches are archived.'].every((k) => read('src/lib/i18n-zh.js').includes(J(k) + ': "') && read('src/lib/i18n-ja.js').includes(J(k) + ': "')), '§9 N5 …the archived words have a zh AND a ja entry');
+  ok(J(ar.first) === J(['1 more match is archived. Show archived']) && J(ar2.first) === J(['1 more match is hidden by your status filter.', '1 more match is archived. Show archived']), '§9 N5 …an ARCHIVED match is said as archived (the default filter hides Archived — the person narrowed nothing), its own line beside the filter\'s (the cure of the batch-4 verdict)', { ar: ar.first, ar2: ar2.first });
+  ok(['1 more match is archived.', '{n} more matches are archived.', 'Show archived'].every((k) => read('src/lib/i18n-zh.js').includes(J(k) + ': "') && read('src/lib/i18n-ja.js').includes(J(k) + ': "')), '§9 N5 …the archived words (and the door\'s) have a zh AND a ja entry');
+  // THE ARCHIVED LINE CARRIES ITS DOOR (cure 3 — the cure-2 verdict: the line named no way to the rows): «Show archived», Locate's own act
+  const pr = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'], { press: true });
+  ok(pr.door === 'Show archived' && pr.filter.includes('archived') && pr.handed.includes('old-3') && J(pr.after) === J([]), '§9 N5 …the archived line\'s door «Show archived» turns Archived on in the person\'s status filter (Locate\'s own writes): the archived match is listed and the line goes', pr);
+  const { Sidebar: SBd } = await mutantEsm('src/lib/sidebar.js', ", { label: tr('Show archived'), why: 'archived' }); // the default filter hides Archived", '); // the default filter hides Archived');
+  const pr0 = await hintOf(SBd, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'], { press: true });
+  ok(pr0.door === null && !pr0.filter.includes('archived'), '§9 N5 CONTROL: the line without its door (the cure-2 line) ⇒ nothing to press, the archived match stays out of reach (the door leg goes RED)', pr0);
   const { Sidebar: SBa } = await mutantEsm('src/lib/sidebar.js', '    this._statusHid = door ? searched - statusLeft - archivedHid : 0;', '    this._statusHid = door ? searched - statusLeft : 0;');
-  ok(J((await hintOf(SBa, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'])).first) === J(['1 more match is hidden by your status filter.', '1 more match is archived.']), '§9 N5 CONTROL: the first cut\'s count (archived inside the filter\'s) blames the person\'s filter for an archived match — the archived leg goes RED');
+  ok(J((await hintOf(SBa, ['live', 'tmux', 'external', 'stopped'], null, undefined, ['old-3'])).first) === J(['1 more match is hidden by your status filter.', '1 more match is archived. Show archived']), '§9 N5 CONTROL: the first cut\'s count (archived inside the filter\'s) blames the person\'s filter for an archived match — the archived leg goes RED');
   const qv = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, 'live');
   ok(J(qv.later) === J([]), '§9 N5 …rows a QUICK VIEW (LIVE) hides are not worded as the status filter\'s', qv.later);
   ok(/this\.listEl\.innerHTML = '';[\s\S]{0,400}this\._appendKindHint\?\.\(\);[^\n]*\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-workbench.js')) && /this\.listEl\.innerHTML = '';\n\s*this\._appendKindHint\?\.\(\);\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-column.js')), '§9 N5 …the two renders that WIPE the list (the workbench, the column list) draw the line again after the wipe (the adversarial read: drawn once in _renderInner, it was wiped)');

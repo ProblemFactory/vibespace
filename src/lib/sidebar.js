@@ -1351,13 +1351,18 @@ class Sidebar {
    *  narrowed hid a conversation of the tile's name without a word): while the «Open the session list» search stands, the matches
    *  the person's status filter leaves out are counted in one line, and the ARCHIVED ones in their own (the default filter hides
    *  Archived — the person narrowed nothing: never blamed on their filter, the cure of the batch-4 verdict) — not a quick view's
-   *  (LIVE / STOP), not the Tasks tab's. The filter stays theirs. Drawn again by each render that wipes the list. */
+   *  (LIVE / STOP), not the Tasks tab's. The filter stays theirs. Drawn again by each render that wipes the list. The archived
+   *  line carries its DOOR (B-54d9 cure 3): «Show archived», the very act Locate's toast hands (`_locateDoor('archived')`). */
   _appendStatusHint() {
     if (!this.listEl) return;
-    const say = (text) => { const row = document.createElement('div'); row.className = 'empty-hint sidebar-status-hint'; row.textContent = text; this.listEl.appendChild(row); };
+    const say = (text, door = null) => { const row = document.createElement('div'); row.className = 'empty-hint sidebar-status-hint';
+      const label = document.createElement('span'); label.textContent = text + (door ? ' ' : ''); row.append(label);
+      if (door) { const b = document.createElement('button'); b.type = 'button'; b.className = 'sidebar-kind-hint-btn'; b.textContent = door.label; b.onclick = () => this._locateDoor(door.why); row.append(b); }
+      this.listEl.appendChild(row);
+    };
     const n = this._statusHid || 0, a = this._archivedHid || 0;
     if (n) say(n === 1 ? tr('1 more match is hidden by your status filter.') : tr('{n} more matches are hidden by your status filter.', { n }));
-    if (a) say(a === 1 ? tr('1 more match is archived.') : tr('{n} more matches are archived.', { n: a })); // the default filter hides Archived: its own words (B-54d9 cure)
+    if (a) say(a === 1 ? tr('1 more match is archived.') : tr('{n} more matches are archived.', { n: a }), { label: tr('Show archived'), why: 'archived' }); // the default filter hides Archived: its own words (B-54d9 cure) and its door (cure 3)
   }
 
   _renderInner() {
