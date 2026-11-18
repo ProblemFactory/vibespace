@@ -495,7 +495,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
     const mine = by.kind === 'agent' && by.actorId && keyId && by.actorId === keyId;
     return { ...r, ended: { ...r.ended, by: mine ? { kind: 'agent', actorId: by.actorId, name: by.name ? beltRow({ name: by.name }).name : null, ...(by.forced ? { forced: true } : {}) } : { kind: by.kind === 'agent' ? 'agent' : 'person' } } };
   };
-  const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return []; } };
+  const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return null; } };   // the chain's cure (the U3d should): null = could not be read (unreadable, never «no groups»)
   // lane lg-group-parents U3d: the ONE reader's ancestors; a read that throws (or answers no list) is null = UNREADABLE (its read, 2)
   const lineageOfIds = (ids) => { if (typeof lineageOf !== 'function') return []; try { const l = lineageOf(ids); return Array.isArray(l) ? l : null; } catch { return null; } };
   const targetOf = (base, inh) => ({ ...base, inherited: Array.isArray(inh) ? inh : [], ...(Array.isArray(inh) ? {} : { groupsUnreadable: true }) });
@@ -504,8 +504,8 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
     const hit = findSession(target || caller.conversationId);
     if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
     const [s, id] = hit;
-    const gl = groupsOfLive(s, id);
-    const v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: gl, ...require('./groups-hold.js').fact() }, lineageOfIds(gl)));   // lane lg-group-parents U3d: + the lineage   // ONE rule: opener / self / the grant's reach (B-3190)
+    const glr = groupsOfLive(s, id), gl = glr || [];
+    const v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl)));   // lane lg-group-parents U3d: + the lineage   // ONE rule: opener / self / the grant's reach (B-3190)
     if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id, by: (v && v.by) || null };   // lane end-obeys-verdict: how the key reached it (`opener` = it opened it)
   }
@@ -578,7 +578,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (typeof archive !== 'function') return { ok: false, code: 'not_ready', why: 'the archive path is not wired yet' };
       const hit = findSession(args.target);
       let f;   // the target's facts: { s?, id?, conversationId, sessionKey, name, groups }
-      if (hit) { const [s, id] = hit; const gl = groupsOfLive(s, id); f = { s, id, conversationId: idOf(s), sessionKey: keyOf(s), name: s.name || null, groups: gl, inherited: lineageOfIds(gl) }; }   /* lane lg-group-parents U3d */
+      if (hit) { const [s, id] = hit; const glr = groupsOfLive(s, id), gl = glr || []; f = { s, id, conversationId: idOf(s), sessionKey: keyOf(s), name: s.name || null, groups: gl, inherited: glr === null ? null : lineageOfIds(gl) }; }   /* lane lg-group-parents U3d */
       else {
         let d = null; try { d = deadOf(args.target); } catch { d = null; }
         if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target };

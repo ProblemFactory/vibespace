@@ -597,6 +597,11 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       await verbsOf(() => ['tg-x'], () => ({ conversationId: 'k9', sessionKey: 'claude:k9', name: 'ended', groups: ['tg-c'], inherited: ['tg-p'] }))['conversations.archive']({ target: 'k9' }, ctx);
       await verbsOf(() => ['tg-x'], () => ({ conversationId: 'k9', sessionKey: 'claude:k9', name: 'ended', groups: ['tg-c'], inherited: null }))['conversations.archive']({ target: 'k9' }, ctx);
       ok(seen.length === 4 && seen[0].groupsUnreadable === true && J(seen[0].inherited) === '[]' && !seen[1].groupsUnreadable && J(seen[1].inherited) === '["tg-p"]' && J(seen[2].inherited) === '["tg-p"]' && !seen[2].groupsUnreadable && seen[3].groupsUnreadable === true, 'conversation-ops: a lineage read that throws hands the reach an UNREADABLE target; a stopped target is judged with the lineage the wiring read (its own, never re-read), and one read as null is unreadable', seen);
+      // the chain's cure (the U3d read's should): a target whose OWN Task Groups could not be read is unreadable too (was «in no group»)
+      const seenG = [];
+      await OPS2.automationVerbs({ activeSessions: new Map([['w-0001', { claudeSessionId: 'k1', name: 'child' }]]), groupsOf: () => { throw new Error('the store'); }, lineageOf: () => ['tg-p'] })['conversations.end']({ target: 'w-0001' }, { ...ctx, reach: (t) => { seenG.push(t); return { ok: false, code: 'not_granted', why: 'stop here' }; } });
+      const mpwSrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
+      ok(seenG.length === 1 && seenG[0].groupsUnreadable === true && /const automationGroupsStrict = \(s, id\) => \{ const g = automationGroupsRead\(s, id\); if \(g\.unreadable\) throw/.test(mpwSrc) && /groupsOf: automationGroupsStrict,/.test(mpwSrc), 'conversation-ops (the cure): a reach target whose own Task Groups could not be read is handed to the reach UNREADABLE — the wiring\'s strict read throws', seenG);
     }
   }
   // the chain's cure (E, the U3c read): an API proposal's approve judges the LIVE lineage while its conversation runs — the real
@@ -685,7 +690,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
       const CUTD = '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows }) : null;';
       ok(fsrc.split(CUTD).length === 2, 'CONTROL setup: the via line hands the access rows, exactly once');
-      const CFx = MD.load('src/channel-filter.js', fsrc.replace(CUTD, '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members) : null;'), 'via-own-only');
+      const CFx = MD.load('src/channel-filter.js', fsrc.replace(CUTD, '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members) : null;'), 'via-own-only');   // stale-pins: kept (the mutant restores the release's own-only via line)
       const cx = CFx.validateWatchers([wD('k1')], accP, { members: membersD });
       ok(!cx.ok && cx.code === 'watcher-needs-access', 'CONTROL: a via judge without the access rows (own groups only) refuses the child — the leg above would be red', cx);
     } finally { try { fs.rmSync(MD.dir, { recursive: true, force: true }); } catch { } }

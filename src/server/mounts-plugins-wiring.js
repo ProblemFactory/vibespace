@@ -226,6 +226,9 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // would admit the conversation the owner left out of All agents (the engine refuses groups_unreadable instead)
 const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { const ids = grantMemberIds(tasks, { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); const gg = tasks.grantGroupsOf(ids); return { ids: gg.ids, inherited: gg.inherited, unreadable: !!ids.unread }; } catch { return { ids: [], unreadable: true }; } };   // held ⇒ throws: unreadable; B-55dc ⇒ unreadable (lane bl-windows seam) · lane lg-group-parents U3d: + the lineage over the same ids (the ONE reader)
 const automationGroupsOf = (s, id) => automationGroupsRead(s, id).ids;
+// the chain's cure (the U3d read's should): a REACH target whose Task Groups could not be read throws — conversation-ops reads it
+// UNREADABLE (it was «in no group»: a parent's or its own group's «除了» was not applied to it)
+const automationGroupsStrict = (s, id) => { const g = automationGroupsRead(s, id); if (g.unreadable) throw new Error('the Task Groups could not be read'); return g.ids; };
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
 const automationSettings = require('./harness-config-sync.js').accessorsFor({ serverSetting, harnesses: require('../harnesses') });
@@ -342,7 +345,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
   // write, the For-you store's open asks of a conversation (its own: by agent, not a notice) and their dismissal, the turn fact, and
   // an ENDED conversation's facts (its session key from the stores that still name it — the sidebar's names, the Task Groups — else claude:<id>)
-  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf, lineageOf: (ids) => { const tk = getTasks && getTasks(); return tk ? tk.grantGroupsOf(ids).inherited : []; },
+  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsStrict, lineageOf: (ids) => { const tk = getTasks && getTasks(); return tk ? tk.grantGroupsOf(ids).inherited : []; },
     archive: (key) => persistenceRouter.archiveSession(key),
     asksOf: (key) => { if (userTodos.isHeldUnread?.()) throw Object.assign(new Error(userTodos.unreadRefusal('archiving a conversation (its open asks are unread)')), { code: 'todos-unread' }); try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },   // B-44f3: held ⇒ refused by name (never «no open asks»)
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),

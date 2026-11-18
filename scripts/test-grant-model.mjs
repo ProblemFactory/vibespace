@@ -298,6 +298,12 @@ console.log('⑥ lane lg-group-parents: a child group uses what its parents are 
     ok(M2.admits([row([PONLY])], child).ok, 'CONTROL (d): a model that ignores «仅本组» admits the child — ⑥ «仅本组» would be red');
     const M3 = MZ.load('src/grant-model.js', src.replace(EXC, ''), 'except-own-only');
     ok(M3.admits([row([{ kind: 'everyone' }], [P])], child).ok, 'CONTROL (e): an exception judged over own groups only lets the child escape «everyone except the parent» — ⑥ rule ③ would be red');
+    // the chain's cure (the U1fu read's should): the rule-④ guard — a model that lets the group-visibility door read the lineage
+    // admits a child through its parent's visibility row (the leg «rule ④ holds IN THE MODEL» would be red)
+    const G4 = "  const toInherited = row.door === 'group-visibility' ? null : F.inherited;";
+    ok(src.split(G4).length === 2, 'CONTROL setup: the rule-④ guard is found exactly once');
+    const M4 = MZ.load('src/grant-model.js', src.replace(G4, '  const toInherited = F.inherited;'), 'rule4-off');
+    ok(M4.admits([{ door: 'group-visibility', resource: 'tg-p', to: [{ kind: 'group', id: 'tg-p', level: 'visible' }], except: [] }], child).ok, 'CONTROL (rule ④): a model without the guard admits a child through its parent\'s visibility row — the rule-④ leg would be red');
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 

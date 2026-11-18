@@ -51,8 +51,8 @@ const crypto = require('crypto');
 const A = require('../automation-keys.js');
 const { tokenMatches } = require('../pairing-token.js');   // lane fleet-feedback-marks: the maintainer key's sha, compared in constant time
 const GM = require('../grant-model.js');   // lane grants-unify: THE grant model (admits)
-// lane lg-group-parents U3d (its read, 3): a caller's lineage as the model reads it — none, a list, or (anything else) as handed:
-// the model reads that as unreadable, never as «no parents»
+// lane lg-group-parents U3d (its read, 3): a caller's lineage as the model reads it — none (undefined / null: no lineage handed), a
+// list, or anything else as handed: the model reads that as unreadable, never as «no parents»
 const lineageIn = (x) => (x == null ? [] : Array.isArray(x) ? x.map(String) : x);
 const GS = require('./grants-store.js');   // lane grants-unify: a grant's WHO and REACH are rows of the ONE grants store
 const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
