@@ -283,6 +283,9 @@ function restartChild(why) {
 const AS = require(path.join(__dirname, '..', '..', 'src', 'agy-store.js'));
 const SUB_TAIL_MS = Math.max(200, Number(process.env.AGY_WEBUI_SUB_TAIL_MS) || 2000);
 const SPAWN_LOOK_MS = Math.max(1000, Number(process.env.AGY_WEBUI_SUB_LOOK_MS) || 60000);
+// B-0f7b: how long the tail keeps reading a sub that is over (idle / no longer alive) for its ANSWER — the parent's message
+// store may get it after the tick that first saw the sub over (the order a real agy writes them is not measured)
+const SUB_ANSWER_WAIT_MS = Math.max(200, Number(process.env.AGY_WEBUI_SUB_ANSWER_WAIT_MS) || 30000);
 const SUB_MAX = 4000;          // a timeline text's clip in the journal (the full text stays in the store)
 const subs = new Map();        // subId → {toolCallId, row, task, answer, startedAt, offset, lastIdx, st, steps, last, files, done, card}
 const spawns = new Map();      // the invoke_subagent row's toolCallId → {step, at, subId}
@@ -359,7 +362,7 @@ function linkSpawns() {
     if (hit) adoptSub(hit[0], row.id);
   }
 }
-function tailSub(sub) {
+function tailSub(sub, parentMessages = null) {   // parentMessages: the tick's ONE read of the parent's message store (B-0f7b)
   const p = AS.storePaths(sub.row.id);
   const t = storeLines(p.transcript, sub.offset);
   if (t) { sub.offset = t.next; for (const line of t.lines) addStep(sub, AS.transcriptStepOf(line)); }
@@ -367,10 +370,17 @@ function tailSub(sub) {
   const row = AS.subagentRowOf(safeJsonParse(storeRead(`${AS.storePaths(meta.sessionId).subagents}/${sub.row.id}.json`)));
   if (row) sub.row = row;
   const over = !sub.row.alive || AS.subPhaseOf(sub.last) === 'idle';
+  if (!over) sub.overAt = 0;
   if (over) {
-    const answers = AS.answersOf(storeRows(AS.storePaths(meta.sessionId).messages, AS.messageRowOf), { parentId: meta.sessionId, subId: sub.row.id });
+    const answers = AS.answersOf(parentMessages ? parentMessages() : storeRows(AS.storePaths(meta.sessionId).messages, AS.messageRowOf), { parentId: meta.sessionId, subId: sub.row.id })
+      .filter((a) => !sub.wokeAt || !(a && a.at) || a.at > sub.wokeAt);   // B-0f7b: a sub the parent woke again answers anew — never its last round's words
     if (answers.length) sub.answer = answers[answers.length - 1];
-    if (!sub.row.alive && /KILL|CANCEL|STOP|ABORT|FAIL|ERROR/i.test(String(sub.row.state || ''))) for (const rec of AS.closePendingRecords(sub.st)) record('sub', { subId: sub.row.id, toolCallId: sub.toolCallId, rec }); // lane agy-card-details gap 5: an ended sub never leaves a tool card «运行中»
+    const stopped = !sub.row.alive && /KILL|CANCEL|STOP|ABORT|FAIL|ERROR/i.test(String(sub.row.state || ''));
+    if (stopped) for (const rec of AS.closePendingRecords(sub.st)) record('sub', { subId: sub.row.id, toolCallId: sub.toolCallId, rec }); // lane agy-card-details gap 5: an ended sub never leaves a tool card «运行中»
+    // B-0f7b: an ended sub with NO answer read yet keeps its tail — the answer may land after this tick — until it is read
+    // or SUB_ANSWER_WAIT_MS passes (a sub that was stopped writes none: it is done at once)
+    if (!sub.overAt) sub.overAt = Date.now();
+    if (!sub.answer && !stopped && Date.now() - sub.overAt < SUB_ANSWER_WAIT_MS) { emitCard(sub); return; }
     sub.done = true;
   }
   emitCard(sub);
@@ -378,7 +388,9 @@ function tailSub(sub) {
 function subTick() {
   try {
     linkSpawns();
-    for (const sub of subs.values()) if (!sub.done) tailSub(sub);
+    // B-0f7b: the parent's message store read at most ONCE a tick, for every sub that asks it (a waiting sub asks each tick)
+    let msgs = null; const parentMessages = () => msgs || (msgs = storeRows(AS.storePaths(meta.sessionId).messages, AS.messageRowOf));
+    for (const sub of subs.values()) if (!sub.done) tailSub(sub, parentMessages);
   } catch (e) { log(`subagent tail: ${e.message}`); }
   const looking = [...spawns.values()].some((s) => !s.subId && Date.now() - s.at < SPAWN_LOOK_MS);
   if (!looking && ![...subs.values()].some((s) => !s.done)) stopSubTail();
@@ -395,6 +407,8 @@ function subsAtExit() {
   stopSubTail();
   if (!subs.size) return;
   try { for (const sub of subs.values()) if (!sub.done) tailSub(sub); } catch { }
+  // B-0f7b: a sub already ENDED and only waiting for its answer is completed, as it was — never re-stamped stopped with agy
+  for (const sub of subs.values()) if (!sub.done && sub.overAt) { sub.done = true; emitCard(sub); }
   for (const sub of subs.values()) if (!sub.done) { for (const rec of AS.closePendingRecords(sub.st)) record('sub', { subId: sub.row.id, toolCallId: sub.toolCallId, rec }); sub.done = true; sub.ended = true; sub.row = { ...sub.row, alive: false, state: 'SUBAGENT_STATE_STOPPED_WITH_PARENT' }; emitCard(sub); }
 }
 /** The stream's invoke_subagent row: remember it, link it now when the stream names the sub, else let the tail look. */
@@ -409,6 +423,7 @@ function noteSendTo(recipient) {
   const sub = subs.get(String(recipient || ''));
   if (!sub || !sub.done || sub.ended) return;
   sub.done = false; sub.answer = null; sub.last = null;
+  sub.overAt = 0; sub.wokeAt = Date.now();   // B-0f7b: a new round waits for a NEW answer (its own end, its own bound)
   emitCard(sub);
   armSubTail();
 }

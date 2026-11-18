@@ -1169,6 +1169,44 @@ console.log('— ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): the invoke_sub
       ok('RED control: a copy without the stop keeps its tail on after the sub ended (no «tail off») — the leg above can go red', src.includes(cut) && /subagent tail on/.test(wlog(m)) && !/subagent tail off/.test(wlog(m)), wlog(m).slice(-300));
     } finally { await m.stop(); }
   });
+  // B-0f7b: THE ANSWER CAN LAND LATE — the tail read a sub's answer only on the tick that first saw it over, then stopped
+  // (sub.done): an answer the parent's store got after that tick was never read and the card stayed «completed» with no
+  // result. Steps first, the answer three tail periods later: the card must end WITH it; with no answer at all the tail
+  // still ends at its bound; the release's wrapper is the red control.
+  const lateLeg = (name, wrapper, { answer = true, look = 2500, bound = '3000' } = {}) => async (ok) => {
+    const L = await mkStore(name);
+    const w = startWrapper({ wrapper, env: env(L.home, { AGY_WEBUI_SUB_ANSWER_WAIT_MS: bound }) });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'please start a subagent', msgId: name });
+      await w.until(() => w.find('subagent', (r) => r.status === 'running'), 8000, 'the running card');
+      fs.appendFileSync(L.t, L.rest.join('\n') + '\n');                          // the sub's last steps: it is over …
+      await w.until(() => w.find('subagent', (r) => r.status === 'completed'), 8000, 'the ended card');
+      await sleep(600);                                                             // … three tail periods with no answer
+      if (answer) fs.copyFileSync(path.join(FIXS, 'answer.json'), path.join(L.store, 'brain', P, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json'));
+      let withAnswer = null;
+      try { withAnswer = await w.until(() => w.find('subagent', (r) => r.status === 'completed' && /88\/100/.test(r.result || '')), look, 'the answer'); } catch { withAnswer = null; }
+      let off = false;
+      try { await w.until(() => /subagent tail off/.test(wlog(w)), 4000, 'the tail off'); off = true; } catch { off = false; }
+      return { withAnswer, off, log: wlog(w).slice(-300) };
+    } finally { await w.stop(); }
+  };
+  leg(async (ok) => {
+    const r = await lateLeg('agy-sub-late', WRAPPER)(ok);
+    ok('B-0f7b: the sub\'s answer written THREE TAIL PERIODS after its last step is still read — the card ends completed WITH it (88/100), and then the tail stops', !!r.withAnswer && r.off, r);
+  });
+  leg(async (ok) => {
+    const r = await lateLeg('agy-sub-none', WRAPPER, { answer: false, look: 900, bound: '1000' })(ok);
+    ok('B-0f7b: a sub that never writes an answer: the tail still ends at its bound (AGY_WEBUI_SUB_ANSWER_WAIT_MS) — the card completed, no result invented', !r.withAnswer && r.off, r);
+  });
+  leg(async (ok) => {
+    let base = '';
+    try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:data/bin/agy-wrapper.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
+    if (!base) { console.log('  - SKIP B-0f7b RED control: the release b06f36e90 is not in this clone (its history is not here)'); return; }   // said by name, never counted as a pass (test-architecture §75)
+    const f = path.join(MUTBIN, 'agy-wrapper-release-b06f36e90.js'); fs.writeFileSync(f, base);
+    const r = await lateLeg('agy-sub-late-red', f, { look: 1200 })(ok);
+    ok('B-0f7b RED control: the release\'s wrapper stops at the first ended tick — the late answer is never read (the card stays «completed» with no result)', !r.withAnswer, r);
+  });
   for (const out of await Promise.all(legs)) for (const [n, c, e] of out) ok(n, c, e);
 }
 
