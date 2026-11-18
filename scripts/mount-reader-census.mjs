@@ -230,7 +230,7 @@ export const ROWS = [
   ['src/transcript-service.js', 'own-tree', 6, null, `${CLI}; B-3b03 +1: picturePool asks once whether the checkout ships its worker script (a constant over __dirname — the device bundle has none)`],
   ['src/turn-carry.js', 'own-tree', 2, null, `${DATA}; lane report-mark-on-ack r3: the outstanding deliveries by conversation (data/turn-carry-outstanding.json), read once when the routes are set up — the tidy after r4: opened, its size checked, read only under its 1 MiB bound`],
   ['src/usage-anchors.js', 'own-tree', 1, null, CLI],
-  ['src/usage-cache-write.js', 'own-tree', 2, null, CLI],
+  ['src/usage-cache-write.js', 'own-tree', 3, null, CLI],   // lane lg-store-writes U6.1 +1: readCacheJson / listCacheDir — the hub's readers of the readings folder
   ['src/usage-estimator.js', 'own-tree', 7, null, CLI], // B-403e −5: an anchor file's signature stat asks through src/run-reads.js (once per run) · +2 (hotfix usage-ledger-walk ②): _primePairs lists data/usage-anchors and reads each file's last line, once per cost-memo epoch; +1 (usage-relearn-stepped): lines() reads a grown anchor file's appended tail (openSync/readSync of the same dir); +1 (round 2, MUST 3): a fold's judge stats its own anchor file before each chunk (the identity's lines moved?); +3 (round 3): a fold's proof and a throw's repair stat the file (_sigNow), the per-identity meta stats it (_metaOf) and reads a grown file's appended bytes (_metaTail); +1 (round 4): _seedRates reads rates.json once a process; +1 (round 5): _readsNoFile stats a cached identity's file at its open (a rewrite is a cold read)
   ['src/usage-hold-road.js', 'own-tree', 8, null, DATA], // lane ledger-dedup-law r12: +1 = the set-aside folder's listing (fs.promises readdir of data/usage-history/_set-aside — its SET_ASIDE_MAX bound, once per setting-aside) // r11: UsageHistory's hold road, moved out of src/usage-history.js with its reads — the ingest's rid index (its stat + the stat after an append), the growth alarm's stat, the dedup's after-stat, the hub-kept cursor file, the held months' listing and the hold's async-road readdir + stat — all data/usage-history
   ['src/usage-reset-claim.js', 'own-tree', 1, null, 'lane account-reset-door: its own data/usage-reset-claims.json — read once at start (K2: the store writer writes it, on its own thread)'],
@@ -239,7 +239,7 @@ export const ROWS = [
   ['src/usage-cold-walk.js', 'own-tree', 3, null, CLI], // r3: + the sync one-line read (a hash hit's string compare) // B-9428 r2: the ledger's cold rows at their (shard, offset) — the worker's fold, aggregate()/rows(), the popup's one line
   ['src/usage-index-worker.js', 'own-tree', 6, null, CLI],
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],
-  ['src/usage-routes.js', 'own-tree', 23, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
+  ['src/usage-routes.js', 'own-tree', 14, null, CLI],   // lane lg-store-writes U6.1 −9: its reads of the readings folder go through the cache module's readers // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/usage-walker.js', 'user-path', 12, 'DOOR\\.blocked\\(', 'the usage walk: a blocked project folder skipped this pass, said once'],
   ['src/user-todos.js', 'own-tree', 2, null, DATA], // B-44f3: +1 — a held store's read again (fs.promises.readFile of its own data/user-todos.json, off the loop)
   ['src/vnc.js', 'own-tree', 3, null, PROC],

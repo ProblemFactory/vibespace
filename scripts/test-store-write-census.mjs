@@ -1855,5 +1855,128 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 
+// ── ⑤ U6 (lane lg-store-writes, B-0248 — 主开发 02:59Z, R1 + R2): NO READ OF THE READINGS FOLDER BYPASSES THE CACHE MODULE ──
+// The usage readings' write moves onto the store writer only when EVERY hub read of data/usage-cache goes through the cache
+// module's own read (src/usage-cache-write.js — the one place the pending copy can be consulted first). DERIVED BY SEARCH, per
+// file: a path into the folder (USAGE_CACHE_DIR, a `cacheDir` parameter, a local built from them by path.join / cacheFileFor or
+// an alias — the nearest earlier definition decides, an arrow helper's body included) reaching a raw read (fs read / stat /
+// readdir / open, B-403e's run-reads RR.*, or a same-file helper that reads its own first parameter). Every file with such
+// reads is a ROW with its exact count (a move lowers its row in the same commit); a new file or a rise is red BY NAME. The
+// cache module itself is the door (exempt by name). Comments and string contents are never code here.
+console.log('⑤ U6 — the readings folder: every raw read in the hub outside the cache module is a named row');
+{
+  const views = (t) => {
+    let code = '', keep = '', i = 0, q = null; const n = t.length;
+    while (i < n) {
+      const c = t[i];
+      if (q) {
+        if (c === '\\') { keep += t.slice(i, i + 2); i += 2; continue; }
+        keep += c;
+        if (c === q) { q = null; code += c; } else if (c === '\n') code += c;
+        i++; continue;
+      }
+      if (c === "'" || c === '"' || c === '`') { q = c; code += c; keep += c; i++; continue; }
+      if (t.startsWith('//', i)) { const j = t.indexOf('\n', i); i = j < 0 ? n : j; continue; }
+      if (t.startsWith('/*', i)) { const j = t.indexOf('*/', i + 2), end = j < 0 ? n : j + 2, nl = '\n'.repeat((t.slice(i, end).match(/\n/g) || []).length); code += nl; keep += nl; i = end; continue; }
+      code += c; keep += c; i++;
+    }
+    return { code, keep };
+  };
+  const RD_SCOPE = /USAGE_CACHE_DIR|require\('\.\.?\/(?:\.\.\/)?(?:usage-cache-write|window-stamp|rate-limit-capture|reading-lag)\.js'\)/;
+  const RD_SEEDS = new Set(['USAGE_CACHE_DIR', 'cacheDir']);
+  const RD_BASE = ['fs\\.(?:readFileSync|readdirSync|statSync|existsSync|openSync|lstatSync)', 'RR\\.(?:readText|readdir|stat)', 'fs\\.promises\\.(?:readFile|readdir|stat)'];
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sinkRe = (H) => new RegExp(`\\b(?:${[...RD_BASE, ...H.map((h) => `(?<![\\w$.])${esc(h)}`)].join('|')})\\(`, 'g');
+  const firstArg = (s, j) => { let depth = 1, k = j; while (k < s.length && depth) { const ch = s[k]; if ('([{'.includes(ch)) depth++; else if (')]}'.includes(ch)) depth--; else if (ch === ',' && depth === 1) break; k++; } return s.slice(j, k); };
+  const PATH_ARG = /(?:path\.(?:join|resolve)|cacheFileFor)\(\s*(?:[\w$]+\.)?([A-Za-z_$][\w$]*)/;
+  const helpersOf = (code) => {
+    const out = [];
+    for (const rx of [/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(\s*([A-Za-z_$][\w$]*)/g, /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(\s*([A-Za-z_$][\w$]*)[^)]*\)\s*=>/g]) {
+      for (const m of code.matchAll(rx)) {
+        const name = m[1], param = m[2];
+        let body = code.slice(m.index + m[0].length, m.index + m[0].length + 1500);
+        const cut = /\n(?:function |const [\w$]+ = (?:async )?\(|  [\w$]+\(.*\) \{$)/.exec(body); if (cut) body = body.slice(0, cut.index);
+        for (const s0 of body.matchAll(sinkRe([]))) { if (new RegExp(`^\\s*${esc(param)}\\s*(?:\\)|$|,)`).test(firstArg(body, s0.index + s0[0].length))) { if (!out.includes(name)) out.push(name); break; } }
+      }
+    }
+    return out;
+  };
+  /** one file's text → null (out of scope) | [{line, call, via}] */
+  const readsOf = (src) => {
+    const { code, keep } = views(src);
+    if (!RD_SCOPE.test(keep)) return null;
+    const lines = code.split('\n'), defs = new Map(), memo = new Map();
+    lines.forEach((l, i) => { for (const m of l.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]*)/g)) { if (!defs.has(m[1])) defs.set(m[1], []); defs.get(m[1]).push([i + 1, m[2]]); } });
+    const tainted = (name, at, depth = 0) => {
+      if (depth > 8) return false;
+      const ds = (defs.get(name) || []).filter((d) => d[0] <= at);
+      if (!ds.length) return RD_SEEDS.has(name);
+      const [ln, rhs] = ds.reduce((a, b) => (b[0] >= a[0] ? b : a)), key = `${name}@${ln}`;
+      if (memo.has(key)) return memo.get(key);
+      memo.set(key, false);
+      const r = rhsTaints(rhs, ln, depth + 1); memo.set(key, r); return r;
+    };
+    const rhsTaints = (rhs, at, depth) => {
+      let m = PATH_ARG.exec(rhs);
+      if (m && (RD_SEEDS.has(m[1]) || tainted(m[1], at, depth))) return true;
+      m = /^\s*(?:\([^)]*\)|[\w$]+)\s*=>\s*(.*)$/.exec(rhs);
+      if (m) return rhsTaints(m[1], at, depth);
+      m = /^\s*(?:[\w$]+\.)?([A-Za-z_$][\w$]*)\s*(?:\|\||$)/.exec(rhs);
+      return !!(m && (RD_SEEDS.has(m[1]) || tainted(m[1], at, depth)));
+    };
+    const SK = sinkRe(helpersOf(code)), sites = [];
+    lines.forEach((l, i) => {
+      for (const m of l.matchAll(SK)) {
+        const a = firstArg(l, m.index + m[0].length);
+        let via = null; const pm = PATH_ARG.exec(a);
+        if (pm && (RD_SEEDS.has(pm[1]) || tainted(pm[1], i + 1))) via = pm[1];
+        else { const cm = /^\s*(?:[\w$]+\.)?([A-Za-z_$][\w$]*)\s*(?:\(|\)|$)/.exec(a); if (cm && (RD_SEEDS.has(cm[1]) || tainted(cm[1], i + 1))) via = cm[1]; }
+        if (via) sites.push({ line: i + 1, call: m[0].slice(0, -1), via });
+      }
+    });
+    return sites;
+  };
+  const RD_DOOR = 'src/usage-cache-write.js';   // THE cache module: its own readers ARE the door (readCacheObject / readCacheJson / listCacheDir)
+  // file → [count, class, why]; 'debt' = a raw read U6.2–U6.4 move onto the door (a row only falls); 'folder' = the folder itself
+  // made / checked, never a reading
+  const READINGS_ROWS = {
+    'src/server/usage-pool-engine.js': [12, 'debt', 'the pool engine — B-403e\'s run-reads memo (RR.readText / RR.readdir over the folder) and its raw reads (the reset credit, the account repair, the window lag) — U6.2'],
+    'src/reading-repair.js': [6, 'debt', 'the reading repair\'s own _readJson / readdir over the folder — U6.3'],
+    'src/rate-limit-capture.js': [2, 'debt', 'a capture\'s base read (fileFor) — shared with the device agent — U6.3'],
+    'src/quota-model-migrate.js': [2, 'debt', 'the quota model\'s migration walk (readdir + each reading) — U6.4'],
+    'src/window-stamp.js': [1, 'debt', 'the `.window-` sidecar\'s ONE reader — U6.3'],
+    'src/weekly-lanes-unfold.js': [1, 'debt', 'the weekly lanes\' unfold walk (readdir) — U6.4'],
+    'src/server/auto-cli-loop.js': [1, 'debt', 'the auto-cli loop\'s per-account reading — U6.4'],
+    'src/server/cli-env.js': [1, 'debt', 'the CLI env\'s __models__ read — U6.4'],
+    'src/server/agent-tool-generators.js': [1, 'folder', 'ensureDir(USAGE_CACHE_DIR) at boot — the folder made, never a reading'],
+  };
+  const RD_FILES = censusFiles(REPO).filter((f) => f !== RD_DOOR);
+  const RD_BASE_SITES = new Map(RD_FILES.map((f) => [f, readsOf(fs.readFileSync(path.join(REPO, f), 'utf8'))]));   // each file read and judged ONCE; a control re-judges only the file it plants in
+  const readingsCensus = (over = {}) => {
+    const got = new Map();
+    for (const f of RD_FILES) { const r = over[f] !== undefined ? readsOf(over[f]) : RD_BASE_SITES.get(f); if (r && r.length) got.set(f, r); }
+    for (const [f, src] of Object.entries(over)) if (!got.has(f) && f !== RD_DOOR && !RD_BASE_SITES.has(f)) { const r = readsOf(src); if (r && r.length) got.set(f, r); }
+    const bad = [];
+    for (const [f, sites] of got) { const row = READINGS_ROWS[f]; if (!row) bad.push(`UNNAMED: ${f} reads the readings folder outside the cache module (${sites.map((x) => `${x.line} ${x.call}(${x.via}…)`).join(', ')}) — read it through src/usage-cache-write.js`); else if (row[0] !== sites.length) bad.push(`${f}: ${sites.length} raw reads of the readings folder, its row says ${row[0]} (${sites.map((x) => `${x.line} ${x.call}`).join(', ')}) — a move lowers the row; a new read goes through the cache module`); }
+    for (const f of Object.keys(READINGS_ROWS)) if (!got.has(f)) bad.push(`${f}: its row says ${READINGS_ROWS[f][0]} raw reads, the tree has none — drop the row`);
+    return { got, bad };
+  };
+  const RC0 = readingsCensus();
+  const sumR = [...RC0.got.values()].reduce((n, x) => n + x.length, 0);
+  ok(!RC0.bad.length, `the readings folder: ${sumR} raw reads in ${RC0.got.size} files outside the cache module, each file a row with its count (U6.1: usage-routes' nine moved onto the door — readCacheJson / listCacheDir)`, RC0.bad);
+  ok(!RC0.got.has('src/usage-routes.js'), 'usage-routes reads the readings folder ONLY through the cache module (U6.1)');
+  const CE = fs.readFileSync(path.join(REPO, 'src/server/cli-env.js'), 'utf8'), WS = fs.readFileSync(path.join(REPO, 'src/window-stamp.js'), 'utf8'), UR = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
+  const c1 = readingsCensus({ 'src/zz-readings-plant.js': "const fs = require('fs'); const usageWrite = require('./usage-cache-write.js');\nfunction zz(USAGE_CACHE_DIR) { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'a.json')); }\n" });
+  ok(c1.bad.some((x) => /^UNNAMED: src\/zz-readings-plant\.js /.test(x)), 'NEGATIVE CONTROL: a NEW file reading the folder raw is red by name', c1.bad);
+  const c2 = readingsCensus({ 'src/server/cli-env.js': CE + "\nfunction zzLocal() { const f9 = path.join(USAGE_CACHE_DIR, 'y.json'); return fs.readFileSync(f9, 'utf-8'); }\n" });
+  ok(c2.bad.some((x) => /^src\/server\/cli-env\.js: 2 raw reads/.test(x)), 'NEGATIVE CONTROL: a raw read through a LOCAL built from the folder path (a plain pattern misses it) is red by name', c2.bad);
+  const c3 = readingsCensus({ 'src/window-stamp.js': WS + "\nfunction zzRd(p) { return fs.readFileSync(p, 'utf8'); }\nfunction zzUse(cacheDir) { return zzRd(path.join(cacheDir, 'z.json')); }\n" });
+  ok(c3.bad.some((x) => /^src\/window-stamp\.js: 2 raw reads/.test(x)), 'NEGATIVE CONTROL: a raw read through a same-file HELPER that reads its parameter is red by name', c3.bad);
+  const c4 = readingsCensus({ 'src/server/cli-env.js': CE + "\n// fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'))\nconst zzS = \"fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'))\";\n" });
+  ok(!c4.bad.length, '…while the same read in a comment and in a string adds nothing', c4.bad);
+  const c5 = readingsCensus({ 'src/usage-routes.js': UR + "\nfunction zzBack() { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'), 'utf-8'); }\n" });
+  ok(c5.bad.some((x) => /^UNNAMED: src\/usage-routes\.js /.test(x)), 'NEGATIVE CONTROL: a raw read put back in usage-routes (U6.1 moved them all) is red by name', c5.bad);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

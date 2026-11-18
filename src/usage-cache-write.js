@@ -71,8 +71,13 @@ function cacheFileFor(cacheDir, key) {
 function isCacheFileName(fn) { return /\.json$/.test(fn) && !fn.startsWith('__models__'); }
 
 function readCacheObject(cacheDir, key) {
-  try { return JSON.parse(fs.readFileSync(cacheFileFor(cacheDir, key), 'utf-8')) || null; } catch { return null; }
+  try { return readCacheJson(cacheFileFor(cacheDir, key)) || null; } catch { return null; }
 }
+/** THE CACHE MODULE'S READERS (lane lg-store-writes, B-0248 U6.1): every hub read of a file in the readings folder goes
+ *  through these — so that when the folder's writes move off the main thread (U6.5) ONE place consults the pending copy
+ *  first. Each throws exactly as the raw call it replaces did (a caller keeps its own try). */
+function readCacheJson(file) { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
+function listCacheDir(dir) { return fs.readdirSync(dir); }
 
 // ── lifting a stored object into the typed model ────────────────────────────
 
@@ -629,7 +634,7 @@ function writeSidecar(cacheDir, name, payload) {
 }
 
 module.exports = {
-  cacheFileFor, isCacheFileName, readCacheObject,
+  cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
   carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,

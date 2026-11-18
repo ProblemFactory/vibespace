@@ -251,7 +251,7 @@ const CACHE_READ_ROWS = {
 // builder, a cache reader) and reads it, lists it or BUILDS A PATH into it (a read on the next line starts here), or that
 // aliases the dir; async reads (readFile / fs.promises) count like sync ones
 const CACHE_NAMED = /USAGE_CACHE_DIR|usage-cache|\bcacheDir\b|cacheFileFor\(|\bfileFor\(|readCacheObject\(|readRawUsageCache\(/;
-const CACHE_TOUCH = /readFile|readdir|createReadStream|path\.join\(|cacheFileFor\(|\bfileFor\(|readCacheObject\(|readRawUsageCache\(|\bopen(Sync)?\(/;
+const CACHE_TOUCH = /readFile|readdir|createReadStream|path\.join\(|cacheFileFor\(|\bfileFor\(|readCacheObject\(|readRawUsageCache\(|\breadCacheJson\(|\blistCacheDir\(|\bopen(Sync)?\(/;   // lane lg-store-writes U6.1: the cache module's two readers (readCacheJson / listCacheDir) are reads of the cache too
 const CACHE_ALIAS = /=\s*(?:[\w.]+\.)?USAGE_CACHE_DIR\s*[;,)]/;
 // r5 (smaller 3): THE CACHE DIR UNDER ANOTHER NAME — a file's own aliases of it are collected first (an assignment, a
 // DESTRUCTURED name `{ USAGE_CACHE_DIR: X } = …`, a FIELD of another name `this.k = cacheDir` / `{ k: USAGE_CACHE_DIR }`),

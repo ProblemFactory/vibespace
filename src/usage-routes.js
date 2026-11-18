@@ -348,13 +348,13 @@ function ingestPassiveUsage() {
     _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: cm ? cm.id : null };
   } catch { _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
   let entries = [];
-  try { entries = fs.readdirSync(USAGE_CACHE_DIR); } catch { entries = []; }
+  try { entries = usageWrite.listCacheDir(USAGE_CACHE_DIR); } catch { entries = []; }
   for (const fn of entries) {
     if (!fn.endsWith('.json')) continue;
     const key = fn.slice(0, -5);
     if (key === '__models__') { ingestPassiveModels(fn); continue; }
     let u = null;
-    try { u = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { continue; }
+    try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn)); } catch { continue; }
     if (!u || typeof u.fetchedAt !== 'number') continue;
     // A RESET THE SHIPPED STATUSLINE'S OWN WRITE SHOWS (lane account-reset-door r2): it writes the file itself, so its reading is
     // compared HERE against the last one ingested — once a write (a file the write path wrote is compared there, never twice)
@@ -423,7 +423,7 @@ function ingestPassiveUsage() {
 // (now opt-in) /v1/models fetch.
 function ingestPassiveModels(fn) {
   let list = [];
-  try { list = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { return; }
+  try { list = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn)); } catch { return; }
   if (!Array.isArray(list) || !list.length) return;
   const have = new Set((AVAILABLE_MODELS.claude || []).map((m) => m.id));
   const add = list.filter((m) => m && typeof m.id === 'string' && !have.has(m.id))
@@ -489,11 +489,11 @@ const _hostAcctUsage = {};
 // NORMALISER AT LOAD, not a migration: nothing is written; the file keeps its bytes until its next write
 const heldSource = (snap) => { if (snap && typeof snap === 'object') { if (snap.source === 'on-demand') snap.source = 'on-demand-held'; if (Array.isArray(snap.limits)) for (const l of snap.limits) if (l && l.source === 'on-demand') l.source = 'on-demand-held'; } return snap; };
 try {
-  for (const f of fs.readdirSync(USAGE_CACHE_DIR)) {
+  for (const f of usageWrite.listCacheDir(USAGE_CACHE_DIR)) {
     const ma = /^host-([\w-]+)-(sub-[\w-]+)\.json$/.exec(f);
-    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = heldSource(JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8'))); } catch {} continue; }
+    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = heldSource(usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, f))); } catch {} continue; }
     const m = /^host-([\w-]+)\.json$/.exec(f);
-    if (m) { try { _hostUsage[m[1]] = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8')); } catch {} }
+    if (m) { try { _hostUsage[m[1]] = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, f)); } catch {} }
   }
 } catch {}
 // Ledger harvest from remote hosts (ssh, incremental via remote-side cursors).
@@ -801,7 +801,7 @@ async function refreshViaCliPanel(key) {
     fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
     const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
     // preserve org identity + any fields the panel doesn't carry
-    let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
+    let prev = {}; try { prev = usageWrite.readCacheJson(f); } catch { }
     const merged = { ...prev, ...u, scopedWeekly: u.scopedWeekly?.length ? u.scopedWeekly : (prev.scopedWeekly || []) };
     // A preserve-merge inherits IDENTITY, never PROVENANCE (2026-09-07 r2):
     // `corroborated` is a verdict about the write that carried it. This panel
@@ -1449,11 +1449,11 @@ function summarizeCodexRateLimits() {
   // account's quota silently VANISHED. Persisted files also make codex
   // identities visible to the anchors sweep / estimator like claude's.
   try {
-    for (const fn of fs.readdirSync(USAGE_CACHE_DIR)) {
+    for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR)) {
       const m = /^(cxs-[\w-]+|__global_codex__)\.json$/.exec(fn);
       if (!m) continue;
       try {
-        const stored = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
+        const stored = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn));
         // A stored file may ALREADY carry the typed limits (everything written
         // since this model shipped); seed from those rather than from its
         // projected buckets, so a limit the projection cannot show is not lost
