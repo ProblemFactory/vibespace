@@ -2877,23 +2877,40 @@ console.log('㊳ A SHORT VIEW\'S STRIP IS THE PHONE\'S ONE ROW (B-16a9 — int36
 {
   const J = JSON.stringify, CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8'), ST = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
   // A — the REAL _dockShort (its source sliced) over a fake dock: a view under the bound folds the strip, a taller one or a phone does not
-  const shortOf = (src) => { const i = src.indexOf('  _dockShort(dock, h) {'), j = src.indexOf('\n  }\n', i), px = Number((src.match(/const SHORT_VIEW_PX = (\d+);/) || [])[1]);
-    if (i < 0 || j < 0 || !(px > 0)) return null;
-    const fn = new Function('SHORT_VIEW_PX', 'boxInUse', `return function (dock, h) {${src.slice(src.indexOf('{', i) + 1, j)}\n};`)(px, (box) => !!(box && box.typing));
-    return (h, { mobile = false, typing = false, again = false } = {}) => { const cls = new Set(); let passes = 0; const box = { typing };
-      const dock = { classList: { contains: (c) => cls.has(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) }, querySelector: () => box }; const me = { app: { isMobile: mobile }, schedule: () => { passes++; } };
-      fn.call(me, dock, 600); fn.call(me, dock, h); const first = cls.has('cad-short'); if (again) { box.typing = false; fn.call(me, dock); }
-      return again ? [first, cls.has('cad-short'), passes] : cls.has('cad-short'); }; };
-  const S = shortOf(CARD), got = S ? { v400: S(400), v449: S(449), v450: S(450), v600: S(600), phone400: S(400, { mobile: true }), typing: S(400, { typing: true }), after: S(400, { typing: true, again: true }), flips: S(400, { again: true }) } : null;
-  ok(!!got && J(got) === '{"v400":true,"v449":true,"v450":false,"v600":false,"phone400":false,"typing":false,"after":[false,true,1],"flips":[true,true,1]}', `RED-able (B-16a9 — b06f36e90: no short rule, the strip two lines at every height): a view under 450 px folds the strip to one row, 450 and taller do not, a phone keeps its own rule; a box being typed in never folds away — the next pass (the view's kept height, no layout read) folds it once the box is left; each flip asks one pass (the head's role and keys follow) (${J(got)})`, got);
-  const Sx = shortOf(CARD.replace('const short = !this.app.isMobile && h < SHORT_VIEW_PX;', 'const short = false;'));
-  ok(CARD.includes('const short = !this.app.isMobile && h < SHORT_VIEW_PX;') && !!Sx && Sx(400) === false, 'CONTROL (B-16a9): the mutant that never folds leaves a 400-px view\'s strip two lines — the leg goes red');
+  const methodOf = (src, head) => { const i = src.indexOf(head), j = src.indexOf('\n  }\n', i); return i < 0 || j < 0 ? null : src.slice(src.indexOf('{', i) + 1, j); };
+  const shortOf = (src) => { const px = Number((src.match(/const SHORT_VIEW_PX = (\d+);/) || [])[1]), bs = methodOf(src, '  _dockShort(dock, h) {'), bt = methodOf(src, '  _dockTyping(dock) {');
+    if (!bs || !(px > 0)) return null;
+    // a fake strip: its classes, the page's focus (inside it or not), its item's fields (text with or without words, a checkbox)
+    return (h, { mobile = false, focus = false, fields = [], open = false, startShort = false, again = null } = {}) => { const cls = new Set([...(open ? ['cad-open'] : []), ...(startShort ? ['cad-short'] : [])]); let passes = 0; const folds = [];
+      const doc = { activeElement: focus ? 'inside' : 'outside' }, rows = { querySelectorAll: () => fields };
+      const dock = { classList: { contains: (c) => cls.has(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) }, querySelector: (q) => (q === ':scope > .cad-rows' ? rows : null), contains: (x) => x === 'inside' };
+      const mk = (b) => new Function('SHORT_VIEW_PX', 'document', `return function (dock, h) {${b}\n};`)(px, doc);
+      const me = { app: { isMobile: mobile }, schedule: () => { passes++; }, _dockFold: (d, o) => { folds.push(o); if (!o) cls.delete('cad-open'); }, _dockTyping: bt ? mk(bt) : () => false };
+      const fn = mk(bs);
+      fn.call(me, dock, h[0]); fn.call(me, dock, h[1]); const first = [...cls].sort().join(' ');
+      if (again) { again(doc, fields); fn.call(me, dock); }
+      return { first, last: [...cls].sort().join(' '), passes, folds: folds.join(',') }; }; };
+  const S = shortOf(CARD), T = (x) => ({ value: '', type: 'text', ...x });
+  const got = S ? { v400: S([600, 400]).first, v449: S([600, 449]).first, v450: S([600, 450]).first, phone: S([600, 400], { mobile: true }).first,
+    focus: S([600, 400], { focus: true, again: (d) => { d.activeElement = 'outside'; } }), paste: S([600, 400], { fields: [T({ value: 'typed words' })], again: (d, f) => { f[0].value = ''; } }),
+    check: S([600, 400], { fields: [T({ type: 'checkbox', value: 'on' })] }).first, grow: S([400, 600], { open: true, startShort: true }), growTyping: S([400, 600], { open: true, startShort: true, focus: true }) } : null;
+  ok(!!got && got.v400 === 'cad-short' && got.v449 === 'cad-short' && got.v450 === '' && got.phone === '', `RED-able (B-16a9 — b06f36e90: no short rule, the strip two lines at every height): a view under 450 px folds the strip to one row, 450 and taller do not, a phone keeps its own rule (${J(got && [got.v400, got.v449, got.v450, got.phone])})`, got);
+  ok(!!got && got.focus.first === '' && got.focus.last === 'cad-short' && got.paste.first === '' && got.paste.last === 'cad-short' && got.check === 'cad-short',
+    `the follow-up ① (主开发's verdict on 016d66438 — a typed vault paste field or an option's words folded away under the typist): A FIELD IN USE NEVER MOVES UNDER THE TYPIST — the focus inside the strip, or any text field holding words, holds the fold; a checkbox is no field in use; the field left ⇒ the rule asked again folds it (${J(got && [got.focus, got.paste, got.check])})`, got);
+  ok(!!got && got.grow.first === '' && got.grow.folds === 'false' && got.growTyping.first === 'cad-open cad-short' && got.growTyping.folds === '',
+    `the follow-up ② — PINNED: a short view that grows while its item is open FOLDS IT (the whole strip that comes back shows the question and its answers; ${J(got && got.grow)}); while a field of it is in use it stays the short row, its head still folding it (${J(got && got.growTyping)})`, got);
+  const Sx = shortOf(CARD.replace('    if (this._dockTyping(dock)) return;\n', ''));
+  const gx = Sx ? Sx([600, 400], { fields: [T({ value: 'typed words' })] }).first : null;
+  ok(CARD.includes('    if (this._dockTyping(dock)) return;\n') && gx === 'cad-short', `CONTROL (the follow-up ①): the mutant without the typing guard folds a strip whose paste field holds words (${J(gx)}) — the leg goes red`);
+  const Sn = shortOf(CARD.replace('const short = !this.app.isMobile && h < SHORT_VIEW_PX;', 'const short = false;'));
+  ok(CARD.includes('const short = !this.app.isMobile && h < SHORT_VIEW_PX;') && !!Sn && Sn([600, 400]).first === '', 'CONTROL (B-16a9): the mutant that never folds leaves a 400-px view\'s strip two lines — the leg goes red');
   // B — THE WIRING: the view's own box (an observer on the strip's host — a pass reads no layout), let go at stop; the phone row's
   // press and keys are a short view's too (the same open, the same arm)
   const wire = { ro: /\(this\._shortRO = new ResizeObserver\(\(es\) => \{ const h = es\[es\.length - 1\]\?\.contentRect\?\.height; if \(h > 0\) this\._dockShort\(dock, h\); \}\)\)\.observe\(host\);/.test(CARD) && /const host = dock\.parentElement;\n\s+if \(typeof ResizeObserver === 'function' && host\) \(this\._shortRO/.test(CARD),
     stop: /try \{ this\._shortRO\?\.disconnect\(\); \} catch \{ \}/.test(CARD), press: CARD.includes("if ((!this.app.isMobile && !dock.classList.contains('cad-short')) || ev.target.closest('.cad-all')) return;"),
     keys: CARD.includes("if ((this.app.isMobile || dock.classList.contains('cad-short')) && (q.classList?.contains('cad-head')"), head: CARD.includes("phone = !!this.app.isMobile || dock.classList.contains('cad-short')"),
-    pass: /  _dockStrip\(dock, d, entry\) \{\n    this\._dockShort\(dock\);/.test(CARD) };
+    pass: /  _dockStrip\(dock, d, entry\) \{\n    this\._dockShort\(dock\);/.test(CARD), left: CARD.includes("dock.addEventListener('focusout', () => setTimeout(() => this._dockShort(dock), 0), { signal: own });"),
+    imports: (() => { const k = CARD.indexOf('const SHORT_VIEW_PX = '); return k > 0 && !CARD.slice(k).includes('\nimport '); })() };
   ok(Object.values(wire).every(Boolean), `the short rule is read from the view's own box and let go at stop; the folded row's press, its keys and its head are a short view's too (${J(wire)})`, wire);
   // C — ONE ROW, ONE RULE SET: every structural rule of the phone's row (style.css, lane phone-dock-restore — outside the touch
   // sizes) is JOINED with `.chat-attn-dock.cad-short`, never copied; the touch line height stays the phone's

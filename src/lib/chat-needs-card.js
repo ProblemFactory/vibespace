@@ -61,13 +61,14 @@
 import { t } from './i18n.js';
 import { escHtml, showToast } from './utils.js';
 import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open moved under the pointer answers nothing for ARM_MS
-/** B-16a9: a view shorter than this (a chat window under ~480 px) draws its strip as the phone's one row (_dockShort) */
-const SHORT_VIEW_PX = 450;
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf, stripWithholds, tickDeadlines } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
 import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+
+/** B-16a9: a view shorter than this (a chat window under ~480 px) draws its strip as the phone's one row (_dockShort) */
+const SHORT_VIEW_PX = 450;
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -575,6 +576,8 @@ export class NeedsCards {
     // view's own box (its observer's — a pass reads no layout); the dock's own size never moves the view's
     const host = dock.parentElement;
     if (typeof ResizeObserver === 'function' && host) (this._shortRO = new ResizeObserver((es) => { const h = es[es.length - 1]?.contentRect?.height; if (h > 0) this._dockShort(dock, h); })).observe(host);
+    // (the follow-up, 主开发's verdict on 016d66438) a field left asks the short rule again — what waited for the typist flips now
+    dock.addEventListener('focusout', () => setTimeout(() => this._dockShort(dock), 0), { signal: own });
   }
 
   /** lane phone-dock-restore: THE PHONE'S ONE ROW's words and door, each pass (style.css draws the row; a desktop strip never
@@ -609,17 +612,28 @@ export class NeedsCards {
   }
 
   /** B-16a9: a SHORT view (under SHORT_VIEW_PX) folds its strip to the phone's one row — style.css joins `.chat-attn-dock.cad-short`
-   *  to the phone's rules; a taller view, or a phone (its own rule, html[data-vc]), draws it as before. An open item stays open.
-   *  `h` = the view's height from its observer (kept: a pass asks again with it — never a layout read). A box being typed in
-   *  never folds away under the typist (the next pass asks again); a flip asks a pass, so the head's role, keys and words follow */
+   *  to the phone's rules; a taller view, or a phone (its own rule, html[data-vc]), draws it as before. `h` = the view's height
+   *  from its observer (kept: a pass and a field's focusout ask again with it — never a layout read). The follow-up (主开发's
+   *  verdict on 016d66438): ① A FIELD IN USE NEVER MOVES UNDER THE TYPIST, either way — the focus inside the strip, or any text
+   *  field of its item holding text (a reply, a vault paste field, an option's own words: _dockTyping); ② A SHORT VIEW THAT GROWS
+   *  WHILE ITS ITEM IS OPEN FOLDS IT — the whole strip that comes back shows the item's question and its answers, and the head's
+   *  fold role ends with the short row. A flip asks a pass, so the head's role, keys and words follow */
   _dockShort(dock, h) {
     if (h > 0) dock._viewH = h; else h = dock._viewH;
     if (!(h > 0)) return;
     const short = !this.app.isMobile && h < SHORT_VIEW_PX;
     if (dock.classList.contains('cad-short') === short) return;
-    if (short && boxInUse(dock.querySelector(':scope > .cad-rows .ut-reply'))) return;
+    if (this._dockTyping(dock)) return;
     dock.classList.toggle('cad-short', short);
+    if (!short && dock.classList.contains('cad-open')) this._dockFold(dock, false);
     this.schedule();
+  }
+
+  /** the follow-up ①: is a field of the strip in use — the focus inside it, or a text field of its item holding text? */
+  _dockTyping(dock) {
+    if (dock.contains(document.activeElement)) return true;
+    const rows = dock.querySelector(':scope > .cad-rows');
+    return !!rows && [...rows.querySelectorAll('textarea, input')].some((f) => !/^(checkbox|radio|button|submit|reset|hidden|range|color|file|image)$/.test(f.type || '') && !!f.value);
   }
 
   /** lane phone-dock-restore (the owner 2026-11-02 on the iPhone, .373: «等你操作的那个橙色的菜单…占据的显示面积过大» — 390×844: a
