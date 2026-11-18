@@ -47,7 +47,10 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // os.homedir() reads the process's environment, which this thread's process.env is and a worker's copy is not; §42's GIT_*
 // reach only children, which take the copy of the thread that spawns them). VS_ARCH_ONE_THREAD=1 runs every
 // section on this thread, in order. CHECKS_PIN: a run that printed no degraded line (a `SKIP …` notice or a `… SKIPPED` check)
-// counts at least this many checks — a section that stops counting is a red, never a smaller green.
+// counts at least this many checks — a section that stops counting is a red, never a smaller green. IT IS OFF ON A DEPTH-ONE
+// CLONE: §50b and §82 print their SKIP notices there, so it guards the box's and the test machine's runs and never the hosted
+// mirror's (a shallow clone). The worker's sections end within SEC_DEADLINE_MS of this thread's last, or the run is a red that
+// names the sections still out.
 const CHECKS_PIN = 952;
 const SEC_ONE_THREAD = isMainThread && process.env.VS_ARCH_ONE_THREAD === '1';
 const SEC_CLAIM = isMainThread ? new Int32Array(new SharedArrayBuffer(4 * 4096)) : new Int32Array(workerData.claim);
@@ -64,6 +67,7 @@ const printSlot = (s) => { for (const [fd, t] of SEC_HELD.get(s) || []) writeLin
 const slotReady = (s) => SEC_SLOT > s && (s % 2 === 0 || SEC_DONE.has((s - 1) / 2) || SEC_GOT.has((s - 1) / 2));
 const flushHeld = (all = false) => { while (SEC_PRINTED <= SEC_SLOT && (all || slotReady(SEC_PRINTED))) printSlot(SEC_PRINTED++); };
 let SEC_WORKER = null, SEC_WORKER_DONE = null;
+const SEC_DEADLINE_MS = 3 * 60 * 1000, SEC_HEADS = [];   // the test machine ends a build check at 600 s: this names the hang first   // SEC_HEADS[k]: the last line held before section k (its heading, if it has one)
 if (isMainThread && !SEC_ONE_THREAD) {
   try { SEC_WORKER = new Worker(new URL(import.meta.url), { workerData: { claim: SEC_CLAIM.buffer } }); } catch { SEC_WORKER = null; }   // none: every section is this thread's
   if (SEC_WORKER) SEC_WORKER_DONE = new Promise((resolve) => {
@@ -80,6 +84,7 @@ if (isMainThread && !SEC_ONE_THREAD) {
 if (isMainThread) process.on('exit', () => { flushHeld(true); SEC_EXITING = true; });
 const section = async (fn, where) => {
   const k = SEC_N++;
+  if (isMainThread) { const h = SEC_HELD.get(SEC_SLOT); SEC_HEADS[k] = h && h.length ? h[h.length - 1][1].trim().slice(0, 90) : ''; }
   if (!isMainThread) {
     if (where === 'main' || where === 'alone' || Atomics.compareExchange(SEC_CLAIM, k, 0, 2) !== 0) return;
     SEC_OWN = true; SEC_SLOT = 2 * k + 1; const p0 = pass, f0 = fail;
@@ -94,10 +99,13 @@ const section = async (fn, where) => {
 };
 const sectionsEnd = async () => {
   if (!isMainThread) process.exit(0);   // the worker: each section it ran was handed over as it ended
-  const e = SEC_WORKER ? await SEC_WORKER_DONE : null, lost = SEC_OWNER.flatMap((o, k) => (o === 2 && !SEC_GOT.has(k) ? [k] : []));
+  let late = null;   // the worker's sections end within the deadline, or the run is a red naming the ones still out
+  const e = SEC_WORKER ? await Promise.race([SEC_WORKER_DONE, new Promise((r) => { late = setTimeout(() => r(new Error(`the worker's sections did not end within ${SEC_DEADLINE_MS / 1000} s of this thread's last — still out: ${SEC_OWNER.flatMap((o, k) => (o === 2 && !SEC_GOT.has(k) ? [`#${k}${SEC_HEADS[k] ? ` (after «${SEC_HEADS[k]}»)` : ''}`] : [])).join(', ') || 'none'}`)), SEC_DEADLINE_MS); })]) : null;
+  if (late) clearTimeout(late);
+  const lost = SEC_OWNER.flatMap((o, k) => (o === 2 && !SEC_GOT.has(k) ? [k] : []));
   if (e || lost.length) {
     flushHeld(true);
-    process.stderr.write(`  ✗ the worker thread failed — ${lost.length} section(s) it claimed never judged (${lost.map((k) => '#' + k).join(' ') || 'none'}): ${(e && e.stack) || e || 'no error'}\n`);
+    process.stderr.write(`  ✗ the worker thread failed — ${lost.length} section(s) it claimed never judged (${lost.map((k) => '#' + k + (SEC_HEADS[k] ? ` after «${SEC_HEADS[k]}»` : '')).join(' | ') || 'none'}): ${(e && e.stack) || e || 'no error'}\n`);
     process.stdout.write(`\n${fail + SEC_W_FAIL + 1} FAILED (${pass + SEC_W_PASS} passed)\n`); process.exit(1);
   }
   const here = pass + fail;
@@ -117,8 +125,8 @@ const sectionsEnd = async () => {
 // under the checkout drops what is remembered for it (the suite writes none today — §51 — but a planted copy never reads stale).
 // A listing is handed back as a COPY (a caller may sort it). Same asserts, same order: only the cost moves.
 {
-  const REPO_ = REPO + path.sep, NM = path.sep + 'node_modules' + path.sep;
-  const mine = (p) => { if (typeof p !== 'string' && !(p instanceof URL)) return null; const a = path.resolve(p instanceof URL ? p.pathname : p); return a.startsWith(REPO_) && !a.includes(NM) ? a : null; };
+  const REPO_ = REPO + path.sep, NM = path.sep + 'node_modules' + path.sep, GITD = REPO_ + '.git';   // git's own files: read fresh (git writes them)
+  const mine = (p) => { if (typeof p !== 'string' && !(p instanceof URL)) return null; const a = path.resolve(p instanceof URL ? p.pathname : p); return a.startsWith(REPO_) && !a.includes(NM) && !(a === GITD || a.startsWith(GITD + path.sep)) ? a : null; };
   const texts = new Map(), lists = new Map();
   const realRead = fs.readFileSync, realList = fs.readdirSync;
   fs.readFileSync = function readFileSync(p, opts) {
@@ -146,6 +154,8 @@ const sectionsEnd = async () => {
 }
 let pass = 0, fail = 0;
 const ROOT_DIR_DCHS = new URL('..', import.meta.url).pathname;
+// (a worker callback's check while the worker is INSIDE another section is counted there, in that section's lines, unmarked — never
+// lost; only one made while the worker is between sections is marked LATE)
 const ok = (c, n, d) => { if (!SEC_OWN) { if (!isMainThread && SEC_ALS.getStore() !== undefined) parentPort.postMessage({ late: [[c ? 1 : 2, `  ${c ? '✓' : '✗'} ${n} (LATE: after its section ended, on the worker)`]], pass: c ? 1 : 0, fail: c ? 0 : 1 }); return; } if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; let x = ''; try { x = d === undefined ? '' : ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)); } catch { x = ' — ' + String(d); } console.error('  ✗ ' + n + x.slice(0, 4000)); } };   // a failure names its detail (lane job-secrets-retire r3, review N1: §96 named no offender)
 // §78's dead-code censuses take ~4 s (a raw scan of ~20 MB per unused-key candidate + two esbuild metafiles): they run as
 // a CHILD from here, alongside every other section, and §78 awaits the file it writes (no pipe: a busy parent never stalls it)
