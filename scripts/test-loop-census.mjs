@@ -349,9 +349,9 @@ console.log('④ the doors');
   none.stop(); off.stop();
   ok(n1 === null && n2 === null, 'census() answers null with no watchdog thread and with the census off (no take, never a guess)', { n1, n2 });
   const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
-  ok(/const q = takeCensusAsk\(\{ kind: 'hold', h \}\) \|\| ask\(\{ kind: 'hold', h \}\);/.test(WK) && /if \(!hold\) takeCensusAsk\(\{ kind: 'capture', c, pending: \[\] \}\);/.test(WK)
-    && /if \(!hold && takeCensusAsk\(\{ kind: 'profile', pr, pq: \{ countedTo: now, counted: false \} \}\)\) return;/.test(WK)
-    && /const k = CC\.tickOf\(\{ state, wchan, sys, beatAgeMs: now - T\[1\], freshMs: 2 \* beatMs \+ noAnswerMs, holdOpen: !!hold, mine: own, other: \(!!inflight && !own\) \|\| !!cap \|\| !!prof \}\);/.test(WK)
+  ok(/const q = takeCensusAsk\(\{ kind: 'hold', h \}\) \|\| ask\(\{ kind: 'hold', h \}\);/.test(WK) && /if \(!openHold\(now\)\) takeCensusAsk\(\{ kind: 'capture', c, pending: \[\] \}\);/.test(WK)
+    && /if \(!openHold\(now\) && takeCensusAsk\(\{ kind: 'profile', pr, pq: \{ countedTo: now, counted: false \} \}\)\) return;/.test(WK)
+    && /const k = CC\.tickOf\(\{ state, wchan, sys, beatAgeMs: now - T\[1\], freshMs: 2 \* beatMs \+ noAnswerMs, holdOpen: openHold\(now\), mine: own, other: \(!!inflight && !own\) \|\| !!cap \|\| !!prof \}\);/.test(WK)
     && /startCensus\(censusEveryMs\);/.test(WK),
     'the watchdog: a hold, a capture and a profile TAKE the census\'s ask through ONE function; the census\'s tick is a capture\'s tick (CC.tickOf) with every other asker counted as «another ask out»; it starts with the watchdog');
 }

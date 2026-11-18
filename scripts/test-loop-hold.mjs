@@ -458,8 +458,8 @@ console.log('⑦ round 4 — the law over {asked 0…3} × {latency} × {state a
     const dW = win0 => LH.schedDelta(R(60000, { ut: 0, st: 0, run: 0, wait: 0 }), R(60000 + win0, { ut: 240, st: 0, run: 2400, wait: 0 }));
     const onTime = LH.holdLine({ from: 0, to: 900, ms: 900, msHi: 1150, unsampled: LH.unseenWhy({ starvedMs: 0 }), d: null });
     const starved = LH.holdLine({ from: 0, to: 900, ms: 900, msHi: 1150, unsampled: LH.unseenWhy({ starvedMs: 1500 }), d: null, starvedMs: 1500 });
-    ok(/not sampled \(the watchdog ran on time, but none of its checks came after the hold’s first second — it asks only from then\)/.test(onTime) && !/was not running either/.test(onTime) && /not sampled \(the watchdog was not running either\)/.test(starved),
-      '(smaller 1) a hold the watchdog did not watch: on time ⇒ none of its checks came after the first second; ≥ 1 s late ⇒ it was not running either', { onTime, starved });
+    ok(/not sampled \(none of the watchdog’s checks came while it was held \(another ask was in flight, or the watchdog ran late under the 1 s it calls starved\)\)/.test(onTime) && !/was not running either/.test(onTime) && /not sampled \(the watchdog was not running either\)/.test(starved),
+      '(smaller 1) a hold the watchdog did not watch: under the starved bar ⇒ none of its checks came while it was held (B-7c97: an on-time watchdog asks every counted hold — what is left is an ask in flight or a late watchdog); ≥ 1 s late ⇒ it was not running either', { onTime, starved });
     const sh = dW(4200); sh.shared = 2;
     const shared = LH.holdLine({ from: 0, to: 1200, ms: 1200, unsampled: 'between', d: sh }), alone = LH.holdLine({ from: 0, to: 1200, ms: 1200, unsampled: 'between', d: dW(4200) });
     ok(/ran 2\.4 s of the 4\.2 s measured \(user 2\.4, kernel 0\.0\) \(one window for the 2 holds the watchdog slept through — these numbers are theirs together\)/.test(shared) && !/one window for/.test(alone),
@@ -492,7 +492,7 @@ console.log('⑦ round 4 — the law over {asked 0…3} × {latency} × {state a
     // (2) the unseen road with the watchdog 0.65 s late — under its 1 s starved bar — says so
     const late = LH.holdLine({ from: 0, to: 1100, ms: 900, msHi: 1150, unsampled: LH.unseenWhy({ starvedMs: 650 }), unseenLateMs: 650, d: null });
     const onTime = LH.holdLine({ from: 0, to: 1100, ms: 900, msHi: 1150, unsampled: LH.unseenWhy({ starvedMs: 40 }), unseenLateMs: 40, d: null });
-    ok(/not sampled \(the watchdog ran 0\.7 s late \(under the 1 s it calls starved\), and none of its checks came after/.test(late) && !/ran on time/.test(late) && /the watchdog ran on time/.test(onTime),
+    ok(/not sampled \(the watchdog ran 0\.7 s late \(under the 1 s it calls starved\), and none of its checks came while the hold lasted\)/.test(late) && !/ran on time/.test(late) && /none of the watchdog’s checks came while it was held/.test(onTime) && !/ran 0\.0 s late/.test(onTime),
       'minor 2: the unseen road with the watchdog 0.65 s late says how late (round 5 said «on time»); 40 ms late is on time', { late, onTime });
     // (3) JavaScript, asleep, JavaScript — two real parts that INTERLEAVE: both named, «interleaved», never one «then»
     const m3 = Lx([Sx('js', 70300), Sx('kernel', 71800), Sx('js', 73400)], win2(2100, 4700), 4300, 4500);
@@ -922,6 +922,95 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
       deps: noDeps && /— http2, /.test(r(noDeps, UNDICI31).words) && r(noDeps, UNDICI8).words === ud.words, loader: noLoader && /— http_agent, /.test(r(noLoader, HTTP).words),
       helper: noHelper && /— buffer, /.test(r(noHelper, ZLIB).words), cut: noCut && r(noCut, UNDICI31).words.endsWith(NO) };
     ok(Object.values(red).every((v) => v === true), `RED CONTROLS: without the rule undici and zlib say their chains (${noOwn && r(noOwn, UNDICI8).words.slice(0, 60)}…); without the inspector branch its dispatch is a sample; without the bundled dependency first the full stack says «${noDeps && r(noDeps, UNDICI31).words}»; without the loader rule «${noLoader && r(noLoader, HTTP).words}»; without the helpers «${noHelper && r(noHelper, ZLIB).words}»; without the cut the full stack claims «${NO}»`, red);
+  }
+}
+
+console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every counted hold is asked while it lasts; a spawn is named by its caller (the owner\'s incident inc-mwlgtu4o-uosz)');
+{
+  const ans = (frames) => { const sm = LH.sampleOf(enc(frames), ROOT); return LH.framesAnswer(sm.frames, sm.form, sm.cut); };
+  const LB = ROOT + '/src/server/loop-blame.js', SW = ROOT + '/src/server/sync-fs-witness.js';
+  // the witness's own rows (int359/loopw/ranked-all.txt 62 / 63 / 65 / 217 / 496): a V8 built-in innermost, then the instrument
+  // RECONSTRUCTED from row 62's sample (a chain cut at 3 frames): realpathSync runs in agy-store-fs's storePath (lines 24–25),
+  // reached through open (31) and read (40) — line 42 (readFileSync) is another sample of that hold
+  const R62 = [['', '', 0], ['realpathSync', 'node:fs', 2878], ['wrapped', LB, 64], ['storePath', ROOT + '/src/agy-store-fs.js', 24], ['open', ROOT + '/src/agy-store-fs.js', 31], ['read', ROOT + '/src/agy-store-fs.js', 40]];
+  const R217 = [['', '', 0], ['callerOf', LB, 35], ['wrapped', LB, 67], ['readAll', ROOT + '/src/x.js', 3]];
+  const R496 = [['', '', 0], ['before', SW, 174], ['wrapped', LB, 60], ['claudeLoginState', ROOT + '/src/harnesses/claude.js', 103]];
+  const ALONE = [['', '', 0], ['wrapped', LB, 60], ['refresh', SW, 129], ['listOnTimeout', 'node:internal/timers', 594]];
+  const EVALD = [['', '', 0, true], ['wrapped', LB, 64], ['read', ROOT + '/src/agy-store-fs.js', 42]];
+  const a62 = ans(R62), a217 = ans(R217), a496 = ans(R496), alone = ans(ALONE), evald = ans(EVALD);
+  ok(a62.key === 'src/agy-store-fs.js:24' && /^storePath \(src\/agy-store-fs\.js:24\)/.test(a62.words) && !/loop-blame/.test(a62.words) && a217.key === 'src/x.js:3' && a496.key === 'src/harnesses/claude.js:103',
+    `a sample answered in a V8 built-in under the instrument names the CALLER of the wrapped call, never the wrapper: «${a62.words}» (the hub's «(built-in) ← realpathSync ← wrapped (loop-blame line 64)», 28.4 s in 4 holds); callerOf / the witness's hook the same`, { a62, a217, a496 });
+  ok(/src\/server\/loop-blame\.js/.test(alone.key) && /src\/server\/loop-blame\.js/.test(evald.key),
+    'a stack that is the instrument\'s ALONE (built-ins and node around it) stays the instrument\'s — that time is its own; an eval\'d frame is never passed (it stops the trim)', { alone: alone.key, evald: evald.key });
+  // THE FIRST ASK: for every phase of the watchdog's check against the last beat, the first check at or past firstAskMs falls
+  // INSIDE the smallest gap the book counts (the one bar); due at the bar itself, some phases miss a 1.0–1.25 s hold
+  const H = LH.HOLD_MS, B = LH.BEAT_MS;
+  let G0 = H; while (!LH.isGapHold(G0, B, H)) G0++;   // the smallest gap that is a hold
+  const firstCheck = (phase, first) => { let s = phase; while (s < first) s += B; return s; };
+  const missWith = (first) => { const m = []; for (let p = 0; p < B; p++) if (firstCheck(p, first) >= G0) m.push(p); return m; };
+  const now = missWith(LH.firstAskMs(H, B)), release = missWith(H);
+  ok(LH.firstAskMs(H, B) === H - B && LH.firstAskMs() === 750 && !now.length && release.length > 0 && LH.sampleDue(0, H - B, H, LH.SAMPLES_PER_HOLD, LH.firstAskMs(H, B)) && !LH.sampleDue(0, H - B - 1, H, LH.SAMPLES_PER_HOLD, LH.firstAskMs(H, B)) && LH.sampleDue(1, 2 * H, H, LH.SAMPLES_PER_HOLD, LH.firstAskMs(H, B)) && !LH.sampleDue(1, 2 * H - 1, H, LH.SAMPLES_PER_HOLD, LH.firstAskMs(H, B)),
+    `the first ask comes due one beat before the bar (${LH.firstAskMs(H, B)} ms): for every one of the ${B} phases its check falls inside the smallest counted gap (${G0} ms); due at the bar (the release), ${release.length} phases of ${B} miss a hold that short — the owner's 43 «not sampled» holds of 1.0–1.25 s; the later asks keep 2, 4, 8 … × the bar`, { G0, now: now.length, release: release.length });
+  { // the watchdog thread follows it (no fast suite runs the thread over a hold at the bar: test-loop-hold-live is heavy)
+    const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
+    ok(/if \(!hold && stale >= \(boot \? holdMs : LH\.firstAskMs\(holdMs, beatMs\)\)\) \{ hold = startHold\(now, boot\);/.test(WK) && /LH\.sampleDue\(h\.k, now - h\.fromM, holdMs, samplesPerHold, LH\.firstAskMs\(holdMs, beatMs\)\)/.test(WK)
+      && /if \(LH\.holdEndVerdict\(\{ first: h\.first, matched: !!g, lostSinceOpen: gapsLost - \(h\.lost0 \|\| 0\), msHi: h\.msHi, beatMs, holdMs \}\) === 'drop'\) \{ afterWait\.delete\(h\); h\.dropped = true; return; \}/.test(WK)
+      && /lost0: gapsLost,/.test(WK) && /afterModule: J\.after && J\.after\.module \? J\.after\.module : null/.test(WK)
+      && /const openHold = \(now\) => !!hold && \(hold\.first \|\| now - hold\.fromM >= holdMs\);/.test(WK) && (WK.match(/holdOpen: openHold\(now\)/g) || []).length === 2 && /if \(!openHold\(now\)\) takeCensusAsk\(\{ kind: 'capture'/.test(WK) && /if \(!openHold\(now\) && takeCensusAsk\(\{ kind: 'profile'/.test(WK)
+      && /if \(h\.k === 0 && !h\.first && now - h\.fromM < holdMs && inflight\) return;/.test(WK),
+      'the watchdog opens a candidate one beat before the bar (the boot\'s at the bar) and asks it there only when nothing is in flight; its end is the PURE verdict (a record with no ringed gap is no hold); the capture and the census count a record as a held tick only from the bar, and a capture or a profile takes the census\'s ask in flight until then; the fold gets the after-answer\'s module');
+  }
+  { // (its adversarial read F1) THE END OF A RECORD: the main thread rings every gap that is a hold — no ringed gap, no hold,
+    // however late the watchdog read the beat (a 900 ms stall read a beat late gave «held 0.9–1.15 s», a hold that never was)
+    const V = (o) => LH.holdEndVerdict({ beatMs: B, holdMs: H, ...o });
+    const rows = { late: V({ msHi: 1150 }), lateLong: V({ msHi: 2650 }), matched: V({ matched: true, msHi: 1150 }), boot: V({ first: true, msHi: 300 }), overflow: V({ lostSinceOpen: 2, msHi: 1200 }), overflowShort: V({ lostSinceOpen: 2, msHi: 1000 }) };
+    ok(rows.late === 'drop' && rows.lateLong === 'drop' && rows.matched === 'keep' && rows.boot === 'keep' && rows.overflow === 'estimate' && rows.overflowShort === 'drop',
+      'a record with NO ringed gap is dropped whatever the late read of the beat says (1.15 s, 2.65 s); a ringed gap and the boot are kept; only a ring that overflowed since the record opened is estimated, and kept past the bar', rows);
+    const SRC1 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+    const m = { exports: {} }; const from1 = '  if (lostSinceOpen > 0) return isGapHold(msHi, beatMs, holdMs) ? \'estimate\' : \'drop\';';
+    if (SRC1.split(from1).length === 2) vm.compileFunction(SRC1.replace(from1, '  return isGapHold(msHi, beatMs, holdMs) ? \'estimate\' : \'drop\';'), ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-f1.js' })(m, m.exports, require);
+    const mut = m.exports.holdEndVerdict ? m.exports.holdEndVerdict({ beatMs: B, holdMs: H, msHi: 1150 }) : null;
+    ok(mut === 'estimate', `RED CONTROL: judged by the late read of the beat (7089a8ee5's candidate rule), the 900 ms stall read a beat late is kept as a hold (${mut})`, mut);
+  }
+  // A SPAWN IS NAMED BY ITS CALLER: asleep on the exec-status pipe, the first JavaScript after it node's child_process start
+  const SPAWN = (caller, line) => [['', 'node:diagnostics_channel', 314], ['spawn', 'node:internal/child_process', 489], ['spawn', 'node:child_process', 813], [caller, ROOT + '/src/' + line.split(':')[0], Number(line.split(':')[1])]];
+  const sleepy = { cls: 'kernel', kind: 'none', words: 'asleep: anon_pipe_read in read', key: '(asleep: anon_pipe_read in read)', keyWords: '(asleep: anon_pipe_read in read)' };
+  const foldWith = (L, after) => L.foldHold({ from: 0, to: 1300, ms: 1300, d: null, samples: [sleepy], after: after && after.words, afterKey: after && after.key, afterKeyWords: after && after.keyWords, afterModule: after && after.module });
+  const mnt = ans(SPAWN('', 'mounts.js:1466')), job = ans(SPAWN('_spawn', 'jobs.js:1839')), busy = ans([['busyHog', ROOT + '/src/hogs.js', 2]]), anon = ans(SPAWN('', 'x.js:1').slice(0, 3));
+  const fm = foldWith(LH, mnt), fj = foldWith(LH, job), fb = foldWith(LH, busy), fa = foldWith(LH, anon);
+  ok(mnt.module === 'child_process' && fm.verdict === LH.V.blocked && fm.frameKey === 'src/mounts.js:1466 (starting a child process)' && fm.frame === 'asleep starting a child process — (anonymous) (src/mounts.js:1466)'
+    && fj.frameKey === 'src/jobs.js:1839 (starting a child process)' && fj.frameKey !== fm.frameKey,
+    `a hold asleep while starting a child process is the SPAWNER's row: «${fm.frame}» — the mount probe and the job start two rows, never one «anon_pipe_read» for every spawner (21.5 s in 16 holds)`, { fm, fj });
+  { // (its adversarial read F2) a WHOLE synchronous child run (spawnSync / execFileSync: asleep in ep_poll, the first JavaScript
+    // after it node's child_process) is WAITED for, never «starting»
+    const ep = { cls: 'kernel', kind: 'none', words: 'asleep: ep_poll in epoll_wait', key: '(asleep: ep_poll in epoll_wait)', keyWords: '(asleep: ep_poll in epoll_wait)' };
+    const sync = ans([['spawnSync', 'node:child_process', 870], ['execFileSync', 'node:child_process', 920], ['', ROOT + '/src/server/ops-routes.js', 188]]);
+    const fs2 = LH.foldHold({ from: 0, to: 30000, ms: 30000, d: null, samples: [ep], after: sync.words, afterKey: sync.key, afterKeyWords: sync.keyWords, afterModule: sync.module });
+    ok(sync.module === 'child_process' && fs2.frameKey === 'src/server/ops-routes.js:188 (waiting for a child process)' && fs2.frame === 'asleep waiting for a child process \u2014 (anonymous) (src/server/ops-routes.js:188)',
+      `a hold asleep for a whole synchronous child run is the caller's, said as a WAIT: «${fs2.frame}» — never «starting» (that is the exec-status pipe's alone)`, fs2);
+  }
+  { // (its adversarial read F4) THE WATCHDOG'S ROAD: askOf → judgeAsks carry the after-answer's module into the hold's facts
+    const J = LH.judgeAsks([{ postedAt: 400, answeredAt: 1290, state: 'asleep', kernel: 'anon_pipe_read in read', answer: mnt, beat: 3 }], { beat0: 3, holdEnd: 1300 });
+    const fj2 = LH.foldHold({ from: 0, to: 1300, ms: 1300, d: null, samples: J.samples, after: J.after && J.after.words, afterKey: J.after && J.after.key, afterKeyWords: J.after && J.after.keyWords, afterModule: J.after && J.after.module });
+    const SRC2 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), from2 = ', ...(answer.module ? { module: answer.module } : {}) } : null;';
+    const m2 = { exports: {} }; if (SRC2.split(from2).length === 2) vm.compileFunction(SRC2.replace(from2, ' } : null;'), ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-f4.js' })(m2, m2.exports, require);
+    const J0 = m2.exports.judgeAsks ? m2.exports.judgeAsks([{ postedAt: 400, answeredAt: 1290, state: 'asleep', kernel: 'anon_pipe_read in read', answer: mnt, beat: 3 }], { beat0: 3, holdEnd: 1300 }) : null;
+    const f0 = J0 ? m2.exports.foldHold({ from: 0, to: 1300, ms: 1300, d: null, samples: J0.samples, after: J0.after && J0.after.words, afterKey: J0.after && J0.after.key, afterKeyWords: J0.after && J0.after.keyWords, afterModule: J0.after && J0.after.module }) : null;
+    ok(J.after && J.after.module === 'child_process' && fj2.frameKey === 'src/mounts.js:1466 (starting a child process)' && f0 && f0.frameKey === '(asleep: anon_pipe_read in read)',
+      'the road the watchdog takes (an asleep ask → askOf → judgeAsks → the facts) carries the module to the fold; RED CONTROL: askOf without it folds every start into the wait channel again', { J: J.after, fj2: fj2.frameKey, red: f0 && f0.frameKey });
+  }
+  ok(fb.frameKey === '(asleep: anon_pipe_read in read)' && fa.frameKey === '(asleep: anon_pipe_read in read)',
+    'a sleep followed by anything but a child process start (our own JavaScript) keeps its wait channel; a start with no frame of ours below it names nobody new', { fb: fb.frameKey, fa: fa.frameKey });
+  { // RED CONTROLS (patched copies compiled in memory): the release's trim, the helper list without diagnostics_channel, no spawner rule
+    const SRC = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+    const load = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-mutant.js' })(m, m.exports, require); return m.exports; };
+    const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
+    const oldTrim = cut(" && !(f === '' && !(raw[i] && raw[i].evalish))) break; }", ') break; }');
+    const noHelper = cut("'per_context', 'diagnostics_channel']", "'per_context']");
+    const noSpawnBy = cut("const spawnBy = !topOf('js') && v === V.blocked && h.afterModule === 'child_process'", 'const spawnBy = false && !topOf(\'js\') && v === V.blocked && h.afterModule === \'child_process\'');
+    const ansWith = (L, f) => { const sm = L.sampleOf(enc(f), ROOT); return L.framesAnswer(sm.frames, sm.form, sm.cut); };
+    const red = { trim: oldTrim && /loop-blame\.js:64/.test(ansWith(oldTrim, R62).key), helper: noHelper && ansWith(noHelper, SPAWN('', 'mounts.js:1466')).module === 'diagnostics_channel', spawnBy: noSpawnBy && foldWith(noSpawnBy, mnt).frameKey === '(asleep: anon_pipe_read in read)' };
+    ok(Object.values(red).every((v) => v === true), `RED CONTROLS: the release's trim keys the wrapper (${oldTrim && ansWith(oldTrim, R62).key}); without the helper the spawn is node's «diagnostics_channel»; without the spawner rule every start is one wait-channel row`, red);
   }
 }
 

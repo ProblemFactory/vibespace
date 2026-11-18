@@ -627,7 +627,7 @@ async function legRound3(node, tag) {
     for (const d of D.length ? D : LATE_D) {   // the FIFO's reader is let through ~0.1 s after its release starts (the feeder's close): its next check — and its ask — lands in the hog's last ms
       const r = await run({ plan: 'lateJs', fifo: true, fifoAt: 350, blockS: (680 + d) / 1000, hogAt: 500, hogMs: 300 }, { node });
       const hs = (r.out && r.out.report.holds) || [], truth = r.out && r.out.checks.truth ? r.out.checks.truth.end - r.out.checks.truth.start : null;
-      const how = (l) => (/ — JavaScript: /.test(l) ? 'JS inside' : / — on the CPU — JavaScript or native code, no sample of that part/.test(l) ? 'on the CPU, an asleep sample' : /no sample landed inside it — asked/.test(l) ? 'asked, ' + ((/the answer came (at its end|after it)/.exec(l) || [, 'no answer'])[1]) : /the watchdog was not running either|none of its checks came after/.test(l) ? 'unseen' : l.slice(0, 80));
+      const how = (l) => (/ — JavaScript: /.test(l) ? 'JS inside' : / — on the CPU — JavaScript or native code, no sample of that part/.test(l) ? 'on the CPU, an asleep sample' : /no sample landed inside it — asked/.test(l) ? 'asked, ' + ((/the answer came (at its end|after it)/.exec(l) || [, 'no answer'])[1]) : /the watchdog was not running either|none of (?:its|the watchdog’s) checks came while/.test(l) ? 'unseen' : l.slice(0, 80));
       res.push({ d, verdicts: hs.filter((h) => !(r.starve || []).some((y) => y.h === h && y.outside)).map((h) => h.verdict), how: holdLines(r).map(how).join('+'), contains: hs.length ? hs.every((h) => within(h, truth)) : null, truth, lines: holdLines(r) });
     }
     const native = res.filter((x) => x.verdicts.includes(LH.V.native));

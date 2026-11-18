@@ -55,7 +55,7 @@
 
 const HOLD_MS = 1000;          // a hold: the main thread's beat stale this long
 const BEAT_MS = 250;           // the main thread's beat AND the watchdog's check (ONE unref'd timer each side)
-const SAMPLES_PER_HOLD = 7;    // asked at held ≈ 1, 2, 4, 8, 16, 32, 64 × HOLD_MS — one in flight at a time
+const SAMPLES_PER_HOLD = 7;    // asked at held ≈ 1 (B-7c97: one beat before it), 2, 4, 8, 16, 32, 64 × HOLD_MS — one in flight at a time
 const JS_FAST_MS = 2;          // ROUND 4: a thread RUNNING JavaScript enters a posted ask in p50 0.015–0.02 ms, p99 0.08–0.15 ms,
                                // max 0.29–0.51 ms (post → the sample's first instruction, 400 asks a run over a busy main thread,
                                // Node 22 and 24, load 4.7–4.8 — lane dir probe/r4/jslat.cjs): an answer later than four times the
@@ -66,7 +66,8 @@ const SESSION_MS = 20;         // an ask of a main thread ON THE CPU keeps its s
 // EVERY HOLD GETS ITS FIRST SAMPLE (lane hub-loop-stalls, the owner's .393 hub: 54 of 74 holds — 214 of ~300 s — «not
 // sampled (20 holds were sampled in the last hour)»: a COUNT of 20 an hour ran out in the minutes after a boot and left the
 // steady state with no name). What bounds the asks now is what the count protected: no ask at 85 % of the heap limit or
-// more (holdRefusalOf), one ask in flight, no ask on a free loop (a hold is ≥ HOLD_MS — its first sample, ≤ ~2 ms, is ≤ 0.2 %
+// more (holdRefusalOf), one ask in flight, no ask on a free loop (a hold is ≥ HOLD_MS; B-7c97: a CANDIDATE stalled ≥ HOLD_MS − BEAT_MS
+// is asked once too, then dropped if it stays under the bar — its first sample, ≤ ~2 ms, is ≤ 0.3 %
 // of it by construction), and a TIME budget for the samples after the first: their own main-thread run, measured per ask,
 // summed over the rolling hour — under ASK_BUDGET_MS (1 % of the hour) a hold takes its later samples, past it only its first
 const ASK_BUDGET_MS = 36000;
@@ -244,7 +245,11 @@ function readLen(t, i) {
  *  frames (innermost first, {file, …}) → the same frames without the innermost run of the instrument's own frames
  *  (src/server/loop-blame.js, src/server/sync-fs-witness.js) and the node frames among them, so the time lands on the
  *  JavaScript CALLER that made the call, as for any native call. A stack that is the instrument's alone (its own work, a
- *  timer of the witness) is kept whole: that time IS the instrument's. */
+ *  timer of the witness) is kept whole: that time IS the instrument's.
+ *  B-7c97 (the owner's incident inc-mwlgtu4o-uosz: «loop-blame.js line 64» was the third hold site of an hour, 28.4 s in 4
+ *  holds over five): a V8 BUILT-IN frame (no file, not eval'd) inside that innermost run is passed like a node frame — a
+ *  sample answered in a built-in under realpathSync under the wrapper («(built-in) ← realpathSync (node:fs) ← wrapped
+ *  (loop-blame)») kept the whole stack, so the WRAPPER named the hold and the caller of the call was lost. */
 // B-403e: + src/run-reads.js — its process-wide write wrappers and its asks sit between a caller and the fs call: the hold is
 // the caller's (the pass, a record, a broadcast, a store's write), exactly as before the helper existed
 const INSTRUMENT_FILES = Object.freeze(['src/server/loop-blame.js', 'src/server/sync-fs-witness.js', 'src/run-reads.js']);
@@ -260,7 +265,7 @@ function instrumentTrim(raw, root) {
   const fileOf = (x) => String((x && x.file) || '').replace(/^file:\/\//, '');
   const ours = (f) => f.startsWith(r) && INSTRUMENT_FILES.includes(f.slice(r.length));
   let i = 0, n = 0;
-  for (; i < raw.length; i++) { const f = fileOf(raw[i]); if (ours(f)) n++; else if (!/^node:/.test(f)) break; }
+  for (; i < raw.length; i++) { const f = fileOf(raw[i]); if (ours(f)) n++; else if (!/^node:/.test(f) && !(f === '' && !(raw[i] && raw[i].evalish))) break; }
   return n && i < raw.length ? raw.slice(i) : raw;
 }
 function sampleOf(text, root, isRepoFile = null, lineOf = null, isInternal = null) {
@@ -335,7 +340,7 @@ const NODE_OWN = 'node\u2019s own code';
 const INSPECTOR_FILE = /^node:(?:inspector(?:\/promises)?|internal\/inspector(?:\/[\w/-]+)?)$/;
 const LOADER_FILE = /^node:internal\/bootstrap\/(?:realm|loaders)$/;
 const DEPS_FILE = /^node:internal\/deps\//;
-const HELPER_MODULE = new Set(['buffer', 'util', 'validators', 'errors', 'priority_queue', 'per_context']);
+const HELPER_MODULE = new Set(['buffer', 'util', 'validators', 'errors', 'priority_queue', 'per_context', 'diagnostics_channel']);   // B-7c97: a spawn answers first in diagnostics_channel ⇒ child_process
 /** PURE: is this sample the ask's own delivery (nothing of the thread's own work on its stack)? */
 function isDelivery(frames) {
   if (!Array.isArray(frames) || !frames.length) return true;
@@ -373,8 +378,8 @@ const nodeOwnWords = (o, cut = false) => `${NODE_OWN} \u2014 ${o.module}${o.driv
 function framesAnswer(frames, form, cut = false) {
   if (isDelivery(frames)) return { kind: 'js', words: WORDS.between, key: KEYS.between, keyWords: KEYS.between, empty: true };
   const o = nodeOwnOf(frames);
-  if (o && o.driver) return { kind: 'js', words: nodeOwnWords(o), key: frameLoc(o.driver), keyWords: frameText(o.driver), form };
-  if (o) { const k = `(${NODE_OWN} \u2014 ${o.module})`; return { kind: 'js', words: nodeOwnWords(o, cut), key: k, keyWords: k, form }; }
+  if (o && o.driver) return { kind: 'js', words: nodeOwnWords(o), key: frameLoc(o.driver), keyWords: frameText(o.driver), form, module: o.module };
+  if (o) { const k = `(${NODE_OWN} \u2014 ${o.module})`; return { kind: 'js', words: nodeOwnWords(o, cut), key: k, keyWords: k, form, module: o.module }; }
   return { kind: 'js', words: chainWords(frames), key: keyFrame(frames), keyWords: keyWords(frames), form };
 }
 
@@ -459,12 +464,13 @@ const V = {
   cpu: 'on the CPU — JavaScript or native code, no sample of that part', runnable: 'not in JavaScript when asked (running or waiting for a CPU)',
 };
 /** PURE (round 5, smaller 1): why a hold the watchdog did not watch was not sampled — its own check ran ≥ STARVED_MS late
- *  ⇒ it was not running either; on time ⇒ none of its checks came after the hold's first second (it asks only from then) */
+ *  ⇒ it was not running either; under that ⇒ none of its checks came while it was held (B-7c97: an on-time watchdog asks
+ *  every counted hold one beat before the bar — what is left is another ask in flight, or a watchdog late under STARVED_MS) */
 const unseenWhy = ({ starvedMs = 0 } = {}) => (starvedMs >= STARVED_MS ? 'unseen' : 'between');
 /** PURE (the follow-up, minor 2): the words of «not sampled» — the unseen road says how late the watchdog was when it was
  *  late at all (100 ms or more) yet under the 1 s it calls starved, never «on time» */
 function unsampledWords(h) {
-  if (h.unsampled === 'between' && Number.isFinite(h.unseenLateMs) && h.unseenLateMs >= 100) return `the watchdog ran ${secs(h.unseenLateMs)} s late (under the 1 s it calls starved), and none of its checks came after the hold\u2019s first second — it asks only from then`;
+  if (h.unsampled === 'between' && Number.isFinite(h.unseenLateMs) && h.unseenLateMs >= 100) return `the watchdog ran ${secs(h.unseenLateMs)} s late (under the 1 s it calls starved), and none of its checks came while the hold lasted`;
   return UNSAMPLED[h.unsampled] || h.unsampled;
 }
 /** ROUND 5 (law B): a part of a hold is REAL when the scheduler's window gives it at least this share of the time measured */
@@ -555,7 +561,7 @@ function askOf({ postedAt = null, answeredAt = null, state = 'unknown', kernel =
   if (Number.isFinite(holdEnd) && Number.isFinite(postedAt) && postedAt >= holdEnd) return { cls: 'outside' };
   const ranInside = Number.isInteger(beat) && beat !== -1 && beat === beat0;
   const framed = !!(answer && answer.kind === 'js' && !answer.empty);
-  const after = framed && ranInside && !answer.deep && !answer.failed && answer.key !== KEYS.unreadable ? { words: answer.words, key: answer.key, keyWords: answer.keyWords } : null;
+  const after = framed && ranInside && !answer.deep && !answer.failed && answer.key !== KEYS.unreadable ? { words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.module ? { module: answer.module } : {}) } : null;
   // B-1409: the stat read said asleep and the syscall read, a moment later, «running» — two reads that disagree say so,
   // never the self-contradicting «asleep: on the CPU»
   if (state === 'asleep') { const w = kernel === RUNNING_KERNEL_WORDS ? WOKE_WORDS : `asleep: ${kernel || 'in a call'}`; return { cls: 'kernel', words: w, key: `(${w})`, keyWords: `(${w})`, after }; }
@@ -660,7 +666,7 @@ function samplesWords(samples) {
   return [...by].sort((a, b) => b[1] - a[1]).map(([w, n]) => `${w} ×${n}`).join(', ');
 }
 const UNSAMPLED = { off: 'sampling is off in Settings', debugger: 'a debugger is attached', inspector: 'this Node has no inspector', failed: 'the sampler could not connect',
-  unseen: 'the watchdog was not running either', between: 'the watchdog ran on time, but none of its checks came after the hold\u2019s first second — it asks only from then', accessor: 'Error.prepareStackTrace is an accessor here — the sampler stands down', heap: `the heap is above ${PROFILE_HEAP_SHARE * 100} % of its limit`,
+  unseen: 'the watchdog was not running either', between: 'none of the watchdog\u2019s checks came while it was held (another ask was in flight, or the watchdog ran late under the 1 s it calls starved)', accessor: 'Error.prepareStackTrace is an accessor here — the sampler stands down', heap: `the heap is above ${PROFILE_HEAP_SHARE * 100} % of its limit`,
   unknown: 'the setting was not read yet', lost: 'the watchdog thread stopped', inside: 'no sample landed inside it' };
 /** PURE: where an answer ran against the hold's own beats: 'end' — inside the beat itself; 'after' — a later beat;
  *  'inside' — before the beat that ended the gap (no margin: `askOf` says an answer with no JavaScript on its stack is the
@@ -731,9 +737,30 @@ function foldHold(h) {
   // the table's key: the JavaScript frame most asks found; else the kernel's wait channel of a kernel verdict; else the
   // first JavaScript after it (marked «after»)
   const top = topOf('js') || (v === V.blocked ? topOf('kernel') : null);
-  const frameKey = top ? top.key : h.afterKey ? `${h.afterKey} (after)` : !samples.length ? '(not sampled)' : '(no JavaScript frame)';
-  const frame = top ? top.words : h.afterKey ? `${h.afterKeyWords || h.afterKey} (after)` : frameKey;
+  // B-7c97: ASLEEP STARTING A CHILD PROCESS — the kernel's wait channel alone («anon_pipe_read in read», 21.5 s in 16 holds
+  // on the owner's hub, one row for every spawner) named nobody; the first JavaScript after the sleep was node's
+  // child_process start driven by a frame of ours, so the row is that frame's: keyed by its location, said as a start
+  // (its adversarial read F2): only a sleep on the exec-status PIPE is a start; a sleep in any other channel followed by
+  // child_process code is a whole synchronous child run (spawnSync / execFileSync: ep_poll) — waited for, said as such
+  const spawnBy = !topOf('js') && v === V.blocked && h.afterModule === 'child_process' && h.afterKey && !/^\(/.test(h.afterKey);
+  const starting = spawnBy && !!top && /pipe_read/.test(String(top.key || ''));
+  const cKey = starting ? CHILD_START_KEY : CHILD_WAIT_KEY, cWords = starting ? CHILD_START_WORDS : CHILD_WAIT_WORDS;
+  const frameKey = spawnBy ? `${h.afterKey} (${cKey})` : top ? top.key : h.afterKey ? `${h.afterKey} (after)` : !samples.length ? '(not sampled)' : '(no JavaScript frame)';
+  const frame = spawnBy ? `${cWords} \u2014 ${h.afterKeyWords || h.afterKey}` : top ? top.words : h.afterKey ? `${h.afterKeyWords || h.afterKey} (after)` : frameKey;
   return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved };
+}
+/** B-7c97: the words and key of a hold asleep while starting a child process (fork + exec: the parent waits on the exec-status
+ *  pipe) — and of one asleep for a WHOLE synchronous child run (spawnSync / execFileSync: any other wait channel) */
+const CHILD_START_WORDS = 'asleep starting a child process', CHILD_START_KEY = 'starting a child process';
+const CHILD_WAIT_WORDS = 'asleep waiting for a child process', CHILD_WAIT_KEY = 'waiting for a child process';
+/** PURE (B-7c97, its adversarial read F1): THE END OF A WATCHED RECORD — the main thread rings EVERY gap that is a hold (the one
+ *  bar), so a record that ends with no ringed gap of its own is no hold, however late the watchdog read the beat: 'drop'.
+ *  Only when the ring OVERFLOWED since the record opened (an entry lost) is the gap estimated from the last beat — kept if
+ *  that estimate passes the bar ('estimate'). The boot's own hold and a record whose gap was ringed: 'keep'. */
+function holdEndVerdict({ first = false, matched = false, lostSinceOpen = 0, msHi = 0, beatMs = BEAT_MS, holdMs = HOLD_MS } = {}) {
+  if (first || matched) return 'keep';
+  if (lostSinceOpen > 0) return isGapHold(msHi, beatMs, holdMs) ? 'estimate' : 'drop';
+  return 'drop';
 }
 /** why a frame's name was not read (the watchdog reads source files only after a hold has ended, within a budget) */
 const NAMES_UNREAD = { slow: 'the source files answered slowly — names are not read for ten minutes', budget: 'the time for reading names was spent' };
@@ -778,8 +805,14 @@ function liveWords({ samples = [], pendingMs = 0, pendingState = null, pendingKe
 }
 
 // ── the schedule, the cap, the table ──────────────────────────────────────────────────────────────────────────────────
-/** PURE: is sample k due at `heldMs`? (k = 0 … SAMPLES_PER_HOLD − 1; held ≈ holdMs × 2^k) */
-const sampleDue = (k, heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD) => k < max && heldMs >= holdMs * 2 ** k;
+/** PURE: is sample k due at `heldMs`? (k = 0 … SAMPLES_PER_HOLD − 1; held ≈ holdMs × 2^k; the first at `firstMs`) */
+const sampleDue = (k, heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD, firstMs = holdMs) => k < max && heldMs >= (k === 0 ? firstMs : holdMs * 2 ** k);
+/** B-7c97: WHEN THE FIRST ASK COMES DUE — one beat BEFORE the hold bar. The watchdog checks once a beat; a hold counted by
+ *  the one bar has a gap of at least holdMs + beatMs/2, and a first ask due at the bar itself came at a check between holdMs
+ *  and holdMs + beatMs — after the end of a hold of 1.0–1.25 s (43 holds, 49.9 s «not sampled» on the owner's hub). Due at
+ *  holdMs − beatMs, its check falls before holdMs: inside every hold the book counts. A stall that stays under the bar is
+ *  asked too and then dropped (src/server/sync-fs-witness-worker.js endHold). */
+const firstAskMs = (holdMs = HOLD_MS, beatMs = BEAT_MS) => Math.max(0, holdMs - beatMs);
 /** PURE: the most samples a hold of `heldMs` may carry under the schedule (the live suite's upper bound). */
 const samplesBound = (heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD) => { let k = 0; while (sampleDue(k, heldMs, holdMs, max)) k++; return k; };
 /** PURE: may a hold be sampled at all? `flags` = the main thread's (SAMPLING 1, DEBUGGER 2, HEAP_HIGH 4, KNOWN 8) → null
@@ -949,7 +982,7 @@ module.exports = { partsOf, PART_SHARE, waitedMuch, RUNNING_KERNEL_WORDS, WOKE_W
   frameOf, frameText, frameLoc, parseSample, sampleOf, instrumentTrim, INSTRUMENT_FILES, SYNC_FS_URL, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, isDelivery, nodeOwnOf, nodeOwnWords, framesAnswer, NODE_OWN, SAMPLE_FRAMES, HELPER_MODULE, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
   parseTaskStat, parseSchedstat, parseCpuStat, cpuStatPaths, parsePressure, parseRss, readingOf, schedDelta, coveredDelta, verdict, stateOf, askOf, judgeAsks, clsOf, UNREAD, V, KEYS, WORDS,
   schedWords, heldWords, gcOf, memWords, samplesWords, foldHold, holdLine, liveWords, publicHold, boundReport,
-  sampleDue, samplesBound, holdRefusalOf, budgetAllows, BUDGET_WORDS, tableAdd, tableRows, secs, pct,
+  sampleDue, samplesBound, firstAskMs, holdEndVerdict, CHILD_START_WORDS, CHILD_START_KEY, CHILD_WAIT_WORDS, CHILD_WAIT_KEY, holdRefusalOf, budgetAllows, BUDGET_WORDS, tableAdd, tableRows, secs, pct,
   SAMPLE_EXPR, UNSAMPLED, GC_KINDS,
   HOLD_MS, BEAT_MS, SAMPLES_PER_HOLD, NO_ANSWER_MS, JS_FAST_MS, SESSION_MS, ASK_BUDGET_MS, LIVE_MS, RING_KEEP, TABLE_KEYS, GC_MIN_MS, RAN_SHARE, WAIT_SHARE, KERNEL_SHARE, GC_SHARE, STARVED_MS,
 };

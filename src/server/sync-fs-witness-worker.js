@@ -20,7 +20,7 @@
  *     fresh (a short ring of baselines; a reading timed when it was read), plus its cgroup's cpu.stat, /proc/pressure and
  *     the RSS at the hold's first stale check, at each sample and at the end; judged only over a window that covers at
  *     least half of the hold; the PURE verdict (src/loop-hold.js) — the measured table, then THREE states.
- *   · THE SAMPLES: ONE ask in flight (a hold's or the profile's), asked at held ≈ 1, 2, 4 … × holdMs; ONE constant
+ *   · THE SAMPLES: ONE ask in flight (a hold's or the profile's), asked at held ≈ 1 (B-7c97: one beat before it, a candidate dropped under the bar), 2, 4 … × holdMs; ONE constant
  *     expression; its answer leaves through the main thread's NOTE slot with the main thread's beat count and monotonic
  *     time (where it landed: inside / at its end / after). The session by the main thread's kernel state: asleep in a call
  *     ⇒ posted and closed in one stretch (no session across an exit); on the CPU ⇒ kept until its answer, ≤ SESSION_MS,
@@ -303,7 +303,7 @@ const askSpent = [];    // the hold samples' own main-thread runs in the rolling
 
 function startHold(now, first) {   // first = no beat came yet
   const flags = Atomics.load(I, 6), boot = first && bootAt != null;
-  const h = { boot, first, beat0: Atomics.load(I, 3), fromM: first ? firstFrom : (T[1] || now), seenAt: now, samples: [], asks: [], k: 0, starvedMs: 0, lateMs: 0, unsampled: null, standDown: null, after: null, ended: false, finished: false, waitAfterUntil: 0 };
+  const h = { boot, first, lost0: gapsLost, beat0: Atomics.load(I, 3), fromM: first ? firstFrom : (T[1] || now), seenAt: now, samples: [], asks: [], k: 0, starvedMs: 0, lateMs: 0, unsampled: null, standDown: null, after: null, ended: false, finished: false, waitAfterUntil: 0 };
   let b0 = null; for (const x of bases) if (x.at <= h.fromM + beatMs) b0 = x;   // the last baseline before the hold began
   h.a = withGlobals(b0 || base, fullReading(now));
   h.last = h.a;
@@ -324,6 +324,9 @@ function endHold(h, g, now) {
   if (h.first) { h.toM = end; h.ms = Math.max(0, end - h.fromM); h.msHi = h.ms; }   // the boot: from the process's start to the first beat
   else if (g) { h.fromM = g.end - g.gap; h.toM = g.end; h.msHi = g.gap; h.ms = Math.max(0, g.gap - beatMs); }   // at least the gap less one beat, at most the gap
   else { h.toM = end; const gap = Math.max(0, end - h.fromM); h.msHi = gap; h.ms = Math.max(0, gap - beatMs); }
+  // B-7c97: a record whose gap was not ringed is no hold — the main thread rings EVERY gap that is one, so a late read of the
+  // beat (T[1] already a beat on) never makes one; only a ring that overflowed since it opened is estimated (LH.holdEndVerdict)
+  if (LH.holdEndVerdict({ first: h.first, matched: !!g, lostSinceOpen: gapsLost - (h.lost0 || 0), msHi: h.msHi, beatMs, holdMs }) === 'drop') { afterWait.delete(h); h.dropped = true; return; }
   h.b = fullReading(now);
   h.d = LH.coveredDelta(h.a, h.b, h.fromM, h.toM);   // the scheduler judges a hold only from a window covering at least half of it
   if (mine(h)) { h.waitAfterUntil = now + AFTER_WAIT_MS; afterWait.add(h); }   // still unanswered: wait for «the first JavaScript after it»
@@ -357,16 +360,22 @@ function tell(h, named, why, unread) {
   const J = LH.judgeAsks((h.asks || []).map(askFacts), { beat0: h.beat0, holdEnd: h.toM, standDown: h.standDown, windowed: !!h.d });
   const samples = J.samples.map((x) => ({ cls: x.cls, kind: x.cls === 'js' ? 'js' : 'none', words: x.words, key: x.key, keyWords: x.keyWords, ...(Number.isFinite(x.at) ? { at: x.at } : {}) }));
   const facts = { boot: h.boot, from: toWall(h.fromM), to: toWall(h.toM), fromM: h.fromM, toM: h.toM, ms: h.ms, msHi: h.msHi, samples, outside: J.outside,
-    after: J.after ? J.after.words : null, afterKey: J.after ? J.after.key : null, afterKeyWords: J.after ? J.after.keyWords : null,
+    after: J.after ? J.after.words : null, afterKey: J.after ? J.after.key : null, afterKeyWords: J.after ? J.after.keyWords : null, afterModule: J.after && J.after.module ? J.after.module : null,
     unsampled: samples.length ? h.unsampled : (h.unsampled || h.standDown), standDown: samples.length ? h.standDown : null, ...(Number.isFinite(h.unseenLateMs) ? { unseenLateMs: h.unseenLateMs } : {}), d: h.d, starvedMs: h.starvedMs, lateMs: h.lateMs, ...(h.budgetSpent ? { budgetSpent: true } : {}), ...(unread.size ? { namesUnread: { n: unread.size, why: why || 'budget' } } : {}) };
   try { parentPort && parentPort.postMessage({ ev: 'hold', hold: facts }); } catch { }
 }
+/** B-7c97 (its adversarial read F3): a record is an OPEN HOLD for the capture and the census only from the bar on (the boot's
+ *  at once) — a candidate below the bar is no hold yet, and may be dropped */
+const openHold = (now) => !!hold && (hold.first || now - hold.fromM >= holdMs);
 function stepHold(h, now) {
   if (h.unsampled || h.standDown || (inflight && inflight.asker.kind !== 'census')) return;   // nothing more is asked while ANY other ask is in flight (an abandoned one: until it ran); the census's is TAKEN
   // round 4: the switch and a debugger are RE-READ at every step — sampling turned off mid-hold asks nothing more
   const why = LH.stepRefusalOf(Atomics.load(I, 6));   // FLAG_SAMPLING 1, FLAG_DEBUGGER 2, FLAG_KNOWN 8
   if (why) { if (!h.asks.length) h.unsampled = why; else h.standDown = why; return; }
-  if (LH.sampleDue(h.k, now - h.fromM, holdMs, samplesPerHold)) {
+  // B-7c97: a candidate's early ask is posted only when nothing is in flight (never the census's ask taken for a record that
+  // may be dropped); at the bar the hold takes the census's ask as before
+  if (h.k === 0 && !h.first && now - h.fromM < holdMs && inflight) return;
+  if (LH.sampleDue(h.k, now - h.fromM, holdMs, samplesPerHold, LH.firstAskMs(holdMs, beatMs))) {   // B-7c97: the first one beat before the bar
     if (h.k >= 1 && !LH.budgetAllows(askSpent, now, askBudgetMs)) { h.budgetSpent = true; return; }   // the first sample is always asked; the later ones within the hour's budget
     h.k++; const q = takeCensusAsk({ kind: 'hold', h }) || ask({ kind: 'hold', h }); if (q) h.asks.push(q); else if (!inspector) h.unsampled = 'inspector'; else if (!h.asks.length) h.unsampled = 'failed'; else h.standDown = 'failed'; }
 }
@@ -443,7 +452,7 @@ function stepProfile(now) {
   const turning = now - T[1] <= 2 * beatMs + noAnswerMs;
   if (sys !== 'running' && wchan === 'ep_poll' && turning) { pr.samples++; pr.idle++; return; }
   if (sys !== 'running' && wchan && wchan !== '0') { pr.samples++; pr.noJs++; return; }
-  if (!hold && takeCensusAsk({ kind: 'profile', pr, pq: { countedTo: now, counted: false } })) return;   // the census's ask in flight answers this tick (never a wait behind it)
+  if (!openHold(now) && takeCensusAsk({ kind: 'profile', pr, pq: { countedTo: now, counted: false } })) return;   // the census's ask in flight answers this tick (never a wait behind it)
   if (inflight) { if (inflight.late) { pr.samples++; pr.noJs++; } return; }   // a HOLD's ask is out (one in flight): unanswered past noAnswerMs ⇒ no JavaScript frame; else this interval is not asked
   ask({ kind: 'profile', pr, pq: { countedTo: now, counted: false } });
 }
@@ -487,9 +496,9 @@ function stepCapture(c, now) {
   if (stop) { c.stopped = stop; return endCapture(c, now); }
   if (now >= c.untilM) return endCapture(c, now);
   const wchan = readProc(task('wchan')), sys = readProc(task('syscall')), state = LH.stateOf(readProc(task('stat')));
-  if (!hold) takeCensusAsk({ kind: 'capture', c, pending: [] });   // the census's ask in flight is the capture's from now on (never a wait behind it)
+  if (!openHold(now)) takeCensusAsk({ kind: 'capture', c, pending: [] });   // the census's ask in flight is the capture's from now on (never a wait behind it)
   const mine = !!(inflight && inflight.asker.kind === 'capture' && inflight.asker.c === c);
-  const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: !!hold, mine, other: !!inflight && !mine });
+  const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: openHold(now), mine, other: !!inflight && !mine });
   const tk = { t: now, k: null };
   c.ticks.push(tk);
   if (k === 'booked') { inflight.asker.pending.push(tk); return; }
@@ -644,7 +653,7 @@ function stepCensus(s, now) {
   if (why) { s.ticks.paused++; s.pausedBy[why] = (s.pausedBy[why] || 0) + 1; return; }
   const wchan = readProc(task('wchan')), sys = readProc(task('syscall')), state = LH.stateOf(readProc(task('stat')));
   const own = !!(inflight && inflight.asker.kind === 'census');
-  const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: !!hold, mine: own, other: (!!inflight && !own) || !!cap || !!prof });
+  const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: openHold(now), mine: own, other: (!!inflight && !own) || !!cap || !!prof });
   if (k === 'booked') { inflight.asker.pending++; return; }
   if (k === 'ask') { if (!ask({ kind: 'census', s, pending: 1 })) s.ticks.notSampled++; return; }
   s.ticks[k === 'unsampled' ? 'notSampled' : k]++;
@@ -719,7 +728,9 @@ function check(now = mono()) {
   const lastBeatAt = T[1];
   const boot = beat === 0 || !lastBeatAt;
   const stale = now - (boot ? firstFrom : lastBeatAt);
-  if (!hold && stale >= holdMs) { hold = startHold(now, boot); hold.lateMs += late; if (late >= LH.STARVED_MS) hold.starvedMs = Math.max(hold.starvedMs, late); }
+  // B-7c97: a CANDIDATE opens one beat before the bar (LH.firstAskMs) so its first ask falls inside every hold the book counts;
+  // endHold drops it when its gap stays under the bar (the boot's own hold opens at the bar, as before)
+  if (!hold && stale >= (boot ? holdMs : LH.firstAskMs(holdMs, beatMs))) { hold = startHold(now, boot); hold.lateMs += late; if (late >= LH.STARVED_MS) hold.starvedMs = Math.max(hold.starvedMs, late); }
   if (hold) stepHold(hold, now);
   if (prof) stepProfile(now);
   const flying = Atomics.load(I, 4) === 1;
