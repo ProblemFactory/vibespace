@@ -19,6 +19,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
+import { waitPageList } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -64,7 +65,7 @@ window.openModels = (accountId, name) => openAccountModelsDialog({ accountId, na
   chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=1100,820', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore', env });
   const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
   let list = null;
-  for (let i = 0; i < 80 && !list; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); if (l.some((t) => t.type === 'page')) list = l; } catch { await sleep(200); } }
+  list = await waitPageList(CDP_PORT, { polls: 80, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
   if (!list) throw new Error('chrome never came up on the devtools port');
   const target = list.find((t) => t.type === 'page');
   const sock = new WS(target.webSocketDebuggerUrl);

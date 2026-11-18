@@ -5,6 +5,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { createRequire } from 'node:module';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(p=>fs.existsSync(p));
@@ -22,7 +23,7 @@ process.on('exit',()=>{try{chrome.kill('SIGKILL');}catch{}try{srv.kill('SIGKILL'
 for(let i=0;i<40;i++){try{await fetch(`http://127.0.0.1:${PORT}/api/home`);break;}catch{await sleep(250);}}
 const WebSocket=require('ws');
 let target=null;
-for(let i=0;i<40&&!target;i++){try{target=(await(await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find(t=>t.type==='page');}catch{await sleep(250);}}
+target = await waitPageTarget(CDP, { polls: 40, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
 const ws=new WebSocket(target.webSocketDebuggerUrl,{maxPayload:64*1024*1024});
 await new Promise(r=>ws.on('open',r));
 let seq=0;const pend=new Map();

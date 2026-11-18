@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
 import { judgeGesture, formatGesture, SNAP_SOURCE, RING_SINCE_SOURCE, WHEEL_POINT_SOURCE } from './paging-gesture-rules.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const { cwdToProjectDir } = require('../src/session-store.js');
 
@@ -277,7 +278,7 @@ async function repro(fp) {
 
   const WebSocket = require('ws');
   let target = null;
-  for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); } catch { await sleep(250); } }
+  target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
   const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
   let seq = 0; const pend = new Map(); const pageErrors = [];

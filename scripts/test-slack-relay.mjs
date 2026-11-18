@@ -27,6 +27,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, PRESET_KEYS, CHROME_STORE } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -98,7 +99,7 @@ process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {} try { fs.rmS
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(143));
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 60 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 let seq = 0; const pend = new Map(); const requests = [];
 // B-fbcc: the main frame's navigations as CDP tells them — `pending` from a navigation's ask / start until its commit,

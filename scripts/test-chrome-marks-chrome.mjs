@@ -22,6 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -92,7 +93,7 @@ async function launch(face, cdpPort) {
     '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${path.join(prof, 'p')}`, 'about:blank'], { stdio: 'ignore', env });
   chromes.push(c);
   let target = null;
-  for (let i = 0; i < 80 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+  target = await waitPageTarget(cdpPort, { polls: 80, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
   if (!target) throw new Error(`chrome (${face}) never exposed a page`);
   const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));

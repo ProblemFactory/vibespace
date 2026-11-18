@@ -1124,6 +1124,61 @@ console.log('\n§2j a suite reads no history master does not have');
       (stale.length ? `\n      stale ratchet rows (remove them): ${stale.join(' · ')}` : ''));
   }
 }
+// ── §2k ONE PAGE-TARGET WAITER (B-fcae, lane bl-tests-chrome, 2026-11-18: test-age-badge-chrome «chrome never came up» on the
+// hotfix's hosted run — a launch poll whose OWN wait was only on its error road gave up in ~70 ms on a Chrome whose DevTools
+// endpoint answered before its page target was listed; 58 copies of that loop in 53 scripts, in six layouts). Every script asks
+// the one waiter, scripts/cdp-page-target.mjs (waitPageTarget / waitPageList: a miss ALWAYS waits, each ask bounded, a deadline,
+// the browser's exit ends it, the cause SAID), and NO loop anywhere under scripts/ compares something to 'page' with all its own
+// waits on its error road — found by the tree (oldPageLoops over acorn), not a spelling. CONTROLS run the same detector: eight
+// old shapes (each layout seen, two quote styles, a destructured type, other sleep names, a setTimeout promise, a .catch
+// callback, the list kept) ARE found; five correct ones (the waiter, a wait outside the catch, a second wait, a wait in the
+// loop's update, a correct nested waiter inside an outer loop) are NOT. The waiter's legs are COUNTS and an injected clock.
+console.log('\n§2k one page-target waiter: no loop under scripts/ waits for a page target only on its error road (any layout)');
+{
+  const acorn = createRequire(import.meta.url)('acorn');
+  const { waitPageTarget, waitPageList, oldPageLoops } = await import('./cdp-page-target.mjs');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
+  const files = walk(path.join(REPO, 'scripts')), found = [], unread = [];
+  for (const f of files) for (const h of oldPageLoops(fs.readFileSync(f, 'utf8'), acorn)) (h.error ? unread : found).push(`${path.relative(REPO, f)}:${h.line}${h.error ? ' ' + h.error.slice(0, 60) : ''}`);
+  ok(files.length > 300 && found.length === 0, `no loop under scripts/ waits for a page target only on its error road — ${files.length} scripts walked (subfolders too), ${found.length} carry it${found.length ? ': ' + found.slice(0, 8).join(', ') : ''}`);
+  ok(unread.length === 0, `…and every script that quotes 'page' parsed (an unparsable one would hide a loop): ${unread.length ? unread.slice(0, 4).join(', ') : 'all'}`);
+  const U = '`http://127.0.0.1:${P}/json`';
+  const OLD = {
+    'one line': `for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(${U})).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }`,
+    'compact': `for(let i=0;i<40&&!target;i++){try{target=(await(await fetch(${U})).json()).find(t=>t.type==='page');}catch{await sleep(250);}}`,
+    'its try on lines': `for (let i = 0; i < 40 && !target; i++) {\n  try {\n    const list = await (await fetch(${U})).json();\n    target = list.find((t) => t.type == "page");\n  } catch { await sleep(250); }\n}`,
+    'a destructured type, pause': `for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(${U})).json()).find(({ type }) => type === 'page'); } catch { await pause(250); } }`,
+    'while, the url a const, nap': `const u = ${U}; while (!target) { try { const l = await (await fetch(u)).json(); target = l.find((t) => 'page' === t.type); } catch { await nap(200); } }`,
+    'a setTimeout promise': `for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(${U})).json()).find((t) => t.type === 'page'); } catch { await new Promise((r) => setTimeout(r, 250)); } }`,
+    'a .catch callback': `for (let i = 0; i < 40 && !target; i++) { target = await fetch(${U}).then((r) => r.json()).then((l) => l.find((t) => t.type === 'page')).catch(() => sleep(250)); }`,
+    'the list kept': `for (let i = 0; i < 80 && !list; i++) { try { const l = await (await fetch('http://127.0.0.1:' + P + '/json')).json(); if (l.some((t) => t.type === 'page')) list = l; } catch { await sleep(200); } }`,
+  };
+  const CURED = {
+    'the waiter': `target = await waitPageTarget(P, { polls: 40, everyMs: 250 });`,
+    'a wait outside the catch': `for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(${U})).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }`,
+    'a second wait': `for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(${U})).json()).find((t) => t.type === 'page'); } catch { await sleep(50); } await pause(200); }`,
+    'a wait in the update': `for (let i = 0; i < 40 && !target; i += (await sleep(250)) || 1) { try { target = (await (await fetch(${U})).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }`,
+    'a correct nested waiter': `for (const face of faces) { for (let i = 0; i < 40 && !t; i++) { try { t = (await (await fetch(${U})).json()).find((x) => x.type === 'page'); } catch { } if (!t) await sleep(250); } try { await go(face); } catch { await sleep(100); } }`,
+  };
+  const seenOld = Object.entries(OLD).map(([k, v]) => [k, oldPageLoops(v, acorn).length]), seenCured = Object.entries(CURED).map(([k, v]) => [k, oldPageLoops(v, acorn).length]);
+  ok(seenOld.every(([, n]) => n === 1), `CONTROLS: each old shape, planted, is FOUND by the tree (${seenOld.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+  ok(seenCured.every(([, n]) => n === 0), `CONTROLS: the correct shapes are NOT found (${seenCured.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+  const stub = (pageAt, die = 0) => { let asks = 0; return { list: async () => { ++asks; if (die && asks >= die) throw new Error('refused'); return asks >= pageAt ? [{ type: 'browser' }, { type: 'page', id: 'p1' }] : [{ type: 'browser' }]; }, asks: () => asks }; };
+  const s1 = stub(4); let naps = 0;
+  const t = await waitPageTarget(0, { polls: 10, everyMs: 1, list: s1.list, sleep: async () => { naps++; }, quiet: true });
+  ok(!!t && t.id === 'p1' && s1.asks() === 4 && naps === 3, `the waiter asks until the page is listed and WAITS after every page-less answer (asks ${s1.asks()}, waits ${naps}: three misses, three waits)`);
+  const s2 = stub(99, 3); let naps2 = 0;
+  const none = await waitPageTarget(0, { polls: 5, everyMs: 1, list: s2.list, sleep: async () => { naps2++; }, quiet: true });
+  ok(none === null && s2.asks() === 5 && naps2 === 4 && /did not answer/.test(String(waitPageTarget.lastSeen)), `…at its bound it answers null after five asks and four waits (none after the last), saying what the LAST ask saw («${waitPageTarget.lastSeen}»)`);
+  const s3 = stub(2); const dead = { exitCode: 1, signalCode: null };
+  const gone = await waitPageList(0, { polls: 10, everyMs: 1, list: s3.list, sleep: async () => {}, child: dead, quiet: true });
+  ok(gone === null && s3.asks() === 0 && /exited/.test(String(waitPageList.lastSeen)), `…a browser that EXITED ends the wait at once, asking nothing («${waitPageList.lastSeen}»)`);
+  const s4 = stub(99); let clock = 0;
+  const late = await waitPageTarget(0, { polls: 80, everyMs: 200, deadlineMs: 1000, list: async () => { clock += 300; return s4.list(); }, sleep: async (ms) => { clock += ms; }, now: () => clock, quiet: true });
+  ok(late === null && s4.asks() === 2 && /deadline/.test(String(waitPageTarget.lastSeen)), `…and a DEADLINE ends it whatever the polls left: an endpoint that takes 300 ms an ask, 200 ms between, a 1000 ms deadline ⇒ ${s4.asks()} asks of 80 (an injected clock, no wall time)`);
+  const s5 = stub(1); const l5 = await waitPageList(0, { polls: 3, everyMs: 1, list: s5.list, sleep: async () => {}, quiet: true });
+  ok(Array.isArray(l5) && l5.length === 2, 'waitPageList answers the WHOLE list once it holds a page (the callers that read other targets too)');
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

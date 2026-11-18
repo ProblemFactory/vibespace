@@ -42,6 +42,7 @@ import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
 import { scratch, freePort, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -257,9 +258,7 @@ chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-p
   '--allow-file-access-from-files', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 60 && !target; i++) {
-  try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); }
-}
+target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
 if (!target) { ok(false, 'chrome answered on its debugging port'); process.exit(1); }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));

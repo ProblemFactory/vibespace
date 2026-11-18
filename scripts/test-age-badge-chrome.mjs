@@ -20,6 +20,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, ONBOARDED_SOURCE } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -82,19 +83,12 @@ window.ready = true;`;
     const port = await freePort();
     const c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + port, '--no-first-run', '--disable-gpu', '--password-store=basic', '--user-data-dir=' + path.join(home, 'p'), 'about:blank'], { stdio: 'ignore', env });
     chromes.push(c);
-    // B-7959 (the hotfix's hosted run 44198924165, shard 5: «chrome (…) never came up», green on the retry): the poll SLEPT ONLY
-    // WHEN ITS FETCH THREW — once Chrome's DevTools endpoint answered with no page target yet, the 80 polls ran back to back in
-    // well under a second and the suite gave up on a browser that was merely late. When the browser is late the suite now waits
-    // what the loop always meant — ~16 s, polled every 200 ms, not a longer wait (r2: a DEADLINE, and each ask bounded at 2 s, so
-    // an endpoint that accepts and never answers cannot hold it past the 16 s) — a Chrome that exits ends the wait at once, and
-    // the red says what was seen (the endpoint silent / its targets with none a page / the exit)
-    let tgt = null, seen = 'the DevTools endpoint never answered';
-    for (const t0 = Date.now(); !tgt && Date.now() - t0 < 16000;) {
-      if (c.exitCode !== null || c.signalCode) { seen = `chrome exited (code ${c.exitCode}, signal ${c.signalCode})`; break; }
-      try { const list = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json(); tgt = list.find((x) => x.type === 'page'); if (!tgt) seen = `the endpoint answered ${list.length} target(s), none a page (${list.map((x) => x.type).join(', ') || 'none'})`; } catch { /* not up yet */ }
-      if (!tgt) await sleep(200);
-    }
-    if (!tgt) throw new Error('chrome (' + face + ') never came up: ' + seen + ' (within 16 s, polled every 200 ms)');
+    // B-7959 (the hotfix's hosted run 44198924165, shard 5: «chrome (…) never came up», green on the retry): the poll slept ONLY
+    // in its catch — on a Chrome whose DevTools endpoint answered before its page target was listed, every poll ran back to back
+    // and the suite gave up in ~70 ms. B-fcae: the one waiter (scripts/cdp-page-target.mjs) — a miss always waits, each ask
+    // bounded, the browser's exit ends the wait at once — for the ~16 s this loop always meant; the red names what was seen
+    const tgt = await waitPageTarget(port, { polls: 80, everyMs: 200, deadlineMs: 16000, child: c });
+    if (!tgt) throw new Error('chrome (' + face + ') never came up: ' + waitPageTarget.lastSeen + ' (a 16 s deadline, asked every 200 ms)');
     const sock = new WS(tgt.webSocketDebuggerUrl); await new Promise((r, j) => { sock.on('open', r); sock.on('error', j); });
     let seq = 0; const pend = new Map(), errors = [];
     sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params?.exceptionDetails?.exception?.description || 'exception'); });

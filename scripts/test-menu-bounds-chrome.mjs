@@ -19,6 +19,7 @@ import fs from 'node:fs'; import path from 'node:path'; import net from 'node:ne
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { ONBOARDED_SOURCE, scratchDir, CHROME_STORE } from './scratch.mjs';   // test-architecture: every chrome suite pre-sets 'vs-onboarded' before it navigates
+import { waitPageTarget } from './cdp-page-target.mjs';
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(path.join(ROOT, 'package.json'));
 const CHROME = ['/opt/google/chrome/chrome', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -39,7 +40,7 @@ const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debug
 const cleanup = () => { try { chrome.kill('SIGKILL'); } catch {} try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 try {
-  let target = null; for (let i = 0; i < 60 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+  let target = null; target = await waitPageTarget(CDP, { polls: 60, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
   const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((r) => ws.on('open', r));
   let seq = 0; const pend = new Map();
   ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });

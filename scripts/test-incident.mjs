@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = await freePort(), CDP_PORT = await freePort(), wt = scratch('incident-smoke'); // per-process (scripts/scratch.mjs)
@@ -195,9 +196,7 @@ if (CHROME) {
   const chrome = sp(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${scratch('inc-chrome')}`, 'about:blank'], { stdio: 'ignore' });
   process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { fs.rmSync(scratch('inc-chrome'), { recursive: true, force: true }); } catch {} });
   let target = null;
-  for (let i = 0; i < 40 && !target; i++) {
-    try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); } catch { await sleep(250); }
-  }
+  target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
   const cws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => cws.on('open', r));
   let seq = 0; const pend = new Map();

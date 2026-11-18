@@ -10,6 +10,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,9 +51,7 @@ for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/h
 
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 40 && !target; i++) {
-  try { const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); target = list.find((t) => t.type === 'page'); } catch { await sleep(250); }
-}
+target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();

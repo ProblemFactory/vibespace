@@ -55,6 +55,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, anchored } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -144,7 +145,7 @@ const ITEM = (re) => `[...document.querySelectorAll('#user-todos-popup .ut-item'
 
 try {
   let t0 = null;
-  for (let i = 0; i < 80 && !t0; i++) { try { t0 = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+  t0 = await waitPageTarget(CDP_PORT, { polls: 80, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
   if (!t0) throw new Error('no chrome page');
   const A = await pageOf(t0);
   startServer();

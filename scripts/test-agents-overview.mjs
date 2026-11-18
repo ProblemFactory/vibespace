@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
@@ -98,7 +99,7 @@ fs.writeFileSync(path.join(cacheDir, D.id + '.json'), JSON.stringify(mkSnap()));
 // ── UI asserts (CDP) ──
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 40 && !target; i++) { try { const l = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(250); } }
+target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise((res) => ws.on('open', res));
 let seq = 0; const pend = new Map(); const jsErrors = [];
 ws.on('message', (d) => {

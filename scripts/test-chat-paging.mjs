@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
 import { writeHugeTranscript } from './huge-transcript-fixture.mjs';
 import { judgeGesture, formatGesture, SNAP_SOURCE, RING_SINCE_SOURCE, WHEEL_POINT_SOURCE, JUMP_SLACK_VIEWPORTS, DELIVERY_MIN_FRACTION, PAGE_UP_BAND_PX, historyAbove } from './paging-gesture-rules.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
@@ -159,10 +160,7 @@ check('the scratch server answered', await serverUp(PORT));
 
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 40 && !target; i++) {
-  try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); }
-  catch { await sleep(250); }
-}
+target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();

@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { freePort, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (p) => require(path.join(REPO, p));
@@ -1274,7 +1275,7 @@ console.log('— §7 the chip at 375x667 (headless chrome)');
       // first version of it sat at 198s with nothing printed.
       const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
       let target = null;
-      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
       if (!target) throw new Error('chrome never came up on the devtools port');
       const sock = new WS(target.webSocketDebuggerUrl);
       await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
@@ -1379,7 +1380,7 @@ console.log('— §8 the LAPSED chip at the owner\'s width (1000 px panel, zh, h
       const WS = require(path.join(REPO, 'node_modules/ws'));
       const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
       let target = null;
-      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
       if (!target) throw new Error('chrome never came up on the devtools port');
       const sock = new WS(target.webSocketDebuggerUrl);
       await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
@@ -1490,7 +1491,7 @@ console.log('— §9 the account rows at the owner\'s PHONE width (215 / 180 px,
       const WS = require(path.join(REPO, 'node_modules/ws'));
       const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
       let target = null;
-      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
       if (!target) throw new Error('chrome never came up on the devtools port');
       const sock = new WS(target.webSocketDebuggerUrl);
       await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
@@ -1708,7 +1709,7 @@ console.log('— §10 login × long-lived token (oat-only)');
       const WS = require(path.join(REPO, 'node_modules/ws'));
       const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out')), ms); if (t.unref) t.unref(); })]);
       let target = null;
-      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
       if (!target) throw new Error('chrome never came up');
       const sock = new WS(target.webSocketDebuggerUrl);
       await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
@@ -1849,7 +1850,7 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
       const WS = require(path.join(REPO, 'node_modules/ws'));
       const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out')), ms); if (t.unref) t.unref(); })]);
       let target = null;
-      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
       if (!target) throw new Error('chrome never came up');
       const sock = new WS(target.webSocketDebuggerUrl);
       await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
@@ -1977,7 +1978,7 @@ console.log('— §12 the row says why its reading ages: never probed / the last
       const WS = require(path.join(REPO, 'node_modules/ws'));
       const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out')), ms); if (t.unref) t.unref(); })]);
       let target = null;
-      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      target = await waitPageTarget(CDP_PORT, { polls: 60, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)
       if (!target) throw new Error('chrome never came up');
       const sock = new WS(target.webSocketDebuggerUrl);
       await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');

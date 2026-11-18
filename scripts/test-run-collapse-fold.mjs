@@ -5,6 +5,7 @@ import fs from 'node:fs'; import path from 'node:path'; import { pathToFileURL }
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import { ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const require = createRequire(new URL('../server.js', import.meta.url));
@@ -26,7 +27,7 @@ const chrome = spawn(CHROME,[...CHROME_STORE, '--headless=new',`--remote-debuggi
 process.on('exit',()=>{ for (const p of [chrome,srv]) { try{p.kill('SIGKILL');}catch{} } try{execSync(`git worktree remove --force ${wt}`,{stdio:'ignore'});}catch{} try{fs.rmSync(chromeDir,{recursive:true,force:true});}catch{} try{fs.rmSync(fakeHome,{recursive:true,force:true});}catch{} });
 for (let i=0;i<40;i++){ try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250);} }
 const WebSocket = require('ws');
-let target=null; for (let i=0;i<40&&!target;i++){ try{ const l=await (await fetch(`http://127.0.0.1:${CDP}/json`)).json(); target=l.find(t=>t.type==='page'); }catch{ await sleep(250);} }
+let target=null; target = await waitPageTarget(CDP, { polls: 40, everyMs: 250 }); // B-fcae: the one waiter (a miss always waits)
 const ws = new WebSocket(target.webSocketDebuggerUrl); await new Promise(r=>ws.on('open',r));
 let seq=0; const pend=new Map();
 ws.on('message',d=>{ const m=JSON.parse(d); if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id);} });

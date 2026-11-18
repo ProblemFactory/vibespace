@@ -76,6 +76,7 @@ import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './sc
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { judgeHoverOpen } from './pen-hover-judge.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { waitPageTarget } from './cdp-page-target.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -122,9 +123,7 @@ await hub.ready();
 // ── raw CDP ──
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 40 && !target; i++) {
-  try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); }
-}
+target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
