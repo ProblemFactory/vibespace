@@ -16,6 +16,21 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Manage agents → Add a third-party model…: Claude Code on DeepSeek, Kimi, GLM or MiniMax, Codex on OpenRouter or your own service, with your own key.
 - Settings → Default browser engine offers «Download kernel» for an engine whose kernel is missing or unreadable, with progress and why a download was refused.
 - For you now says when a storage stopped answering and was disconnected (it reconnects by itself), and when files written meanwhile were moved aside.
+- An agent's reply or a For-you item can link to a conversation or a desktop; a press goes there, and an ended one offers «Resume here» or «Read its history».
+- A vibespace://settings/<setting> link in an agent's reply, a For-you item or a notice opens Settings on that one row; it never changes the value.
+- When VibeSpace refuses a turn nobody typed, or warns that a limit is close, its notice links to that limit's row in Settings.
+- An agent can propose a new value for a limit on turns nobody typed: For you shows the limit, its value now and the proposal, and one press changes it.
+- A raised limit always has an end time, when it goes back by itself unless you changed it meanwhile; until then its Settings row says so, with «End now».
+- A website login card can add its site to a login you already saved («Use a login you already saved…»): nothing typed twice; it first says who may sign in there.
+- A reply in For you can carry a picture: paste it, drop it on the reply box or pick it with the picture button; it reaches the agent with your reply.
+- A session that a usage limit or an overloaded model stopped wears a mark on its card until it runs again, with its auto-continue switch beside it.
+- The session list can show only the sessions a usage limit or an overloaded model stopped.
+- One button (Settings → Spending, and the session list's ⋯ menu) turns auto-continue on, or off, for every session.
+- A running resume of stopped sessions can be stopped from its window, or by turning auto-continue off for every session.
+- Before it runs, it says what the batch is likely to cost: the dollars, and each account's 5-hour share when it can be measured.
+- One button resumes every session a usage limit or an overloaded model stopped; it is your own press, so the limits on turns nobody typed do not count it.
+- An agent's own vault secret can now be deleted from its row in the Vault window; the conversation that kept it may store a new one.
+- A secret an agent stored itself can now be shared from its row's «Who may use it…» with another conversation or a Task Group, for the hosts you name.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
@@ -29,6 +44,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
 - Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
+- When a usage limit cuts a Workflow run short, the automatic continue tells the agent to resume that run instead of starting it again.
+- A paired machine now runs an agent's CLI from where that machine's own login shell finds it, and a new conversation says so when it finds none.
+- In Remote, a machine's «Exit: network — … · commands — …» line is now a button that opens «Who can use it…»; the separate exit icon is gone.
+- The notice about the old background-job secrets file now has buttons: Move into the vault (then the file is deleted) or Delete the file.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
@@ -72,9 +91,22 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When an agent's approval to use a vault entry has ended, the agent is told when and how to ask again, instead of that the entry was never opened.
 - The Vault no longer turns off the entry you just switched on after the clock moves back, and a refused allow no longer leaves a false «switched off» notice.
 - In Integrations, the Plugin Git repository card offers its Test once a repository from its host is installed; before that the card says when.
+- A picture you paste, pick or take in a chat is checked at once: an empty file, a HEIC, a non-picture or one too large for the model is refused with its reason.
+- A subscription you pick now pays on a machine whose Claude settings name an apiKeyHelper; the helper's key used to pay. Its first start says so.
+- A session's own auto-continue choice now survives a VibeSpace restart instead of falling back to the default.
+- Auto-continue no longer sends a session back into a model's cap that still stands just because the plan's window reset; it waits for that cap instead.
+- When Tailscale stops, a browser's request still waiting on a tailnet name now reads why instead of an empty answer.
+- On a machine that runs its own Tailscale, a refused tailnet page now says so instead of asking you to start the plugin.
+- On an instance your company set up, «Connect with Fish Audio» for voice input now uses the company's sign-in client and its relay page.
+- An update run from a terminal now runs every new step it brings at once, as the Update button already did.
+- A machine paired inside a VibeSpace container (a fleet pod) comes back after the container restarts once its pairing command has run on this version.
+- In «Who may use…», saving twice no longer re-sends a later end, and a member whose 1-hour approval had ended leaves the list once a save lands.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
+- On browsers older than mid-2025, a chat link written with a crafted title can no longer run code.
+- An agent can no longer change the limits on turns nobody typed or the judge's daily spend cap: only your own page can; an agent that tries is told to ask you.
+- With sign-in off, Settings › Spending says that anything reaching VibeSpace could still change those limits, with a button to set a password.
 
 ## 2.369.410 — 2026-11-18
 
