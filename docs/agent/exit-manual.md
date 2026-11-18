@@ -44,9 +44,10 @@ machine's shell reads its pipe. TWO OR MORE words are an argv and arrive WORD FO
 machine's shell, so `vibespace-exit run box -- bash -c 'ls /srv; df -h'` runs exactly `bash`, `-c` and that script (before, the
 words were joined with spaces and re-split there — another command ran). An empty word stays a word. On Windows (cmd.exe) the
 words are put in cmd.exe's own form — a word with spaces in double quotes, backslashes as typed (`-- powershell -NoProfile
--Command "Get-ChildItem C:\x"` works); a word holding a double quote, `& | < > ^ ( ) % !`, an empty word or a trailing backslash
-cannot pass word for word and is refused by name, nothing runs: write ONE line in cmd.exe's own quoting. A word holding `,` `;`
-or `=` is put in double quotes too (cmd's built-ins split on them); `*` and `?` still reach the program, which expands them.
+-Command "Get-ChildItem C:\x"` works); a word holding a double quote, `& | < > ^ ( ) % !`, an empty word or a space AND a trailing
+backslash cannot pass word for word and is refused by name, nothing runs: write ONE line in cmd.exe's own quoting. A word holding `,` `;`
+or `=` is put in double quotes too (cmd's built-ins split on them) — `echo` prints the quotes as typed (`-- echo a=b` prints `"a=b"`);
+such a word that ENDS in a backslash (`INSTALLDIR=C:\App\`) passes as it is; `*` and `?` still reach the program, which expands them.
 
 
 - **Windows** — `cmd.exe /d /s /c "<line>"`. One line only: join steps with `&` or `&&` (a line

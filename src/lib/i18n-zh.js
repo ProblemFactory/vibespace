@@ -6225,6 +6225,7 @@ export default {
   "Pairing command — \"{name}\"": "配对命令 — \"{name}\"",
   "Update its agent…": "更新它的 agent…",
   "VibeSpace sends the agent its update each time the machine connects. If the agent stays old, run the pairing command on that machine again: it installs the agent anew.": "VibeSpace 会在这台机器每次连接时把更新发给它的 agent。如果 agent 仍然过旧，请在那台机器上再运行一次配对命令：它会重新安装 agent。",
+  "Last run: {cmd} — {who}, {when}, not run — allowed, then refused: this machine runs commands with cmd.exe; write the command as one line": "上次运行：{cmd} — {who}，{when}，未运行 — 已允许，随后被拒绝：这台机器用 cmd.exe 运行命令；请把命令写成一行",
   "Last run: {cmd} — {who}, {when}, not run — agent {v} cannot run commands on Windows; rerun the install command (Pairing command)": "上次运行：{cmd} — {who}，{when}，未运行 — 代理 {v} 无法在 Windows 上运行命令；请重新运行安装命令（配对命令）",
   "Agent {from} — its update to {to} failed, so commands cannot run here; rerun the install command (Pairing command)": "代理 {from} — 升级到 {to} 失败，因此这里无法运行命令；请重新运行安装命令（配对命令）",
   "Agent {from} — its update to {to} failed; rerun the install command (Pairing command)": "代理 {from} — 升级到 {to} 失败；请重新运行安装命令（配对命令）",

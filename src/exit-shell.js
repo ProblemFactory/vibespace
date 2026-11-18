@@ -78,7 +78,7 @@ function argvLine(words) {
 /** The SAME words for cmd.exe (`cmd /d /s /c "<line>"`, the program's own argv parser): a word with none of cmd's live
  *  characters as it is (a backslash and any letter are fine there), a word holding spaces or , ; = (cmd's built-ins split on
  *  them) in double quotes;
- *  a word with a double quote, `& | < > ^ ( ) % !`, a trailing backslash or nothing at all cannot be handed WORD FOR WORD
+ *  a word with a double quote, `& | < > ^ ( ) % !`, a space AND a trailing backslash, or nothing at all cannot be handed WORD FOR WORD
  *  through cmd.exe ⇒ {ok: false} (the hub refuses by name: write cmd.exe's own line). → {ok, line}. */
 const WIN_LIVE = /["&|<>^()%!]/;
 function winArgvLine(words) {
@@ -87,7 +87,9 @@ function winArgvLine(words) {
   for (const w of words) {
     if (!w || WIN_LIVE.test(w)) return { ok: false, line: '' };
     if (!/[\s,;=]/.test(w)) { out.push(w); continue; } // B-f169 r2: cmd's built-ins split a word on , ; = too — such a word is quoted
-    if (/\\$/.test(w)) return { ok: false, line: '' };
+    // a word ending in a backslash cannot be double-quoted (\" escapes the quote): with no space it passes PLAIN, as before r2
+    // (INSTALLDIR=C:\App\ ran at the release); with a space it cannot be handed word for word
+    if (/\\$/.test(w)) { if (!/\s/.test(w)) { out.push(w); continue; } return { ok: false, line: '' }; }
     out.push(`"${w}"`);
   }
   return { ok: true, line: out.join(' ') };

@@ -29,6 +29,8 @@
 //      hides nothing; the stderr preview too; «Show output» is drawn as itself. The redraw also through the VIEW'S OWN SWAP:
 //      the real ChatView._swapMessageEl (chat-view.js bundled) with the view's _peerOpen / _setPeerOpen. Its CONTROLS: (h, h2)
 //      no keeper (the release: a redraw / the swap closes every fold), (i) the release's drawing (the margin drawn)
+//   §3b (B-f169 follow-up 2) the machine row's last-run words (src/lib/exit-access-dialog.js lastRunText, bundled): a run
+//      allowed, then refused (outcome `quoting`) reads «not run — allowed, then refused …», never «exit ?»; CONTROL: no branch
 //   §4 CONTROLS (patched copies of the source, bundled in memory — src/ never touched): the painter's hover title back;
 //      the body's command cut to the head; the card without its command block; the command on the card again
 //      outside its fold (d); a row without the icon; the 2.369.207 duration words (f); the fold without the device's
@@ -173,6 +175,16 @@ const rule = (css, sel) => { const m = new RegExp('^' + sel.replace(/[.*+?^${}()
 const wraps = (r) => /white-space: pre-wrap/.test(r) && /overflow-wrap: anywhere/.test(r);
 ok(wraps(rule(CSS, '.chat-exit-cmd')) && wraps(rule(CSS, '.chat-exit-out, .chat-exit-out-all')) && wraps(rule(STY, '.exit-runs-cmd-all')), 'both command pres and the card\'s output wrap anywhere (a 1 365-byte token breaks on a phone)');
 ok(/max-height: 60vh; overflow: auto/.test(rule(CSS, '.chat-exit-tech .chat-exit-cmd')) && !/chat-exit-cmd-folded|chat-exit-cmd-fold\b/.test(CSS), 'inside 技术细节 the whole command scrolls past 60vh; no four-line clamp is left in chat.css');
+
+// ── §3b B-f169 follow-up 2: a run ALLOWED, THEN REFUSED (the agent said cmd.exe after the Allow) is never «exit ?» on the row ──
+console.log('§3b the machine row\'s last-run words for a run allowed, then refused (B-f169)');
+const XA = await bundle('src/lib/exit-access-dialog.js');
+const QLR = { cmd: 'cmd /c dir C:/My Files', outcome: 'quoting', code: null, at: Date.now() - 60000, by: { name: 'conv' } };
+const qWords = XA.lastRunText(QLR);
+ok(/not run — allowed, then refused: this machine runs commands with cmd\.exe; write the command as one line/.test(qWords) && !/exit/.test(qWords), 'a run allowed, then refused (the agent said cmd.exe) reads «not run — allowed, then refused …» on the machine row (the Remote row and «Who can use it» share these words) — never «exit ?»', qWords);
+ok(/, exit 0$/.test(XA.lastRunText({ ...QLR, outcome: 'ran', code: 0 })), '…a run that ran still says its exit code', XA.lastRunText({ ...QLR, outcome: 'ran', code: 0 }));
+const pq = patched('src/lib/exit-access-dialog.js', /\n  \/\/ B-f169 follow-up 2:[^\n]*\n  if \(lr\.outcome === 'quoting'\)[^\n]*\n/, '\n');
+ok(pq.applies && /, exit \?$/.test((await bundle('src/lib/exit-access-dialog.js', pq)).lastRunText(QLR)), 'CONTROL: the tip before this cure (no branch for the outcome) — the row reads «exit ?» for a run that never ran: §5 goes red');
 
 // ── §4 controls ──
 console.log('§4 controls (patched copies, bundled in memory)');

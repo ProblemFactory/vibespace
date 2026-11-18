@@ -61,6 +61,8 @@ export function lastRunText(lr) {
   if (lr.outcome === 'spawn_failed') return t('Last run: {cmd} — {who}, {when}, could not start — {why}', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', why: spawnFailureText(lr.spawnError, { interpreter: lr.interpreter || 'sh' }) });
   // lane device-upgrade-stuck: refused before it was sent (a Windows agent without run-shell) — never "exit ?"
   if (lr.outcome === 'agent_outdated') return t('Last run: {cmd} — {who}, {when}, not run — agent {v} cannot run commands on Windows; rerun the install command (Pairing command)', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', v: lr.agentVersion || '?' });
+  // B-f169 follow-up 2: allowed, then refused — the agent said cmd.exe after the Allow and the words differ there; nothing ran: never «exit ?»
+  if (lr.outcome === 'quoting') return t('Last run: {cmd} — {who}, {when}, not run — allowed, then refused: this machine runs commands with cmd.exe; write the command as one line', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '' });
   const code = lr.timedOut ? t('timed out') : (lr.code == null ? (lr.outcome === 'offline' ? t('offline') : '?') : lr.code);
   return t('Last run: {cmd} — {who}, {when}, exit {code}', { cmd: head, who: (lr.by && lr.by.name) || '?', when: lr.at ? agoText(lr.at, t) : '', code });
 }
