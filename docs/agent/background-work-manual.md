@@ -184,8 +184,9 @@ the panel is posted AND when the user answers.
 Its cause gone (the alarm cleared, the mirror fresh again)? `vibespace-job withdraw`
 (inside the job: its own panel; from the owner conversation: `withdraw <id>`)
 closes it and resolves its For-you item; `answers` then holds `{"withdrawn": true}`
-for that panel, as an unanswered one holds `{"expired": true}`. Only the job that
-filed it, or its owner conversation, may withdraw it — a control grant may not.
+for that panel, as an unanswered one holds `{"expired": true}`. The job
+withdraws its own question from inside, or its owner conversation does — never another
+conversation (one that holds control included).
 
 Example panel.json:
 ```json

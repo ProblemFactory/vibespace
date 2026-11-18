@@ -3386,6 +3386,7 @@ class JobManager {
     // the panel is gone, whoever closed it
     job.interaction.answers = job.interaction.answers || [];
     job.interaction.answers.push({ withdrawn: true, version: p.version, ts: now() });
+    if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);   // its read r2: the same cap as an answer's
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
     this._resolveAns(job);
