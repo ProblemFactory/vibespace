@@ -44,6 +44,7 @@ const path = require('path');
 const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this reading say the wall is gone?
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
 const { toAgentText } = require('../peer-text.js');          // PURE: the one belt on a name an agent reads (the account label)
+const { familyOfModel, familyOfScopedBucket } = require('../model-family.js');   // PURE: a model's family and a model cap's (modelCapHold)
 
 // THE CONTINUE AN AGENT READS (lane resume-words, the owner 2026-10-29: «agent 都会优先理解那个 claude 自己的 reset
 // time 作为"用量重置时间"，但实际上 vibespace 通知的时候才是重置的时候»). The Screeps conversation hit a WEEKLY wall
@@ -240,6 +241,23 @@ function claimContinueNotice({ label, cause = null }) {
   return { cls: 'switched', text: cause === 'member-usable' ? `账号 ${who} 按你的重置声明可用（未确认），已自动继续这个任务。` : `账号池已切换到 ${who}（按你的重置声明，未确认），已自动继续这个任务。` };
 }
 
+/** THE MODEL'S CAP STILL STANDS (主开发's law 2026-11-18): the wall that stopped the conversation was a MODEL's cap (the stop
+ *  fact's bucket 'scoped' with its name) whose OWN stated reset is still ahead, and the continue would land where it met it
+ *  (the same member, a model the cap still draws) — the plan's window resetting is then not the way out: the request would
+ *  meet the cap again. PURE: `{ name, until }` (hold until the cap's own reset) or null (fire as before). `key` = the identity
+ *  the continue lands on NOW (after the pre-fire gate); a fact with no member is a conversation no pool can move (the same
+ *  account); a known member with an unknown identity now cannot be told — fire as before (the gate and the wall still
+ *  judge). The family fails CLOSED: a cap or a model of no known family binds; only two known, different families let it go.
+ *  A cap with no stated reset has nothing to wait for — fire as before. */
+function modelCapHold({ fact, now = Date.now(), key = null, modelFamily = null, capFamily = null } = {}) {
+  if (!fact || fact.kind !== 'quota' || fact.bucket !== 'scoped' || !fact.scopedName) return null;
+  const until = Number(fact.resetsAt) || 0;
+  if (!(until > now)) return null;
+  if (fact.memberId && fact.memberId !== key) return null;
+  if (modelFamily && capFamily && modelFamily !== capFamily) return null;
+  return { name: String(fact.scopedName), until };
+}
+
 /** The delayed ARM announcement, worded by the arm's CAUSE (2.369.104, owner:
  *  "明明没到也没被中断你却提示到达上限了"): a hot pool switch arms a +45 s
  *  near-nudge, and one sentence — "用量已达上限。已安排在 <T> 重置后自动继续" —
@@ -385,7 +403,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -1235,6 +1253,22 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  same identity had just been rejected.
    *    breaker → the SAME beforeFire gate → deliver → remember what we fired at
    *  Returns true when a continue was delivered or a gate is in flight. */
+  /** A TIMED continue whose wall was a model's cap that still stands (modelCapHold) is NOT delivered: re-armed at the cap's
+   *  own reset — a watch when that is beyond the waiting bound, so a reading that says the cap cleared early still opens it —
+   *  and said once per hold. Asked AFTER the pre-fire gate, of the identity the continue would land on: a gate that moved the
+   *  conversation onto another member continues it. */
+  function capHeld(id, session, key2) {
+    const fact = session && session._stoppedBy;
+    if (!fact || fact.bucket !== 'scoped') return false;
+    let model = null; try { model = modelOf ? modelOf(id, session) : null; } catch { model = null; }
+    const h = modelCapHold({ fact, now: Date.now(), key: key2, modelFamily: familyOfModel(model), capFamily: familyOfScopedBucket(fact.scopedName) });
+    if (!h) return false;
+    log(`[auto-resume] ${id}: the wall was the ${h.name} cap, which resets at ${new Date(h.until).toISOString()} — the plan's window is what reset; not continued (it would meet the cap again), waiting for the cap's own reset`);
+    const re = armIfEnabled(id, session, h.until, `usage limit (the ${h.name} cap)`, { bucket: 'scoped', scopedName: h.name, ...(fact.lane ? { lane: fact.lane } : {}), cause: { scope: 'account', until: { label: h.name, resetsAt: h.until } } });
+    if (!re) { armed.delete(id); save(); emit(id); }   // it could not wait (switched off, no verb): no due arm is left to re-enter the gate every tick
+    return true;
+  }
+
   function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false } = {}) {
     const now = Date.now();
     if (session._arFiring) return false;   // a gate is already running for this session (also breaks fireNow ⇄ beforeFire re-entry)
@@ -1292,6 +1326,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // ARMED RECORD (one source, one wording) — see continueNoticeFor
       const note = continueNoticeFor({ kind, armReason: a2.reason, label: label2, moved, cause });
       if (claim) Object.assign(note, claimContinueNotice({ label: label2, cause }));   // a continue on a reset claim says so (fireNowOnClaim)
+      if (kind === 'timed' && capHeld(id, session, key2)) return false;   // THE MODEL'S CAP STILL STANDS: the plan's window reset, not the cap (modelCapHold) — nothing reserved yet
       // THE CEILING, on the identity the continue actually lands on. The gate
       // can have moved us onto a member whose budget is spent — charging the
       // one we resolved before it is the round-2 defect in a second currency.
@@ -1565,4 +1600,5 @@ module.exports = {
   create, CONTINUE_PROMPT, continuePromptFor, workflowRunLine, WF_REREAD_MS, WF_FRESH_MS, WF_LEAD_MS, WF_INFLIGHT_MAX, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
+  modelCapHold,   // PURE: a model's cap that still stands holds a timed continue
 };

@@ -2141,6 +2141,64 @@ await (async () => {
   ok('18. CONTROL: a fire that does not hand the run over says today\'s words — the naming leg goes red', mW.hits === 1 && !!ctl && ctl.sent.length === 1 && !ctl.sent[0].includes('Workflow'), mW.err || (ctl && ctl.sent));
 })();
 
+// ── 18b. THE MODEL'S CAP STILL STANDS (主开发's law 2026-11-18 11:24Z, written on the chain's restack — it needs the U1 cure's
+// stop fact): the wall was a MODEL's cap and the plan's window is what reset ⇒ the timed continue is NOT delivered (it would meet
+// the cap again) and waits for the cap's own reset; on another member, or a model the cap does not draw, it continues.
+{
+  console.log('\n18b. a model\'s cap that still stands holds the timed continue');
+  const { modelCapHold } = require(AR_PATH);
+  const real = { create };
+  const T = Date.now(), cap = { kind: 'quota', at: T - 3600e3, resetsAt: T + 3 * 3600e3, memberId: 'A', bucket: 'scoped', scopedName: 'opus' };
+  const H = (o) => modelCapHold({ fact: cap, now: T, key: 'A', modelFamily: 'opus', capFamily: 'opus', ...o });
+  const tbl = [
+    ['the cap stands, the same member, the same family ⇒ held until the cap\'s reset', JSON.stringify(H({})) === JSON.stringify({ name: 'opus', until: cap.resetsAt })],
+    ['another member now ⇒ fires', H({ key: 'B' }) === null],
+    ['the cap\'s own reset has passed ⇒ fires', H({ fact: { ...cap, resetsAt: T - 1 } }) === null],
+    ['a cap with no stated reset ⇒ fires (nothing to wait for)', H({ fact: { ...cap, resetsAt: null } }) === null],
+    ['the wall was the plan\'s own window (fiveHour) ⇒ not this rule', H({ fact: { ...cap, bucket: 'fiveHour', scopedName: null } }) === null],
+    ['a model the cap does not draw (sonnet under an opus cap) ⇒ fires', H({ modelFamily: 'sonnet' }) === null],
+    ['a model of no known family ⇒ held (fails closed)', !!H({ modelFamily: null })],
+    ['a cap of no known family ⇒ held (fails closed)', !!H({ capFamily: null })],
+    ['a wall that named no member (no pool can move it) ⇒ held', !!H({ fact: { ...cap, memberId: null }, key: null })],
+    ['a named member, an identity that cannot be told now ⇒ fires as before', H({ key: null }) === null],
+    ['an overload stop ⇒ not this rule', H({ fact: { kind: 'overload', at: T } }) === null],
+  ];
+  for (const [n, c] of tbl) ok('18b. PURE modelCapHold: ' + n, c);
+  // THE MODULE: an arm at the plan's reset, the stop fact a model's cap three hours on; the gate may move the conversation
+  const scene = (mod, { member = 'A', model = 'claude-opus-5-5', gateMovesTo = null, capAt = T + 3 * 3600e3 } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-mcap-')), sent = [], logs = [], sessions = new Map();
+    let on = member;
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, log: (l) => logs.push(String(l)),
+      sendToSession: (id) => { sent.push(id); return true; }, fireIdentity: () => ({ key: on, name: on }), modelOf: () => model,
+      beforeFire: () => { if (gateMovesTo) on = gateMovesTo; return true; } });
+    sessions.set('m', sess({ _stoppedBy: { ...cap, resetsAt: capAt } }));
+    const plan = T + 3600e3;
+    ar.armIfEnabled('m', sessions.get('m'), plan, 'usage limit', { bucket: 'scoped', scopedName: 'opus' });
+    ar.tick(plan + GRACE_MS + 1);
+    const a = ar._armed.get('m');
+    const out = { sent: sent.length, resetsAt: a ? a.resetsAt : null, watch: a ? !!a.watch : null, said: logs.some((l) => /m: the wall was the opus cap, which resets at .* not continued/.test(l)) };
+    if (a && !sent.length) {   // the cap's reset comes (the fact's own reset now behind the clock): the re-armed wait continues it
+      sessions.get('m')._stoppedBy = { ...sessions.get('m')._stoppedBy, resetsAt: Date.now() - 1 };
+      ar.tick(a.resetsAt + GRACE_MS + 1); out.after = sent.length;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    return out;
+  };
+  const r = scene(real);
+  ok('18b. THE MODULE: the plan\'s window reset, the opus cap still stands on the same member ⇒ NOT continued, re-armed at the cap\'s own reset, said; at that reset it continues once', r.sent === 0 && r.resetsAt === T + 3 * 3600e3 && r.watch === false && r.said && r.after === 1, JSON.stringify(r));
+  const rFar = scene(real, { capAt: T + 5 * 24 * 3600e3 });
+  ok('18b. THE MODULE: a cap whose reset is days away ⇒ not continued, held as a WATCH (no timed continue; a reading that says the cap cleared opens it)', rFar.sent === 0 && rFar.resetsAt === T + 5 * 24 * 3600e3 && rFar.watch === true, JSON.stringify(rFar));
+  const rB = scene(real, { member: 'B' });
+  ok('18b. THE MODULE: the conversation is on another member now ⇒ continued at the plan\'s reset', rB.sent === 1, JSON.stringify(rB));
+  const rG = scene(real, { gateMovesTo: 'B' });
+  ok('18b. THE MODULE: the pre-fire gate moves it onto another member ⇒ continued (the hold is asked AFTER the gate, of the identity it lands on)', rG.sent === 1, JSON.stringify(rG));
+  const rS = scene(real, { model: 'claude-sonnet-5-5' });
+  ok('18b. THE MODULE: the conversation asks a model the opus cap does not draw ⇒ continued', rS.sent === 1, JSON.stringify(rS));
+  const mC = mutantAr([["      if (kind === 'timed' && capHeld(id, session, key2)) return false;", '      /* the hold removed */']]);
+  const rRed = mC.mod ? scene(mC.mod) : null;
+  ok('18b. RED: without the hold the timed continue goes at the plan\'s reset into the cap that still stands', mC.hits === 1 && !!rRed && rRed.sent === 1, mC.err || JSON.stringify(rRed));
+}
+
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix
