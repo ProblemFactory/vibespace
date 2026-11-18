@@ -668,6 +668,35 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     ok(cr.includes("fetch('/api/file/temp'") && !cr.includes("'/tmp/claude-webui") && cr.includes(".then((tmpPath) => {"), "B-3767: the client asks the hub for its temp file and opens the path the hub answered (it spells no /tmp folder)");   // stale-pins: kept — an absence check: the client spells no /tmp folder
     ok(HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/b/data', tmpRoot: '/t', uid: 7 }) && HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 8 }),
       'B-3767: two hubs (two data folders) and two users never share a folder');
+    // B-3767 unit 2 (主开发 11:40Z, B-4371): THE AGE SWEEP OF THE HUB'S OWN ROOT — in its purposes an old file goes and a fresh one
+    // stays, a link is removed as a link (its target kept), a purpose folder that is not ours is skipped and said (nothing behind
+    // it touched), and nothing outside the root is ever looked at. RED control: the sweep without the purpose judgment deletes
+    // through a planted link.
+    {
+      const SR = path.join(DIR, 'sweep10'), dataX = '/srv/x/data', uidX = process.getuid();
+      const rootX = HT.hubTmpRoot({ dataDir: dataX, tmpRoot: SR, uid: uidX });
+      const OLD = (Date.now() - 48 * 3600 * 1000) / 1000;
+      const mk = (f, body = 'x', old = true) => { fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 }); fs.writeFileSync(f, body); if (old) fs.utimesSync(f, OLD, OLD); return f; };
+      fs.mkdirSync(rootX, { recursive: true, mode: 0o700 }); fs.chmodSync(rootX, 0o700);
+      const oldUp = mk(path.join(rootX, 'uploads', 'old-upload.bin')), freshUp = mk(path.join(rootX, 'uploads', 'fresh.bin'), 'x', false);
+      const target = mk(path.join(SR, 'outside', 'target.txt')), link = path.join(rootX, 'editor', 'old-link');
+      fs.mkdirSync(path.dirname(link), { recursive: true, mode: 0o700 }); fs.symlinkSync(target, link); fs.lutimesSync(link, OLD, OLD);
+      const victim = mk(path.join(SR, 'victim', 'old-in-victim.bin')); fs.symlinkSync(path.dirname(victim), path.join(rootX, 'paste'));
+      const sharedOld = mk(path.join(SR, 'claude-paste-1.png'));   // in the shared temp folder, not in the root
+      for (const d of [path.join(rootX, 'uploads'), path.join(rootX, 'editor')]) fs.chmodSync(d, 0o700);
+      const r = await HT.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
+      const there = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
+      ok(!there(oldUp) && there(freshUp) && !there(link) && there(target) && there(victim) && there(sharedOld) && r.refused.length === 1 && r.refused[0].includes(path.join(rootX, 'paste')) && /SYMLINK/.test(r.refused[0]),
+        `B-3767 unit 2: the age sweep of the hub's own root — the old upload and the old link go (the link's target stays), the fresh file stays, a planted purpose folder is refused by name and nothing behind it is touched, the shared temp folder is never looked at: ${JSON.stringify({ removed: r.removed.length, kept: r.kept, refused: r.refused })}`);
+      const htSrc = fs.readFileSync(path.join(REPO, 'src/server/hub-tmp.js'), 'utf8'), JUDGE = '    if (!(await own(d))) continue;\n';
+      const victim2 = mk(path.join(SR, 'victim', 'old-in-victim-2.bin'));
+      const HT0 = M.load('src/server/hub-tmp.js', htSrc.replace(JUDGE, ''), 'nojudge');
+      await HT0.sweepHubTmp({ dataDir: dataX, tmpRoot: SR, uid: uidX });
+      ok(htSrc.includes(JUDGE) && !there(victim2), `CONTROL B-3767 unit 2: without the purpose judgment the sweep deletes through the planted link (red): ${there(victim2) ? 'kept' : 'deleted'}`);
+      const filesSrc = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
+      ok(/sweepOwnTmp\(\); upload\.array\('files'\)/.test(filesSrc) && (filesSrc.match(/\n\s+sweepOwnTmp\(\);\n/g) || []).length === 2,
+        'B-3767 unit 2: the roads that write into the root ask the sweep (upload, temp file, paste) — throttled, never awaited');
+    }
   } finally { if (prevTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmp; await S.close(); }
 }
 

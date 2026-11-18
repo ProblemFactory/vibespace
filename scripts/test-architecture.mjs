@@ -7781,6 +7781,7 @@ await section(async () => {
     ["src/server/cli-self-measure.js", "scratchBases = () =>", "unique", "its run root is a per-run name"],
     ["src/server/hub-tmp.js", "function hubTmpRoot({ dataDir, tmpRoot = os.tmpdir()", "per-data", "THE hub's own folder: vibespace-<uid>-<8 hex of the data folder>"],
     ["src/server/hub-tmp.js", "async function hubTmpDir(purpose, { dataDir, tmpRoot = os.tmpdir()", "per-data", "the same"],
+    ["src/server/hub-tmp.js", "async function sweepHubTmp({ dataDir, tmpRoot = os.tmpdir()", "per-data", "the age sweep of the hub's OWN root — inside it only, never a pattern over the shared folder (B-3767 unit 2, B-4371)"],
     ["src/server/local-index.js", "varTmp = '/var/tmp' } = {})", "read", "the index's place verdict"],
     ["src/server/memory-pressure-watch.js", "async function tmpfsOf(dir = '/tmp')", "read", "reads a tmpfs"],
     ["src/server/memory-pressure-watch.js", "async function tmpRoots(dir = '/tmp')", "read", "the same"],

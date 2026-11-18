@@ -508,6 +508,7 @@ router.post('/api/file/write', async (req, res) => {
 router.post('/api/file/temp', async (req, res) => {
   const name = String(req.body?.name || '');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name)) return res.status(400).json({ error: 'name must be a plain file name', code: 'bad_name' });
+  sweepOwnTmp();
   const r = await HUB_TMP.hubTmpDir('editor', { dataDir: HUB_DATA });
   if (!r.dir) return res.status(500).json({ error: `the editor's temp folder: ${r.why}`, code: 'hub_tmp_refused' });
   const p = path.join(r.dir, name);
@@ -538,8 +539,15 @@ router.delete('/api/file', async (req, res) => {
 // folder it cannot use is the request's error BY NAME (the upload route answers it, never a hang)
 const HUB_TMP = require('../server/hub-tmp.js');
 const HUB_DATA = path.join(__dirname, '..', '..', 'data');
+// B-3767 unit 2 (B-4371): the hub's own temp root gets the tree's age sweep — asked by the roads that write there (upload, temp
+// file, paste), at most once in 10 min, off the request (never awaited); what it removed or refused is said in one line
+let ownTmpSweptAt = 0;
+const sweepOwnTmp = () => {
+  const now = Date.now(); if (now - ownTmpSweptAt < 10 * 60 * 1000) return; ownTmpSweptAt = now;
+  HUB_TMP.sweepHubTmp({ dataDir: HUB_DATA }).then((r) => { if (r.removed.length || r.refused.length) console.log(`[files] the hub's own temp root: ${r.removed.length} old file(s) removed${r.refused.length ? ' — refused: ' + r.refused.join('; ') : ''}`); }, () => { });
+};
 const upload = multer({ storage: HUB_TMP.hubTmpStorage(multer, 'uploads', { dataDir: HUB_DATA }) });
-const uploadFiles = (req, res, next) => upload.array('files')(req, res, (err) => (err ? res.status(err.status || 500).json({ error: err.message, code: err.code || 'upload_failed' }) : next()));
+const uploadFiles = (req, res, next) => { sweepOwnTmp(); upload.array('files')(req, res, (err) => (err ? res.status(err.status || 500).json({ error: err.message, code: err.code || 'upload_failed' }) : next())); };
 // lane chat-attachments-persist (road a): a file the person gives a conversation whose cwd is TEMPORARY — chat.uploadDir
 // unset, the cwd under os.tmpdir() / /tmp / /var/tmp — is kept with the conversation instead (data/chat-attachments/<conv>/
 // files/, a remote host's ~/.vibespace/chat-attachments/<conv>/), and the answer says where; a cwd that is not temporary
@@ -670,7 +678,8 @@ function sweepPasteTemps(rfsInst, host) {
     return;
   }
   // async only — os.tmpdir() is local disk, but never risk a pool stall. B-3767: new pastes live in the hub's own folder
-  // (<tmp>/vibespace-<uid>-<data hash>/paste); the legacy root is still swept of THIS user's old claude-paste-* files
+  // (<tmp>/vibespace-<uid>-<data hash>/paste), swept with the rest of that root by HUB_TMP.sweepHubTmp (judged, by age); here
+  // only the LEGACY root's old claude-paste-* files of this user remain (retired a release later: B-5527)
   const sweepDir = (dir) => fs.promises.readdir(dir).then(async (names) => {
     for (const n of names) {
       if (!n.startsWith('claude-paste-')) continue;
@@ -679,7 +688,6 @@ function sweepPasteTemps(rfsInst, host) {
     }
   }).catch(() => {});
   sweepDir(os.tmpdir());
-  sweepDir(path.join(HUB_TMP.hubTmpRoot({ dataDir: HUB_DATA }), 'paste'));
 }
 
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
@@ -708,6 +716,7 @@ router.post('/api/paste-image', async (req, res) => {
       return res.json({ ready: true, remotePath });
     }
     // B-3767: the paste lands in THIS hub's own temp folder (never the shared root, where any user could read it)
+    sweepOwnTmp();
     const pasteDir = await HUB_TMP.hubTmpDir('paste', { dataDir: HUB_DATA });
     if (!pasteDir.dir) return res.status(500).json({ error: `the paste's temp folder: ${pasteDir.why}`, code: 'hub_tmp_refused' });
     const tmpPath = path.join(pasteDir.dir, `claude-paste-${Date.now()}.${ext}`);

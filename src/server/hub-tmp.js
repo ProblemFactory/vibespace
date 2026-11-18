@@ -57,4 +57,32 @@ function hubTmpStorage(multer, purpose, opts) {
   });
 }
 
-module.exports = { hubTmpRoot, ownVerdict, hubTmpDir, hubTmpStorage };
+/** The purposes this hub makes under its own root — the ones the sweep may judge (B-3767 unit 2, B-4371). */
+const SWEPT_PURPOSES = Object.freeze(['uploads', 'editor', 'paste', 'plugin-uploads']);
+/** ORCH (B-3767 unit 2, 主开发 11:40Z — B-4371): THE TREE'S AGE SWEEP OVER THE HUB'S OWN TEMP ROOT. A multer file of a hub killed
+ *  mid-upload, an «open in editor» file whose tab closed without its delete, a paste nobody asked for again: each stayed until the
+ *  temp folder itself was cleaned. The sweep stays INSIDE this hub's own root: the root and each purpose folder are judged first
+ *  (ownVerdict — a folder that is not ours is skipped and said, never entered); in them a plain file (or a link, removed as a link,
+ *  never followed) older than `maxAgeMs` is removed; anything else is kept. Never a name pattern over the shared temp folder.
+ *  Async, at most `max` removals a pass. → { removed: [path], kept: n, refused: [why] } */
+async function sweepHubTmp({ dataDir, tmpRoot = os.tmpdir(), uid = myUid(), fs = fsp, now = Date.now(), maxAgeMs = 24 * 3600 * 1000, max = 500 } = {}) {
+  const root = hubTmpRoot({ dataDir, tmpRoot, uid });
+  const out = { removed: [], kept: 0, refused: [] };
+  const own = async (d) => { let st = null; try { st = await fs.lstat(d); } catch { return false; } const why = ownVerdict(st, { uid }); if (why) out.refused.push(`${d}: ${why}`); return !why; };
+  if (!(await own(root))) return out;   // no root yet, or not ours: nothing of ours to sweep
+  for (const purpose of SWEPT_PURPOSES) {
+    const d = path.join(root, purpose);
+    if (!(await own(d))) continue;
+    let names = []; try { names = await fs.readdir(d); } catch { continue; }
+    for (const n of names) {
+      if (out.removed.length >= max) return out;
+      const f = path.join(d, n);
+      let st = null; try { st = await fs.lstat(f); } catch { continue; }
+      if (!(st.isFile() || st.isSymbolicLink()) || now - st.mtimeMs < maxAgeMs) { out.kept++; continue; }
+      try { await fs.unlink(f); out.removed.push(f); } catch { out.kept++; }
+    }
+  }
+  return out;
+}
+
+module.exports = { hubTmpRoot, ownVerdict, hubTmpDir, hubTmpStorage, sweepHubTmp, SWEPT_PURPOSES };
