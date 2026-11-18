@@ -185,7 +185,7 @@ class MachineMounts {
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
-    else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores runs at the next start');
+    else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores is not run mid-life (a legacy store still there is ingested by a start that finds no machine-mounts.json)');
   }
   _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
   _unreadHold(a) {

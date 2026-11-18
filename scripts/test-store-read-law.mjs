@@ -397,15 +397,28 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   {
     const d = path.join(D, 'mounts-refusals'); fs.mkdirSync(d, { recursive: true });
     const F = path.join(d, 'machine-mounts.json'); plant(F, body);
-    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], [])); clearInterval(M._sweep);
     const codeOf = async (p) => { try { await p(); return 'answered'; } catch (e) { return e && e.code; } };
-    const got = [await codeOf(() => M.mountPush('h-0001', { folder: '/srv' })), await codeOf(() => M.mountPull('h-0001', { remotePath: '/r' })), await codeOf(() => M.remount('mm-0001'))];
-    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
+    const three = async (Mod) => {
+      const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
+      const got = [await codeOf(() => M.mountPush('h-0001', { folder: path.join(d, 'no-such-folder') })), await codeOf(() => M.mountPull('h-0001', { remotePath: '/r' })), await codeOf(() => M.remount('mm-0001'))];
+      clearTimeout(M._unreadT); M._unreadT = null;
+      return got;
+    };
+    const got = await three(require(path.join(ROOT, 'src/machine-mounts.js')));
+    // its read (S1): each refusal has its own control — a copy that cuts ONLY that guard answers anything but the hold's name there
+    const GUARDS = ["    this._refuseIfUnread('adding a push mount');", "    this._refuseIfUnread('adding a mount');", "    this._refuseIfUnread('mounting again');"];
+    const cut = [];
+    for (const [k, g] of GUARDS.entries()) {
+      ok(MSRC.split(g).length === 2, `control setup: the guard «${g.trim()}» stands once in machine-mounts.js`);
+      cut.push((await three(MJ.load('src/machine-mounts.js', MSRC.replace(g, '    /* MUTANT: this guard cut */'), `refusal-cut-${k}`)))[k]);
+    }
+    if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
     ok(got.every((c) => c === 'mounts-unread'), 'a push mount, a pull mount and a remount are each refused BY NAME while held (mounts-unread)', got);
+    ok(cut.every((c) => c !== 'mounts-unread'), 'CONTROLS (each guard cut alone, in a copy): that call is no longer refused by the hold\'s name', cut);
   }
   const SVM = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
-  ok((SVM.match(/catch \(e\) \{ res\.status\(e && e\.code === 'mounts-unread' \? 503 : 400\)\.json\(\{ error: e\.message, \.\.\.\(e && e\.code === 'mounts-unread' \? \{ code: e\.code \} : \{\}\) \}\); \}/g) || []).length === 3,
-    'WIRING (主开发 23:21Z): the mount, unmount and remount routes keep the refusal\'s status (503) and its name');
+  ok((SVM.match(/catch \(e\) \{ res\.status\(e && e\.status === 503 \? 503 : 400\)\.json\(\{ error: e\.message, \.\.\.\(e && e\.status === 503 && e\.code \? \{ code: e\.code \} : \{\}\) \}\); \}/g) || []).length === 3,
+    'WIRING (主开发 23:21Z; its read S2): the mount, unmount and remount routes keep a hold\'s status (503) and its name — machine-mounts.json\'s (mounts-unread) AND hosts.json\'s (hosts-unread, a machine looked up while the paired machines are held)');
   // its read r1 (M2): the next try armed FIRST — a try that meets a read in flight arms the next, and the read that then fails leaves it
   const armM = async (Mod, name) => {
     const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
