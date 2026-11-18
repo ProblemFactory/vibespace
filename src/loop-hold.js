@@ -742,7 +742,9 @@ function foldHold(h) {
   // child_process start driven by a frame of ours, so the row is that frame's: keyed by its location, said as a start
   // (its adversarial read F2): only a sleep on the exec-status PIPE is a start; a sleep in any other channel followed by
   // child_process code is a whole synchronous child run (spawnSync / execFileSync: ep_poll) — waited for, said as such
-  const spawnBy = !topOf('js') && v === V.blocked && h.afterModule === 'child_process' && h.afterKey && !/^\(/.test(h.afterKey);
+  // (its verdict's should, 08:54Z) either word needs the KERNEL'S OWN sample: a blocked window with no kernel sample is no
+  // evidence of the pipe nor of ep_poll — it keeps the «(after)» row
+  const spawnBy = !topOf('js') && v === V.blocked && h.afterModule === 'child_process' && h.afterKey && !/^\(/.test(h.afterKey) && !!top;
   const starting = spawnBy && !!top && /pipe_read/.test(String(top.key || ''));
   const cKey = starting ? CHILD_START_KEY : CHILD_WAIT_KEY, cWords = starting ? CHILD_START_WORDS : CHILD_WAIT_WORDS;
   const frameKey = spawnBy ? `${h.afterKey} (${cKey})` : top ? top.key : h.afterKey ? `${h.afterKey} (after)` : !samples.length ? '(not sampled)' : '(no JavaScript frame)';
@@ -811,8 +813,10 @@ const sampleDue = (k, heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD, firstMs 
  *  the one bar has a gap of at least holdMs + beatMs/2, and a first ask due at the bar itself came at a check between holdMs
  *  and holdMs + beatMs — after the end of a hold of 1.0–1.25 s (43 holds, 49.9 s «not sampled» on the owner's hub). Due at
  *  holdMs − beatMs, its check falls before holdMs: inside every hold the book counts. A stall that stays under the bar is
- *  asked too and then dropped (src/server/sync-fs-witness-worker.js endHold). */
-const firstAskMs = (holdMs = HOLD_MS, beatMs = BEAT_MS) => Math.max(0, holdMs - beatMs);
+ *  asked too and then dropped (src/server/sync-fs-witness-worker.js endHold). A bar under THREE beats asks AT the bar (the
+ *  release's): one beat before it would sit within a beat or so of an ordinary beat's age (a late setInterval beat reads
+ *  past beatMs) — a candidate and an ask at many checks. Three beats leave the early ask a whole beat clear of it. */
+const firstAskMs = (holdMs = HOLD_MS, beatMs = BEAT_MS) => (holdMs >= 3 * beatMs ? holdMs - beatMs : holdMs);
 /** PURE: the most samples a hold of `heldMs` may carry under the schedule (the live suite's upper bound). */
 const samplesBound = (heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD) => { let k = 0; while (sampleDue(k, heldMs, holdMs, max)) k++; return k; };
 /** PURE: may a hold be sampled at all? `flags` = the main thread's (SAMPLING 1, DEBUGGER 2, HEAP_HIGH 4, KNOWN 8) → null

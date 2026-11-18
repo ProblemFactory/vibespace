@@ -1012,6 +1012,23 @@ console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every coun
     const red = { trim: oldTrim && /loop-blame\.js:64/.test(ansWith(oldTrim, R62).key), helper: noHelper && ansWith(noHelper, SPAWN('', 'mounts.js:1466')).module === 'diagnostics_channel', spawnBy: noSpawnBy && foldWith(noSpawnBy, mnt).frameKey === '(asleep: anon_pipe_read in read)' };
     ok(Object.values(red).every((v) => v === true), `RED CONTROLS: the release's trim keys the wrapper (${oldTrim && ansWith(oldTrim, R62).key}); without the helper the spawn is node's «diagnostics_channel»; without the spawner rule every start is one wait-channel row`, red);
   }
+  { // (its verdict's shoulds, 08:54Z) A BAR UNDER THREE BEATS asks at the bar (one beat before it would sit within a beat of
+    // an ordinary beat's age: a candidate and an ask at many checks); the SPAWN WORDS need the kernel's own sample (a blocked window with
+    // no kernel sample keeps the «(after)» row — no evidence of the exec-status pipe nor of ep_poll)
+    const FA = [[1000, 250, 750], [100, 20, 80], [90, 30, 60], [100, 50, 100], [100, 60, 100], [1000, 1000, 1000], [1000, 2000, 1000]];
+    const faBad = FA.filter(([h, b, w]) => LH.firstAskMs(h, b) !== w);
+    const NOK = { from: 0, to: 1300, ms: 1300, d: { wallMs: 1300, ranMs: 20 }, samples: [], after: mnt.words, afterKey: mnt.key, afterKeyWords: mnt.keyWords, afterModule: mnt.module };
+    const fk = LH.foldHold(NOK);
+    const SRC3 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+    const load3 = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-7c97-cure.js' })(m, m.exports, require); return m.exports; };
+    const cut3 = (from, to) => (SRC3.split(from).length === 2 ? load3(SRC3.replace(from, to)) : null);
+    const noFloor = cut3('(holdMs >= 3 * beatMs ? holdMs - beatMs : holdMs)', 'Math.max(0, holdMs - beatMs)');   // stale-pins: kept (the red control rebuilds the line before this cure)
+    const noKernelNeed = cut3(" && !/^\\(/.test(h.afterKey) && !!top;", " && !/^\\(/.test(h.afterKey);");   // stale-pins: kept (the red control rebuilds the line before this cure)
+    const rk = noKernelNeed ? noKernelNeed.foldHold(NOK) : null;
+    const redFA = noFloor ? FA.filter(([h, b, w]) => noFloor.firstAskMs(h, b) !== w).length : 0;
+    ok(!faBad.length && fk.verdict === LH.V.blocked && fk.frameKey === `${mnt.key} (after)` && noFloor && noFloor.firstAskMs(1000, 1000) === 0 && redFA === 4 && rk && rk.frameKey === `${mnt.key} (waiting for a child process)`,
+      `a bar of three beats or more asks one beat before it, a shorter bar at the bar itself (${FA.map(([h, b]) => `${h}/${b} → ${LH.firstAskMs(h, b)}`).join(', ')}); a blocked hold with no kernel sample keeps «${fk.frameKey}»; RED CONTROLS: the unit's first formula misses ${redFA} of the ${FA.length} rows and asks at 0 ms for a bar of one beat (${noFloor && noFloor.firstAskMs(1000, 1000)}), and the spawn words without the kernel's sample claim «${rk && rk.frameKey}»`, { faBad, fk: fk.frameKey, v: fk.verdict, rk: rk && rk.frameKey });
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
