@@ -349,7 +349,7 @@ const deadlineInChild = (file, fn, src) => new Promise((res) => {
   const css = { run: '(M, x) => M.sanitizeCss(x)', mk: `(n) => (${row1.shapes['quote pairs, no newline']})(n || 64)`, n: 8 * K, kind: 'linear' };
   const v1 = judgeInChild({ ...css, module: M.write('src/mail-frame.js', oldScan, 'per-quote-newline-scan') }), w1 = judgeInChild({ ...css, module: path.join(REPO, 'src/mail-frame.js') });
   ok(oldScan !== mfSrc && !v1.ok && v1.r > 3 && w1.ok, `CONTROL: the mail sanitizer with round 1's per-quote newline scan is NOT linear in WORK (×${(v1.r || 0).toFixed(2)}; the real one ×${(w1.r || 0).toFixed(2)})`, J({ v1, w1 }));
-  const oldStrip = gmailSrc.replace(/function stripHtml\(html\) \{[\s\S]*?\n\}\n/, `function stripHtml(html) {
+  const oldStrip = gmailSrc.replace(/function stripHtml\(html\) \{[\s\S]*?\n\}\n/, `function stripHtml(html) { /* stale-pins: kept — the old gmail stripHtml as a control; a coincidence with subagent-card.js, not a pin */
   return String(html || '')
     .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ').replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
     .replace(/<br\\s*\\/?>/gi, '\\n').replace(/<\\/(p|div|tr|li|h[1-6])>/gi, '\\n')

@@ -739,7 +739,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   // site, the agent route (vibespace-ask --artifact, each attachment judged openable there first), with the asker's cwd + host
   const artSites = Object.entries(files).filter(([, src]) => /\.add\([^;]*\bartifacts\b/.test(src)).map(([rel]) => rel).filter((rel) => C.sites.some((x) => x.rel === rel));
   eq(artSites, ['src/agent-routes/status.js'], 'the census: ONE add() site declares `artifacts` (the agent route)');
-  ok(/userTodos\.add\(key, \{[^\n]*origin: 'agent'[^\n]*, artifacts, cwd: s\.cwd \|\| null, hostId: s\.host && s\.host !== 'local' \? s\.host : null(?:, \.\.\.\(grantFields \|\| \{\}\)|, \.\.\.\(grantFields \|\| proposeFields \|\| \{\}\))? \}\)/.test(files['src/agent-routes/status.js']), 'the agent route declares artifacts + the asker\'s cwd + host at the call (lane controls-that-lie: + a --grant\'s resolved action; lane setting-doors pick 2: or a --propose\'s, never both)');
+  ok(/userTodos\.add\(key, \{[^\n]*origin: 'agent'[^\n]*, artifacts, cwd: s\.cwd \|\| null, hostId: s\.host && s\.host !== 'local' \? s\.host : null(?:, \.\.\.\(grantFields \|\| \{\}\)|, \.\.\.\(grantFields \|\| proposeFields \|\| \{\}\))? \}\)/.test(files['src/agent-routes/status.js']), 'the agent route declares artifacts + the asker\'s cwd + host at the call (lane controls-that-lie: + a --grant\'s resolved action; lane setting-doors pick 2: or a --propose\'s, never both)');   // stale-pins: kept — the alternation's older branch (before --propose)
   {
     const os = await import('node:os');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-arts-'));
@@ -1765,7 +1765,7 @@ console.log('㉔ A BUTTON NAMED FOR AN ACTION PERFORMS IT (lane controls-that-li
   ok(gb.length > 200 && gb.indexOf('/use`') < gb.indexOf("method: 'PATCH'") && gb.indexOf("method: 'PATCH'") < gb.indexOf('return postReply(rec.id, grantReplyText(') && /if \(rec && rec\.action && rec\.action\.type === 'browser-grant'\) return grantBrowser\(rec\);/.test(acts),
     'runAction(browser-grant) reads the list (GET …/use), writes it (the whole-list PATCH with its base), and only THEN answers the agent (postReply)');
   const panelSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/\.ut-action-grant'\)\) \{|closest\('\.ut-action-grant'\)/.test(panelSrc) && /\.ut-action-app\.ut-app-install, \.ut-action-grant, \.ut-action-setting'/.test(panelSrc), 'the tray presses it through runAction, armed like every Approve (press-arm; lane setting-doors pick 2: + a proposed change\'s one button)');
+  ok(/\.ut-action-grant'\)\) \{|closest\('\.ut-action-grant'\)/.test(panelSrc) && /\.ut-action-app\.ut-app-install, \.ut-action-grant, \.ut-action-setting'/.test(panelSrc), 'the tray presses it through runAction, armed like every Approve (press-arm; lane setting-doors pick 2: + a proposed change\'s one button)');   // stale-pins: kept — the alternation's older branch (before closest)
   const win = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window.js'), 'utf8'), winL = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window-layout.js'), 'utf8');
   ok(/'browser-grant': \(it\) =>/.test(win) && /if \(a === 'browser-grant'\) \{/.test(win) && /optionWords\(o\.label, t\)/.test(win) && /\.\.\.\(grantAsk \? \['browser-grant'\] : \[\]\)/.test(winL), 'the For-you window draws the same grant button first and the same «Reply: …» chips');
   const cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
