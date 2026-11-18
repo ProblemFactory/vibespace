@@ -82,7 +82,7 @@ const compShrunk = Object.entries(MENU_LEDGER).filter(([f, n]) => (compPer[f] ||
 ok(compGrown.length === 0, 'no NEW computed `disabled:` menu row (a new one is `off` with its why, or not drawn)', compGrown.join(' ; '));
 ok(compShrunk.length === 0, 'the computed ledger is exact (a site that moved onto caption / off lowers its row)', compShrunk.join(' ; '));
 { const DAW = read('src/lib/desktop-app-window.js'), DSM = read('src/lib/desktop-seamless.js');
-  ok(/const rows = m\.why \? m\.rows\.filter\(\(r\) => r\.current\)\.map\(\(r\) => \(\{ caption: scaleRowLabel\(r\) \}\)\) : m\.rows\.map\(\(r\) => \(\{ label: scaleRowLabel\(r\), action: \(\) => \{ if \(!r\.disabled\) relaunchAt\(r\.choice, r\.scale\); \} \}\)\);/.test(DAW)
+  ok(/const rows = m\.why \? scaleRunsCaption\(m, rec\) : m\.rows\.map\(\(r\) => \(\{ label: scaleRowLabel\(r\), action: \(\) => \{ if \(!r\.disabled\) relaunchAt\(r\.choice, r\.scale\); \} \}\)\);/.test(DAW)
     && /\{ label: frameRowLabel\(r\), action: \(\) => \{ if \(!r\.current\) saveFrameChoice\(frameKey\(\), r\.choice\); \} \}/.test(DAW) && !/disabled: choice === cur/.test(DSM),
     'B-b659: the desktop app window\'s Scale ▸ and Show window frame ▸ draw the present choice as a live ✓ row — pressing it keeps it (no relaunch, no write); a window that cannot relaunch draws no choice row — its caption says why, the running scale stays said as a caption'); }
 const UT = read('src/lib/utils.js');

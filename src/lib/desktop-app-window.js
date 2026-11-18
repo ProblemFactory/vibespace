@@ -283,6 +283,15 @@ export function scaleRowLabel(row) {
   if (row.choice === 'auto') return mark + t('Auto ({scale}×)', { scale: row.scale }) + tail;
   return mark + explicitScaleLabel(row.choice) + tail;
 }
+/** B-b659 (the reading of 2026-11-18): a window that cannot relaunch keeps ONE caption, the scale its app RUNS at — the record's
+ *  own, never the one THIS client would derive (a second client at another pixel ratio read «✓ Auto (1×)» of an app running at
+ *  2×). `model` = PURE scaleMenuModel's → [{ caption }], or [] when no row is the running one. */
+export function scaleRunsCaption(model, rec) {
+  const r = model && Array.isArray(model.rows) ? model.rows.find((x) => x.current) : null;
+  if (!r) return [];
+  const s = Number(rec && rec.scale);
+  return [{ caption: scaleRowLabel({ ...r, scale: Number.isFinite(s) && s > 0 ? s : r.scale }) }];
+}
 /** Lane D: the rows after the scale rows — the app's default (PURE appDefaultModel): one status line when the window runs
  *  at it, "Make n× the default for this app", "Forget this app's default (n×)". `save(choice)` stores ('auto' = forget). */
 export function appDefaultItems(model, save) {
@@ -962,8 +971,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     const why = scaleWhyText(m.why);
     // B-b659 (the menu grammar): the present choice is a live ✓ row — pressing it keeps it (the model's `disabled` there =
     // nothing to relaunch: no confirm, no relaunch); a window that cannot relaunch draws no choice row — its caption says why,
-    // the scale it runs at stays said in words (an automatic scale has no chip: «✓ Auto (2.5×)» is the one place it is read)
-    const rows = m.why ? m.rows.filter((r) => r.current).map((r) => ({ caption: scaleRowLabel(r) })) : m.rows.map((r) => ({ label: scaleRowLabel(r), action: () => { if (!r.disabled) relaunchAt(r.choice, r.scale); } }));
+    // the scale its app RUNS at stays said in words (an automatic scale has no chip: «✓ Auto (2.5×)» is the one place it is read)
+    const rows = m.why ? scaleRunsCaption(m, rec) : m.rows.map((r) => ({ label: scaleRowLabel(r), action: () => { if (!r.disabled) relaunchAt(r.choice, r.scale); } }));
     // lane D: the app's default scale — stored under the same per-app key as the frame choice, heard by every client
     const tail = appDefaultItems(appDefaultModel(rec, appPrefs(SCALE_PREF_KEY)), (choice) => saveScaleDefault(frameKey(), choice));
     return why ? [{ caption: why }, ...rows, ...tail] : [...rows, ...tail];

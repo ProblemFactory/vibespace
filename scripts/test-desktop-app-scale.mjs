@@ -183,6 +183,14 @@ console.log('§5 the words — the chip, its tooltip, the rows, the card control
   const tP = W.scaleChipTitle({ ...X, state: 'launching', scaleOrigin: 'chosen' }, 'not-ready');
   ok(/Only a running app can be relaunched at another scale$/.test(tP) && !/Click to change/.test(tP), `a plain chip says WHY in its tooltip instead ("…${tP.slice(-60)}")`);
   ok(W.scaleRowLabel({ choice: 2.5, current: false }) === ' 2.5×' && W.scaleRowLabel({ choice: 1.5, current: true, appDefault: true }) === '✓ 1.5× · App default' && W.scaleRowLabel({ choice: 3 }) === ' 3×' && W.scaleRowLabel({ choice: 'auto', scale: 2, appDefault: false }) === ' Auto (2×)', 'the Scale ▸ rows: plain numbers (a fraction is a real scale since lane D (a) — no GTK caveat), the app\'s default row is marked');
+  { // B-b659: a window that cannot relaunch says the scale its app RUNS at — the same words on two clients of other pixel ratios
+    const runs = { ...X, scale: 2, scaleOrigin: 'auto' };
+    const capOn = (dpr) => W.scaleRunsCaption(M.scaleMenuModel(runs, { dpr, uiScale: 1, seat: 'blocked' }), runs);
+    const a = capOn(2), b = capOn(1), mine = (dpr) => { const m = M.scaleMenuModel(runs, { dpr, uiScale: 1, seat: 'blocked' }); return m.rows.filter((r) => r.current).map((r) => W.scaleRowLabel(r)); };
+    ok(M.scaleMenuModel(runs, { dpr: 1, seat: 'blocked' }).why === 'seat' && same(a, [{ caption: '✓ Auto (2×)' }]) && same(b, a) && same(W.scaleRunsCaption(M.scaleMenuModel({ ...X, scale: 1.5, scaleOrigin: 'chosen' }, { dpr: 1, leased: true }), { ...X, scale: 1.5, scaleOrigin: 'chosen' }), [{ caption: '✓ 1.5×' }]) && same(W.scaleRunsCaption({ rows: [{ choice: 1, current: false }] }, X), []),
+      'B-b659: a window that cannot relaunch keeps ONE caption — the scale its app RUNS at (an app at Auto 2× reads «✓ Auto (2×)» on a 2× client AND on a 1× one; a chosen 1.5× reads «✓ 1.5×»; no running row ⇒ none)', { a, b });
+    ok(same(mine(1), ['✓ Auto (1×)']) && !same(mine(1).map((c) => ({ caption: c })), a), "MUTANT (the first cut's caption = this client's own derived row): the 1× client names «✓ Auto (1×)», a scale nothing runs at — RED", mine(1));
+  }
   const saved = [];
   const items = W.appDefaultItems({ key: 'k', def: 1.5, running: 2, make: 2, isDefault: false, clear: true }, (c) => saved.push(c));
   items.forEach((it) => it.action && it.action());
