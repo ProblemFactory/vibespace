@@ -6,6 +6,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - When you browse a profile yourself and a site asks you to sign in, VibeSpace shows its sign-in form in your window, as it does while an agent drives.
+- Manage agents → Add a third-party model…: Claude Code on DeepSeek, Kimi, GLM or MiniMax, Codex on OpenRouter or your own service, with your own key.
+- Settings → Default browser engine offers «Download kernel» for an engine whose kernel is missing or unreadable, with progress and why a download was refused.
+- For you now says when a storage stopped answering and was disconnected (it reconnects by itself), and when files written meanwhile were moved aside.
 - A run request's card now says who started the turn running when it asked, beside «Allow for 1 hour»: you, another session, or «not recorded» when unknown.
 - While an agent is in a turn, the strip above the message box can hand it the waiting group messages now; if that turn is just ending, they run right after it.
 - On a phone turned sideways two windows can stand side by side: «Split» beside a window in the window list; held upright, the phone says to turn it.
@@ -13,9 +16,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A sent message whose files did not all arrive offers «Send the rest» on its card: only the missing files go, as a new message; an agent can propose it too.
 - An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); its own Settings row can turn that off.
 - An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
-- Manage agents → Add a third-party model…: Claude Code on DeepSeek, Kimi, GLM or MiniMax, Codex on OpenRouter or your own service, with your own key.
-- Settings → Default browser engine offers «Download kernel» for an engine whose kernel is missing or unreadable, with progress and why a download was refused.
-- For you now says when a storage stopped answering and was disconnected (it reconnects by itself), and when files written meanwhile were moved aside.
 - An agent's reply or a For-you item can link to a conversation or a desktop; a press goes there, and an ended one offers «Resume here» or «Read its history».
 - A vibespace://settings/<setting> link in an agent's reply, a For-you item or a notice opens Settings on that one row; it never changes the value.
 - When VibeSpace refuses a turn nobody typed, or warns that a limit is close, its notice links to that limit's row in Settings.
@@ -31,10 +31,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - One button resumes every session a usage limit or an overloaded model stopped; it is your own press, so the limits on turns nobody typed do not count it.
 - An agent's own vault secret can now be deleted from its row in the Vault window; the conversation that kept it may store a new one.
 - A secret an agent stored itself can now be shared from its row's «Who may use it…» with another conversation or a Task Group, for the hosts you name.
+- A Background Work job can close its own question in For you once its cause is gone (vibespace-job withdraw); it used to stay open.
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
 - A conversation on another machine no longer joins a Task Group through a symbolic link on the server's disk; only its folder as written counts.
+- Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
 - On a phone the For you button shows a single number; on a wider screen its numbers fold into one when the window's name needs the room.
 - A Background Work job says which machine it runs on; an agent on another machine asking for a folder this one lacks is refused at once.
 - Ending or archiving a conversation that still runs background jobs shows a notice naming them, with Stop these too.
@@ -43,7 +45,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
 - Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
-- Your channel messages are kept in a folder only your own account on this computer can open; only your channel sign-ins are locked in the vault.
 - When a usage limit cuts a Workflow run short, the automatic continue tells the agent to resume that run instead of starting it again.
 - A paired machine now runs an agent's CLI from where that machine's own login shell finds it, and a new conversation says so when it finds none.
 - In Remote, a machine's «Exit: network — … · commands — …» line is now a button that opens «Who can use it…»; the separate exit icon is gone.
@@ -56,6 +57,21 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a workspace with sign-in, the welcome tour's first screen waits up to 3 seconds for the server, so it usually starts at three steps, not four.
 - In Diagnostics, a new kind of record from a Codex conversation is no longer counted as Claude Code's, and no longer counted twice.
 - An agent running many commands on a paired machine no longer slows the whole workspace: each command's record is written in the background.
+- On slow storage, putting a browser engine's previous kernel back no longer leaves browser starts and downloads waiting forever; each answers within 30 seconds.
+- A browser engine that asks for -disable-sync with one dash is now treated like the two-dash form: it is left out, so the browser can still sign in to Google.
+- The live view of an idle agent browser that two conversations share no longer stays blank when you open it: it shows its own tab.
+- After a Resume, the live view no longer shows the stopped browser's old tabs as if they were open; its tabs appear once the browser lists them.
+- A conversation's own browser and a sub-agent's child browser now start with Chrome's logging off, as profile browsers already did.
+- VibeSpace's own memory no longer grows when a terminal or chat attached to a machine that dials in stops reading its output.
+- A storage whose listing keeps hanging while its provider answers stays disconnected, with Reconnect in For you, instead of reconnecting and hanging again.
+- The hub no longer pauses at every storage check on a machine running many processes.
+- A machine's conversation or terminal that writes faster than its window reads now waits instead of filling the machine's memory (after its agent updates).
+- Chinese or Japanese typed or pasted into a terminal on a machine that dials in no longer turns into replacement marks now and then (after its agent updates).
+- Diagnostics → Main loop held says «no frame of ours» with Node's own frames when a stack holds no VibeSpace code, never VibeSpace's own measuring.
+- An agent browser found stopped soon after it started no longer says it «idled out»: it says it was found gone before its idle timeout.
+- When an agent's approval to use a vault entry has ended, the agent is told when and how to ask again, instead of that the entry was never opened.
+- The Vault no longer turns off the entry you just switched on after the clock moves back, and a refused allow no longer leaves a false «switched off» notice.
+- In Integrations, the Plugin Git repository card offers its Test once a repository from its host is installed; before that the card says when.
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
 - An Unlock button pressed right after the page loads now always opens the vault; it no longer does nothing or asks for the password while already unlocked.
 - After a restart, Resume all no longer calls a folder gone when its machine or storage mount waits for the vault or is not up; it asks you to unlock first.
@@ -76,21 +92,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace restarts while delivering held channel messages, their card now says some may already have reached the agent; you choose to resend or discard.
 - When two agents propose a reply to the same message, each card now names the other, and Approve asks once more before a second reply is sent.
 - A usage wall seen again after a restart no longer reads the Antigravity account a second time.
-- On slow storage, putting a browser engine's previous kernel back no longer leaves browser starts and downloads waiting forever; each answers within 30 seconds.
-- A browser engine that asks for -disable-sync with one dash is now treated like the two-dash form: it is left out, so the browser can still sign in to Google.
-- The live view of an idle agent browser that two conversations share no longer stays blank when you open it: it shows its own tab.
-- After a Resume, the live view no longer shows the stopped browser's old tabs as if they were open; its tabs appear once the browser lists them.
-- A conversation's own browser and a sub-agent's child browser now start with Chrome's logging off, as profile browsers already did.
-- VibeSpace's own memory no longer grows when a terminal or chat attached to a machine that dials in stops reading its output.
-- A storage whose listing keeps hanging while its provider answers stays disconnected, with Reconnect in For you, instead of reconnecting and hanging again.
-- The hub no longer pauses at every storage check on a machine running many processes.
-- A machine's conversation or terminal that writes faster than its window reads now waits instead of filling the machine's memory (after its agent updates).
-- Chinese or Japanese typed or pasted into a terminal on a machine that dials in no longer turns into replacement marks now and then (after its agent updates).
-- Diagnostics → Main loop held says «no frame of ours» with Node's own frames when a stack holds no VibeSpace code, never VibeSpace's own measuring.
-- An agent browser found stopped soon after it started no longer says it «idled out»: it says it was found gone before its idle timeout.
-- When an agent's approval to use a vault entry has ended, the agent is told when and how to ask again, instead of that the entry was never opened.
-- The Vault no longer turns off the entry you just switched on after the clock moves back, and a refused allow no longer leaves a false «switched off» notice.
-- In Integrations, the Plugin Git repository card offers its Test once a repository from its host is installed; before that the card says when.
 - A picture you paste, pick or take in a chat is checked at once: an empty file, a HEIC, a non-picture or one too large for the model is refused with its reason.
 - A subscription you pick now pays on a machine whose Claude settings name an apiKeyHelper; the helper's key used to pay. Its first start says so.
 - A session's own auto-continue choice now survives a VibeSpace restart instead of falling back to the default.
@@ -101,6 +102,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An update run from a terminal now runs every new step it brings at once, as the Update button already did.
 - A machine paired inside a VibeSpace container (a fleet pod) comes back after the container restarts once its pairing command has run on this version.
 - In «Who may use…», saving twice no longer re-sends a later end, and a member whose 1-hour approval had ended leaves the list once a save lands.
+- Channels: an agent's status and search, one account's list and the remove dialog now read only that account's conversations, not every account's.
+- The Background Work list no longer fails when one job record's run list is damaged; that job lists with no runs.
+- A job command given as several unquoted words is refused with the quoted form to use; only its first word used to run, reported as done.
+- Starting a job while its stop is still ending now starts it once the stop ends, instead of «already running»; vibespace-job restart does both.
+- Right after VibeSpace starts, the groups list no longer freezes it while unread messages are counted; a count shown as zero fills in a moment later.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
