@@ -1117,6 +1117,7 @@ class ChatView {
       // (2.234.0, real report). Send = the button. chat.touchEnterSends
       // restores enter-to-send for those who prefer it.
       isTouch: () => !!this.app?.isTouch,
+      getBackend: () => (this._getSessionIds() || {}).backend || null,   // batch 20 cure: the picture door judges with THIS harness's limits
       getTouchEnterSends: () => !!this.app?.settings?.get('chat.touchEnterSends'),
       // chat.enterSends (desktop, default on): off ⇒ Enter inserts a newline and Ctrl/Cmd+Enter sends
       getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,

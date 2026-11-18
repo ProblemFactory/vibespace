@@ -41,7 +41,7 @@ import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文�
 import { navOneBadge } from './title-chips.js'; // lane phone-titlebar-title: the phone bar's ONE-badge form
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
-import { replyPictures } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
+import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply box takes a picture (button · paste · drop) through THE picture door
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
 import { onVaultFacts, showUnlock, showSetup } from './vault-unlock.js'; // … the box says a locked vault by name (live), its 解锁… is THE unlock dialog
 
@@ -627,7 +627,7 @@ export function installUserTodos(app) {
       ta.value = drafts.get(i.id) || '';
       if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what a reply box held), carried into the rebuilt box: they still hold a stale page's reload
       // B-51dd: the item's pictures (kept across a fold) above the field, the picture button beside Send
-      const pics = replyPictures({ box, ta, id: i.id, store: model.pictures, t });
+      const pics = replyPictures({ box, ta, id: i.id, store: model.pictures, t, backend: () => backendOfKey(i.sessionKey) });   // batch 20 cure: its conversation's harness limits
       box.insertBefore(pics.strip, box.querySelector(':scope > .voice-field') || ta);
       box.insertBefore(pics.btn, box.querySelector(':scope > .ut-reply-send'));
       box.append(pics.input, pics.camera.input);

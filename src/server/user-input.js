@@ -176,7 +176,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
           : `its wrapper (started ${started}) predates the frame-file update — Terminate + Resume the session, then send it again`;
         const refusal = `Message too large (${mb}MB) for this session: it was NOT sent — ${why}.`;
         log(`[${sessionId}] chat-input REFUSED (${mb}MB, ${origin}): wrapper caps ${caps?.reason} (pid ${caps?.pid}, started ${caps?.startedAt})`);
-        return { ok: false, code: 'too_large', error: refusal };
+        return { ok: false, code: 'too_large', error: refusal, reason: caps?.reason === 'no-sidecar' ? 'no-sidecar' : 'old-wrapper' };   // the reason by name (batch 20 cure: only «still starting» is a wait)
       }
     }
     const wasInFlight = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }); // read BEFORE the flag write

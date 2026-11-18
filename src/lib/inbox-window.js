@@ -37,7 +37,7 @@ import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, it
 import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { replyPictures } from './reply-pictures.js'; // B-51dd: a reply takes a picture (button · paste · drop) through THE picture door
+import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply takes a picture (button · paste · drop) through THE picture door
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
@@ -312,7 +312,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what this box held), carried into the rebuilt box: they still hold a stale page's reload
     const why = mk('div', 'iw-reply-why'); // the box's one-line note ABOVE it: the verdict's fact (an ended conversation: the send reopens it)
     reply.append(why, voiceField(ta, attachDictation(ta)));
-    const pics = replyPictures({ box: reply, ta, id, store: model.pictures, t }); // B-51dd: the item's pictures above the field, the picture button after it
+    const pics = replyPictures({ box: reply, ta, id, store: model.pictures, t, backend: () => { const it = model.byId(id); return backendOfKey(it && it.sessionKey); } }); // B-51dd: the item's pictures above the field, the picture button after it — judged with its conversation's harness limits (batch 20 cure)
     reply.insertBefore(pics.strip, why.nextSibling);
     reply.append(pics.btn, pics.input, pics.camera.input);
     const actions = mk('div', 'iw-actions');

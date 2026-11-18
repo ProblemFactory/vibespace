@@ -560,7 +560,7 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
     'WIRING (§11 (2)): the Resume verdict and the create both resume an account-bound harness on the held account (a host\'s resume aside); a sentence with a name is said from its key + params');
   ok(read('src/server/inbox-reopen.js').includes("return { ok: false, why, ...(err && err.i18n && err.i18n.key ? { i18n: err.i18n } : {}) };")
     && read('src/routes/user-todos-reply.js').includes("fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened', o && o.i18n ? { i18n: o.i18n } : null)")
-    && read('src/lib/user-todos-actions.js').includes("const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');"),
+    && read('src/lib/user-todos-actions.js').includes("const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.words && r.words.key ? t(r.words.key, r.words.params || {}) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');"),   // (bl-chat-b restack-411: the line also words a refused picture by its harness's numbers and a reopen's words first; the i18n road unchanged)
     'WIRING (§11 (2) r2): a For-you reply\'s refusal keeps its key + params from the create to the page (a zh / ja page says it in the reader\'s words)');
   ok(read('src/server/inbox-reopen.js').includes("try { held = await require('../routes/sessions').heldAccountOfNow(conv.backend, conv.id); } catch { held = null; }")
     && read('src/server/inbox-reopen.js').includes('if (held && held.accountId) spec.data.accountId = held.accountId;'),

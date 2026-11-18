@@ -952,6 +952,22 @@ console.log('§10 POST /api/user-todos/:id/reply with pictures (B-51dd)');
   const tooMuch = refuse(many3, 'total');
   ok(tooMuch.rr.json.picture && tooMuch.rr.json.picture.code === 'too_much' && tooMuch.rr.json.picture.name === 'big6.png' && /pass 32 MB/.test(tooMuch.rr.json.error) && tooMuch.open,
     'nine 3.5 MB pictures: the seventh takes the reply past the API\'s 32 MB request ⇒ too_much, named — nothing sent', tooMuch.rr.json && tooMuch.rr.json.picture);
+  // batch 20 cure (主开发 08:44Z): THE NUMBERS ARE THE RECEIVING HARNESS'S — the same 4.6 MB phone JPEG is refused for a claude
+  // conversation (claude's row: the Claude API's 5 MiB of base64) and TAKEN for a codex one (its row states none): judged before
+  // the send, so the codex reply goes on to the conversation (none is live here: no_live_session, never bad_image)
+  const PHOTO = pic(Buffer.concat([JPEG, Buffer.alloc(4.6e6)]), 'IMG_2041.jpg', 'image/jpeg');
+  const clPhoto = refuse([PHOTO], 'claude-photo');
+  ok(clPhoto.rr.status === 400 && clPhoto.rr.json.picture.code === 'too_big' && clPhoto.rr.json.picture.limits && clPhoto.rr.json.picture.limits.b64PerPicture === 5 * 1024 * 1024 && /4\.39 MB — larger than 3\.75 MB/.test(clPhoto.rr.json.error) && clPhoto.open,
+    'a claude conversation: the 4.6 MB photo ⇒ bad_image too_big, worded with CLAUDE\'s numbers, which the refusal carries (the page words it with them)', clPhoto.rr.json);
+  const cxItem = H.userTodos.add('codex:th-photo', { origin: 'agent', text: 'Send me a photo of the screen' });
+  const cxPhoto = H.call(cxItem.id, { text: 'here', images: [PHOTO] });
+  ok(cxPhoto.json.code !== 'bad_image' && cxPhoto.json.code === 'no_live_session', 'a codex conversation: the SAME photo passes the rule (its row states no limit) — the reply goes on to the conversation', cxPhoto.json);
+  // …but VibeSpace's OWN ceiling (48 MiB of pictures in one message — the hub's 50 MiB body) holds for codex too: nine phone photos
+  // are refused by name as VibeSpace's limit, never the hub's raw 413 that the page read as «server unreachable»
+  const nine = Array.from({ length: 9 }, (_, i) => pic(Buffer.concat([JPEG, Buffer.alloc(4.6e6)]), `IMG_${2050 + i}.jpg`, 'image/jpeg'));
+  const cxNine = H.call(H.userTodos.add('codex:th-nine', { origin: 'agent', text: 'Photos of every screen' }).id, { text: 'all of them', images: nine });
+  ok(cxNine.status === 400 && cxNine.json.code === 'bad_image' && cxNine.json.picture && cxNine.json.picture.code === 'too_much_here' && /the most VibeSpace carries in one message/.test(cxNine.json.error),
+    'a codex reply with nine 4.6 MB photos (≈ 55 MB of base64) ⇒ bad_image too_much_here, VibeSpace\'s own ceiling by name', cxNine.json);
   const txt = refuse([pic(Buffer.from('just some text, not a picture'), 'notes.txt', 'text/plain')], 'txt');
   const shape = refuse([{ base64: PNG.toString('base64').slice(0, -1), name: 'cut.png' }], 'shape');
   const empty = refuse([{ base64: '', name: 'zero.png' }], 'empty');
@@ -975,6 +991,31 @@ console.log('§10 POST /api/user-todos/:id/reply with pictures (B-51dd)');
   const c = made[0] && made[0].wrote[0] ? JSON.parse(made[0].wrote[0]).message.content : [];
   ok(r.status === 200 && r.json.reopened === true && c.length === 2 && c[0].source.media_type === 'image/png' && c[1].text === R.composeReply({ ...dead, status: 'open' }, 'attached', { now: H.NOW }), 'an ENDED conversation: the reopen\'s first input carries the picture, then the quote', r.json);
   H.userTodos.stop(); H.userTodos.flush();
+}
+// batch 20 cure: an ENDED conversation is judged with the harness its KEY names (the one the reopen resumes) — BEFORE any reopen
+const endedPhoto = async (routeFile) => {
+  const made = [];
+  const H = harness(routeFile, { reopen: async (item, o, { addSession }) => { const id = 'reo-photo'; made.push(addSession(id, { backendSessionId: item.sessionKey.split(':')[1] })); return { ok: true, sessionId: id, conversation: { backend: 'claude', backendSessionId: item.sessionKey.split(':')[1], cwd: '/p', hostId: null, name: 'ended' } }; } });
+  const dead = H.userTodos.add('claude:ended-photo', { origin: 'agent', text: 'A photo of the screen, please' });
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+  const r = await H.callAsync(dead.id, { text: 'here', images: [{ base64: Buffer.concat([JPEG, Buffer.alloc(4.6e6)]).toString('base64'), name: 'IMG_2041.jpg' }] });
+  const out = { r, reopened: H.reopened.length, open: H.userTodos.get(dead.id).status === 'open' };
+  H.userTodos.stop(); H.userTodos.flush();
+  return out;
+};
+{
+  const e = await endedPhoto(undefined);
+  ok(e.r.status === 400 && e.r.json.code === 'bad_image' && e.r.json.picture && e.r.json.picture.code === 'too_big' && e.reopened === 0 && e.open,
+    'an ENDED claude conversation: the 4.6 MB photo is judged with claude\'s row (its key) and refused BEFORE the reopen — nothing reopened, nothing sent', { status: e.r.status, json: e.r.json, reopened: e.reopened });
+  // RED CONTROL: a route that reads only the LIVE session's harness judges the ended conversation with no numbers — it reopens and sends
+  const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
+  const needle = "      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;";
+  ok(rsrc.includes(needle), '§10 reopen-key control needle exists');
+  const MUT = mutantCopies('inbox-reply-reopen-key', REPO);
+  const mut = MUT.write(rel, rsrc.split(needle).join('      const backend = (s && s.backend) || null;'), 'live-only');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 reopen key ' })) ok(row.pass, row.name, row.detail);
+  const red = await endedPhoto(mut);
+  ok(red.r.json.code !== 'bad_image' && red.reopened === 1, 'RED CONTROL: without the key\'s harness the ended conversation is reopened with a photo claude refuses — the leg above can go red', { json: red.r.json, reopened: red.reopened });
 }
 // the reopen road with a REAL screenshot's size: the fresh wrapper reports its frame-file verb a moment after the start —
 // a frame over 1 MiB before that is refused `too_large` + waitCaps by the sender; the route waits for the verb and sends
@@ -1007,11 +1048,16 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 wait ' })) ok(row.pass, row.name, row.detail);
   const red = await reopenBig(mut, 150);
   ok(red.r.status === 400 && red.r.json.code === 'too_large' && red.w.length === 0 && red.open, 'RED CONTROL: without the wait the reopened reply with a real screenshot is refused too_large — the leg above can go red', red.r.json);
+  // batch 20 cure: that refusal is ALSO a key the page words in its language (the sender's English carries the size, so t(error) found no row)
+  const RW = require(path.join(REPO, 'src/image-attach-rule.js')).REPLY_WORDS;
+  ok(red.r.json.words && red.r.json.words.key === RW.reopenTooLarge && /^\d+\.\d$/.test(String(red.r.json.words.params && red.r.json.words.params.mb)) && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes(JSON.stringify(RW.reopenTooLarge) + ':'))
+    && /r && r\.words && r\.words\.key \? t\(r\.words\.key, r\.words\.params \|\| \{\}\)/.test(read('src/lib/user-todos-actions.js')),
+    'the reopen road\'s too_large answer carries its words as a key + the size; zh and ja word it; the page says the key, never the English', red.r.json.words);
 }
 {
   // RED CONTROL: the route with no picture rule (every picture taken as the page typed it) — the §10 refusals can go red
   const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
-  const needle = '    const v = judgeImageBase64(p && p.base64, { total });';
+  const needle = '    const v = judgeImageBase64(p && p.base64, { total, limits });';
   ok(rsrc.includes(needle), '§10 control needle exists');
   const MUT = mutantCopies('inbox-reply-pictures', REPO);
   const mut = MUT.write(rel, rsrc.split(needle).join("    const v = { ok: true, mediaType: (p && p.mediaType) || 'image/png' };"), 'no-picture-rule');
@@ -1024,17 +1070,32 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   ok(r.status === 200 && wrote.length === 1 && JSON.parse(wrote[0]).message.content[0].source.media_type === 'image/heif', 'RED CONTROL: without the rule a HEIC rides to the model as image/heif — the §10 refusals can go red', r.json);
   H.userTodos.stop(); H.userTodos.flush();
 }
+{
+  // RED CONTROL (batch 20 cure): a route that judges every reply with claude's numbers refuses the codex photo the leg above takes
+  const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
+  const needle = '      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf(backend) });';
+  ok(rsrc.includes(needle), '§10 per-harness control needle exists');
+  const MUT = mutantCopies('inbox-reply-harness', REPO);
+  const mut = MUT.write(rel, rsrc.split(needle).join("      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf('claude') });"), 'claude-for-all');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 harness ' })) ok(row.pass, row.name, row.detail);
+  const H = harness(mut);
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+  const it = H.userTodos.add('codex:th-photo-red', { origin: 'agent', text: 'control' });
+  const r = H.call(it.id, { text: 'here', images: [{ base64: Buffer.concat([JPEG, Buffer.alloc(4.6e6)]).toString('base64'), name: 'IMG_2041.jpg' }] });
+  ok(r.status === 400 && r.json.code === 'bad_image' && r.json.picture && r.json.picture.code === 'too_big', 'RED CONTROL: one vendor\'s numbers for every harness refuse the codex photo — the per-harness leg can go red', r.json);
+  H.userTodos.stop(); H.userTodos.flush();
+}
 console.log('§10b the reply boxes take a picture (wiring census, both surfaces + the model + the chat\'s card)');
 {
   const files = { panel: 'src/lib/user-todos-panel.js', win: 'src/lib/inbox-window.js', act: 'src/lib/user-todos-actions.js', rp: 'src/lib/reply-pictures.js', row: 'src/lib/user-todos-row.js', cr: 'src/lib/chat-renderers.js', lay: 'src/lib/inbox-window-layout.js' };
   const src = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, read(f)]));
   const judge = ({ panel, win, act, rp, row, cr, lay }) => ({
-    panelBox: /const pics = replyPictures\(\{ box, ta, id: i\.id, store: model\.pictures, t \}\);/.test(panel) && /box\.append\(pics\.input, pics\.camera\.input\);/.test(panel),
+    panelBox: /const pics = replyPictures\(\{ box, ta, id: i\.id, store: model\.pictures, t, backend: \(\) => backendOfKey\(i\.sessionKey\) \}\);/.test(panel) && /box\.append\(pics\.input, pics\.camera\.input\);/.test(panel),
     panelSend: /const pics = chip \? \[\] : \(model\.pictures\.get\(id\) \|\| \[\]\);/.test(panel) && /if \(\(!body && !pics\.length\) \|\| row\.dataset\.sending === '1'\) return;/.test(panel) && /const sent = await model\.postReply\(id, body, replyOpts\);/.test(panel),
     chipSays: /t\('\{label\} sent — the \{n\} picture\(s\) in the reply box were not sent'/.test(panel) && /t\('\{label\} sent — the \{n\} picture\(s\) in the reply box were not sent'/.test(win),
     overlayInside: /#record-clear-dialog, \.chat-img-overlay'\)/.test(panel),
     noFoldWipe: !/model\.pictures\.delete\(/.test(panel),
-    winBox: /const pics = replyPictures\(\{ box: reply, ta, id, store: model\.pictures, t \}\);/.test(win) && /reply\.append\(pics\.btn, pics\.input, pics\.camera\.input\);/.test(win),
+    winBox: /const pics = replyPictures\(\{ box: reply, ta, id, store: model\.pictures, t, backend: \(\) => \{ const it = model\.byId\(id\); return backendOfKey\(it && it\.sessionKey\); \} \}\);/.test(win) && /reply\.append\(pics\.btn, pics\.input, pics\.camera\.input\);/.test(win),
     winSend: /const pics = chip \? \[\] : \(model\.pictures\.get\(c\.id\) \|\| \[\]\);/.test(win) && /model\.postReply\(c\.id, body, \{ pictures: pics \}\)/.test(win) && /if \(st\.cur && \(model\.pictures\.get\(st\.cur\.id\) \|\| \[\]\)\.length\) \{ sendReply\(txt\); return; \}/.test(win),
     model: /const pictures = new Map\(\);/.test(act) && /boardOf, drafts, pictures,/.test(act) && /body: JSON\.stringify\(images \? \{ text, images \} : \{ text \}\)/.test(act) && /if \(images\) dropSentPictures\(pictures, id, pics\);/.test(act) && /r\.code === 'bad_image' && r\.picture \? pictureRefusalText\(\[r\.picture\], t\)/.test(act),
     door: /import \{ createImageDoor, refusalText, heldOf \} from '\.\/image-attach\.js';/.test(rp) && /held: \(\) => heldOf\(list\(\)\),/.test(rp) && /if \(!cd \|\| \(cd\.getData && cd\.getData\('text\/plain'\)\)\) return;/.test(rp) && /it\.kind === 'file'/.test(rp)

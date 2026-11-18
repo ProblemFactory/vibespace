@@ -742,6 +742,8 @@ export default {
   "{w} × {h} pixels — the model takes at most {side} pixels on a side": "{w} × {h} 像素——模型接收的图片每边最多 {side} 像素",
   "With it, this message's pictures pass {total} MB — the most one request to the model carries": "加上它，这条消息的图片会超过 {total} MB——这是发给模型的一次请求的上限",
   "The file could not be read": "无法读取该文件",
+  "With it, this message's pictures pass {carry} MB — the most VibeSpace carries in one message": "加上它，这条消息的图片超过 {carry} MB——这是 VibeSpace 一条消息能携带的上限",
+  "The conversation has just started and cannot take this reply ({mb} MB) yet — nothing was sent; wait a moment and send it again": "对话刚刚启动，还不能接收这条回复（{mb} MB）——什么都没有发送；请稍等片刻再发送一次",
   "{name} — {why}": "{name}——{why}",
   "the pasted picture": "粘贴的图片",
   "{n} picture(s)": "{n} 张图片",

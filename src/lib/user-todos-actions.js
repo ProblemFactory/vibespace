@@ -318,7 +318,9 @@ export function inboxModel(app) {
       else showToast(sentToast || t('Reply sent'));
       return true;
     }
-    const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account; B-51dd: a refused picture by its own words
+    // a refused picture is worded with the limits the route judged it by (its `picture.limits`: THAT harness's numbers); a reply the
+    // just-reopened conversation cannot take yet carries its words as a key (`words`) — said in the page's language (batch 20 cure)
+    const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.words && r.words.key ? t(r.words.key, r.words.params || {}) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account (its i18n); batch 20's: a picture by its harness's numbers, a reopen's words
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
     if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
     showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : failWords ? failWords(why) : t('Could not reply: {why}', { why }), { type: 'error' });

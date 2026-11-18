@@ -4,18 +4,21 @@
 // cameraDoor — since a phone's gallery picker has no camera), a paste of a file into the box (a paste that carries TEXT
 // stays text: a copied spreadsheet range is text plus a picture of it), a drop of files on it. Each file goes through
 // THE picture door (src/lib/image-attach.js — the rule the chat composer asks: the type by its bytes, HEIC by name, no
-// empty file, the size and sides the API takes, the message's total), so a refusal is the composer's own toast.
+// empty file; the size, sides and total the asking conversation's HARNESS row states), so a refusal is the composer's own toast.
 // The pictures are the ITEM's, kept in the model's `pictures` map beside its text draft (`drafts`): a folded box keeps
 // them, a box opened again shows them, a sent reply removes exactly the ones it carried. Every box showing an item
 // redraws on any change to its pictures (the tray and the window may show the same item); a ✕ removes ITS picture (by
 // identity, never by a stale index). Every chip is DOM nodes (the image by its .src, never markup).
 //
-// replyPictures({ box, ta, id, store, t }) → { strip, btn, input, camera, draw }
+// replyPictures({ box, ta, id, store, t, backend }) → { strip, btn, input, camera, draw }
+//   backend = the asking conversation's harness, or a function answering it (backendOfKey) — its row's picture limits
+//             judge each picture (batch 20 cure: a codex ask takes the phone photo a claude one cannot)
 //   box   = the element a drop lands on; ta = the textarea a paste lands in
 //   store = the model's Map (item id → [{base64, mediaType, dataUrl, name}]); id = the item's
 //   strip (the chips, hidden while empty) · btn (the picture button) · input + camera.input (hidden file inputs) — the
 //   caller places them
 import { createImageDoor, refusalText, heldOf } from './image-attach.js';
+import { imageLimitsOf } from '../backend-caps.js';   // batch 20 cure: the numbers are the conversation's HARNESS row
 import { cameraDoor, sheetRow } from './chat-input.js';   // THE camera door (lane phone-take-photo) and the sheet's row
 import { UI_ICONS } from './icons.js';
 import { showToast, showImageOverlay, showContextMenu } from './utils.js';
@@ -25,7 +28,21 @@ const hasFiles = (e) => { const types = e.dataTransfer && e.dataTransfer.types; 
 const boxesOf = new Map();   // item id → Set(draw)
 const redrawAll = (id) => { for (const d of [...(boxesOf.get(id) || [])]) d(); };
 
-export function replyPictures({ box, ta, id, store, t }) {
+/** The harness of the conversation a For-you item belongs to: its key names it (`<harness>:<id>`), or — a page-only key
+ *  (`webui:<id>`) — the live session row that holds it. null = not known (then no number judges a picture here; the route
+ *  judges again with the conversation it sends to). */
+export function backendOfKey(key, rows = null) {
+  const k = String(key || '');
+  const at = k.indexOf(':');
+  if (at <= 0) return null;
+  const head = k.slice(0, at), rest = k.slice(at + 1);
+  if (head !== 'webui') return head;
+  const list = rows || (typeof window !== 'undefined' && window.app && window.app.sidebar && window.app.sidebar._allSessions) || [];
+  const row = Array.isArray(list) ? list.find((s) => s && s.webuiId === rest) : null;
+  return row ? (row.backend || 'claude') : null;
+}
+
+export function replyPictures({ box, ta, id, store, t, backend = null }) {
   const list = () => store.get(id) || [];
   const setList = (l) => { if (l.length) store.set(id, l); else store.delete(id); redrawAll(id); };
   const strip = document.createElement('div');
@@ -71,6 +88,7 @@ export function replyPictures({ box, ta, id, store, t }) {
     held: () => heldOf(list()),
     onAdd: (p) => setList([...list(), p]),
     onRefused: (l) => showToast(refusalText(l, t), { type: 'error' }),
+    limits: () => imageLimitsOf(typeof backend === 'function' ? backend() : backend),
   });
   const camera = cameraDoor((shot) => door.add([shot]));
   btn.onclick = (e) => {

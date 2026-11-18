@@ -741,6 +741,8 @@ export default {
   "{w} × {h} pixels — the model takes at most {side} pixels on a side": "{w} × {h} ピクセル——モデルが受け付ける画像は 1 辺 {side} ピクセルまで",
   "With it, this message's pictures pass {total} MB — the most one request to the model carries": "これを加えると、このメッセージの画像が {total} MB を超えます——モデルへの 1 回のリクエストの上限です",
   "The file could not be read": "ファイルを読み込めませんでした",
+  "With it, this message's pictures pass {carry} MB — the most VibeSpace carries in one message": "これを加えると、このメッセージの画像は {carry} MB を超えます——VibeSpace が 1 つのメッセージで運べる上限です",
+  "The conversation has just started and cannot take this reply ({mb} MB) yet — nothing was sent; wait a moment and send it again": "会話は起動したばかりで、まだこの返信（{mb} MB）を受け取れません——何も送信されていません。少し待ってからもう一度送信してください",
   "{name} — {why}": "{name}——{why}",
   "the pasted picture": "貼り付けた画像",
   "{n} picture(s)": "画像 {n} 枚",

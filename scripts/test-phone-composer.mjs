@@ -137,33 +137,37 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
   const WEBP = [...Buffer.from('RIFF'), 0x24, 0, 0, 0, ...Buffer.from('WEBPVP8X'), 10, 0, 0, 0, 0, 0, 0, 0, 0x3f, 0x1f, 0, 0x3f, 0x1f, 0];   // VP8X 8000 × 8000
   const box = (major, ...compat) => { const b = [major, '\0\0\0\0', ...compat].join(''); return [...be32(8 + b.length), ...Buffer.from('ftyp' + b, 'latin1'), 0, 0, 0, 0]; };
   const TXT = [...Buffer.from('hello, this is text')];
-  const B64CAP = R.CAPS.maxB64, FILECAP = R.CAPS.maxBytes;
+  // batch 20 cure (主开发 2026-11-18 08:44Z): the three numbers are the HARNESS row's (src/backend-caps.js imageLimitsOf) — claude
+  // states the Claude API's; the legs below judge with claude's row unless a leg names another harness
+  const BC = req('../src/backend-caps.js');
+  const CL = BC.imageLimitsOf('claude');
+  const B64CAP = CL.b64PerPicture, FILECAP = R.fileBytesOf(CL.b64PerPicture), SIDE = CL.sidePx, REQ = CL.requestB64;
   // ⑤a the PURE verdicts — the type from the BYTES, then the size as the API measures it (its base64), the sides, the total; no count
-  const j = (head, size = 1000, total = 0) => R.judgeImage({ size, head }, { total });
+  const j = (head, size = 1000, total = 0, limits = CL) => R.judgeImage({ size, head }, { total, limits });
   ok('PNG / JPEG / GIF / WebP taken, each with the type its bytes say (and its sides read from the header)', j(PNG).mediaType === 'image/png' && j(JPEG).mediaType === 'image/jpeg' && j(JPEG).width === 640 && j(JPEG).height === 480 && j(GIF).mediaType === 'image/gif' && j(GIF).width === 320 && j(WEBP).mediaType === 'image/webp' && j(WEBP).width === 8000, [j(PNG), j(JPEG), j(GIF), j(WEBP)]);
   ok('HEIC / HEIF refused BY NAME (heic, heix, mif1 brands)', [box('heic'), box('heix'), box('mif1', 'heic')].every((h) => j(h).code === 'heic'), [box('heic'), box('mif1', 'heic')].map((h) => j(h)));
   ok('an AVIF — even one whose major brand is the generic mif1 — is «not a picture the model reads», never called a HEIC', j(box('avif')).code === 'not_image' && j(box('mif1', 'miaf', 'avif')).code === 'not_image', [j(box('avif')), j(box('mif1', 'miaf', 'avif'))]);
   ok('a text file (whatever the browser declared) is not a picture', j(TXT).code === 'not_image' && j([]).code === 'not_image', [j(TXT), j([])]);
   ok('a 0-byte file is refused as empty (before its missing bytes are judged)', j([], 0).code === 'empty' && j(PNG, 0).code === 'empty');
-  ok(`the size cap is the API's own measure — the BASE64 of one picture ≤ 5 MiB, i.e. a file ≤ ${R.CAPS.mb} MiB: the largest fitting file taken, one byte more refused`,
-    B64CAP === 5 * 1024 * 1024 && FILECAP === 3932160 && R.CAPS.mb === 3.75 && j(PNG, FILECAP).ok && j(PNG, FILECAP + 1).code === 'too_big' && j(PNG, FILECAP).b64 === B64CAP, [j(PNG, FILECAP), j(PNG, FILECAP + 1)]);
+  ok(`claude's size cap is the API's own measure — the BASE64 of one picture ≤ 5 MiB, i.e. a file ≤ ${R.refusalVars({}, CL).mb} MiB: the largest fitting file taken, one byte more refused`,
+    B64CAP === 5 * 1024 * 1024 && FILECAP === 3932160 && R.refusalVars({}, CL).mb === 3.75 && j(PNG, FILECAP).ok && j(PNG, FILECAP + 1).code === 'too_big' && j(PNG, FILECAP).b64 === B64CAP, [j(PNG, FILECAP), j(PNG, FILECAP + 1)]);
   ok('a 4.5 MB screenshot (it fits «5 MB» as a file but not as the base64 the API measures) is refused — the row\'s «fails later at the vendor»', j(PNG, 4.5e6).code === 'too_big');
   ok('the type is judged before the size: a 40 MB text file is «not a picture», not «too big»', j(TXT, 40 * 1024 * 1024).code === 'not_image');
-  ok(`a side over ${R.CAPS.side} px is refused with its sides (PNG, JPEG after its EXIF, WebP); exactly ${R.CAPS.side} taken`,
+  ok(`a side over ${SIDE} px is refused with its sides (PNG, JPEG after its EXIF, WebP); exactly ${SIDE} taken`,
     j(png(1440, 12000)).code === 'too_wide' && j(png(1440, 12000)).height === 12000 && j(jpeg(9000, 100)).code === 'too_wide' && j(png(8000, 8000)).ok && j(WEBP).ok, [j(png(1440, 12000)), j(jpeg(9000, 100))]);
   ok('a JPEG whose frame header lies past the head (or a cut header) has no known sides and is judged on the rest', j(jpegDeep(9000, 100).slice(0, R.HEAD_BYTES)).ok && j(jpegDeep(9000, 100)).code === 'too_wide' && j(JPEG.slice(0, 8)).ok);
-  ok(`the message's total: a picture that takes its pictures past ${R.CAPS.totalMb} MB of base64 (the API's request size) is refused; up to it taken`,
-    j(PNG, 3e6, R.MAX_REQUEST - 4e6 + 1).code === 'too_much' && j(PNG, 3e6, R.MAX_REQUEST - 4e6).ok === true, [j(PNG, 3e6, R.MAX_REQUEST - 4e6 + 1), j(PNG, 3e6, R.MAX_REQUEST - 4e6)]);
+  ok(`the message's total: a picture that takes its pictures past ${REQ / 1e6} MB of base64 (the API's request size) is refused; up to it taken`,
+    j(PNG, 3e6, REQ - 4e6 + 1).code === 'too_much' && j(PNG, 3e6, REQ - 4e6).ok === true, [j(PNG, 3e6, REQ - 4e6 + 1), j(PNG, 3e6, REQ - 4e6)]);
   ok('NO count cap (主开发 22:55Z): no count in the verdict, no count word', !('maxCount' in R.CAPS) && !Object.keys(R.REFUSAL_WORDS).some((k) => /many|count/.test(k)), Object.keys(R.REFUSAL_WORDS));
   // ⑤b the server's belt over base64 — the same verdict as over the bytes, the size exact at every padding
   const b64 = (bytes) => Buffer.from(bytes).toString('base64');
-  const same = [PNG, JPEG, GIF, WEBP, box('heic'), TXT, png(1440, 12000)].every((h) => JSON.stringify(R.judgeImageBase64(b64(h))) === JSON.stringify(j(h, h.length)));
+  const same = [PNG, JPEG, GIF, WEBP, box('heic'), TXT, png(1440, 12000)].every((h) => JSON.stringify(R.judgeImageBase64(b64(h), { limits: CL })) === JSON.stringify(j(h, h.length)));
   const sizes = [1, 2, 3, 4, 5, 100].every((n) => R.bytesOfBase64(b64(new Array(n).fill(7))) === n);
-  ok('judgeImageBase64 = judgeImage over the same bytes (the JPEG\'s sides found after its EXIF too); bytesOfBase64 exact at padding 0 / 1 / 2', same && sizes && R.judgeImageBase64('').code === 'empty' && R.judgeImageBase64(null).code === 'empty' && R.judgeImageBase64('!!!!' + b64(PNG)).code === 'not_image' && R.judgeImageBase64(b64(jpeg(9000, 100))).code === 'too_wide');
+  ok('judgeImageBase64 = judgeImage over the same bytes (the JPEG\'s sides found after its EXIF too); bytesOfBase64 exact at padding 0 / 1 / 2', same && sizes && R.judgeImageBase64('').code === 'empty' && R.judgeImageBase64(null).code === 'empty' && R.judgeImageBase64('!!!!' + b64(PNG)).code === 'not_image' && R.judgeImageBase64(b64(jpeg(9000, 100)), { limits: CL }).code === 'too_wide');
   const sized = (n) => { const b = Buffer.alloc(n); Buffer.from(PNG).copy(b); return b; };
-  ok('a base64 picture one byte over the cap is refused, at the cap taken; the belt sums the total it is given', R.judgeImageBase64(sized(FILECAP + 1).toString('base64')).code === 'too_big' && R.judgeImageBase64(sized(FILECAP).toString('base64')).ok && R.judgeImageBase64(sized(1000).toString('base64'), { total: R.MAX_REQUEST }).code === 'too_much');
+  ok('a base64 picture one byte over the cap is refused, at the cap taken; the belt sums the total it is given', R.judgeImageBase64(sized(FILECAP + 1).toString('base64'), { limits: CL }).code === 'too_big' && R.judgeImageBase64(sized(FILECAP).toString('base64'), { limits: CL }).ok && R.judgeImageBase64(sized(1000).toString('base64'), { total: REQ, limits: CL }).code === 'too_much');
   // ⑤c THE DOOR over real File objects: judged on the head, the refused never read whole, ONE refusal call per hand-over
-  const runDoor = async (mod, { held = () => 0, extra = [] } = {}) => {
+  const runDoor = async (mod, { held = () => 0, extra = [], limits = () => CL } = {}) => {
     const reads = [], added = [], refusals = [];
     const spy = (f) => ({ name: f.name, size: f.size, slice: (a, b) => f.slice(a, b), arrayBuffer: () => { reads.push(f.name); return f.arrayBuffer(); } });
     const files = [
@@ -176,10 +180,11 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
       new File([new Uint8Array(PNG)], '', { type: 'image/png' }),   // a pasted picture has no name
       ...extra,
     ].map((f) => (f.slice ? spy(f) : f));
-    const door = mod.createImageDoor({ held, onAdd: (p) => added.push(p), onRefused: (l) => refusals.push(l) });
+    const door = mod.createImageDoor({ held, onAdd: (p) => added.push(p), onRefused: (l) => refusals.push(l), limits });
     const r = await door.add(files);
     return { r, reads, added, refusals };
   };
+  const runDoorOf = async (mod, limits, files) => { const added = [], refusals = []; await mod.createImageDoor({ onAdd: (p) => added.push(p), onRefused: (l) => refusals.push(l), limits }).add(files); return { added, refusals }; };
   const live = await runDoor(D, { extra: [{ name: 'gone.png', size: 10, slice: () => ({ arrayBuffer: () => Promise.reject(new Error('moved')) }), arrayBuffer: () => Promise.reject(new Error('moved')) }] });
   ok('the door takes the two pictures with the types their bytes say (the JPEG named .png is image/jpeg)',
     live.added.length === 2 && live.added[0].mediaType === 'image/jpeg' && live.added[0].base64 === b64(JPEG) && live.added[0].dataUrl === 'data:image/jpeg;base64,' + b64(JPEG) && live.added[1].mediaType === 'image/png' && live.added[1].name === 'image', live.added.map((a) => [a.name, a.mediaType]));
@@ -197,7 +202,7 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     // the message's total: what it already holds (held) + this hand-over's reads, each counted as it is judged
     const pic = (n) => new File([sized(n)], `t${n}.png`, { type: 'image/png' });
     const got = [], said = [];
-    const door = D.createImageDoor({ held: () => 24e6 + 1 + D.heldOf(got), onAdd: (p) => got.push(p), onRefused: (l) => said.push(...l) });
+    const door = D.createImageDoor({ held: () => 24e6 + 1 + D.heldOf(got), onAdd: (p) => got.push(p), onRefused: (l) => said.push(...l), limits: () => CL });
     await door.add([pic(3e6), pic(3e6), pic(10)]);
     ok('with 24 MB (+1 B) held, the first 3 MB picture (4 MB as base64) is taken, the second would pass 32 MB and is refused by name, a small one after it still fits',
       got.length === 2 && got[0].name === 't3000000.png' && got[1].name === 't10.png' && said.length === 1 && said[0].code === 'too_much', { got: got.map((g) => g.name), said });
@@ -205,7 +210,7 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
   {
     const tt = (k, v = {}) => k.replace(/\{(\w+)\}/g, (_, n) => (n in v ? v[n] : `{${n}}`));
     const one = D.refusalText([{ name: 'a.heic', code: 'heic' }], tt);
-    const two = D.refusalText([{ name: '', code: 'too_big', size: 4718592 }, { name: 'tall.png', code: 'too_wide', width: 1440, height: 12000 }], tt);
+    const two = D.refusalText([{ name: '', code: 'too_big', size: 4718592, limits: CL }, { name: 'tall.png', code: 'too_wide', width: 1440, height: 12000, limits: CL }], tt);
     ok('the toast words: one file named with its why; several counted, each named; its OWN size or sides with the cap; a pasted picture is «the pasted picture»',
       one === 'Picture not added: a.heic — HEIC pictures cannot be sent — save it as JPEG or PNG first'
       && two === '2 pictures not added: the pasted picture — 4.5 MB — larger than 3.75 MB, the largest picture the model takes · tall.png — 1440 × 12000 pixels — the model takes at most 8000 pixels on a side', [one, two]);
@@ -229,6 +234,41 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     const miss = keys.filter((k) => !src.includes(`${JSON.stringify(k)}:`));
     ok(`${path.basename(f)} words every refusal and the toast`, !miss.length, miss);
   }
+  // ⑤f THE NUMBERS ARE THE HARNESS'S (batch 20 cure, 主开发 08:44Z: «a limit is a row of the harness, never one vendor's number
+  // applied to all»): claude's row states the Claude API's three; a harness that states none gets NO numeric cap — the type,
+  // the empty file and HEIC stay for everyone
+  const ids = Object.keys(BC.BACKEND_CAPS);
+  ok('every shipped harness row DECLARES imageLimits (an object of three numbers, or null = states none)', ids.every((id) => 'imageLimits' in BC.BACKEND_CAPS[id] && (BC.BACKEND_CAPS[id].imageLimits === null || ['b64PerPicture', 'sidePx', 'requestB64'].every((k) => BC.BACKEND_CAPS[id].imageLimits[k] > 0))), ids.map((id) => [id, BC.BACKEND_CAPS[id].imageLimits]));
+  ok('claude states the Claude API\'s limits (5 MiB of base64, 8000 px, 32 MB); every other shipped harness states none; no harness named = none', CL.b64PerPicture === 5 * 1024 * 1024 && CL.sidePx === 8000 && CL.requestB64 === 32e6 && ids.filter((id) => id !== 'claude').every((id) => BC.imageLimitsOf(id) === null) && BC.imageLimitsOf(undefined) === null && BC.imageLimitsOf('') === null);
+  const PHOTO = 4.6e6, CX = BC.imageLimitsOf('codex');
+  ok('THE SAME 4.6 MB phone JPEG: refused for claude (too_big), TAKEN for codex — and a 1440 × 12000 page and a request past 32 MB likewise', j(JPEG, PHOTO).code === 'too_big' && j(JPEG, PHOTO, 0, CX).ok === true && j(png(1440, 12000), 1000, 0, CX).ok === true && j(PNG, 3e6, 40e6, CX).ok === true, [j(JPEG, PHOTO), j(JPEG, PHOTO, 0, CX)]);
+  ok('…the type, the empty file and HEIC stay for every harness', j(box('heic'), 1000, 0, CX).code === 'heic' && j(TXT, 1000, 0, CX).code === 'not_image' && j([], 0, 0, CX).code === 'empty');
+  const CARRY = R.CARRY_B64;
+  ok(`…and VibeSpace's OWN ceiling holds for every harness (its readers' round): a picture that takes the message past ${CARRY / 1048576} MiB of base64 is refused as too_much_here (the hub's own doors), named as VibeSpace's — claude's 32 MB request still answers first`,
+    j(PNG, 3e6, CARRY - 4e6 + 1, CX).code === 'too_much_here' && j(PNG, 3e6, CARRY - 4e6, CX).ok === true && j(PNG, 3e6, CARRY - 4e6 + 1).code === 'too_much'
+    && R.REFUSAL_WORDS.too_much_here.replace('{carry}', R.refusalVars({}, CX).carry) === "With it, this message's pictures pass 48 MB — the most VibeSpace carries in one message", [j(PNG, 3e6, CARRY - 4e6 + 1, CX), R.refusalVars({}, CX)]);
+  {
+    const shot = (name) => new File([sized(PHOTO)], name, { type: 'image/jpeg' });
+    const jpegHead = (n) => { const b = Buffer.alloc(n); Buffer.from(JPEG).copy(b); return b; };
+    const photo = (name) => new File([jpegHead(PHOTO)], name, { type: 'image/jpeg' });
+    const cx = await runDoorOf(D, () => CX, [photo('IMG_2041.jpg')]), cl = await runDoorOf(D, () => CL, [photo('IMG_2041.jpg')]);
+    const tt = (k, v = {}) => k.replace(/\{(\w+)\}/g, (_, n) => (n in v ? v[n] : `{${n}}`));
+    ok('the DOOR: the 4.6 MB camera shot becomes a chip in a codex conversation, and in a claude one is refused in ONE toast that names CLAUDE\'s numbers',
+      cx.added.length === 1 && !cx.refusals.length && cl.added.length === 0 && cl.refusals.length === 1 && cl.refusals[0][0].code === 'too_big'
+      && D.refusalText(cl.refusals[0], tt) === 'Picture not added: IMG_2041.jpg — 4.39 MB — larger than 3.75 MB, the largest picture the model takes', { cx: cx.added.length, cl: cl.refusals, words: cl.refusals[0] && D.refusalText(cl.refusals[0], tt) });
+    void shot;
+  }
+  {
+    const cvSrc = read('src/lib/chat-view.js'), rpSrc = read('src/lib/reply-pictures.js'), upSrc = read('src/lib/user-todos-panel.js'), iwSrc = read('src/lib/inbox-window.js');
+    ok('WIRING: the composer\'s door judges with ITS conversation\'s harness (chat-view hands the backend in); the For-you boxes with the asking conversation\'s (its key, else its live row)',
+      /limits: \(\) => imageLimitsOf\(this\._getBackend\(\)\),/.test(ci) && /getBackend: \(\) => \(this\._getSessionIds\(\) \|\| \{\}\)\.backend \|\| null,/.test(cvSrc)
+      && /limits: \(\) => imageLimitsOf\(typeof backend === 'function' \? backend\(\) : backend\),/.test(rpSrc) && /backend: \(\) => backendOfKey\(i\.sessionKey\)/.test(upSrc) && /return backendOfKey\(it && it\.sessionKey\);/.test(iwSrc));
+    const a = rpSrc.indexOf('export function backendOfKey('), e = rpSrc.indexOf('\n}\n', a);
+    const backendOfKey = new Function(`${rpSrc.slice(a + 'export '.length, e + 2)}\nreturn backendOfKey;`)();
+    const rows = [{ webuiId: 'sess-9', backend: 'codex' }, { webuiId: 'sess-8' }];
+    ok('backendOfKey: a conversation key names its harness; a page-only key reads its live row (a row without one is claude); unknown ⇒ null',
+      backendOfKey('codex:th-1', rows) === 'codex' && backendOfKey('claude:abc', rows) === 'claude' && backendOfKey('webui:sess-9', rows) === 'codex' && backendOfKey('webui:sess-8', rows) === 'claude' && backendOfKey('webui:sess-0', rows) === null && backendOfKey('', rows) === null && backendOfKey(null, rows) === null);
+  }
   // ⑤e RED controls: the release's composer (the change removed), a door with no rule, a rule with no size cap / no total
   let base = '';
   try { base = execFileSync('git', ['show', 'b06f36e90:src/lib/chat-input.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
@@ -240,15 +280,22 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
     const ruleAbs = pathToFileURL(path.join(REPO, 'src/image-attach-rule.js')).href;
     const doorSrc = read('src/lib/image-attach.js').replace("from '../image-attach-rule.js'", `from ${JSON.stringify(ruleAbs)}`);
     const noRule = path.join(tmp, 'door-no-rule.mjs');
-    fs.writeFileSync(noRule, doorSrc.replace("const v = judgeImage({ size: file && file.size, head }, { total: (Number(held()) || 0) + inFlight });", "const v = { ok: true, mediaType: file.type || 'image/png', b64: 0 };"));
+    fs.writeFileSync(noRule, doorSrc.replace("const v = judgeImage({ size: file && file.size, head }, { total: (Number(held()) || 0) + inFlight, limits: lim });", "const v = { ok: true, mediaType: file.type || 'image/png', b64: 0 };"));
     const red = await runDoor(await import(pathToFileURL(noRule).href));
     ok('RED: a door with no rule takes the HEIC, the empty file, the text, the tall page, and reads the big file whole', red.added.length === 7 && red.reads.includes('big.png') && !red.refusals.length, { added: red.added.length, reads: red.reads });
     const ruleSrc = read('src/image-attach-rule.js');
     const noCap = path.join(tmp, 'rule-no-cap.cjs'), noTotal = path.join(tmp, 'rule-no-total.cjs');
-    fs.writeFileSync(noCap, ruleSrc.replace("  if (b64 > MAX_B64) return { ok: false, code: 'too_big', size: n };\n", ''));
-    fs.writeFileSync(noTotal, ruleSrc.replace("  if ((Number(total) || 0) + b64 > MAX_REQUEST) return { ok: false, code: 'too_much', size: n };\n", ''));
-    ok('RED: a rule with no size cap takes the 4.5 MB screenshot the API refuses', req(noCap).judgeImage({ size: 4.5e6, head: PNG }).ok === true);
-    ok('RED: a rule with no total takes a picture past the request size', req(noTotal).judgeImage({ size: 3e6, head: PNG }, { total: R.MAX_REQUEST }).ok === true);
+    const capLine = "  if (perPicture && b64 > perPicture) return { ok: false, code: 'too_big', size: n };\n", totalLine = "  if (request && (Number(total) || 0) + b64 > request) return { ok: false, code: 'too_much', size: n };\n";
+    ok('setup: the size cap and the total are ONE line each in the rule (the mutants below cut them)', ruleSrc.split(capLine).length === 2 && ruleSrc.split(totalLine).length === 2);
+    fs.writeFileSync(noCap, ruleSrc.replace(capLine, ''));
+    fs.writeFileSync(noTotal, ruleSrc.replace(totalLine, ''));
+    ok('RED: a rule with no size cap takes the 4.5 MB screenshot claude\'s API refuses', req(noCap).judgeImage({ size: 4.5e6, head: PNG }, { limits: CL }).ok === true);
+    ok('RED: a rule with no total takes a picture past claude\'s request size', req(noTotal).judgeImage({ size: 3e6, head: PNG }, { total: REQ, limits: CL }).ok === true);
+    // batch 20 cure's RED: the release's shape — ONE vendor's numbers for every harness — refuses the codex photo the cure takes
+    const allClaude = path.join(tmp, 'rule-claude-for-all.cjs'), perLine = "  const perPicture = limitOf(limits, 'b64PerPicture'), side = limitOf(limits, 'sidePx'), request = limitOf(limits, 'requestB64');\n";
+    ok('setup: the rule reads its three numbers on ONE line', ruleSrc.split(perLine).length === 2);
+    fs.writeFileSync(allClaude, ruleSrc.replace(perLine, "  const perPicture = limitOf(limits, 'b64PerPicture') || 5 * 1024 * 1024, side = limitOf(limits, 'sidePx') || 8000, request = limitOf(limits, 'requestB64') || 32e6;\n"));
+    ok('RED: a rule that applies the Claude API\'s numbers to a harness that states none refuses the 4.6 MB phone photo codex takes', req(allClaude).judgeImage({ size: 4.6e6, head: JPEG }, { limits: BC.imageLimitsOf('codex') }).code === 'too_big');
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 

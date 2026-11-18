@@ -13,34 +13,46 @@
  *   empty     — a file of 0 bytes
  *   heic      — HEIC / HEIF (an iPhone's own format) — refused BY NAME, the person can save it as JPEG
  *   not_image — anything else that is not PNG, JPEG, GIF or WebP (the four the model API reads; AVIF is not one)
- *   too_big   — its base64 (what the API measures: «image exceeds 5 MB maximum: N bytes > 5242880 bytes») over 5 MiB,
- *               i.e. a FILE over 3.75 MiB — said with the file's own size and that cap
- *   too_wide  — a side over 8000 px (the API's stated largest side), read from the header when the head holds it
+ *   too_big   — its base64 (what an API measures) over the harness's limit per picture — said with the file's own size
+ *               and that limit (claude: 5 MiB of base64, «image exceeds 5 MB maximum: N bytes > 5242880 bytes» — a file
+ *               over 3.75 MiB)
+ *   too_wide  — a side over the harness's limit (claude: 8000 px), read from the header when the head holds it
  *               (PNG / GIF / WebP always; JPEG when its frame header lies in the first 64 KiB) — unknown sides pass
- *   too_much  — with it, the message's pictures pass 32 MB of base64 (the API's stated largest request): the pictures
+ *   too_much  — with it, the message's pictures pass the harness's request size (claude: 32 MB of base64): the pictures
  *               already in the message are `total`
+ * THE THREE NUMBERS ARE THE HARNESS'S, never this file's (bl-chat-b batch 20 cure, 主开发 2026-11-18 08:44Z: «a limit is a
+ * row of the harness, never one vendor's number applied to all»): `limits` = src/backend-caps.js imageLimitsOf(the
+ * conversation's harness) = {b64PerPicture, sidePx, requestB64}; a harness that states none (null) gets NO numeric cap —
+ * a codex conversation takes the 4.6 MB phone photo it always took. The type, the empty file and HEIC stay for everyone.
+ *   too_much_here — VibeSpace's OWN ceiling, for every harness (its readers' round on the cure): with it, the message's pictures
+ *               pass CARRY_B64 (48 MiB of base64) — the most one message carries through the hub's own doors (a reply's JSON
+ *               body is cut at 50 MiB by the hub, a chat frame rides one WebSocket message and is written in one go); never a
+ *               vendor's number: past it the hub would answer a raw 413 / close the socket, and the person read «server
+ *               unreachable» — a false reason
  * The type is read from the file's FIRST BYTES — never its name or the type the browser declared (a renamed .txt is
  * not a picture; a JPEG named .png is a JPEG) — and the verdict's `mediaType` is what the image block says.
  * NO COUNT CAP (主开发 2026-11-17 22:55Z): a number of pictures is refused only where a harness or the API states its
  * limit, read from where it is stated — this rule invents none. (The API's 2000 px side for a request holding more
  * than 20 pictures counts the whole conversation's history, which no page sees — not judged here.)
  *
- * judgeImage({size, head}, {total})  → {ok:true, mediaType, b64, width?, height?} | {ok:false, code, size, width?, height?}
+ * judgeImage({size, head}, {total, limits}) → {ok:true, mediaType, b64, width?, height?} | {ok:false, code, size, width?, height?}
  *   size = the file's bytes; head = its first bytes (≥ 32 for the sides; up to HEAD_BYTES for a JPEG; a Uint8Array or an
  *   array of numbers); total = the base64 the message already carries; b64 = this picture's base64 length
- * judgeImageBase64(base64, {total}) → the same verdict over a base64 string (the size from its length, the head decoded
+ * judgeImageBase64(base64, {total, limits}) → the same verdict over a base64 string (the size from its length, the head decoded
  *   from its first chars, its shape read at its ends — no whole-string pass) — the server's belt
- * REFUSAL_WORDS[code] = the person's words (an English t() key; {mb} {side} {total} = the caps, {size} {w} {h} = its own)
+ * REFUSAL_WORDS[code] = the person's words (an English t() key; {mb} {side} {total} = the harness's limits, {size} {w} {h} = its own)
+ * refusalVars(refusal, limits) = those words' values
  */
 
-const MAX_B64 = 5 * 1024 * 1024;                 // one picture AS SENT (its base64) — the model API's stated limit
-const MAX_BYTES = Math.floor(MAX_B64 / 4) * 3;   // 3 932 160 — the largest file whose base64 fits (3.75 MiB)
-const MAX_SIDE = 8000;                           // px — the model API's stated largest side
-const MAX_REQUEST = 32 * 1000 * 1000;            // the model API's stated largest request: one message's pictures together
+const CARRY_B64 = 48 * 1024 * 1024;              // VibeSpace's own: one message's pictures through the hub's doors (the reply body's 50 MiB, with room for its text)
 const HEAD_BYTES = 64 * 1024;                    // what a door reads before judging (a JPEG's frame header sits after its EXIF)
 const ACCEPTED = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const mib = (n) => Math.round((n / (1024 * 1024)) * 100) / 100;
-const CAPS = Object.freeze({ maxBytes: MAX_BYTES, maxB64: MAX_B64, mb: mib(MAX_BYTES), side: MAX_SIDE, maxRequest: MAX_REQUEST, totalMb: MAX_REQUEST / 1e6, headBytes: HEAD_BYTES, accepted: ACCEPTED });
+const CAPS = Object.freeze({ headBytes: HEAD_BYTES, accepted: ACCEPTED });   // what holds for every harness (the numbers are each harness's)
+/** the largest FILE whose base64 fits a limit of `b64` (claude's 5 MiB ⇒ 3 932 160 bytes, 3.75 MiB) */
+const fileBytesOf = (b64) => Math.floor((Number(b64) || 0) / 4) * 3;
+/** a harness's limits, read as numbers (anything else = that limit not stated) */
+const limitOf = (limits, k) => { const v = limits && typeof limits === 'object' ? Number(limits[k]) : NaN; return v > 0 ? v : null; };
 
 const REFUSAL_WORDS = Object.freeze({
   empty: 'The file is empty',   // ui-words: a t() key of this table — worded by src/lib/image-attach.js refusalText; scripts/i18n-check.mjs requires its zh / ja rows
@@ -49,7 +61,14 @@ const REFUSAL_WORDS = Object.freeze({
   too_big: '{size} — larger than {mb} MB, the largest picture the model takes',
   too_wide: '{w} × {h} pixels — the model takes at most {side} pixels on a side',
   too_much: 'With it, this message\'s pictures pass {total} MB — the most one request to the model carries',
+  too_much_here: 'With it, this message\'s pictures pass {carry} MB — the most VibeSpace carries in one message',
   unreadable: 'The file could not be read',   // the page's own read failed (a file moved or removed while it was read)
+});
+
+/** A reply's words beside the picture refusals (an English t() key, {mb} = the frame's size): the reopen road's frame that
+ *  the just-started conversation cannot take yet (src/server/user-input.js too_large / no-sidecar) — said in the page's language */
+const REPLY_WORDS = Object.freeze({
+  reopenTooLarge: 'The conversation has just started and cannot take this reply ({mb} MB) yet — nothing was sent; wait a moment and send it again',
 });
 
 /** base64 length of `size` bytes */
@@ -111,17 +130,19 @@ function sidesOf(head, kind) {
   return null;
 }
 
-function judgeImage({ size, head } = {}, { total = 0 } = {}) {
+function judgeImage({ size, head } = {}, { total = 0, limits = null } = {}) {
   const n = Number(size) || 0;
   if (!(n > 0)) return { ok: false, code: 'empty', size: 0 };
   const kind = sniffImage(head);
   if (kind === 'image/heic') return { ok: false, code: 'heic', size: n };
   if (!kind || !ACCEPTED.includes(kind)) return { ok: false, code: 'not_image', size: n };
   const b64 = b64Of(n);
-  if (b64 > MAX_B64) return { ok: false, code: 'too_big', size: n };
+  const perPicture = limitOf(limits, 'b64PerPicture'), side = limitOf(limits, 'sidePx'), request = limitOf(limits, 'requestB64');
+  if (perPicture && b64 > perPicture) return { ok: false, code: 'too_big', size: n };
   const sides = sidesOf(head, kind);
-  if (sides && (sides.width > MAX_SIDE || sides.height > MAX_SIDE)) return { ok: false, code: 'too_wide', size: n, ...sides };
-  if ((Number(total) || 0) + b64 > MAX_REQUEST) return { ok: false, code: 'too_much', size: n };
+  if (side && sides && (sides.width > side || sides.height > side)) return { ok: false, code: 'too_wide', size: n, ...sides };
+  if (request && (Number(total) || 0) + b64 > request) return { ok: false, code: 'too_much', size: n };
+  if ((Number(total) || 0) + b64 > CARRY_B64) return { ok: false, code: 'too_much_here', size: n };   // VibeSpace's own ceiling, every harness
   return { ok: true, mediaType: kind, b64, ...(sides || {}) };
 }
 
@@ -160,9 +181,11 @@ function judgeImageBase64(b64, opts = {}) {
   return judgeImage({ size: bytesOfBase64(b64), head: headOfBase64(b64) || [] }, opts);
 }
 
-/** The words' values for one refusal {code, size, width, height} (the caps, and the picture's own size / sides). */
-function refusalVars(r = {}) {
-  return { mb: CAPS.mb, side: MAX_SIDE, total: CAPS.totalMb, size: `${mib(Number(r.size) || 0)} MB`, w: r.width || 0, h: r.height || 0 };
+/** The words' values for one refusal {code, size, width, height} — the harness's limits it was judged with, and the picture's
+ *  own size / sides. */
+function refusalVars(r = {}, limits = null) {
+  const perPicture = limitOf(limits, 'b64PerPicture'), request = limitOf(limits, 'requestB64');
+  return { mb: perPicture ? mib(fileBytesOf(perPicture)) : 0, side: limitOf(limits, 'sidePx') || 0, total: request ? request / 1e6 : 0, carry: mib(CARRY_B64), size: `${mib(Number(r.size) || 0)} MB`, w: r.width || 0, h: r.height || 0 };
 }
 
-module.exports = { judgeImage, judgeImageBase64, sniffImage, sidesOf, headOfBase64, bytesOfBase64, refusalVars, REFUSAL_WORDS, CAPS, MAX_BYTES, MAX_B64, MAX_SIDE, MAX_REQUEST, HEAD_BYTES, ACCEPTED };
+module.exports = { judgeImage, judgeImageBase64, sniffImage, sidesOf, headOfBase64, bytesOfBase64, refusalVars, fileBytesOf, REFUSAL_WORDS, REPLY_WORDS, CAPS, CARRY_B64, HEAD_BYTES, ACCEPTED };

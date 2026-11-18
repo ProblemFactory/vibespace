@@ -5,7 +5,8 @@
  *   POST /api/user-todos/:id/reply   {text, images?: [{base64, mediaType?, name?}]}
  *     B-51dd: a reply takes PICTURES (the box's button / paste / drop) — each judged again HERE by THE picture rule
  *       (PURE src/image-attach-rule.js, the one the page's door asked: the type from its bytes, HEIC by name, no empty
- *       picture, the size cap) → `bad_image` 400 {picture:{name, code}} with nothing sent; the taken ones ride the chat
+ *       picture; the size / sides / total of the RECEIVING conversation's harness row — the live one's, else the reopen key's —
+ *       and VibeSpace's own ceiling) → `bad_image` 400 {picture:{name, code, …, limits}} with nothing sent; the taken ones ride the chat
  *       composer's own frame (image blocks typed by their bytes, then the quoted text) down THE typing path, on the reopen
  *       road too (a frame over 64 KiB waits, ≤ 15 s, for the fresh wrapper's frame-file report, then goes once); a
  *       picture alone is a reply (no text needed), and the item keeps how many pictures it carried (`reply.pictures`).
@@ -53,7 +54,9 @@
  * the spend census.
  */
 const { checkReplyText, composeReply, replyVerdict } = require('../inbox-reply.js');
-const { judgeImageBase64, refusalVars, REFUSAL_WORDS } = require('../image-attach-rule.js'); // B-51dd: THE picture rule — the page's door asked it, the route asks it again
+const { judgeImageBase64, refusalVars, REFUSAL_WORDS, REPLY_WORDS } = require('../image-attach-rule.js'); // B-51dd: THE picture rule — the page's door asked it, the route asks it again
+const { imageLimitsOf } = require('../backend-caps.js');   // batch 20 cure: judged with the HARNESS of the conversation the reply goes to
+const { conversationOfKey } = require('../inbox-reopen.js');   // …a reopened one's harness is its key's
 
 const STATUS = Object.freeze({
   agent_forbidden: 403, not_found: 404,
@@ -66,18 +69,20 @@ const byOf = (req) => { try { return require('../device-audit.js').byOfReq(req);
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 
 /** B-51dd: a reply's pictures → {ok, blocks} (the composer's image blocks, typed by their BYTES) | {ok:false, error, picture}
- *  — the first picture the rule refuses names the refusal; anything but an array (or nothing) is refused too. */
-function picturesOf(raw) {
+ *  — the first picture the rule refuses names the refusal; anything but an array (or nothing) is refused too. `limits` = the
+ *  receiving conversation's harness row (batch 20 cure; null = it states none: no numeric cap); the refusal carries them so the
+ *  page says THAT harness's numbers. */
+function picturesOf(raw, { limits = null } = {}) {
   if (raw == null) return { ok: true, blocks: [] };
   if (!Array.isArray(raw)) return { ok: false, error: 'images must be an array of pictures', picture: null };
   const blocks = [];
   let total = 0;   // the reply's pictures together — the API's stated request size bounds them (the rule's too_much)
   for (const p of raw) {
     const name = p && typeof p.name === 'string' ? p.name.slice(0, 200) : '';
-    const v = judgeImageBase64(p && p.base64, { total });
+    const v = judgeImageBase64(p && p.base64, { total, limits });
     if (!v.ok) {
-      const picture = { name, code: v.code, size: v.size || 0, ...(v.width ? { width: v.width, height: v.height } : {}) };
-      const vars = refusalVars(picture);
+      const picture = { name, code: v.code, size: v.size || 0, ...(v.width ? { width: v.width, height: v.height } : {}), limits };
+      const vars = refusalVars(picture, limits);
       return { ok: false, picture, error: `${name || 'a picture'}: ${REFUSAL_WORDS[v.code].replace(/\{(\w+)\}/g, (_, k) => String(vars[k]))}` };
     }
     total += v.b64;
@@ -124,7 +129,9 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
     // sends nothing. So it rides THE typing path (no authorizer, no ladder — src/server/user-input.js says why) and
     // the spend census excuses it with this file's typed-send row (scripts/test-spend-paths.mjs).
     const r = await sendWhenReady(o.sessionId, frame);   // ONE send, once the fresh wrapper can take a big frame
-    if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
+    // (batch 20 cure: the frame the just-started conversation cannot take yet is ALSO said as words the page translates)
+    const tooLarge = r && r.code === 'too_large' && r.reason === 'no-sidecar' ? { words: { key: REPLY_WORDS.reopenTooLarge, params: { mb: (frame.length / 1048576).toFixed(1) } } } : {};   // only «still starting» is a wait (an old wrapper needs Terminate + Resume: its English stays)
+    if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ ...tooLarge, error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
     const updated = userTodos.resolveByReply(item.id, text, undefined, { pictures });
     res.json({ ok: true, reopened: true, sessionId: o.sessionId, conversation: o.conversation || null, msgId: r.msgId, item: updated });
   }).catch((e) => { if (!res.headersSent) fail(res, 'resume_failed', 'the conversation could not be reopened: ' + e.message); });
@@ -133,15 +140,18 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
       if (isAgentBearer(req)) return fail(res, 'agent_forbidden', 'a reply is the user\'s own message — an agent token cannot send one');
       const item = userTodos.get(String(req.params.id));
       if (!item) return fail(res, 'not_found', 'item not found');
-      const pics = picturesOf(req.body && req.body.images);
+      // the conversation the reply goes to — FIRST, so its pictures are judged with ITS harness (the live one's, else the one the
+      // reopen would resume: its key names it); a conversation nobody can name has no numbers (the reopen refuses it anyway)
+      const hit = sessionForItem(item, activeSessions, sessionStatusKey);
+      const s = hit && hit[1];
+      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;
+      const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf(backend) });
       if (!pics.ok) return res.status(STATUS.bad_image).json({ error: pics.error, code: 'bad_image', ...(pics.picture ? { picture: pics.picture } : {}) });
       const t0 = checkReplyText(req.body && req.body.text);
       const t = !t0.ok && t0.code === 'empty' && pics.blocks.length ? { ok: true, text: '' } : t0;   // a picture alone is a reply
       if (!t.ok) return fail(res, t.code, t.why);
       const quoted = composeReply(item, t.text, { now: now() });
       const frame = pics.blocks.length ? JSON.stringify({ type: 'user', message: { role: 'user', content: [...pics.blocks, { type: 'text', text: quoted }] } }) : quoted;
-      const hit = sessionForItem(item, activeSessions, sessionStatusKey);
-      const s = hit && hit[1];
       const v = replyVerdict({ item, session: s ? { live: true, mode: s.mode || 'terminal', remoteState: (s._remoteState && s._remoteState.state !== 'connected') ? s._remoteState.state : null } : null });
       if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text, frame, pics.blocks.length);
       if (!v.ok) return fail(res, v.code, v.why);

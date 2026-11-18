@@ -12,6 +12,7 @@ import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { createImageDoor, refusalText, heldOf } from './image-attach.js'; // B-c9ed: THE picture door — every picture judged by THE rule when it is handed
+import { imageLimitsOf } from '../backend-caps.js'; // batch 20 cure: the numbers a picture is judged by are its conversation's HARNESS row
 
 /** THE CAMERA DOOR (lane phone-take-photo, owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): Android Chrome opens an
  *  image-only file input in its system PHOTO PICKER — a gallery with no camera in it — so a phone sheet that offers
@@ -62,7 +63,7 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onHoldChord, onSteerSend, onPageKey, onLogin }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getBackend, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onHoldChord, onSteerSend, onPageKey, onLogin }) {
     this._ws = ws;
     this._onLogin = onLogin || null; // lane signin-card-real-screen: a typed «/login» opens the sign-in card (the CLI answers «isn't available»)
     this._onPageKey = onPageKey || null; // lane door-healthy-chat: PageUp / PageDown page the conversation
@@ -75,6 +76,7 @@ export class ChatInput {
     this._getHost = getHost || (() => null);
     this._getUploadDir = getUploadDir || (() => '');
     this._isTouch = isTouch || (() => false);
+    this._getBackend = getBackend || (() => null);   // batch 20 cure: the conversation's harness — its row's picture limits
     this._getTouchEnterSends = getTouchEnterSends || (() => false);
     this._getEnterSends = getEnterSends || (() => true);   // chat.enterSends (desktop): off ⇒ Cmd/Ctrl+Enter sends
     this._enterGuard = new EnterGuard();                     // inc-muukd9oq-qyc3 r2: every compositionend arms a window that swallows the commit's Enter
@@ -1581,14 +1583,15 @@ export class ChatInput {
 
   /** THE ONE ROAD of a picture into this message (the paste, the gallery, the camera's shot): a File or a list of them,
    *  each judged by THE rule (B-c9ed, src/image-attach-rule.js) when it is handed — an empty file, a HEIC, a file that
-   *  is not PNG / JPEG / GIF / WebP by its bytes, a picture over the model API's size or side, one that takes the
-   *  message's pictures past the API's request size becomes no chip, and ONE toast names each refused file and why; a
+   *  is not PNG / JPEG / GIF / WebP by its bytes, a picture over THIS conversation's harness limits (its size, sides, the
+   *  message's total — claude: the model API's; none stated: none) or past VibeSpace's own ceiling becomes no chip, and ONE toast names each refused file and why; a
    *  taken picture carries the type its bytes say */
   _addImageAttachment(files) {
     if (!this._imageDoor) this._imageDoor = createImageDoor({
       held: () => heldOf(this._attachments),
       onAdd: (attachment) => { this._attachments.push(attachment); this._renderAttachments(); this._textarea.focus(); },
       onRefused: (list) => showToast(refusalText(list, t), { type: 'error' }),
+      limits: () => imageLimitsOf(this._getBackend()),   // the harness's own numbers; one that states none takes any size
     });
     return this._imageDoor.add(files && typeof files.length === 'number' ? files : [files]);
   }

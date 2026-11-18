@@ -136,7 +136,10 @@ const printItems = (items) => {
 const printOne = (i) => {
   printItems([i]);
   console.log('      status: ' + i.status + (i.resolvedBy ? ' (by ' + i.resolvedBy + ')' : ''));
-  if (i.reply && i.reply.text) console.log('      the user replied: ' + i.reply.text.split('\n').join('\n        '));
+  // batch 20 cure: a reply can carry pictures (B-51dd) — they reached the conversation as its message; the listing counts them, so
+  // a reply made only of pictures is not an item «done by reply» with nothing said
+  const pics = i.reply ? Number(i.reply.pictures) || 0 : 0, picWords = pics ? `${pics} picture${pics === 1 ? '' : 's'} (in the conversation)` : '';
+  if (i.reply && (i.reply.text || pics)) console.log('      the user replied: ' + (i.reply.text ? i.reply.text.split('\n').join('\n        ') + (pics ? '\n        + ' + picWords : '') : picWords));
 };
 
 async function main() {
