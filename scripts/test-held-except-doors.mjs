@@ -1614,6 +1614,21 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(srcVU.split(inPlant).length === 2 && /try \{ plan = planNow\(\); \}/.test(srcVU), 'the plant of (k) is where it claims (the owner\'s inputs, once), and the preview draws planNow — the Save\'s own plan', srcVU.split(inPlant).length - 1);
   const rk = await drive2(await bundleVU(swap(inPlant, '')), { routes: noUseRoutes, change: false });
   ok(rk.posts >= 2 && rk.untils[1][0] > rk.untils[0][0], '(k) RED — re-timed on ANY change (the hub\'s too): the repeated Save over an older hub posts a LATER end (B-f212\'s own fault back)', { posts: rk.posts, untils: rk.untils });
+  // r13 «also» (B-bc3b's read: the own-entry dialog words had only a picture) — the REAL dialog over an agent's OWN entry says a
+  // grantee gets no card (another host is refused), and the «let the agent ask … --standing» line is not there (another
+  // conversation's --standing ask is refused on it); an owner's entry keeps that line
+  const dialogText = async (show, own) => {
+    const P = newPage({ routes: sweepRoutes([]) });
+    show({ id: own ? 'agent:cid-ada/deploy-key' : ENTRY, label: own ? 'Agent secret · deploy-key' : 'API key', run: { use: { to: [], except: [], entryHosts: [], ...(own ? { own: true } : {}) } } }, { app: VU_APP, refresh: () => { } });
+    return textOf(P.shell.body);
+  };
+  const ownT = await dialogText(real, true), ownerT = await dialogText(real, false);
+  ok(/Another host, or a command whose destination cannot be told, is refused/.test(ownT) && /Another conversation sends an agent's value only to the hosts you name here/.test(ownT) && !/--standing/.test(ownT) && /--standing/.test(ownerT) && /\(a shell, a script\), still asks you\./.test(ownerT) && !/still asks you/.test(ownT) && !/destination cannot be told, is refused/.test(ownerT),
+    '(l) r13: an agent\'s OWN entry — its dialog says another host is refused and names no «--standing» ask; an owner\'s entry says another host still asks you and keeps the ask line', { own: ownT.slice(0, 400), owner: /--standing/.test(ownerT) });
+  const askPlant = '  if (!u.own) body.append(askAgent);';
+  ok(srcVU.split(askPlant).length === 2, 'the RED control\'s plant of (m) is where it claims: the ask line held back on an own entry, once', srcVU.split(askPlant).length - 1);
+  const ownR = await dialogText(await bundleVU(swap(askPlant, '  body.append(askAgent);')), true);
+  ok(/--standing/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «let the agent ask --standing» (a road that is refused there)', ownR.slice(0, 200));
   globalThis.__hx.real = realWas;
 }
 

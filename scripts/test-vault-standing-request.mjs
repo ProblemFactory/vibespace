@@ -1048,7 +1048,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
   // member for this conversation covers another host); E2 (this world's entry) closed but OPEN to it by an 8-hour grant (the
   // request card), its member already at the host bound; a run naming both to a host neither member covers ⇒ the card, answered
   // «Always»: the press switches E2 ON (the bound turns F0 off), then E2's member write is REFUSED ⇒ the whole press is put back
-  const pressLeg = async (doorMod) => {
+  const pressLeg = async (doorMod, { hold = false } = {}) => {   // r13 «also»: hold ⇒ E2's member far under its host bound (the press HOLDS)
     let clock = Date.now();
     const w = await world({ entryMax: 3, now: () => clock, doorMod });
     const F = [mk(w, 'F0'), mk(w, 'F1')];
@@ -1058,7 +1058,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
     clock += 10; w.door.setRunnable({ id: E1.id, on: true, reauthed: true });
     const stamp0 = (storeOf(w).touched || {})[F[0]];
     w.useGrants.addMember(E1.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['a.example'] });
-    w.useGrants.addMember(w.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: Array.from({ length: 16 }, (_, i) => `h${i}.example`) });
+    w.useGrants.addMember(w.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: Array.from({ length: hold ? 1 : 16 }, (_, i) => `h${i}.example`) });
     const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'read the TTS status' });
     const g8 = q && q.askId ? w.door.answerRequest(q.askId, { answer: '8h', reauthed: true }) : null;
     if (!(g8 && g8.ok)) throw new Error('the 8-hour grant on E2 did not land: ' + JSON.stringify(g8 || q));
@@ -1066,8 +1066,20 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
     const ra = await runAnswered(w, ['--env', `T1=${E1.ref}`, '--env', `T2=${w.e.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'always', reauthed: true, ttl: '30d' });
     const disk = storeOf(w);
     const notice = (w.userTodos.snapshot().open || []).find((i) => i.origin === 'vault' && /switched off/.test(i.text || ''));
-    return { asked: !!ra.card, refused: !!(ra.a && !ra.a.ok), code: ra.a && ra.a.code, F0on: disk.runnable.includes(F[0]), Eon: disk.runnable.includes(w.e.id), stamp0, stamp1: (disk.touched || {})[F[0]], notice: notice ? notice.detail : null };
+    const noticeAll = notice ? `${notice.text || ''} ${notice.detail || ''}` : null, noticeN = (w.userTodos.snapshot().open || []).filter((i) => i.origin === 'vault' && /switched off/.test(i.text || '')).length;
+    return { asked: !!ra.card, refused: !!(ra.a && !ra.a.ok), code: ra.a && ra.a.code, F0on: disk.runnable.includes(F[0]), Eon: disk.runnable.includes(w.e.id), stamp0, stamp1: (disk.touched || {})[F[0]], notice: notice ? notice.detail : null, noticeAll, noticeN, F0: F[0] };
   };
+  // r13 «also» (the readers of batch 52: no leg for it) — a press that HOLDS at the cap: the run list's oldest switch goes OFF,
+  // and since B-be21 the owner hears of it ONLY from the press's own notice (the switch itself is quiet then)
+  await leg('㉝c a press that holds tells the owner what the cap turned off', async () => {
+    const p = await pressLeg(DOOR, { hold: true });
+    ok(p.asked && !p.refused && !p.F0on && p.Eon && p.noticeN === 1 && !!p.noticeAll && p.noticeAll.includes(p.F0), '㉝c the «Always» press HOLDS at the cap ⇒ F0 (the oldest) is switched OFF and ONE For-you notice names it', p);
+    const plant = 'if (off.length) noteEvicted(off); }   // B-be21: the press HELD';
+    ok(DSRC.split(plant).length === 2, '㉝c the RED control\'s plant is where it claims: the held press\'s notice, once', DSRC.split(plant).length - 1);
+    const mh = mutant(plant, '}   // B-be21: the press HELD', 'heldquiet');
+    const rh = mh ? await pressLeg(mh, { hold: true }) : null;
+    ok(!!(mh && rh && !rh.refused && !rh.F0on && rh.noticeN === 0), '㉝c RED control: the held press without its notice ⇒ F0 goes OFF and nobody is told', rh);
+  });
   await leg('㉝b a refused press leaves no false notice and keeps the order', async () => {
     const p = await pressLeg(DOOR);
     ok(p.asked && p.refused && p.F0on && !p.Eon && !p.notice, '㉝b the press is REFUSED (its member at the host bound) and put back: F0 is ON again and NO «switched off» notice says otherwise', p);

@@ -571,6 +571,58 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   mtCopy._compile(jsdSrc.replace(ctPlant, 'now0.mtimeMs !== lst.mtimeMs'), jsdAbs);   // stale-pins: kept — a RED control: the batch's mtime comparison restored on purpose
   const ssRed = await sameSize(mtCopy.exports);
   ok(ssRed.ctMoved === true && ssRed.code !== 'job_secrets_changed' && !ssRed.kept, 'RED control: the modification time compared (the batch\'s shape) ⇒ the edited file passes as the one read and is deleted', ssRed);
+  // r13 «also» (the readers of batch 53: these guards had no leg) — each over the REAL door and the suite's vault
+  const jsDoorOf = (mod, extra = {}) => mod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: W.paste, ...extra });
+  const freshSince = (before) => freeNames(W).filter((x) => !before.has(x.name));
+  const dropFresh = (before) => { for (const x of freshSince(before)) { try { W.paste.dropEntry(x.name.slice('secret:'.length), { by: 'suite' }); } catch { } } };
+  const JSD_REAL = require(jsdAbs);
+  const jsdCopy = (from, to) => { const n = jsdSrc.split(from).length - 1; if (n !== 1) return { n, mod: null }; const m = new Module(jsdAbs, null); m.filename = jsdAbs; m.paths = Module._nodeModulePaths(path.dirname(jsdAbs)); m._compile(jsdSrc.replace(from, to), jsdAbs); return { n, mod: m.exports }; };
+  // (1) ONE press at a time: a second press while a move runs ⇒ job_secrets_busy (the move ends as it would alone)
+  const busyRoad = async (mod) => {
+    plantJS(W, { FIRST_ONE: jsVals[0] }); const before = new Set(freeNames(W).map((x) => x.name));
+    const d = jsDoorOf(mod), p1 = d.answer('move'), r2 = await d.answer('delete'), r1 = await p1;
+    const out = { first: r1.ok ? r1.answer : r1.code, second: r2.ok ? r2.answer : r2.code, sealed: freshSince(before).length };
+    dropFresh(before); if (jsHere(W)) fs.unlinkSync(jsf);
+    return out;
+  };
+  const bz = await busyRoad(JSD_REAL);
+  ok(bz.first === 'move' && bz.second === 'job_secrets_busy' && bz.sealed === 1, 'r13: a second press while the move runs ⇒ job_secrets_busy — the move itself ends whole (one value sealed, the file gone)', bz);
+  const bzc = jsdCopy("    if (busy) return named('job_secrets_busy');\n", '');
+  ok(bzc.n === 1, 'the RED control\'s plant is where it claims: the door\'s busy guard, once', bzc.n);
+  const bzr = bzc.mod ? await busyRoad(bzc.mod) : null;
+  ok(!!(bzr && bzr.second === 'delete'), 'RED control: the door without its busy guard ⇒ the second press RUNS beside the move (its delete answers)', bzr);
+  // (2) a HARD-LINKED name: the move reads nothing and seals nothing (deleting one name would leave the bytes under the other)
+  const hardRoad = async (mod) => {
+    plantJS(W, { FIRST_ONE: jsVals[0] }); const other = jsf + '.other'; fs.linkSync(jsf, other); const before = new Set(freeNames(W).map((x) => x.name));
+    const r = await jsDoorOf(mod).answer('move');
+    const out = { code: r.ok ? r.answer : r.code, sealed: freshSince(before).length, both: jsHere(W) && fs.existsSync(other), otherKept: fs.existsSync(other) };
+    dropFresh(before); for (const f of [jsf, other]) { try { fs.unlinkSync(f); } catch { } }
+    return out;
+  };
+  const hl = await hardRoad(JSD_REAL);
+  ok(hl.code === 'job_secrets_not_a_file' && hl.sealed === 0 && hl.both, 'r13: a hard-linked file by that name ⇒ job_secrets_not_a_file on MOVE — nothing sealed, both names kept', hl);
+  const hlc = jsdCopy("    if (!lst.isFile() || lst.nlink > 1) return named('job_secrets_not_a_file');   // a symlink", "    if (!lst.isFile()) return named('job_secrets_not_a_file');   // a symlink");
+  ok(hlc.n === 1, 'the RED control\'s plant is where it claims: the move\'s second-name check, once', hlc.n);
+  const hlr = hlc.mod ? await hardRoad(hlc.mod) : null;
+  ok(!!(hlr && hlr.code === 'move' && hlr.sealed === 1 && hlr.otherKept && !hlr.both), 'RED control: the move without the second-name check ⇒ it seals and deletes ONE name — the bytes stay under the other', hlr);
+  // (3) a SYMLINK by that name on MOVE (the delete's is legged above): nothing read, the link and its target kept
+  { plantJS(W, { FIRST_ONE: jsVals[0] }); const tgt = path.join(W.dataDir, 'elsewhere-move.json'); fs.renameSync(jsf, tgt); fs.symlinkSync(tgt, jsf); const before = new Set(freeNames(W).map((x) => x.name));
+    const r = await jsDoorOf(JSD_REAL).answer('move');
+    ok(r.code === 'job_secrets_not_a_file' && freshSince(before).length === 0 && fs.lstatSync(jsf).isSymbolicLink() && fs.existsSync(tgt), 'r13: MOVE over a symlink by that name ⇒ job_secrets_not_a_file — nothing sealed, the link and its target kept', r);
+    dropFresh(before); for (const f of [jsf, tgt]) { try { fs.unlinkSync(f); } catch { } } }
+  // (4) the vault never set up: the move refuses by name before reading anything
+  { plantJS(W, { FIRST_ONE: jsVals[0] });
+    const r = await JSD_REAL.create({ dataDir: W.dataDir, vault: { state: () => 'not_set_up', audit() { } }, userTodos: W.userTodos, paste: W.paste }).answer('move');
+    ok(r.code === 'vault_not_set_up' && jsHere(W), 'r13: no vault yet ⇒ vault_not_set_up on MOVE — the file kept', r);
+    try { fs.unlinkSync(jsf); } catch { } }
+  // (5) another file RENAMED over the name while the move ran (the same size, a new inode) ⇒ job_secrets_changed, nothing sealed
+  { plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] }); const before = new Set(freeNames(W).map((x) => x.name)); let swapped = false;
+    const r = await jsDoorOf(JSD_REAL, { paste: { addEntry: (o) => { if (!swapped) { swapped = true; const nx = jsf + '.next'; fs.writeFileSync(nx, fs.readFileSync(jsf)); fs.renameSync(nx, jsf); } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } }).answer('move');
+    ok(swapped && r.code === 'job_secrets_changed' && freshSince(before).length === 0 && jsHere(W), 'r13: another file renamed over the name mid-move (its inode moved) ⇒ job_secrets_changed — nothing sealed, the file kept', r);
+    dropFresh(before); if (jsHere(W)) fs.unlinkSync(jsf); }
+  // (6) the not-a-file refusal says where to act (the page's words — a person reads them in the toast)
+  ok(fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8').includes("job_secrets_not_a_file: () => t('data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted. A link: put the file it points to in its place. A second name: delete that other name. A folder: move it out of the way. Then press again'),"), 'r13: job_secrets_not_a_file names the file and the way on for each kind — a link: the file it points to put in its place (never «remove the link»: the next press would settle the notice with the values still on disk), a second name deleted, a folder moved away');
+  ok(fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8').includes("— nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again')"), 'r13: job_secrets_value_shape names the way on too (correct that value in the file, then press again) — Delete is not the only road left');
   ok(require(path.join(REPO, 'src/server/job-secrets-door.js')).RETIRED === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_RETIRED && require(path.join(REPO, 'src/server/job-secrets-door.js')).ITEM === require(path.join(REPO, 'src/server/migrations.js')).JOB_SECRETS_ITEM,
     'the door\'s file and notice key ARE the migration\'s (one name each)');
 }

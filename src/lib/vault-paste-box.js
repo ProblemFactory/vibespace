@@ -440,11 +440,11 @@ function jobSecretsRefusal(r, answer) {
   const which = r && r.name ? `${r.name}: ` : r && r.at ? `${t('Value {n}', { n: r.at })}: ` : '';   // the value it stopped at — by its name when that name is safe to show (the door sends none otherwise)
   const W = {
     job_secrets_gone: () => t('The file is not there any more'),
-    job_secrets_not_a_file: () => t('Something other than a plain file has that name — nothing was read or deleted'),
+    job_secrets_not_a_file: () => t('data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted. A link: put the file it points to in its place. A second name: delete that other name. A folder: move it out of the way. Then press again'),
     job_secrets_unreadable: () => t('The file could not be read as names and values — nothing was moved'),
     job_secrets_nothing: () => t('The file holds no value to move — delete it instead'),
     job_secrets_undeletable: () => (answer === 'delete' ? t('The file could not be deleted') : t('The file could not be deleted — nothing was moved')),
-    job_secrets_value_shape: () => which + t('not a plain text, number or true/false (or text with spaces around it) — nothing was moved; the file is kept'),
+    job_secrets_value_shape: () => which + t('not a plain text, number or true/false (or text with spaces around it) — nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again'),
     job_secrets_changed: () => t('The file changed while it was being moved — nothing was moved; press again'),
     job_secrets_busy: () => t('The file is being moved — try again in a moment'),
     job_secrets_answer: () => t('That answer is not offered'),
