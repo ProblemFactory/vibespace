@@ -668,7 +668,7 @@ else {
   fs.writeFileSync(path.join(PB, 'node'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   fs.writeFileSync(path.join(PB, 'agent-browser'), '#!/bin/sh\necho DRIVER-REAL\n', { mode: 0o755 });
   fs.writeFileSync(path.join(PT, 'agent-browser'), '#!/bin/sh\necho DRIVER-SHIM\n', { mode: 0o755 });
-  fs.writeFileSync(path.join(PB, 'claude'), '#!/bin/sh\nexec agent-browser\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(PB, 'b63cli'), '#!/bin/sh\nexec agent-browser\n', { mode: 0o755 });   // the planted CLI's name is no real program's (the tier rule reads a `command -v` of one as a run of it)
   fs.writeFileSync(path.join(PH, 'bin', 'mycli'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   fs.writeFileSync(path.join(PH, '.profile'), 'PATH="$HOME/bin:$PATH"; export PATH\n');   // only a LOGIN sh reads it (Debian's stock ~/.profile shape)
   const NLSH = path.join(DIR, 'b63-nlsh'); fs.writeFileSync(NLSH, '#!/bin/sh\n[ "$1" = -l ] && shift\n[ "$1" = -i ] && shift\nexec /bin/sh "$@"\n', { mode: 0o755 });
@@ -679,9 +679,9 @@ else {
   const PENV = { HOME: PH, PATH: PP, SHELL: NLSH, USER: 'u', LOGNAME: 'u' };
   const q1 = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
   const shRun = (script, env = PENV) => spawnSync('/bin/sh', ['-c', script], { env, encoding: 'utf8', timeout: 10000 });
-  const loginReach = shRun(`sh -lc ${q1('command -v node; command -v claude; command -v mycli')} </dev/null`).stdout.trim().split('\n').filter((l) => l.startsWith('/') && !l.startsWith(PH));
+  const loginReach = shRun(`sh -lc ${q1('command -v node; command -v b63cli; command -v mycli')} </dev/null`).stdout.trim().split('\n').filter((l) => l.startsWith('/') && !l.startsWith(PH));
   // MUST 1 — THE VIBESPACE TOOLS STAY FIRST: the spawn's prelude, then the program line; which driver answers
-  const driverBy = (RCm, integ, env = PENV) => shRun(`${RS.buildRemoteShellPrelude({ toolsOnPath: integ, withNodeFinder: integ })}exec ${RCm.programLine(path.join(PB, 'claude'), { tools: integ })}`, env).stdout.trim();
+  const driverBy = (RCm, integ, env = PENV) => shRun(`${RS.buildRemoteShellPrelude({ toolsOnPath: integ, withNodeFinder: integ })}exec ${RCm.programLine(path.join(PB, 'b63cli'), { tools: integ })}`, env).stdout.trim();
   const d1 = driverBy(REM11.RC, true), d0 = driverBy(REM11.RC, false), dLeft = driverBy(REM11.RC, false, { ...PENV, PATH: `${PT}:${PP}` });
   ok(`THE VIBESPACE TOOLS STAY FIRST: after the spawn's integrated prelude, the program line of a CLI installed beside the real browser driver reaches the SHIM (${d1}); a pristine spawn gets no tools dir from the line (${d0}), even when the machine's own PATH holds it (${dLeft})`, d1 === 'DRIVER-SHIM' && d0 === 'DRIVER-REAL' && dLeft === 'DRIVER-REAL', { d1, d0, dLeft });
   const PLA = "const programLine = (p, { tools = false } = {}) => `env PATH=${tools ? '\"$HOME/.vibespace/bin\":' : ''}${shWord(p.replace(/\\/[^/]*$/, '') || '/')}:\"$PATH\" ${shWord(p)}`;";
@@ -690,7 +690,7 @@ else {
   const dR = RP ? driverBy(RP, true) : null;
   ok(`RED CONTROL: the line with the CLI's directory first (the tip before this) — the REAL driver answers, the mediation bypassed without a sign (${dR})`, dR === 'DRIVER-REAL', dR);
   // MUST 2 — ONE PRELUDE FOR THE ASK AND THE SPAWN, and the fallback rung is a LOGIN sh as the spawn's: the machine's login
-  // shell holds neither CLI; the spawn's prelude (the node finder) reaches claude, its login sh reaches mycli (~/.profile)
+  // shell holds neither CLI; the spawn's prelude (the node finder) reaches the planted CLI, its login sh reaches mycli (~/.profile)
   const spawnFinds = (name, integ) => shRun(`sh -lc ${q1(`${RS.buildRemoteShellPrelude({ toolsOnPath: integ, withNodeFinder: integ })}command -v ${name}`)} </dev/null`).stdout.trim();
   const askBy = (RCm, name, integ) => RCm.createRemoteCli({ hostShell: async (h, sc) => String(shRun(sc).stdout || ''), log: () => { } })
     .forSpawn({ id: 'dev-63', name: 'DEV-63' }, name, name, { integration: integ }).then((c) => ({ cmd: c }), (e) => ({ err: e && e.code }));
@@ -698,13 +698,13 @@ else {
   ok('the anchor of the controls «a shorter ask prelude» and «a non-login fallback» is in remote-cli.js once', rsrc.split(PAA).length === 2);
   if (loginReach.length) console.log(`  · NOT JUDGED HERE (by name): this machine's login sh already reaches ${loginReach.join(', ')} — the one-prelude legs need a login sh that reaches no node and no CLI`);
   else {
-    const [a1, a0, am] = await Promise.all([askBy(REM11.RC, 'claude', true), askBy(REM11.RC, 'claude', false), askBy(REM11.RC, 'mycli', false)]);
-    const s1 = spawnFinds('claude', true), s0 = spawnFinds('claude', false), sm = spawnFinds('mycli', false);
+    const [a1, a0, am] = await Promise.all([askBy(REM11.RC, 'b63cli', true), askBy(REM11.RC, 'b63cli', false), askBy(REM11.RC, 'mycli', false)]);
+    const s1 = spawnFinds('b63cli', true), s0 = spawnFinds('b63cli', false), sm = spawnFinds('mycli', false);
     ok(`ONE PRELUDE FOR THE ASK AND THE SPAWN: with integration on the spawn's prelude reaches the CLI (${s1 ? 'found' : 'none'}) and the ask agrees — the name runs (${JSON.stringify(a1)}); with it off neither has it — refused (${JSON.stringify(a0)})`,
-      s1 === path.join(PB, 'claude') && a1.cmd === 'claude' && s0 === '' && a0.err === 'cli-missing', { s1, s0, a1, a0 });
+      s1 === path.join(PB, 'b63cli') && a1.cmd === 'b63cli' && s0 === '' && a0.err === 'cli-missing', { s1, s0, a1, a0 });
     ok(`…and the fallback rung is a LOGIN sh as the spawn's: a CLI only ~/.profile puts on PATH — the spawn's login sh reaches it (${sm ? 'found' : 'none'}), the ask agrees, the name runs (${JSON.stringify(am)})`, sm === path.join(PH, 'bin', 'mycli') && am.cmd === 'mycli', { sm, am });
     const RA2 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', rsrc.replace(PAA, "const preludeAsk = (name, integration) => `sh -lc ${sq(`${buildRemoteShellPrelude({})}printf '\\\\n${R_PRE}%s\\\\n' \"$(command -v ${name} 2>/dev/null | head -n 1)\"`)} </dev/null 2>/dev/null`;"), 'short-ask-prelude') : null;
-    const aR = RA2 ? await askBy(RA2, 'claude', true) : null;
+    const aR = RA2 ? await askBy(RA2, 'b63cli', true) : null;
     ok(`RED CONTROL: the ask with the base prelude only (the first tip: no node finder) — a create the spawn would run is REFUSED (${JSON.stringify(aR)})`, !!aR && aR.err === 'cli-missing', aR);
     const RA3 = rsrc.includes(PAA) ? M.load('src/server/remote-cli.js', rsrc.replace(PAA, "const preludeAsk = (name, integration) => `printf '\\\\n${R_PRE}%s\\\\n' \"$( ${askPrelude(integration)} command -v ${name} 2>/dev/null | head -n 1 )\"`;"), 'non-login-fallback') : null;   // the cure's first cut, on purpose — stale-pins: kept
     const aN = RA3 ? await askBy(RA3, 'mycli', false) : null;
