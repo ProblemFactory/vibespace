@@ -514,7 +514,10 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
           if (c && !has(catalog, key)) { demanded.set(key, 'constructs ' + squash(c).slice(0, 90)); v = undefined; }
           else {
             if (c) used.add(key);
-            const whole = evalIn(d.file, d.anc, chainRest, '(' + WM.text(d.file, init) + ')');
+            // one construction per declaration: every pick of `const { a, b } = create(…)` reads the same value
+            const wk = `${d.file}\0${d.node.start}\0init`;
+            const whole = d.kind === 'pick' && memo.has(wk) ? memo.get(wk) : evalIn(d.file, d.anc, chainRest, '(' + WM.text(d.file, init) + ')');
+            if (d.kind === 'pick') memo.set(wk, whole);
             v = d.kind === 'pick' ? (whole == null ? undefined : whole[d.key]) : whole;
             if (c) made.set(key, v);
           }
@@ -640,6 +643,9 @@ const CATALOG = {
   'server.js:AGENT_BIN_DIR': { kind: 'make', why: 'agent-tool-generators create()\'s bin dir: a scratch path (no helper is written)', make: (w) => path.join(w.root, 'agent-bin') },
   'server.js:auth': { kind: 'make', why: 'THE cookie gate, real (src/auth.js) on the scratch data dir, a password set — the signed-in hub', make: (w) => { const a = new (R('src/auth.js').Auth)(w.data, {}); a.setPassword('census-' + process.pid); return a; } },
   'server.js:hosts': { kind: 'make', why: 'THE machines store (src/hosts.js), real, on the scratch data dir (no machine paired)', make: (w) => new (R('src/hosts.js').HostManager)({ dataDir: w.data }) },
+  // the Task Groups' ctx sync (task-groups-wiring.js ctxSync — moved out of server.js by «make room»): two picks of ONE construction
+  'server.js:scheduleCtxSync': { kind: 'eval', why: 'a pick of task-groups-wiring.js ctxSync(), real: the remote ctx-folder sync — no session runs on a machine, so it syncs nothing (its 60 s timer never fires in the suite\'s seconds)' },
+  'server.js:remoteCtxBaseFor': { kind: 'eval', why: 'the same ctxSync()\'s other pick: a remote session\'s ctx-folder base — none is remote' },
   'server.js:instanceUrl': { kind: 'make', why: 'the instance\'s public address: loopback', make: (w) => standIn(w, 'instanceUrl', { url: () => 'http://127.0.0.1', publicUrl: () => null, status: () => ({}) }) },
   'server.js:integrationsWiring': { kind: 'make', why: 'the integrations store, real (src/server/integration-store.js) on the scratch data dir, no cluster env', make: (w) => ({ store: R('src/server/integration-store.js').create({ dataDir: w.data, env: {}, broadcast: () => {}, log: () => {} }) }) },
   'server.js:unblocker': { kind: 'make', why: 'the /proxy/ unblocker: a pass-through (it serves /proxy/ only; the census asks no proxied page)', make: () => (req, res, next) => next() },
