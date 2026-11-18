@@ -915,6 +915,10 @@ console.log('\n§2j a suite reads no history master does not have');
   // show <sha>:` command strings (options before the verb); a binding judged by the NEAREST one above the read (a later block's
   // const no longer takes over an earlier block's read); a sha handed to a helper as ANY argument its body gives git; an argument
   // array split across lines (the statement is judged whole); and a blob / tree sha on master's history is ON master.
+  // STILL BLIND (said; no live case): `git -c k=v show`, grep / merge-base / rev-list / restore with a sha, and a helper whose
+  // parameter list holds a `)` in a default (`(ref = pick()) =>` — DEF reads `\(([^)]*)\)`). ONE READ HIDDEN ON PURPOSE:
+  // test-pool-auto's preFixCopy CONTROL joins its ABSENT ref from pieces — a control whose whole point is absence. Never copy
+  // the trick to hide a real off-master read: that is a ratchet row, or its few lines freeze as a fixture (B-874f / B-4075).
   const HEX = '[0-9a-f]{7,40}', VERBS = 'show|cat-file|rev-parse|ls-tree|archive|diff|log|checkout';
   const VERB = new RegExp(`['"\`](?:${VERBS})['"\`]|['"\`]worktree['"\`]\\s*,\\s*['"\`]add['"\`]|\\bgit(?:\\s+-C\\s+\\S+)?\\s+(?:${VERBS}|worktree\\s+add)\\b`);
   const LIT = new RegExp(`['"\`](${HEX})(?=[:'"\`^])`, 'g'), ANY_VERB = new RegExp(`['"\`](?:${VERBS}|worktree)['"\`]|\\bgit\\s`);
@@ -1030,7 +1034,10 @@ console.log('\n§2j a suite reads no history master does not have');
         if (c.status === 0) memo.set(sha, run(['merge-base', '--is-ancestor', c.stdout.trim(), 'HEAD']).status === 0 ? 'on' : 'off');
         else if ((run(['rev-parse', '--disambiguate=' + sha]).stdout || '').trim().split('\n').filter(Boolean).length > 1) memo.set(sha, 'ambiguous');
         else {
-          // B-1388: a BLOB or TREE sha is on master when master's history holds it (a commit of HEAD's that adds or drops it)
+          // B-1388: a BLOB or TREE sha is on master when master's history holds it (a commit of HEAD's that adds or drops it).
+          // COST: for one OFF master the walk diffs every commit of HEAD's history before it answers «off» (seconds on this tree,
+          // inside this fast part); no read takes this road today (each resolves as a commit; the plants are found early). The
+          // day one does, cap the walk here — never drop the check.
           const o = run(['rev-parse', '--verify', '--quiet', sha + '^{object}']), t = o.status === 0 ? (run(['cat-file', '-t', o.stdout.trim()]).stdout || '').trim() : '';
           memo.set(sha, (t === 'blob' || t === 'tree') && (run(['log', '-1', '--format=%H', '--find-object=' + o.stdout.trim(), 'HEAD']).stdout || '').trim() ? 'on' : 'off');
         }
