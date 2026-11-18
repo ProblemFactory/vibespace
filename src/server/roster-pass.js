@@ -36,7 +36,7 @@ function sessionRoster({ sessions, tasks, addressableId, statusKey }) {
   };
   const build = () => heads().map(([id, s, cid]) => {
     let groups = [];
-    try { groups = (tasks().groupsForSession({ sessionKey: statusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id); } catch { }
+    try { groups = (tasks().groupsForSession({ sessionKey: statusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id); } catch { }
     return { cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null };
   });
   const fingerprint = () => {

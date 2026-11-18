@@ -70,7 +70,7 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
   store: feedback, activeSessions, getJobs,
   groupOf: (s, id) => {
     const tasks = getTasks && getTasks();
-    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
+    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
     const g = gs.find((x) => x.id === s._initialGroupId) || gs[0];
     return g ? { id: g.id, name: g.title || null } : null;
   },
@@ -122,7 +122,7 @@ const vaultUseFacts = (caller) => {
     if (!s || s.isTmuxView || !caller || require('../claude-lock-capture.js').addressableId(s) !== caller.conversationId) continue;   // fork-safe: a pending fork shares its parent's id and is never picked
     let groupIds = [], groupsUnreadable = false;
     const tasks = getTasks && getTasks();
-    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
+    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
     return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable };
   }
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
@@ -190,7 +190,7 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
 // lane key-grant-everyone r2: a read that failed is SAID (`unreadable`) — the caller's groups judge a Task Group «除了», and []
 // would admit the conversation the owner left out of All agents (the engine refuses groups_unreadable instead)
-const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { return { ids: tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id), unreadable: false }; } catch { return { ids: [], unreadable: true }; } };
+const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { return { ids: tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id), unreadable: false }; } catch { return { ids: [], unreadable: true }; } };
 const automationGroupsOf = (s, id) => automationGroupsRead(s, id).ids;
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
@@ -1060,10 +1060,10 @@ function createSessionMessages(session, sessionId) {
       // else the earliest bound group naming a default). Belonging is the
       // store's own LIVE rule (`groupsForSession`), asked with the facts a
       // create has: cwd + the dialog's taskId (+ the session key when known).
-      taskGroupDefault: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+      taskGroupDefault: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return '';
-        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId, initialGroupIds }) || [];
+        const groups = tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) || [];
         // lane new-session-form: the FIRST spawned-into group in selection order that names a default (then any group)
         const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
         const first = picked.map((id) => groups.find((g) => g.id === id && g.browserProfileId)).find(Boolean) || groups.find((g) => g.browserProfileId);
@@ -1089,10 +1089,10 @@ function createSessionMessages(session, sessionId) {
       },
       // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
       // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
-      taskGroupCap: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
+      taskGroupCap: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return null;
-        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId, initialGroupIds }) || [];
+        const groups = tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) || [];
         const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
         const first = picked.map((id) => groups.find((g) => g.id === id && Number.isInteger(g.browserCap))).find(Boolean) || groups.find((g) => Number.isInteger(g.browserCap));
         return first ? first.browserCap : null;
@@ -1111,7 +1111,7 @@ function createSessionMessages(session, sessionId) {
         if (!hit) return { ids: [], unreadable: false, live: false };
         try {
           const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
-          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || []).map((g) => g.id), unreadable: false };
+          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, hostId: hit.host || null, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || []).map((g) => g.id), unreadable: false };
         } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
       },
       // lane grants-unify: "Who can use it" names a conversation by its CONVERSATION id in the ONE grants store — a browser
@@ -1140,7 +1140,7 @@ function createSessionMessages(session, sessionId) {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
       const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
-      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
+      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
     };
     let browserEnvMemo;
     // the pin route re-points a RUNNING session's indirection through the

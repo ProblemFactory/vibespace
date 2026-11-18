@@ -1222,7 +1222,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               if (kp && integrationOn) {
                 forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
-                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
+                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
                 if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
                 // B-6b6d r3 for this knob: the New Session dialog sends the value it
@@ -1261,11 +1261,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             }
             if (!be.variant && spawnPinWitness) {
               // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
-              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
+              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
             } else if (!be.variant && be0 && integrationOn) {
               // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
               // start had no default rather than guessing from the default the user has by then
-              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }
+              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }
               spawnPinWitness = { profileId: '', origin: 'harness', at: Date.now(), by: 'user', cap: c };
             }
             if (be.variant) {
@@ -1298,7 +1298,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // (once — a conversation that has its stamp keeps it), never read live off the group afterwards
               try {
                 const kc = require('./server/browser-keeper.js').keeper();
-                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
+                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 session._browserCap = kc && typeof kc.capOf === 'function' ? kc.capOf(bk.key) : null;
               } catch { session._browserCap = null; }
               spawnBrowserPre = be.remotePrelude || '';

@@ -1801,6 +1801,11 @@ class TaskGroupManager {
   //    that is not an object or whose createdAt is not a number, any throw while the index is read or built. A stat that
   //    throws, a symlink loop, a cwd that no longer exists are the walk's own answers (_kindOf ⇒ missing, the realpath ⇒
   //    the cwd alone) — the index reads the same _res / _realOf, so it gives them; never a throw into a grant check.
+  //
+  // B-df5f — A FOLDER IS RESOLVED ON THE MACHINE IT BELONGS TO, OR NOT AT ALL: `hostId` (the session's machine, a parameter —
+  // never a branch on which machine) names a conversation of ANOTHER machine; its cwd is matched as written (or by a
+  // `realCwd` its own machine resolved), never through the hub's realpath — a path of the other machine that exists on the
+  // hub as a symlink would resolve to the hub's target and match a group it should not (or miss one).
   groupsForSession(args = {}) {
     let ans = null;
     try { ans = this._memberAnswer(args || {}); } catch { ans = null; }   // a doubt: the walk answers
@@ -1849,12 +1854,12 @@ class TaskGroupManager {
     return ix;
   }
 
-  _memberAnswer({ sessionKey, cwd, realCwd, initialGroupId, initialGroupIds } = {}) {
-    for (const v of [sessionKey, cwd, realCwd]) if (v != null && typeof v !== 'string') return null;   // a shape the index does not key
+  _memberAnswer({ sessionKey, cwd, realCwd, hostId, initialGroupId, initialGroupIds } = {}) {
+    for (const v of [sessionKey, cwd, realCwd, hostId]) if (v != null && typeof v !== 'string') return null;   // a shape the index does not key
     const ix = this._memberIndex();
     if (!ix) return null;
     const spawned = [...new Set([...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter((x) => typeof x === 'string' && x))].sort();
-    const real = this._realOf(cwd, realCwd);
+    const real = this._realHere(cwd, realCwd, hostId);
     const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
     const key = JSON.stringify([sessionKey || '', cwds, spawned]);
     let hit = ix.results.get(key);
@@ -1866,6 +1871,12 @@ class TaskGroupManager {
       ix.results.set(key, hit);
     }
     return hit.map((g) => g.t);
+  }
+
+  /** B-df5f: the cwd's realpath — the hub's own (`_realOf`) for a conversation of THIS machine; for one of another machine
+   *  (`hostId`) only a `realCwd` that machine resolved itself, else none (the cwd is matched as written). */
+  _realHere(cwd, realCwd, hostId) {
+    return hostId ? (realCwd || null) : this._realOf(cwd, realCwd);
   }
 
   // Match a folder against the cwd AND its symlink-resolved realpath (a session
@@ -1888,9 +1899,9 @@ class TaskGroupManager {
 
   // THE WALK — membership as it was asked before the index, kept as the index's answer on any doubt and as its
   // equality pin (scripts/test-groups-sweep-on-change.mjs: every call shape ≡ the walk over seeded stores)
-  _groupsForSessionWalk({ sessionKey, cwd, realCwd, initialGroupId, initialGroupIds } = {}) {
+  _groupsForSessionWalk({ sessionKey, cwd, realCwd, hostId, initialGroupId, initialGroupIds } = {}) {
     const spawnedInto = new Set([...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter((x) => typeof x === 'string' && x));
-    const real = this._realOf(cwd, realCwd);
+    const real = this._realHere(cwd, realCwd, hostId);
     const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
     const out = [];
     for (const t of Object.values(this._state.tasks)) {

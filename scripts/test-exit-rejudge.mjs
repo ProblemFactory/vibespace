@@ -170,7 +170,7 @@ function world(Mgr = ExitProxyManager, dir = path.join(SCR, `w${++wn}`)) {
   const todos = new UserTodoManager({ dataDir: dir, onChange: () => {}, expirySweepMs: 0 });
   const grants = GS.create({ dataDir: dir });   // lane grants-unify: THE store the lists live in
   const sessionStatusKey = (s, id) => { const b = s?.backendSessionId || s?.claudeSessionId; return b ? `${s.backend || 'claude'}:${b}` : `webui:${id}`; };
-  ex = new Mgr({ hosts, grants, userTodos: todos, sessionsMap: () => sessions, log: () => {}, groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
+  ex = new Mgr({ hosts, grants, userTodos: todos, sessionsMap: () => sessions, log: () => {}, groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id) });
   hosts.onReachChange = (why) => ex.rejudgeAll(`hosts-${why}`);          // server.js (A-r3a)
   grants.onChange(({ door }) => { if (door === 'exit') { try { ex.rejudgeAll('grants'); } catch { } } });   // server.js (lane grants-unify)
   const broadcastActiveSessions = () => { try { ex.rejudgeAll('sessions'); } catch { } }; // server.js (the census's C4)

@@ -86,7 +86,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (/^(vsst_|jbt_)/.test(bearer)) {
       const hit = bearer.startsWith('vsst_') ? [...activeSessions].find(([, s]) => sameToken(bearer, s.agentToken)) : null;
-      const mine = !!hit && tasks.groupsForSession({ sessionKey: sessionStatusKey(hit[1], hit[0]), cwd: hit[1].cwd, initialGroupId: hit[1]._initialGroupId, initialGroupIds: hit[1]._initialGroupIds }).some((g) => g.id === req.params.id);
+      const mine = !!hit && tasks.groupsForSession({ sessionKey: sessionStatusKey(hit[1], hit[0]), cwd: hit[1].cwd, hostId: hit[1].host || null, initialGroupId: hit[1]._initialGroupId, initialGroupIds: hit[1]._initialGroupIds }).some((g) => g.id === req.params.id);
       if (!mine) return res.status(403).json({ error: 'this session does not belong to that Task Group', code: 'not_member' });
     }
     try { res.json({ success: true, ...tasks.readProgress(req.params.id, { before: req.query.before, limit: req.query.limit }) }); }
@@ -149,7 +149,7 @@ function ctxSync({ tasks, hosts, activeSessions, integrationEnabled, serverNotic
   // Groups a session belongs to that have a syncable context folder.
   function ctxGroupsOf(session, id) {
     if (!session.host) return [];
-    return tasks.groupsForSession({ sessionKey: sessionStatusKey(session, id), cwd: session.cwd, initialGroupId: session._initialGroupId, initialGroupIds: session._initialGroupIds })
+    return tasks.groupsForSession({ sessionKey: sessionStatusKey(session, id), cwd: session.cwd, hostId: session.host || null, initialGroupId: session._initialGroupId, initialGroupIds: session._initialGroupIds })
       .map((g) => tasks.view(g.id)).filter((g) => g.contextDir && g.injectContext !== false);   // lane task-group-context: the view's contextDir = the 记笔记 row
   }
   function scheduleCtxSync(session, id) {

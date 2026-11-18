@@ -125,7 +125,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         const { addressableId } = require('../claude-lock-capture.js');
         if (activeSessions) for (const [id, s] of activeSessions) {
           if (addressableId(s) !== cid) continue;
-          const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
+          const groups = taskGroups && typeof sessionStatusKey === 'function' ? taskGroups.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
           return { live: true, conversationId: cid, sessionId: id, sessionCreatedAt: s.createdAt || 0, groups: new Set(groups.map((g) => g.id)) };
         }
         const byKey = taskGroups && typeof taskGroups.list === 'function' ? taskGroups.list().filter((g) => !g.archived && (g.sessions || []).some((k) => typeof k === 'string' && k.endsWith(':' + cid))) : [];

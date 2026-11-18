@@ -508,7 +508,7 @@ function agentSession(req, res) {
 function resolveAgentGroup(hit, req, res) {
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
-  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
   const want = String(req.query?.group || req.body?.group || '').trim();
   if (want) {
     const g = groups.find((x) => x.id === want);
@@ -641,7 +641,7 @@ app.get('/api/agent/task-context', function taskContextRoute(req, res) {
     // prompt-context call IS its delivery (a codex sub-agent thread's SessionStart is the same call).
     if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });
     const key = sessionStatusKey(s, id);
-    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off (2.211.0) ⇒ no group content is injected at
     // all (falls through to the baseline tools intro) — the per-group
     // injectContext toggle stays the finer-grained instrument.
@@ -783,7 +783,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
     const key = sessionStatusKey(s, id);
     // lane task-group-fanout: the Context read FIRST (off the loop, bounded) — the route is entered again once it settled,
     // and nothing above this line consumed anything
-    if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
+    if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
     // lane report-mark-on-ack: every mark this answer would move is STAGED (carry.stage) and moves when the caller confirms the
     // turn carried it (TC.CONFIRM_ROUTE) — a previous answer never confirmed is dropped here, said in the journal, and composed again
     const carry = openCarry(s, { owner: key, route: 'UserPromptSubmit', turn: turnIsUserInitiated(s) ? 'person' : 'machine', confirm: TC.confirmable(req), sent: TC.sentAt(req), store: carryOutstanding });
@@ -799,7 +799,7 @@ app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
       parts.push(`<vibespace-cwd-notice>\nYour working directory (${s.cwd || ''}) did NOT exist when this session was resumed — the user chose to recreate it as an EMPTY directory. Files from earlier in this conversation are GONE from disk. Re-verify every assumption about existing files/state before acting, and tell the user what is missing if it affects the task.\n</vibespace-cwd-notice>`);
     }
     const toolFlags = toolsFor(s, id);   // lane channels-teach: + `channels` (the session's reach), asked once per call
-    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     // ── THE ROOM (channel-jump verify r7, 2026-09-27) ──
@@ -1649,7 +1649,7 @@ function jobsCaller(s, id) {
   return {
     conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),
     sessionId: id, sessionCreatedAt: s.createdAt || 0,
-    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id)),
+    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id)),
   };
 }
 function jobAuth(req, res) {
@@ -1737,14 +1737,14 @@ function _msgEndpoints(exceptId) {
     // parent was refused `ambiguous`. ONE predicate with server.js's roster (`liveSessions`): addressableId.
     const cid = addressableId(t);
     if (!cid) continue;
-    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, initialGroupId: t._initialGroupId, initialGroupIds: t._initialGroupIds }) || []).map((g) => g.id);
+    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, hostId: t.host || null, initialGroupId: t._initialGroupId, initialGroupIds: t._initialGroupIds }) || []).map((g) => g.id);
     out.push({ id: tid, t, cid, groups, reachability: t._msgReachability || null });
   }
   return out;
 }
 // lane grants-unify: a Task Group's outside visibility = its ROWS of the ONE grants store (msg-acl judges them — a member left out is not exposed)
 const _groupExtVis = (gid) => { try { const g = require('./server/grants-store.js').store(); return g ? g.rowsFor('group-visibility', String(gid)) : []; } catch { return []; } };
-const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
+const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
 app.get('/api/agent/msg/peers', (req, res) => {
   const who = msgCaller(req, res);   // a session, or a job speaking for its owner conversation
   if (!who) return;
