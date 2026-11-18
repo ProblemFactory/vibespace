@@ -918,16 +918,16 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   const anyEl = () => new Proxy(function () { }, { get: (t0, k) => (k === Symbol.toPrimitive ? () => '' : anyEl()), set: () => true, apply: () => anyEl() });
   const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
   const page = async (mutate) => {
-    const M = await bundleDoor(mutate), seen = [], gets = [];
+    const M = await bundleDoor(mutate), seen = [], gets = [], shells = [];
     let answer = null;
     globalThis.__vd = {
-      shell: (o) => { seen.push(`dialog:${o.id}`); return { dialog: anyEl(), body: anyEl(), close() { }, raised: true }; },
+      shell: (o) => { seen.push(`dialog:${o.id}`); shells.push(o); return { dialog: anyEl(), body: anyEl(), close() { }, raised: true }; },
       fetch: (u) => { gets.push(String(u)); return new Promise((r) => { answer = r; }); },
       open: (spec) => { seen.push(`window:${spec.action}`); },
     };
     const win = new EventTarget();
     const press = () => win.dispatchEvent(new CustomEvent('vs-vault-door'));
-    return { M, seen, gets, press, win, answer: (f) => { if (answer) answer(f); } };
+    return { M, seen, gets, shells, press, win, answer: (f) => { if (answer) answer(f); } };
   };
   const had = { window: globalThis.window, document: globalThis.document };
   const scene = async (mutate, run) => {
@@ -980,6 +980,36 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   const listensFirst = (src) => { const i = src.indexOf('\n    listenVaultDoor(this);'), h = src.indexOf("\n    fetch('/api/home').then(r => {"); return i > 0 && h > i && h - i < 300 && src.indexOf('initVault(this);') > h; };
   ok(listensFirst(appSrc), 'app.js: listenVaultDoor(this) runs in the construction right before /api/home is asked; initVault(this) stays in its then');
   ok(!listensFirst(appSrc.replace('\n    listenVaultDoor(this);', '').replace('initVault(this);', 'listenVaultDoor(this); initVault(this);')), 'RED control: the call moved into /api/home\'s then ⇒ the wiring check is red');
+  // B-864f CURE (the reader round's must): «Unlock and resume all n» waited on the unlock dialog's close alone — but the facts
+  // saying UNLOCKED remove that dialog (applyVaultFacts) and a removed form runs none of its closers, so the resumes never ran.
+  // unlockThen runs `go` ONCE on whichever comes first: the vault turning unlocked, or the person's close (Later / Esc / ✕)
+  const thenScene = (first) => (p) => (async () => {
+    p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick();   // the boot read: LOCKED (the load's own ask opens)
+    let went = 0;
+    p.M.unlockThen(() => { went++; });
+    const sh = p.shells.filter((o) => o.id === 'vault-unlock-dialog').pop();
+    const unlock = async () => { const rp = p.M.refreshVaultFacts(); p.answer({ state: 'unlocked', startedAt: 7 }); await rp; await tick(); };
+    const close = async () => { if (sh && sh.onClose) sh.onClose(); await new Promise((r) => setTimeout(r, 10)); await tick(); };
+    if (first === 'unlock') { await unlock(); const atUnlock = went; await close(); return { atUnlock, went }; }
+    await close(); const atClose = went; await unlock(); return { atClose, went };
+  })();
+  const u1 = await scene(null, thenScene('unlock'));
+  ok(u1.atUnlock === 1 && u1.went === 1, 'unlockThen: the vault turns UNLOCKED while the dialog is open (it is removed, no closer runs) ⇒ go runs ONCE, and a later close runs nothing more', u1);
+  const u2 = await scene(null, thenScene('close'));
+  ok(u2.atClose === 1 && u2.went === 1, 'unlockThen: the person closes the dialog (Later) first ⇒ go runs ONCE (the resumes start; each folder that waits says so), a later unlock runs nothing more', u2);
+  const uRed = await scene((s0) => s0.replace("  off = onVaultFacts((f) => { if (f && f.state === 'unlocked') once(); });\n", "  off = () => { };\n"), thenScene('unlock'));
+  // the ⚙ press (unlockFirst — the same root, the cure's own read): an unlock in its dialog opens the menu after it
+  const gearScene = (p) => (async () => {
+    p.M.initVault({}); p.answer({ state: 'locked', startedAt: 7 }); await tick();
+    let opened = 0; p.M.unlockFirst(() => { opened++; });
+    const rp = p.M.refreshVaultFacts(); p.answer({ state: 'unlocked', startedAt: 7 }); await rp; await tick();
+    return { opened };
+  })();
+  const g1 = await scene(null, gearScene);
+  ok(g1.opened === 1, 'the ⚙ press while locked: an unlock in its dialog (which removes it) opens the menu after it, once', g1);
+  const gRed = await scene((s0) => s0.replace('  if (vaultLoudState({ facts }).mark) { unlockThen(open); return; }', '  if (vaultLoudState({ facts }).mark) { showUnlock({ then: open }); return; }'), gearScene);
+  ok(gRed.opened === 0, 'RED control: the ⚙ press on `then` alone (the release\'s shape) ⇒ the menu never opens after an unlock in its dialog', gRed);
+  ok(uRed.atUnlock === 0, 'RED control: the close alone (the batch\'s first shape — showUnlock({ then })) ⇒ an unlock in the dialog never starts the resumes', uRed);
   delete globalThis.__vd;
 }
 
@@ -999,7 +1029,9 @@ console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder o
     { id: 'm-team', name: 'Team drive', type: 's3', endpoint: 'https://s3.example.test', bucket: 'team', accessKey: 'AKEXAMPLE', secretKeyEnc: SB.encWith(crypto.randomBytes(32), 'x'), desired: 'mounted', customPath: sealedAt },
     { id: 'm-open', name: 'Open share', type: 's3', endpoint: 'https://s3.example.test', bucket: 'open', desired: 'mounted', customPath: openAt });
   let pulls = [{ id: 'p-mac', dir: 'pull', hostId: 'h-mac', mountpoint: pull, live: false }];
-  CW.register({ vault: v, mounts, getHosts: () => ({ get: (id) => (id === 'h-mac' ? { name: 'Studio Mac' } : null) }), getMachineMounts: () => ({ list: () => pulls }) });
+  const sshPull = path.join(d, 'mnt', 'buildbox'); fs.mkdirSync(sshPull, { recursive: true });
+  const HOSTS = { 'h-mac': { name: 'Studio Mac', transport: 'dial' }, 'h-ssh': { name: 'Build box', transport: 'ssh' } };
+  CW.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [...pulls, { id: 'p-ssh', dir: 'pull', hostId: 'h-ssh', mountpoint: sshPull, live: false }] }) });
   const at = (root, ...p) => path.join(root, ...p);
   const why = (cwd, o) => (CW.verdict(cwd, o) || { why: null }).why;
   ok(why(at(sealedAt, 'proj'), { missing: false }) === null && why(at(sealedAt, 'proj')) === 'mount_down' && why(at(d, 'elsewhere')) === null && why(sealedAt + '-other/x') === null, 'a vault NOT SET UP: an existing folder waits for nothing; a MISSING one under a recorded mount that is down is mount_down (never «gone»); no mount on the path (or a prefix only) ⇒ null');
@@ -1009,7 +1041,20 @@ console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder o
   const ws = CW.verdict(at(sealedAt, 'proj'), { missing: false });
   ok(ws && ws.why === 'vault_locked' && ws.root === sealedAt && ws.name === 'Team drive' && why(at(sealedAt, 'proj')) === 'vault_locked', 'LOCKED: a folder under a storage mount whose secret is sealed ⇒ vault_locked — the EXISTING bare mount point too (it passes test -d), its mount named', ws);
   const wp = CW.verdict(at(pull, 'src', 'app'), { missing: false });
-  ok(wp && wp.why === 'vault_locked' && wp.root === pull && wp.name === 'Studio Mac', '…and under a machine\'s pulled folder that is not live (its link token is a vault entry) ⇒ vault_locked, the machine named', wp);
+  ok(wp && wp.why === 'vault_locked' && wp.root === pull && wp.name === 'Studio Mac', '…and under a DIAL machine\'s pulled folder that is not live (its link token is a vault entry) ⇒ vault_locked, the machine named', wp);
+  ok(why(at(sshPull, 'src'), { missing: false }) === 'vault_locked' && why(at(sshPull, 'src')) === 'vault_locked', 'LOCKED, an SSH machine\'s pulled folder too: its link token is a vault entry (host-tokens host-<id>) ⇒ vault_locked — the EXISTING bare mount point included (never the shadow)');
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    globalThis.__cwHosts = HOSTS;   // read by the mutant copy at its load
+    const CSRC = fs.readFileSync(path.join(REPO, 'src/server/cwd-wait.js'), 'utf8'), from = 'busy: false, failed: false, sealed: true };';
+    const CWm = CSRC.split(from).length === 2 ? mutantCopies('vs-cwdwait', REPO).load('src/server/cwd-wait.js', CSRC.replace(from, "busy: false, failed: false, sealed: !!(HOSTS[r.hostId] && HOSTS[r.hostId].transport === 'dial') };").replace("'use strict';", "'use strict'; const HOSTS = globalThis.__cwHosts || {};"), 'dialonly') : null;
+    let mw = null;
+    if (CWm) { CWm.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [{ id: 'p-ssh', dir: 'pull', hostId: 'h-ssh', mountpoint: sshPull, live: false }] }) }); mw = (CWm.verdict(at(sshPull, 'src'), { missing: false }) || { why: null }).why; }
+    delete globalThis.__cwHosts;
+    ok(!!(CWm && mw === null), 'RED control: a pull sealed only on a dial machine (the cure\'s first, refuted shape) ⇒ an ssh machine\'s bare mount point while locked reads null — the agent would start in the empty folder', mw);
+  }
+  { const wf = mounts.waitFacts(mounts._state.mounts[0]), lr = mounts.list().find((x) => x.id === 'm-team') || {};
+    ok(wf.keyCode === KF.VAULT_LOCKED && wf.keyCode === (lr.keyFile && lr.keyFile.code) && wf.connecting === !!lr.connecting && wf.starting === !!lr.starting && (wf.error || null) === (lr.error || null), 'the by-id wait facts (MountManager.waitFacts — one row, never list() every 500 ms) agree with the REAL list row', { wf, lr: { keyFile: lr.keyFile, connecting: lr.connecting, starting: lr.starting, error: lr.error } }); }
   ok(why(at(openAt, 'x'), { missing: false }) === null && why(at(openAt, 'x')) === 'mount_down', 'LOCKED, a mount that needs NO secret: it waits for nothing of the vault — an existing folder ⇒ null, a missing one ⇒ mount_down');
   mounts._state.mounts[0].desired = 'unmounted';
   ok(why(at(sealedAt, 'proj')) === null, 'a storage row the person UNMOUNTED waits for nothing (the folder\'s own verdict)');

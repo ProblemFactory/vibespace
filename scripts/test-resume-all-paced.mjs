@@ -227,15 +227,15 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
     vf.clear(); globalThis.__rapFacts = already ? { state: 'unlocked' } : { state: 'locked' };
     const t0 = made.length, n = unlockMidPace ? 4 : 3;
     const refused = new Set(), waits = (m) => (unlockMidPace ? m.resumeId === CID(1) : true);   // each waiting conversation is refused ONCE
-    const P = page(inst, { delay: 40, answer: (i, m) => (waits(m) && !refused.has(m.resumeId) ? (refused.add(m.resumeId), locked(i, m)) : created(i, m)) });
+    const P = page(inst, { delay: 10, answer: (i, m) => (waits(m) && !refused.has(m.resumeId) ? (refused.add(m.resumeId), locked(i, m)) : created(i, m)) });
     const run = P.lm._resumeAll(stoppedOf(n));
     if (unlockMidPace) { for (let k = 0; k < 40 && P.creates.length < 2; k++) await tick(5); facts({ state: 'unlocked' }); }
     await run; await tick(5);
     const first = { creates: P.creates.length, said: saidOf(t0), waiting: vf.size };
-    if (!unlockMidPace && !already) { facts({ state: 'locked' }); await tick(30); first.whileLocked = P.creates.length; facts({ state: 'unlocked' }); }
+    if (!unlockMidPace && !already) { facts({ state: 'locked' }); await tick(10); first.whileLocked = P.creates.length; facts({ state: 'unlocked' }); }
     const want = unlockMidPace ? 5 : 6;
-    for (let k = 0; k < 60 && P.answered < want; k++) await tick(30);
-    await tick(10); facts({ state: 'unlocked' }); await tick(80);
+    for (let k = 0; k < 120 && P.answered < want; k++) await tick(10);
+    await tick(10); facts({ state: 'unlocked' }); await tick(30);
     const same = refused.size > 0 && [...refused].every((rid) => { const ms = P.creates.filter((m) => m.resumeId === rid); return ms.length === 2 && pick(ms[0]) === pick(ms[1]); });
     return { first, after: P.creates.length, max: Math.max(0, ...P.inFlightAtSend), same, left: vf.size, inFlightAtSend: P.inFlightAtSend };
   };
@@ -259,7 +259,7 @@ console.log('— ⑫ B-864f: A FOLDER THAT WAITS FOR THE VAULT — never «gone�
   delete globalThis.__rapVault; delete globalThis.__rapFacts; delete globalThis.__rapTurn;
   // the boot offer while LOCKED (layout.js _offerResumeAll): it reads the facts when the page has none, says so and unlocks FIRST
   const LY = read('src/lib/layout.js'), body = LY.slice(LY.indexOf('  async _offerResumeAll(stopped) {'), LY.indexOf('  async _resumeAll(stopped) {'));
-  ok(/if \(!vaultFacts\(\)\) await refreshVaultFacts\(\);/.test(body) && /const locked = vaultFacts\(\)\?\.state === 'locked';/.test(body) && /confirmText: locked \? t\('Unlock and resume all \{n\}'/.test(body) && /if \(locked && vaultFacts\(\)\?\.state === 'locked'\) return await new Promise\(\(done\) => showUnlock\(\{ then: \(\) => done\(this\._resumeAll\(stopped\)\) \}\)\);[^\n]*\n      return await this\._resumeAll\(stopped\);/.test(body), 'the boot offer while locked: the facts read first, «Unlock and resume all n», the unlock dialog first, the paced resumes from its close');
+  ok(/if \(!vaultFacts\(\)\) await refreshVaultFacts\(\);/.test(body) && /const locked = vaultFacts\(\)\?\.state === 'locked';/.test(body) && /confirmText: locked \? t\('Unlock and resume all \{n\}'/.test(body) && /if \(locked && vaultFacts\(\)\?\.state === 'locked'\) return await new Promise\(\(done\) => unlockThen\(\(\) => done\(this\._resumeAll\(stopped\)\)\)\);[^\n]*\n      return await this\._resumeAll\(stopped\);/.test(body), 'the boot offer while locked: the facts read first, «Unlock and resume all n», the unlock dialog first, the paced resumes from unlockThen (its close OR the unlock — test-vault-secrets ⑪ drives it)');
 }
 
 console.log('— ⑥ RED CONTROLS');

@@ -44,13 +44,13 @@ function downMountOf(cwd) {
   const mounts = reg.mounts;
   const m = mounts && typeof mounts.shadowedBy === 'function' ? call(() => mounts.shadowedBy(p), null) : null;
   if (m && m.desired === 'mounted') {
-    const row = call(() => (mounts.list() || []).find((r) => r.id === m.id), null) || {};
+    const row = call(() => mounts.waitFacts(m), null) || {};   // ONE row by id (the cure's should: never list() every 500 ms)
     const busy = !!(row.connecting || row.starting);
-    return { root: call(() => mounts.pathOf(m), null), name: String(m.name || ''), busy, failed: !busy && !!row.error, sealed: !!(row.keyFile && row.keyFile.code === VAULT_LOCKED) };
+    return { root: call(() => mounts.pathOf(m), null), name: String(m.name || ''), busy, failed: !busy && !!row.error, sealed: row.keyCode === VAULT_LOCKED };
   }
   const mm = typeof reg.getMachineMounts === 'function' ? call(() => reg.getMachineMounts(), null) : null;
   for (const r of (mm && typeof mm.list === 'function' ? call(() => mm.list(), []) : [])) {
-    if (r && r.dir === 'pull' && !r.live && under(p, r.mountpoint)) return { root: r.mountpoint, name: machineName(r.hostId), busy: false, failed: false, sealed: true };
+    if (r && r.dir === 'pull' && !r.live && under(p, r.mountpoint)) return { root: r.mountpoint, name: machineName(r.hostId), busy: false, failed: false, sealed: true };   // EVERY machine's link token is a vault entry (src/server/host-tokens.js: host-<id> for ssh and dial-<id> alike; the ssh road asks it at each connect) — the cure's own read refuted «ssh is not sealed»
   }
   return null;
 }

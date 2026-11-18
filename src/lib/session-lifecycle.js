@@ -286,7 +286,9 @@ export function installSessionLifecycle(App, ctx = {}) {
         const where = { name: msg.waitsFor || msg.cwd };
         const folderWords = !folderWaits ? '' : msg.code === 'mount_down'
           ? (resumeId ? t('This conversation\u2019s folder is on {name}, which is not mounted right now \u2014 nothing was started; resume it once the mount is back.', where) : t('The folder is on {name}, which is not mounted right now \u2014 start again once it is back.', where))
-          : msg.resumesAtUnlock ? t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock; nothing is lost.', where)
+          : msg.resumesAtUnlock ? (createArgs.initialMessage   // the cure's should: a resume carrying the person's waiting message sends it then — said
+            ? t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.', where)
+            : t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock; nothing is lost.', where))
             : t('The folder is on {name}, which opens after the vault is unlocked \u2014 unlock it, then start again.', where);
         const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || folderWords || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, i18nParams(msg.i18n)) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession

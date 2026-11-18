@@ -287,7 +287,7 @@ export function showUnlock({ then = null, opener = 'person' } = {}) {
 /** The ⚙ button's press (app.js, mobile-nav.js — lane vault-locked-loud): while LOCKED the unlock dialog first, then `open` (the
  *  menu, as today) once it closes; otherwise `open` at once. */
 export function unlockFirst(open) {
-  if (vaultLoudState({ facts }).mark) { showUnlock({ then: open }); return; }
+  if (vaultLoudState({ facts }).mark) { unlockThen(open); return; }   // B-864f cure (the cure's own read): an unlock in this dialog removes it — `then` alone never opened the menu
   open();
 }
 
@@ -348,6 +348,18 @@ export function showChange() {
   };
   footerOf(dialog, [cancel, go]);
   setTimeout(() => o.focus(), 0);
+}
+
+/** RUN `go` ONCE AFTER THE UNLOCK ASK (B-864f cure — the reader round's must): when the person closes the unlock dialog (an
+ *  unlock, 「稍后」, Esc, ✕) OR the vault turns unlocked (this dialog, another tab, another device), whichever comes first.
+ *  applyVaultFacts REMOVES the unlock dialog when the facts say unlocked, and a removed form runs none of its closers — so a
+ *  `then` alone never ran after a successful unlock. The boot offer's «Unlock and resume all n» (src/lib/layout.js). */
+export function unlockThen(go) {
+  let ran = false, off = null;
+  const once = () => { if (ran) return; ran = true; if (off) off(); go(); };
+  off = onVaultFacts((f) => { if (f && f.state === 'unlocked') once(); });
+  if (facts && facts.state === 'unlocked') { once(); return; }
+  showUnlock({ then: once });
 }
 
 /** The setup ask while NOT SET UP — at a load (after the welcome tour, or straight away when there is none: app.js

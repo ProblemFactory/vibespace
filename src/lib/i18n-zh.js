@@ -9996,6 +9996,7 @@ export default {
   "waiting for the vault to be unlocked": "等待保险库解锁", // lane vault-e2e-password-fix-r2
   "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "这个会话在等保险库——用第二密码解锁（页面顶部的「解锁…」；「待你处理」里写明了在等它的事）后它会自己重连，什么也不会丢。", // lane vault-e2e-password-fix-r2
   "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，什么也不会丢。",
+  "This conversation’s folder is on {name}, which opens after the vault is unlocked — while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.": "这个对话的文件夹在 {name} 上，要等保险库解锁后才能打开——只要这个页面开着，解锁后它会自己恢复，然后发出你写好的消息，什么也不会丢。",
   "This conversation’s folder is on {name}, which is not mounted right now — nothing was started; resume it once the mount is back.": "这个对话的文件夹在 {name} 上，它现在没有挂载——什么也没启动；等挂载恢复后再恢复这个对话。",
   "The folder is on {name}, which is not mounted right now — start again once it is back.": "文件夹在 {name} 上，它现在没有挂载——等它恢复后再重新开始。",
   "The folder is on {name}, which opens after the vault is unlocked — unlock it, then start again.": "文件夹在 {name} 上，要等保险库解锁后才能打开——请先解锁，再重新开始。",

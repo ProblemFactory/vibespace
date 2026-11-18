@@ -1979,9 +1979,9 @@ class LayoutManager {
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
     const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
     // B-864f: while the vault is LOCKED (every restart) a conversation whose folder is on a machine or a storage mount cannot
-    // start yet — the offer says so and unlocks FIRST; the resumes begin when the unlock dialog closes (unlocked, or 「稍后」:
+    // start yet — the offer says so and unlocks FIRST; the resumes begin at the unlock or when the unlock dialog closes, whichever first (unlocked, or 「稍后」:
     // then such a conversation waits in its window and resumes once the vault is unlocked)
-    const { vaultFacts, showUnlock, refreshVaultFacts } = await import('./vault-unlock.js');
+    const { vaultFacts, unlockThen, refreshVaultFacts } = await import('./vault-unlock.js');
     if (!vaultFacts()) await refreshVaultFacts();   // a slow hub's page may not have read them yet (fetchJson never throws)
     const locked = vaultFacts()?.state === 'locked';
     const ok = await this.askResumeAll({
@@ -1994,7 +1994,7 @@ class LayoutManager {
     if (!ok) { this._keepOffer(stopped); return; } // dismissed: a door stays while they stay stopped (B-6352)
     this._keepOffer(null);
     try {
-      if (locked && vaultFacts()?.state === 'locked') return await new Promise((done) => showUnlock({ then: () => done(this._resumeAll(stopped)) }));   // B-864f: unlock FIRST
+      if (locked && vaultFacts()?.state === 'locked') return await new Promise((done) => unlockThen(() => done(this._resumeAll(stopped))));   // B-864f: unlock FIRST — on the dialog's close OR the unlock, whichever first (a removed dialog runs no closers)
       return await this._resumeAll(stopped);
     } finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
   }

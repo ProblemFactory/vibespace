@@ -633,6 +633,13 @@ class MountManager {
     return m.customPath || path.join(this.mountBase, m.name.replace(/[^\w.-]+/g, '_'));
   }
 
+  /** B-864f (src/server/cwd-wait.js): ONE row's wait facts by id — its connect / start in flight, its last error, whether its
+   *  key waits for the vault — without building every row (list()); asked every 500 ms while a create waits for the mount. */
+  waitFacts(m) {
+    const conn = this._connOf(m), keyNo = BOX_CIPHERTEXT_RE.test(JSON.stringify(conn)) ? this._box.refusal() : null;
+    return { connecting: !!this._connecting?.has(m.id), starting: !!this._starting?.get(m.id), error: this._errors.get(m.id) || null, keyCode: (keyNo && keyNo.code) || null };
+  }
+
   /** The registered storage whose mount point contains p but is NOT mounted
    *  right now, or null. A write landing there goes to the bare local
    *  directory: invisible once the storage reconnects, and the reconnect
