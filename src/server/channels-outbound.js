@@ -723,6 +723,10 @@ function create(engineCtx) {
           ...(alsoIds.length ? { alsoFor: alsoIds } : {}),
         };
         for (const sid of alsoIds) { const q = ob.proposals[sid]; if (q) q.alsoFor = [...(Array.isArray(q.alsoFor) ? q.alsoFor.filter((x) => x !== id) : []), id].slice(-ALSO_MAX); }   // both ways: the earlier card says it too
+        // lane bl-msg B-da74 cure (主开发 09:24Z): «Send the rest» is ONCE across a restart — the rest's back-link and its original's
+        // once-stamp are written IN THE SAME UPDATE that creates the rest, before anything is uploaded (a stop inside the upload leaves
+        // both on disk); transition() frees the stamp when the rest ends unsent or failed
+        if (guards && guards.restOf) { created.restOf = guards.restOf; const q0 = ob.proposals[guards.restOf]; if (q0) q0.restSentAs = id; }
       });
       OF.commit(store.dir, staged, created.id);
       staged = null;
@@ -736,6 +740,8 @@ function create(engineCtx) {
     } catch (err) {
       OF.discard(staged);
       wakeRefundIfUnsent(gate, guards, convId, created && created.id, { threw: true });
+      // the cure: a rest that threw before it was sending frees its original (one that reached `sending` may have landed — it holds)
+      if (created && guards && guards.restOf) await store.outbox.update((ob) => { const q = ob.proposals[created.id], q0 = ob.proposals[guards.restOf]; if (q && q.state === 'proposed' && q0 && q0.restSentAs === created.id) delete q0.restSentAs; }).catch(() => {});
       throw err;
     }
     if (decision.mode !== 'direct') {
@@ -1322,12 +1328,7 @@ function create(engineCtx) {
     const files = (vr.files || []).map((f) => ({ name: f.name, data: Buffer.from(f.data).toString('base64') }));
     const input = { text: '', attachments: files, ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.placement && p.placement !== 'chat' ? { placement: p.placement } : {}), ...(p.why ? { why: p.why } : {}), ...(!agent ? { direct: true, ...(pressed ? { pressed } : {}) } : {}) };
     const r = await propose(agent ? ctx : { kind: 'user' }, p.adapterId, p.convId, input, { ...guards, restOf: p.id, ...(agent ? { forceReview: true } : {}) });   // r2: the agent's rest is always the user's to approve
-    if (r && r.ok && r.proposal && r.proposal.id) {
-      // r2: «once» stands only while the rest is alive or sent — transition() clears it when the rest ends unsent or failed
-      const live = ['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent'].includes(r.proposal.state);
-      await store.outbox.update((ob) => { const q = ob.proposals[r.proposal.id]; if (q) q.restOf = p.id; const q0 = ob.proposals[p.id]; if (q0 && live) q0.restSentAs = r.proposal.id; });
-      notifyOutbox([p.id, r.proposal.id]);
-    }
+    if (r && r.ok && r.proposal && r.proposal.id) notifyOutbox([p.id, r.proposal.id]);   // the cure: the stamp and the back-link were written with the rest (propose's create update)
     return r;
   }
   function withdrawProposal({ proposalId, why = null, by = null } = {}) {

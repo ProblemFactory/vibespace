@@ -1200,6 +1200,10 @@ function create(engineCtx) {
     if (askEndOf(req0) <= t) { await expireWatchRequests(t); return expiredRefusal(req0); }
     if (req0.kind === 'held') return decideHeld(req0, approve, by, { person });   // r6: a held digest — deliver / discard
     deciding.set(requestId, t);   // lane bl-msg B-ae13 r2: the asker's withdraw waits out a decision in flight (its watcher write awaits below)
+    try { return await decideOpenWatch(requestId, req0, approve, by, person, t); } finally { deciding.delete(requestId); }   // the cure (主开发 09:24Z): the mark is released on EVERY exit (an early return held a withdraw off for 30 s)
+  }
+  async function decideOpenWatch(requestId, req0, approve, by, person, t) {
+    let undo = null;
     if (approve) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
@@ -1208,11 +1212,18 @@ function create(engineCtx) {
       const others = g.watchers.filter((w) => w && pkOf(w.principal) !== pk);
       const w = await setGrain(req0.adapterId, req0.grain, { watchers: [...others, { ...req0.watch }] }, { by });
       if (!w || !w.ok) { deciding.delete(requestId); return w || { ok: false, code: 'error', error: 'the notification could not be written' }; }
+      undo = { pk, prev: g.watchers.find((x) => x && pkOf(x.principal) === pk) || null };
     }
     let applied = false;
     await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by; }, { durable: true });
     deciding.delete(requestId);
-    if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
+    if (!applied) {
+      // the cure (主开发 09:24Z): the other order — the asker withdrew while this Allow wrote its watcher: the watch is taken back
+      // (a live watch never stands on a request whose card says withdrawn, or denied in another window)
+      const endedAs = ((store.index.table('watchRequests') || []).find((r) => r && r.id === requestId) || {}).status;
+      if (undo && endedAs !== 'approved') { try { const g2 = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] }; await setGrain(req0.adapterId, req0.grain, { watchers: [...g2.watchers.filter((x) => x && pkOf(x.principal) !== undo.pk), ...(undo.prev ? [undo.prev] : [])] }, { by }); } catch { } }
+      return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)', ...(endedAs ? { state: endedAs } : {}) };
+    }
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
       try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.resolveAnswered([req0.todoId], approve ? 'allowed' : 'denied', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}   // lane chat-needs-you-card: the card's record says which; r2: and whose (the person verdict's mark)

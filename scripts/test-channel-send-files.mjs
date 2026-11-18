@@ -320,6 +320,49 @@ async function restJudge(ENGm) {
   } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
   return out;
 }
+// lane bl-msg B-da74 cure (主开发 09:24Z): «Send the rest» is ONCE across a restart — the hub stops INSIDE the rest's upload (the
+// first rest upload never answers); a fresh engine over the same folder is the boot: the first card offers no rest and a second press
+// is refused by name, nothing uploaded again
+async function restRestartJudge(ENGm) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-rr-'));
+  const calls = []; let refuse = true, hung = 0, atUpload = null;
+  const inUpload = new Promise((r) => { atUpload = r; });
+  const fetchFn = async (url, init = {}) => {
+    const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData }; calls.push(c);
+    if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
+    if (c.form && c.url.includes('/im/v1/files')) { if (refuse) return jsonRes(400, LF.answers.scopeRefusal); if (hung++ === 0) { atUpload(); return new Promise(() => {}); } return jsonRes(200, LF.answers.file); }
+    return c.form ? jsonRes(200, LF.answers.image) : jsonRes(200, LF.answers.message);
+  };
+  const A = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
+  const mod = { kind: 'lark-own', caps: { ...fake.fakePoll.caps, idempotency: lark.caps.idempotency, sendAttachments: lark.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-own', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, options: {} }] }));
+  const mk = () => ENGm.create({ dataDir, registry, env: {}, now: () => T0, broadcast: () => {}, serverSetting: (k) => ({ 'channels.guardAttachmentsReview': true })[k], liveSessions: () => [], userTodos: { add: () => ({ id: 't1' }) }, log: { log() {}, warn() {}, error() {} } });
+  try {
+    const eng = mk();
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((k) => k.startsWith('la/')).slice(3);
+    const pr = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the report', attachments: files().map((f) => ({ name: f.name, data: f.data.toString('base64') })), direct: true });
+    const id = pr.ok ? pr.proposal.id : null;
+    if (!id) return [`setup: the first send (${JSON.stringify(pr).slice(0, 120)})`];
+    refuse = false;
+    eng.resendRest(id, { ctx: { kind: 'user' } });   // never answered: the hub stops inside its upload
+    await inUpload;   // the rest is created and its file is on its way
+    const files0 = calls.filter((c) => c.form && c.url.includes('/im/v1/files')).length;
+    const eng2 = mk();   // THE RESTART: a fresh engine over the folder as the stop left it
+    const v = (eng2.outboxView().proposals || []).find((x) => x.id === id) || {};
+    const again = await eng2.resendRest(id, { ctx: { kind: 'user' } });
+    if (v.restLeft) out.push(`after the restart the first card offers «Send the rest» again (restLeft ${v.restLeft})`);
+    if (!(again && again.ok === false && again.code === 'rest-already')) out.push(`after the restart a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 140)})`);
+    const files1 = calls.filter((c) => c.form && c.url.includes('/im/v1/files')).length;
+    if (files1 !== files0) out.push(`after the restart the same file went up again (${files1 - files0} upload(s))`);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
 async function ownerJudge(ENGm) {
   const out = [];
   const fake = require(path.join(REPO, 'src/channels/fake.js'));
@@ -372,6 +415,23 @@ const rest = await restJudge(ENG);
 ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused) is offered the rest, the owner's press sends ONLY b.pdf as one new message, the image is not uploaded again, the first card stops offering it, a second press and a whole one are refused by name${rest.length ? ' — ' + rest.join(' · ') : ''}`);
 const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && !x.lost && !REST_NEVER.has(x.code)", "parts.forEach((x, k) => { if (false && !x.ok && !x.lost && !REST_NEVER.has(x.code)", restJudge, 'no-rest');
 ok(Array.isArray(restRed) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
+const restart = await restRestartJudge(ENG);
+ok(restart.length === 0, `«Send the rest» ONCE ACROSS A RESTART: the hub stops inside the rest's upload — the fresh engine's first card offers no rest, a second press is refused by name (rest-already), nothing goes up again${restart.length ? ' — ' + restart.join(' · ') : ''}`);
+{ // RED CONTROL: today's order — the stamp and the back-link written AFTER propose() returns (after the upload)
+  const STAMP = "        if (guards && guards.restOf) { created.restOf = guards.restOf; const q0 = ob.proposals[guards.restOf]; if (q0) q0.restSentAs = id; }\n";
+  const LATE = '    if (r && r.ok && r.proposal && r.proposal.id) notifyOutbox([p.id, r.proposal.id]);';
+  const LATE_OLD = "    if (r && r.ok && r.proposal && r.proposal.id) { const live = ['proposed', 'awaiting-approval', 'sending', 'unknown', 'sent'].includes(r.proposal.state); await store.outbox.update((ob) => { const q = ob.proposals[r.proposal.id]; if (q) q.restOf = p.id; const q0 = ob.proposals[p.id]; if (q0 && live) q0.restSentAs = r.proposal.id; }); notifyOutbox([p.id, r.proposal.id]); }";
+  const es = engineSource(REPO), found = es.split(STAMP).length === 2 && es.split(LATE).length === 2;
+  ok(found, 'the control «today\'s order» finds its two lines (the stamp in the create update, the notify after propose)');
+  const late = found ? await restRestartJudge(require(MC.write('src/server/channels-engine.js', es.replace(STAMP, '').replace(LATE, LATE_OLD), 'rest-late-stamp'))) : null;
+  ok(Array.isArray(late) && late.length > 0, `RED CONTROL (today's order — the stamp after the upload): after the restart the rest is offered and sent again — the leg goes red (${late ? late.join(' · ') : 'the control missed its lines'})`);
+}
+{ // the cure: the four refusals reach the owner's toast in the owner's words (routeErrorText), never the engine's English sentence
+  const CW = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const rows = ['rest-not-sent', 'rest-already', 'rest-nothing-left', 'rest-files-gone'].map((code) => { const w = CW.routeErrorText({ code, error: 'ENGLISH SENTENCE' }); return { code, w, zh: zh.includes(`"${w}":`), ja: ja.includes(`"${w}":`) }; });
+  ok(rows.every((x) => x.w && !x.w.includes('ENGLISH SENTENCE') && x.zh && x.ja), `the four «Send the rest» refusals are worded by code, in zh and ja (${rows.map((x) => `${x.code} → «${x.w}»${x.zh && x.ja ? '' : ' (a dictionary lacks it)'}`).join(' · ')})`);
+}
 const own = await ownerJudge(ENG);
 ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);
 

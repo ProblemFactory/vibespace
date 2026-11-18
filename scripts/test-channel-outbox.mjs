@@ -4449,6 +4449,7 @@ console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — n
     const id = wk && wk.request && wk.request.id;
     const other = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-2' } }) : null;
     const reqOf = () => (eng.store.index.table('watchRequests') || []).find((r) => r && r.id === id) || {};
+    const reqOf3 = (rid) => ((eng.store.index.table('watchRequests') || []).find((r) => r && r.id === rid) || {}).status;
     const todoId = reqOf().todoId;
     const mine = id ? await eng.withdrawWatchRequest({ requestId: id, by: { kind: 'agent', id: 'agent-1' }, why: 'the reply came' }) : null;
     const after = { status: reqOf().status, decidedBy: reqOf().decidedBy, item: todoId && userTodos.get(todoId) ? { status: userTodos.get(todoId).status, by: userTodos.get(todoId).resolvedBy } : null };
@@ -4456,13 +4457,32 @@ console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — n
     const wk2 = await eng.agentWatch(AG2, KEY, { delivery: 'wake' });
     await (wk2 && wk2.request ? eng.decideRequest(wk2.request.id, true, 'user') : null);
     const decided = wk2 && wk2.request ? await eng.withdrawWatchRequest({ requestId: wk2.request.id, by: { kind: 'agent', id: 'agent-2' } }) : null;
-    return { wk, other, mine, after, again, decided };
+    // the cure (主开发 09:24Z): THE OTHER ORDER — the asker's withdraw is queued (its index write waits on the store's chain) when the
+    // person's Allow starts: the decide writes its watcher, finds the request withdrawn and takes the watch back
+    const wk3 = await eng.agentWatch(AGENT, KEY, { delivery: 'wake', keywords: ['outage'], why: 'on call again' });
+    const id3 = wk3 && wk3.request && wk3.request.id;
+    const wd3 = id3 ? eng.withdrawWatchRequest({ requestId: id3, by: { kind: 'agent', id: 'agent-1' } }) : null;   // not awaited: queued
+    const dc3 = id3 ? await eng.decideRequest(id3, true, 'user') : null;
+    const wr3 = wd3 ? await wd3 : null;
+    const rows3 = eng.agentWatchesFor(AGENT, KEY);
+    const race = { filed: !!id3, decide: dc3, withdraw: wr3 && { ok: wr3.ok, code: wr3.code }, status: id3 ? reqOf3(id3) : null, live: ((rows3 && rows3.rows) || []).filter((w) => !w.inert && w.delivery === 'wake').length };
+    // the «being decided» mark is released on EVERY exit: a decide that returns early (the conversation is gone) leaves the asker free
+    const wk4 = await eng.agentWatch(AGENT, KEY, { delivery: 'wake', keywords: ['outage'], why: 'on call, third' });
+    const id4 = wk4 && wk4.request && wk4.request.id;
+    if (id4) await eng.store.index.update((ix) => { delete ix.conversations[KEY]; });
+    const dc4 = id4 ? await eng.decideRequest(id4, true, 'user') : null;
+    const wd4 = id4 ? await eng.withdrawWatchRequest({ requestId: id4, by: { kind: 'agent', id: 'agent-1' } }) : null;
+    const gone = { filed: !!id4, decide: dc4 && { ok: dc4.ok, code: dc4.code }, withdraw: wd4 && { ok: wd4.ok, code: wd4.code, error: wd4.error } };
+    return { wk, other, mine, after, again, decided, race, gone };
   };
   const g = await run(ENG, 'bae13');
   ok(g.wk && g.wk.proposed && g.other && g.other.ok === false && g.other.code === 'not-found', 'another agent cannot withdraw it (the same uniform not-found)', JSON.stringify(g.other));
   ok(g.mine && g.mine.ok && g.after.status === 'withdrawn' && g.after.decidedBy === 'agent' && g.after.item && g.after.item.status !== 'open' && g.after.item.by === 'agent',
     'THE ASKER withdraws its open wake request: the request ends withdrawn (by the agent), its For-you item «withdrawn by the agent»', JSON.stringify(g.after));
   ok(g.again && g.again.ok === false && g.again.code === 'not-withdrawable' && g.decided && g.decided.ok === false && g.decided.code === 'not-withdrawable', 'twice, or once the person decided it ⇒ refused by name (a decision is final)', JSON.stringify({ again: g.again, decided: g.decided }));
+  ok(g.race.filed && g.race.decide && g.race.decide.ok === false && g.race.decide.code === 'bad-state' && g.race.withdraw && g.race.withdraw.ok && g.race.status === 'withdrawn' && g.race.live === 0,
+    'THE OTHER ORDER (the cure): the asker withdraws while the person\'s Allow is writing — the request ends withdrawn, the Allow is refused, and NO live wake watch stands', JSON.stringify(g.race));
+  ok(g.gone.filed && g.gone.decide && g.gone.decide.ok === false && g.gone.withdraw && g.gone.withdraw.ok, 'a decide that returns early (the conversation is gone) leaves no «being decided» mark: the asker withdraws at once', JSON.stringify(g.gone));
   // RED CONTROL: the withdraw that never ends the person's item ⇒ the card would sit in For you — the leg above goes red
   const src = engineSource(REPO);
   const RES = "try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { }";
@@ -4470,6 +4490,14 @@ console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — n
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const r = await run(mutantCopies('blm-ae13', REPO).load('src/server/channels-engine.js', src.replace(RES, ''), 'ae13-no-resolve'), 'bae13-red');
   ok(r.after.status === 'withdrawn' && !(r.after.item && r.after.item.status !== 'open'), 'RED CONTROL (the item never ended): the request is withdrawn but the person\'s card stays open — the leg above goes red', JSON.stringify(r.after));
+  // the cure's RED CONTROLS (each fails by name when its line is gone): no undo ⇒ the watch stands; the mark kept on an early return ⇒ refused
+  const UNDO = "      if (undo && endedAs !== 'approved') {", MARK = 'try { return await decideOpenWatch(requestId, req0, approve, by, person, t); } finally { deciding.delete(requestId); }';
+  ok(src.split(UNDO).length === 2 && src.split(MARK).length === 2, 'the cure\'s two controls find their lines');
+  const MCc = mutantCopies('blm-ae13c', REPO);
+  const ru = await run(MCc.load('src/server/channels-engine.js', src.replace(UNDO, '      if (false) {'), 'ae13-no-undo'), 'bae13-noundo');
+  ok(ru.race.status === 'withdrawn' && ru.race.live === 1, 'RED CONTROL (no undo): the request says withdrawn and a live wake watch stands — the other-order leg goes red (and the race was run: the Allow did write)', JSON.stringify(ru.race));
+  const rm = await run(MCc.load('src/server/channels-engine.js', src.replace(MARK, 'return decideOpenWatch(requestId, req0, approve, by, person, t);'), 'ae13-mark-held'), 'bae13-markheld');
+  ok(rm.gone.withdraw && rm.gone.withdraw.ok === false && rm.gone.withdraw.code === 'not-withdrawable', 'RED CONTROL (the mark kept on an early return): the asker\'s withdraw is refused «being decided» — the early-return leg goes red', JSON.stringify(rm.gone));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
