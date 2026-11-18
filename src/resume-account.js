@@ -106,7 +106,7 @@ function resumeAccountVerdict({ pinned = {}, accounts = [], loginStates = null, 
   const doors = [];
   if (row) doors.push({ kind: 'relogin', accountId: row.id, via: isPool(row) || judged.why === 'remote-cannot-ship' ? 'manage' : 'login' });
   doors.push({ kind: 'switch', to });
-  return { ok: false, why: judged.why, account: { id, name: row ? row.name || id : null }, since: judged.since ?? null, viaDefault, ...(host ? { host } : {}), ...(heldBy ? { held: true } : {}), doors };
+  return { ok: false, why: judged.why, account: { id, name: row ? row.name || id : null }, since: judged.since ?? null, viaDefault, ...(host ? { host } : {}), ...(heldBy && heldBy === id ? { held: true } : {}), doors };   // cure 3: held = the pinned account IS the holder (a stale pick is not)
 }
 
 const fill = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : String(s));
@@ -114,8 +114,9 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 /**
  * The refusal's words, in the page's language (`t` = the bundle's i18n; `date` formats the stop instant):
- * → { sentence, relogin (the first button's label, null when there is no account to log in), switch, none }
- * `none` is said when no other account can run the conversation (the switch door then has nothing to offer).
+ * → { sentence, relogin (the first button's label, null when there is no account to log in), switch, none, switchDoor }
+ * `none` is said when no other account can run the conversation (the switch door then has nothing to offer); `switchDoor`
+ * false ⇒ the bar draws no switch door (a held conversation with nothing to offer — B-a5a4 cure 3).
  */
 function resumeAccountWords(v, { t = fill, date = isoDay, hostName = '' } = {}) {
   if (!v || v.ok) return null;
@@ -133,19 +134,24 @@ function resumeAccountWords(v, { t = fill, date = isoDay, hostName = '' } = {}) 
     case 'oat-expired': sentence = when
       ? t('“{name}”’s long-lived token ended on {date} and it has no working login, so this conversation can’t resume on it.', { name, date: when })
       : t('“{name}”’s long-lived token has ended and it has no working login, so this conversation can’t resume on it.', { name }); break;
-    case 'missing-account': sentence = t('The account this conversation resumes on was removed, so it can’t resume until you pick another.'); break;
+    case 'missing-account': sentence = v.held   // cure 3 r2: a HELD conversation's deleted account — nothing to pick (the server's ACCT_GONE_BOUND)
+      ? t('The account this conversation lived in was removed — the conversation stays in that account’s own store, so no other account can resume it.')
+      : t('The account this conversation resumes on was removed, so it can’t resume until you pick another.'); break;
     case 'remote-cannot-ship': sentence = t('“{name}” can’t run on {host}, so this conversation can’t resume there.', { name, host: hostName || t('this machine') }); break;
     case 'pool-no-target': sentence = t('The pool “{name}” has no member that can serve right now, so this conversation can’t resume on it.', { name }); break;
     default: sentence = t('“{name}” can’t serve right now, so this conversation can’t resume on it.', { name });
   }
   const re = (v.doors || []).find((d) => d.kind === 'relogin');
   const sw = (v.doors || []).find((d) => d.kind === 'switch');
+  const empty = !(sw && sw.to.length);
   return {
     sentence,
     relogin: re ? (re.via === 'login' ? t('Log in to {name} again', { name }) : t('Open {name} in Manage agents', { name })) : null,
     switch: t('Use another account'),
     // cure 2: a conversation that lives in ONE account's own store — another account cannot help, only that account's login
-    none: sw && sw.to.length ? null : v.held ? t('This conversation lives in this account’s own store — no other account can run it.') : t('No other account can run it right now — add one in Manage agents.'),
+    none: !empty ? null : v.held ? (v.why === 'missing-account' ? null : t('This conversation lives in this account’s own store — no other account can run it.')) : t('No other account can run it right now — add one in Manage agents.'),
+    // cure 3: is the «Use another account» door DRAWN — never for a held conversation with nothing to offer (a door that always refuses)
+    switchDoor: !(v.held && empty),
   };
 }
 

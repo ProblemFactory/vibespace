@@ -9463,6 +9463,7 @@ export default {
   "“{name}”’s long-lived token ended on {date} and it has no working login, so this conversation can’t resume on it.": "「{name}」的长期 token 已于 {date} 到期，也没有可用的登录，所以这个对话无法用它恢复。",
   "“{name}”’s long-lived token has ended and it has no working login, so this conversation can’t resume on it.": "「{name}」的长期 token 已到期，也没有可用的登录，所以这个对话无法用它恢复。",
   "The account this conversation resumes on was removed, so it can’t resume until you pick another.": "这个对话设定用来恢复的账号已被删除，换一个账号后才能恢复。",
+  "The account this conversation lived in was removed — the conversation stays in that account’s own store, so no other account can resume it.": "这个对话所在的账号已被删除 — 对话仍在那个账号自己的存储里，别的账号都无法恢复它。",
   "“{name}” can’t run on {host}, so this conversation can’t resume there.": "「{name}」不能在 {host} 上运行，所以这个对话无法在那里恢复。",
   "The pool “{name}” has no member that can serve right now, so this conversation can’t resume on it.": "池「{name}」现在没有能用的成员，所以这个对话无法用它恢复。",
   "“{name}” can’t serve right now, so this conversation can’t resume on it.": "「{name}」现在无法使用，所以这个对话无法用它恢复。",

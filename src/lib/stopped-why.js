@@ -38,9 +38,6 @@ export function keptAccountOf(rows, backend, id) {
   const r = rowFor(rows, backend, id);
   return r && r.status !== 'live' && typeof r.accountId === 'string' && r.accountId ? r.accountId : undefined;
 }
-/** THE ONE ACCOUNT A RESUME GOES TO (r2 — the Resume press's verdict, the create, the create-failure re-check all read
- *  THIS): the conversation's saved config names one ⇒ it; else its row's (keptAccountOf); undefined ⇒ the harness default
- *  (the server's seam then asks the same row, src/routes/sessions.js heldAccountOf). */
 /** B-a5a4 cure 2: a server sentence's params with its interface WORDS (`words`: the param names that hold one — the machine's
  *  login in the billing word) said in the reader's language; any other param as it is (a person's own account name). */
 export function i18nParams(i) {
@@ -48,6 +45,10 @@ export function i18nParams(i) {
   for (const k of (i && Array.isArray(i.words) ? i.words : [])) if (typeof p[k] === 'string') p[k] = t(p[k]);
   return p;
 }
+/** THE ONE ACCOUNT A RESUME GOES TO (r2 — the Resume press's verdict, the create, the create-failure re-check all read
+ *  THIS): a harness that keeps a conversation in ONE account's own store (`bound`) ⇒ the account its row names first; else
+ *  the conversation's saved config names one ⇒ it; else its row's (keptAccountOf); undefined ⇒ the harness default
+ *  (the server's seam then asks the same row, src/routes/sessions.js heldAccountOf). */
 export function resumeAccountOf(savedAccount, rows, backend, id, { bound = false } = {}) {
   // B-a5a4 follow-up r2: a harness whose conversation lives in ONE account's own store (`bound`) resumes on the account that holds
   // it — a stale saved pick (logged in or not) was refused by the server on every press with nothing to pick

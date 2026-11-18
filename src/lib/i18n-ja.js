@@ -9462,6 +9462,7 @@ export default {
   "“{name}”’s long-lived token ended on {date} and it has no working login, so this conversation can’t resume on it.": "「{name}」の長期トークンは {date} に期限切れになり、使えるログインもないため、この会話はこのアカウントで再開できません。",
   "“{name}”’s long-lived token has ended and it has no working login, so this conversation can’t resume on it.": "「{name}」の長期トークンは期限切れで、使えるログインもないため、この会話はこのアカウントで再開できません。",
   "The account this conversation resumes on was removed, so it can’t resume until you pick another.": "この会話の再開に使うアカウントは削除されています。別のアカウントを選ぶと再開できます。",
+  "The account this conversation lived in was removed — the conversation stays in that account’s own store, so no other account can resume it.": "この会話のアカウントは削除されました — 会話はそのアカウント自身の保存先にあるため、別のアカウントでは再開できません。",
   "“{name}” can’t run on {host}, so this conversation can’t resume there.": "「{name}」は {host} では実行できないため、この会話はそこで再開できません。",
   "The pool “{name}” has no member that can serve right now, so this conversation can’t resume on it.": "プール「{name}」には今使えるメンバーがいないため、この会話はこのプールで再開できません。",
   "“{name}” can’t serve right now, so this conversation can’t resume on it.": "「{name}」は今使えないため、この会話はこのアカウントで再開できません。",

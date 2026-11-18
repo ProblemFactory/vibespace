@@ -42,7 +42,9 @@ export function resumeAccountBar(verdict, { backend = 'claude', hostName = '', r
     doors.append(b);
   }
   const swBtn = button('chat-account-switch' + (re ? ' secondary' : ''), UI_ICONS.swap, words.switch);
-  doors.append(swBtn);
+  // B-a5a4 cure 3: a HELD conversation whose switch can offer nothing gets no switch button — a greyed door that always refuses;
+  // its words say why (only the holder's own login can run it). The words decide it (resumeAccountWords switchDoor, PURE).
+  if (words.switchDoor) doors.append(swBtn);
   const pick = document.createElement('div');
   pick.className = 'chat-account-pick';
   pick.hidden = true;
@@ -77,7 +79,7 @@ export function resumeAccountBar(verdict, { backend = 'claude', hostName = '', r
     swBtn.disabled = true;
     swBtn.title = words.none;
   }
-  bar.append(note, doors, pick);
+  bar.append(note, ...(doors.childElementCount ? [doors] : []), pick);   // cure 3 r2: no empty door row (a held, deleted account has no door)
   if (words.none) {
     const none = document.createElement('div');
     none.className = 'chat-account-none';

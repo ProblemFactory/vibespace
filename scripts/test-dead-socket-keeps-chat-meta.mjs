@@ -515,7 +515,7 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   ok(ZH.includes(`  "${RS.BOUND_ELSEWHERE}": "这个对话在账号「{name}」自己的存储里 — 只能在那个账号上恢复",`) && JA.includes(`  "${RS.BOUND_ELSEWHERE}": "この会話はアカウント「{name}」自身の保存先にあります — そのアカウントでのみ再開できます",`),
     '§11 (2) …in zh and ja, the name kept as {name}');
   // (2) the Resume bar's switch offers no account the server refuses: a conversation held by ONE account's own store
-  const RA = require(path.join(REPO, 'src/resume-account.js'));
+  const RA = require(path.join(REPO, 'src/resume-account.js')), RASRC0 = read('src/resume-account.js');
   const sub = (id, name, o = {}) => ({ id, name, backend: 'antigravity', type: 'subscription', loggedIn: true, ...o });
   const roster = [sub('agy-aaaaaaaaaaaa', 'A', { loggedIn: false, loginState: { state: 'logged-out' } }), sub('agy-bbbbbbbbbbbb', 'B'), sub('agy-cccccccccccc', 'C')];
   const sw = (Mod, heldBy, account = 'agy-aaaaaaaaaaaa') => { const v = Mod.resumeAccountVerdict({ pinned: { account, backend: 'antigravity', heldBy }, accounts: roster, loginStates: null, defaults: { machineLogin: { loggedIn: true } } }); const d = (v.doors || []).find((x) => x.kind === 'switch'); return v.ok ? 'ok' : (d ? d.to.map((x) => x.id).join() : '(none)'); };
@@ -526,6 +526,23 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   ok(vOf('agy-aaaaaaaaaaaa').held === true && wHeld.none === 'This conversation lives in this account’s own store — no other account can run it.' && /Log in to A again|Open A in Manage agents/.test(wHeld.relogin || '')
     && wFree.none === 'No other account can run it right now — add one in Manage agents.' && RA.resumeAccountWords(vOf('agy-bbbbbbbbbbbb')).none === null,
     '§11 cure 2: a held conversation whose own account is logged out says another account cannot help (its re-login door stays); a free one keeps «add one in Manage agents»; a stale pick still offers the holder', { wHeld, wFree });
+  // cure 3 (主开发's words on d7654c726): no door that always refuses — the words decide whether the switch is DRAWN (PURE)
+  const gone = (Mod, heldBy = 'agy-dddddddddddd') => { const v = Mod.resumeAccountVerdict({ pinned: { account: 'agy-dddddddddddd', backend: 'antigravity', heldBy }, accounts: roster, loginStates: null, defaults: { machineLogin: { loggedIn: true } } }); return { v, w: Mod.resumeAccountWords(v) }; };
+  const doorsOf = (Mod) => ({ held: Mod.resumeAccountWords(vOf('agy-aaaaaaaaaaaa')).switchDoor, free: Mod.resumeAccountWords({ ...vOf(undefined), doors: [{ kind: 'switch', to: [] }] }).switchDoor, stale: Mod.resumeAccountWords(vOf('agy-bbbbbbbbbbbb')).switchDoor, gone: gone(Mod).w.switchDoor });
+  const D3 = doorsOf(RA), G3 = gone(RA), G3free = gone(RA, null);   // null, never undefined: undefined takes the default (held)
+  ok(D3.held === false && D3.free === true && D3.stale === true && D3.gone === false && vOf('agy-bbbbbbbbbbbb').held === undefined && vOf('agy-aaaaaaaaaaaa').held === true,
+    '§11 cure 3: a HELD conversation with nothing to offer gets NO switch door (held, and held by a deleted account); a free one and a stale pick keep theirs; `held` only when the pinned account IS the holder', { D3, staleHeld: vOf('agy-bbbbbbbbbbbb').held });
+  ok(G3free.v.why === 'missing-account' && G3free.v.held === undefined && G3free.w.sentence === 'The account this conversation resumes on was removed, so it can’t resume until you pick another.' && G3free.w.switchDoor === true,
+    '§11 cure 3 r2 (the other side): a NOT-held conversation whose account was deleted keeps «…until you pick another» and its switch door', G3free.w);
+  ok(G3.v.why === 'missing-account' && G3.v.held === true && G3.w.sentence === 'The account this conversation lived in was removed — the conversation stays in that account’s own store, so no other account can resume it.' && G3.w.none === null && G3.w.relogin === null,
+    '§11 cure 3 r2: a held conversation whose account was DELETED says so once — never «until you pick another», no second line, no door', G3.w);
+  const BAR = read('src/lib/resume-account-bar.js');
+  ok(BAR.includes('  if (words.switchDoor) doors.append(swBtn);') && BAR.includes('  bar.append(note, ...(doors.childElementCount ? [doors] : []), pick);') && BAR.split('doors.append(swBtn)').length === 2,
+    'WIRING (cure 3): the bar draws the switch door only when the words say so (one append), and no empty door row');
+  const SD = '    switchDoor: !(v.held && empty),\n';
+  ok(RASRC0.split(SD).length === 2, 'ANCHOR: the switch door\'s decision, spelled once');
+  const MD = doorsOf(M.load('src/resume-account.js', RASRC0.replace(SD, '    switchDoor: true,\n'), 'door-always'));
+  ok(MD.held === true && MD.gone === true, 'MUTANT RED: the switch door always drawn (the release\'s) ⇒ a held conversation gets a door that always refuses', MD);
   ok(free.includes('agy-bbbbbbbbbbbb') && free.includes('subscription') && held === '' && stale === 'agy-bbbbbbbbbbbb',
     '§11 (2) the switch: a harness that is not account-bound offers the others (as before); held by the pinned account ⇒ nothing to switch to (its re-login door stays); a stale on-resume account ⇒ ONLY the account that holds it', { free, held, stale });
   const RASRC = read('src/resume-account.js'), HB = '(heldBy && a.id !== heldBy) || ';
