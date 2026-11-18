@@ -26,7 +26,6 @@
 // usage-pool-engine, account-usage-routes, migrations, the suite). Two
 // predicates that answer "is this login dead" is the twin-set the standing
 // sweep exists to kill.
-const fs = require('fs');
 const path = require('path');
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 

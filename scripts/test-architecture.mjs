@@ -384,6 +384,10 @@ const SHARED = new Set(['src/storage-path.js' /* lane hub-fuse-sync-guard: THE O
   // Listed here so a cross-tier edge fails on the classification rule itself, not only
   // transitively via the daemon-bundle marker check (round-6 verifier).
   'src/usage-cache-write.js',
+  // B-403e (lane bl-accounts): ONE ASK PER FILE PER SYNCHRONOUS RUN — fs/path only; the claude harness descriptor reaches it,
+  // so the daemon bundle and its workers load it: it changes NOTHING at load (the first watch() wraps fs's writes, and only
+  // the hub's owners of the watched folders watch — test-pool-pass-reads pins a process that watches nothing as untouched)
+  'src/run-reads.js',
   'src/session-store.js', 'src/codex-session-store.js', 'src/normalizers.js', 'src/message-manager.js',
   'src/codex-message-manager.js', 'src/message-window.js', 'src/adapters/base.js', 'src/adapters/claude-code.js', 'src/adapters/codex.js',
   'src/adapters/shell.js', 'src/adapters/index.js', 'src/usage-estimator.js', 'src/usage-anchors.js', 'src/safe-fs.js',

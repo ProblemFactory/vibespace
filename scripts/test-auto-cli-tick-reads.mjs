@@ -248,7 +248,19 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
 // ── §4 the WORK and the LOOP ──
 console.log('§4 work linear in conversations and members, the loop ≤ 1/5 of the reverted tick at 150 µs per fs call');
 const FS_CALLS = ['readFileSync', 'statSync', 'lstatSync', 'readlinkSync', 'existsSync', 'readdirSync', 'realpathSync', 'openSync'];
-async function measureTick(shape, { slowUs = 0, pre = false } = {}) {
+// B-403e: the run's memo (src/run-reads.js) answers a file asked twice in ONE synchronous run from its first ask, so the
+// reverted tick's members × accounts × conversations reads would collapse to one ask per file and the regression this leg
+// holds would no longer show. THE REVERTED TICK IS THE RELEASE'S: the fix reverted AND every routed ask going to the mount (a
+// copy of the helper whose ask is the call itself, swapped in for that tick); the fixed tick runs the tree as it is.
+const RR = require(path.join(REPO, 'src/run-reads.js'));
+const RR_OFF = (() => { const src = fs.readFileSync(path.join(REPO, 'src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scratchDir, 'run-reads-off.cjs'); fs.writeFileSync(f, src.replace(needle, needle + '  return fn();\n')); return require(f); })();
+async function measureTick(shape, opts = {}) {
+  if (!opts.pre) return measureTick0(shape, opts);
+  const saved = {};
+  for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat']) { saved[k] = RR[k]; RR[k] = RR_OFF[k]; }
+  try { return await measureTick0(shape, opts); } finally { Object.assign(RR, saved); }
+}
+async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
   const w = mkWorld({ ...shape, engine: pre ? PRE_ENGINE : engMod });
   const orig = {}; let calls = 0;
   for (const k of FS_CALLS) {

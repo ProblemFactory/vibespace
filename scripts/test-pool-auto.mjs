@@ -3735,12 +3735,20 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     return { eng, am, P, ids, convs, notices, evaluate, todos };
   };
   const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
+  // B-403e: the run's memo (src/run-reads.js) answers a file asked twice in ONE synchronous run from its first ask — a count of
+  // the reads inside one run would measure the memo, not the code (the probe below counted 0: it shared the run of the roster
+  // call before it). These pins count the CODE's reads — every routed ask goes to the mount, as at the release (a copy of the
+  // helper whose ask is the call itself, swapped in for the count) — so they stay EXACT; the memo's own law is
+  // test-pool-pass-reads'.
+  const RRm = require(path.resolve('src/run-reads.js'));
+  const RR_OFF = (() => { const src = fs.readFileSync(path.resolve('src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scr, 'run-reads-off.cjs'); fs.writeFileSync(f, src.replace(needle, needle + '  return fn();\n')); return require(f); })();
+  const memoOff = (fn) => { const saved = {}; for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat']) { saved[k] = RRm[k]; RRm[k] = RR_OFF[k]; } try { return fn(); } finally { Object.assign(RRm, saved); } };
   const probe = await world(engMod);
   if (!probe) ck('r2 roster SKIP — pools unsupported on this platform', true);
   else {
-    const one = probe.am.poolRoster(probe.P).length, perRoster = (() => { let n = 0; const r = fs.readFileSync; fs.readFileSync = function (...a) { n++; return r.apply(this, a); }; try { probe.am.poolRoster(probe.P); } finally { fs.readFileSync = r; } return n; })();
+    const one = probe.am.poolRoster(probe.P).length, perRoster = memoOff(() => { let n = 0; const r = fs.readFileSync; fs.readFileSync = function (...a) { n++; return r.apply(this, a); }; try { probe.am.poolRoster(probe.P); } finally { fs.readFileSync = r; } return n; });
     const runs = [];
-    for (const n of [1, 20, 60]) { const w = await world(engMod, { sessions: n }); const e = w.evaluate(); runs.push({ n, calls: e.calls, reads: e.reads, notices: w.notices.length }); }
+    for (const n of [1, 20, 60]) { const w = await world(engMod, { sessions: n }); const e = memoOff(() => w.evaluate()); runs.push({ n, calls: e.calls, reads: e.reads, notices: w.notices.length }); }
     console.log('    one roster = ' + one + ' members, ' + perRoster + ' readFileSync; per evaluation: ' + runs.map((r) => `${r.n} conv → ${r.calls} roster / ${r.reads} reads`).join(' · '));
     ck(`r2 ③ ONE ROSTER PER EVALUATION: a blocked evaluation over 1 / 20 / 60 conversations reads the roster ${runs.map((r) => r.calls).join(' / ')} time(s) — never once per conversation (9d53db09: 2 / 21 / 61)`, runs.every((r) => r.calls === 1));
     // (acceptance r3 F5: the bound AS MEASURED, never one world's number — a roster reads each member's .credentials.json and
@@ -3749,7 +3757,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     ck('r2 ③ …and the blocked notice still names the roster (the per-session decisions and the default share that one read)', runs.every((r) => r.notices >= 1));
     const m0 = mutEngine('roster-per-conv', 'const roster = evaluationRoster(poolId, rosters);', 'const roster = () => accounts.poolRoster(poolId);');
     ck('RED CONTROL (③) the patch (9d53db09: a fresh roster thunk per decision) hits', m0.hit);
-    if (m0.hit) { const w = await world(m0.mod, { sessions: 20 }); const e = w.evaluate(); ck(`RED CONTROL (③): with a roster thunk per decision the SAME evaluation over 20 conversations reads it ${e.calls} times (${e.reads} reads) — the memo is what bounds it`, e.calls >= 20 && e.reads >= 20 * perRoster); }
+    if (m0.hit) { const w = await world(m0.mod, { sessions: 20 }); const e = memoOff(() => w.evaluate()); ck(`RED CONTROL (③): with a roster thunk per decision the SAME evaluation over 20 conversations reads it ${e.calls} times (${e.reads} reads) — the memo is what bounds it`, e.calls >= 20 && perRoster > 0 && e.reads >= 20 * perRoster); }
     // ⑤ THE VENDOR REFUSAL IS ITS OWN WALL: B's turn is refused 403 (its login file is fine): switchCandidates drops it for
     // 10 min, and the roster the evaluation reads carries the engine's mark
     const authWorld = async (mod) => {

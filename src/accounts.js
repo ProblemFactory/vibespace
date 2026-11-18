@@ -440,9 +440,10 @@ class AccountManager {
   // lane signin-card-real-screen (the fleet pods: 2–3 presses on a card stuck at «starting» left 2–3 rows): a row
   // whose sign-in is RUNNING (`busy`) is JOINED by the next press — one login run per account, never a second row
   pendingSignin({ busy = () => false } = {}) {
-    const running = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && busy(a.id) && !this.readSubCreds(a.id).loggedIn);
+    // B-403e LOOK-AGAIN reads: a row handed to a sign-in is still not signed in — asked of the mount itself, never the run's answer
+    const running = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && busy(a.id) && !this._lookAgain(a.id).loggedIn);
     if (running) return { id: running.id, dir: this.subDir(running.id), reused: true, joined: true };
-    const idle = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && !busy(a.id) && !this.readSubCreds(a.id).loggedIn);
+    const idle = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && !busy(a.id) && !this._lookAgain(a.id).loggedIn);
     if (idle) return { id: idle.id, dir: this.subDir(idle.id), reused: true };
     return this.createSubscription({ signinPending: true });
   }
@@ -450,7 +451,7 @@ class AccountManager {
   /** Remove a marked row that never logged in — never one that did, a pool lists by name, or a harness default. */
   discardPendingSignin(id) {
     const a = this.get(id);
-    if (!a || !a.signinPending || this._acctType(a) !== 'subscription' || this.readSubCreds(id).loggedIn) return false;
+    if (!a || !a.signinPending || this._acctType(a) !== 'subscription' || this._lookAgain(id).loggedIn) return false;   // B-403e: look again before the row's folder goes
     if (this._state.accounts.some((p) => this._acctType(p) === 'pooled' && Array.isArray(p.members) && p.members.includes(id))) return false;
     if (this._defaultIdFields().some((f) => this._state[f] === id)) return false;
     this.remove(id);
@@ -461,6 +462,11 @@ class AccountManager {
   // (rotation would break the account, issue #20). Returns loggedIn + identity
   // + the access token IF currently valid (for the usage poll).
   readSubCreds(id) { return this._credsOf('claude').parseAuth(this.subDir(id)); } // parser lives on the claude harness descriptor (S2)
+  /** A LOOK-AGAIN READ (B-403e): the member's sign-in folder asked of the mount ITSELF — never the synchronous run's earlier
+   *  answer (src/run-reads.js) — for a check whose purpose is «look again before I write»; its answer is the run's from then on.
+   *  The callers, each before a write: pendingSignin and discardPendingSignin (a row handed to a sign-in or removed),
+   *  reloginResolve (the login moved out of a row), ensureSessionPoolLink and setPoolTarget (a billing link written to it). */
+  _lookAgain(id, be = 'claude') { RR.forget(this._acctDir(be, id)); return be === 'claude' ? this.readSubCreds(id) : this._readAuthFor(be, id); }
 
   _subscriptionLoginStatus(id) {
     try {
@@ -490,7 +496,7 @@ class AccountManager {
   reloginResolve(id) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
-    const fresh = this.readSubCreds(id);
+    const fresh = this._lookAgain(id);   // B-403e: look again before the login is moved
     if (!fresh.loggedIn || fresh.oatFile) return { outcome: 'pending' }; // our long-lived-token file is not the login being completed
     const norm = (s) => String(s || '').trim().toLowerCase();
     const freshEmail = norm(fresh.email);
@@ -1980,8 +1986,9 @@ class AccountManager {
   ensureSessionPoolLink(poolId, sessKey, memberId, { why = 'session-link' } = {}) {
     const target = this.get(memberId);
     if (!target || this._acctType(target) !== 'subscription') throw new Error('not a subscription: ' + memberId);
-    if (!this.readSubCreds(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);
+    if (!this._lookAgain(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);   // B-403e: look again before the link is written
     const link = this.sessionPoolLinkPath(poolId, sessKey);
+    RR.forget(link); // B-403e: the ledger's `from` is the link as it is NOW, never the run's earlier answer (another process re-points links)
     const from = this.poolCurrentFor(poolId, sessKey); // read BEFORE the re-point — the ledger records a transition, not a state
     fs.mkdirSync(path.dirname(link), { recursive: true });
     require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));
@@ -2152,7 +2159,7 @@ class AccountManager {
     const be = this._acctBackend(a) || 'claude';
     const target = this.get(subId);
     if (!target || this._acctType(target) !== 'subscription' || this._acctBackend(target) !== be) throw new Error(`not a ${be} subscription: ` + subId);
-    if (!this._readAuthFor(be, subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
+    if (!this._lookAgain(subId, be).loggedIn) throw new Error('subscription not logged in: ' + target.name);   // B-403e: look again before the link is written
     // ONE material implementation (src/account-material.js, 2.298.0): the
     // same primitive the daemon's sealed-orders reflex executes — data/subs
     // is device #0's account store, and the mechanical act is device-tier.
@@ -2160,6 +2167,7 @@ class AccountManager {
     // claude cred-cache detail (null for codex — auth.json needs no bump).
     const mat = require('./account-material.js');
     const bump = this._credsOf(be).bumpFile;
+    RR.forget(this._poolLinkDir(a)); // B-403e: the ledger's `from` is the link as it is NOW
     const fromDefault = this.poolCurrent(id); // BEFORE the re-point
     mat.repointPoolSymlink(this._poolLinkDir(a), this._poolMemberDir(a, subId), bump ? path.join(this._acctDir(be, subId), bump) : null);
     // sessionId null = the POOL DEFAULT moved; it decides for every session
@@ -2180,6 +2188,7 @@ class AccountManager {
         // a conversation PINNED to a member is not the pool's to move (2026-09-28: pin > pool
         // priority order > automatic — the "everything now" act included)
         if (skipSessKeys && typeof skipSessKeys.has === 'function' && skipSessKeys.has(sessKey)) continue;
+        RR.forget(lp); // B-403e: the ledger's `from` is the link as it is NOW
         const fromLink = this.poolCurrentFor(id, sessKey);
         // no bump here: the pool DEFAULT re-point above already bumped this same target's creds
         // (account-material.js — the bump is load-bearing; test-hot-switch-incident §C pins it)

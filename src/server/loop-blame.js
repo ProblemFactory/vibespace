@@ -31,7 +31,7 @@ function bytesOf(fn, args, result) {
 /** PURE: the first frame of `stack` inside the hub's own code (src/ or server.js under `root`), never this module's. */
 function callerOf(stack, root) {
   for (const l of String(stack || '').split('\n').slice(1)) {
-    if (l.includes('loop-blame.js') || l.includes('sync-fs-witness.js')) continue; // the wrapper and its hook are never the caller
+    if (l.includes('loop-blame.js') || l.includes('sync-fs-witness.js') || l.includes('run-reads.js')) continue; // the wrapper and its hook are never the caller — nor the run's one asker (B-403e: the pass, a record or a broadcast is)
     const m = /\(?((?:\/|[A-Za-z]:\\)[^():]+):(\d+):\d+\)?\s*$/.exec(l);
     if (!m) continue;
     const rel = root ? path.relative(root, m[1]) : m[1];

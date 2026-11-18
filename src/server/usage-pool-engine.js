@@ -1416,7 +1416,7 @@ const API_WITNESS_K = 3;      // consecutive agreeing candidates before a phase 
 const API_WITNESS_RING = 8;   // candidates the sidecar remembers (≥ K + a few foreign ones to break a run)
 function readApiWitnessFile(key) {
   try {
-    const w = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)), 'utf-8'));
+    const w = JSON.parse(RR.readText(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key))));   // B-403e: once per run
     return w && typeof w === 'object' ? w : null;
   } catch { return null; }
 }
@@ -1766,7 +1766,10 @@ function memberLoginState(id) {
     fp = accounts.subCredsPath(id);
   } catch { return null; }
   let sig = 'none';
-  try { const st = RR.facts(fp); sig = `${st.mtimeMs}:${st.size}`; } catch { }   // B-403e: the run's ONE ask of the file (its read rides it)
+  // B-403e: the run's ONE ask of the file (its read rides it). THE SIGNATURE IS THE FILE'S STAT WHENEVER A STAT ANSWERS, as at
+  // the release: a read that fails while the stat answers (the mount's moment) keeps the stat's signature — and so the state
+  // remembered for it — and «present but unreadable» never shares «missing»'s signature
+  try { const st = RR.facts(fp); sig = `${st.mtimeMs}:${st.size}`; } catch (e) { if (e && Number.isFinite(e.mtimeMs)) sig = `${e.mtimeMs}:${e.size}`; }
   const hit = _loginStateMemo.get(id);
   if (hit && hit.sig === sig) return hit.st;
   let st = null;
@@ -2061,7 +2064,7 @@ function readingSlotFor(session, at = Date.now(), opts = {}) {
  *  open). */
 /** Does this conversation have its OWN pool link (then its own ledger rows decide for it, never the pool default)? The ONE
  *  reader of that fact for lastRepointRow and requestSlotFor (lane readings-attribution-2). */
-function sessionHasOwnLink(poolId, sid) { try { if (!RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid))) throw new Error('none'); return true; } catch { return false; } }
+function sessionHasOwnLink(poolId, sid) { try { return RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid)); } catch { return false; } }
 function recentRepointRow(session, at = Date.now()) { return lastRepointRow(session, { at, minAt: at - readingLag.SHADOW_MS }); }
 /** The newest re-point of THIS conversation at or before `at` and not older
  *  than `minAt`, or null. The witness eligibility test asks it with `minAt` =
@@ -6434,7 +6437,7 @@ function credsTokenSig(id) {
   // TOKEN MATERIAL signature, not mtime (review finding: repointPoolSymlink
   // utimes-bumps the target's creds on EVERY re-point, so an mtime-based
   // "somebody re-logged in" check is cleared by the pool's own plumbing).
-  try { return String(JSON.parse(fs.readFileSync(accounts.subCredsPath(id), 'utf-8'))?.claudeAiOauth?.accessToken || ''); } catch { return ''; }
+  try { return String(JSON.parse(RR.facts(accounts.subCredsPath(id)).text)?.claudeAiOauth?.accessToken || ''); } catch { return ''; }   // B-403e: the run's one ask
 }
 // ── «5 小时限额已取消» (lane no-5h-window, 2026-10-30) ───────────────────────
 // Anthropic is removing the rolling 5-hour limit from verified Ultra (formerly Max 20x) accounts in stages; a newer
