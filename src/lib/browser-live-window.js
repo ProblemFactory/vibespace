@@ -136,7 +136,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
-import { tabRowModel, tabRefusalText, tabGroups, tabsCountText } from '../browser-tabs.js';
+import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep } from '../browser-tabs.js';
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
 import { UI_ICONS } from './icons.js';
@@ -1366,14 +1366,18 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // first, as the tab row's names) — the row and the pane group by the SAME facts
   const tabLeasesNow = () => (st.tabLeases || []).map((l) => ({ windowId: l.windowId, holder: { word: l.word, name: (l.sessionId ? nameOfSession(String(l.sessionId)) : '') || l.name || '' } }));
   const tabWinOf = (x) => { const w = st.tabWindows[String((x && x.targetId) || '').toUpperCase()]; return w == null ? null : w; };
+  /** B-26bb (its verdict's law): THE ONE RULE AT A RECORDED STOP — from here until the next tabs record the chips and the pane are
+   *  the stopped run's and none is drawn (tabsStaleStep); every road back (the Resume press, a rejoin, a reconnect) keeps it. */
+  const noteStop = () => { st.tabsStale = tabsStaleStep(st.tabsStale, 'stopped'); renderTabs(); };
   /** THE TABS PANE — grouped by window (this window first, then each holder's by name, then the rest), a window's spare
    *  blank folded into its head as a count. KEYED (the R4 rule): one node per tab / head, patched in place, moved only when
    *  out of place — a broadcast never rebuilds the row under the pointer. */
   const renderTabs = () => {
-    const g = tabGroups({ tabs: st.tabs.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: tabWinOf(x) })), leases: tabLeasesNow(), human: !!H }, t);
-    const byId = new Map(st.tabs.filter((x) => x && x.targetId).map((x) => [String(x.targetId).toUpperCase(), x]));
+    const tabsNow = st.tabsStale ? [] : st.tabs; // B-26bb: the pane lists no tab of a stopped run (the row's rule — its verdict's should)
+    const g = tabGroups({ tabs: tabsNow.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: tabWinOf(x) })), leases: tabLeasesNow(), human: !!H }, t);
+    const byId = new Map(tabsNow.filter((x) => x && x.targetId).map((x) => [String(x.targetId).toUpperCase(), x]));
     const placed = new Set(g.groups.flatMap((gr) => [...gr.targetIds, ...gr.blanks]));
-    const rest = st.tabs.filter((x) => !(x && x.targetId && placed.has(String(x.targetId).toUpperCase()))); // a row with no CDP id: listed last, as before
+    const rest = tabsNow.filter((x) => !(x && x.targetId && placed.has(String(x.targetId).toUpperCase()))); // a row with no CDP id: listed last, as before
     const label = `${t('Tabs')} (${tabsCountText({ order: [...g.order, ...rest], blanks: g.blanks }, t)})`;
     if (tabsBtn.textContent !== label) tabsBtn.textContent = label;
     const have = new Map([...tabsPane.children].map((el) => [el.dataset.key, el]));
@@ -2260,7 +2264,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         // deleted) or is not there any more — said by WHY, and "Browse again" is the one act (a POST: a user act)
         if (H && ((m.state === 'human-ended') || (m.state === 'error' && (m.code === 'not_browsing' || m.code === 'browser_stopped' || m.code === 'not-found')))) {
           H.ended = m.state === 'human-ended' ? (m.deleted ? 'deleted' : String(m.reason || 'released')) : (m.code === 'not-found' ? 'deleted' : m.code === 'browser_stopped' ? 'stopped' : 'left');
-          st.error = m; st.stopped = H.ended === 'stopped' ? true : st.stopped; renderMode();
+          st.error = m; st.stopped = H.ended === 'stopped' ? true : st.stopped; if (st.stopped) noteStop(); renderMode();
           const lbl = (st.target && st.target.label) || H.label || humanLabel() || '';
           const words = H.ended === 'deleted' ? t('“{label}” was deleted', { label: lbl }) : H.ended === 'stopped' ? t('Stopped — Browse again to open it') : H.ended === 'released' ? t('You closed your browsing — Browse again to open it') : t('Your browsing ended — Browse again to open it');
           reBtn.textContent = t('Browse again');
@@ -2271,7 +2275,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
           if (st.frames > 0) {
             // naive study 2 (finding 3): the browser is not running and a view never starts one — say so plainly, keep the
             // LAST frame (greyed), the badge says "Browser stopped"; the view resumes by itself when the browser runs again
-            st.error = m; st.stopped = true; st.stoppedHow = null; st.hollow = false; renderMode();
+            st.error = m; st.stopped = true; noteStop(); st.stoppedHow = null; st.hollow = false; renderMode();
             setStatus(t('Stopped — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true });
           } else hollowFor(m); // MULTIVIEW: a released / stopped browser (lane P verify: an attachment too) is HOLLOW — the tab's own words
           maybeShowSessions(); // 2026-09-27: its past sessions, each with Replay
@@ -2284,11 +2288,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
           // lane H verify r5 (MINOR 2): its browser was CLOSED (the daemon lives) — a view never starts it: the last frame
           // stays greyed, the badge names why; `browser_unstable` = it kept closing and VibeSpace stopped restarting it
           // lane H verify r6 MINOR 1: `unstable: 'failing'` = every ask to start it again failed — it never came back to close
-          st.error = m; st.stopped = m.code; st.stoppedHow = m.unstable || null; renderMode(); maybeShowSessions();
+          st.error = m; st.stopped = m.code; noteStop(); st.stoppedHow = m.unstable || null; renderMode(); maybeShowSessions();
           setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable' });
         } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); maybeShowSessions(); }
         else if (m.state === 'connecting') setStatus(t('Starting the browser stream…'));
-        else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; st.tabsStale = true; renderMode(); renderTabRow(); } /* B-26bb (主开发 09:08Z: A, clear): the stopped run's chips are not this run's — none drawn until its first tabs record */ setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); renderKbd(); syncKeyboard(); renderPicture(); }
+        else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); renderKbd(); syncKeyboard(); renderPicture(); }
         else if (m.state === 'upstream-closed') { st.connected = false; setStatus(t('Stream ended'), { error: true, reconnect: true }); syncKeyboard(); } // verify r2 (H1): the view stops owning — said at once
         else if (m.state === 'ended') { st.error = m; if (/session ended/.test(String(m.error || ''))) st.sessionEnded = true; setStatus(String(m.error || t('Stream ended')), { error: true, reconnect: true }); }
         else if (m.connected !== undefined) { // the upstream's own status record
@@ -2328,7 +2332,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         renderWatchLine();
         break;
       case 'tabs':
-        st.tabsStale = false; // B-26bb: the new run's own tabs
+        st.tabsStale = tabsStaleStep(st.tabsStale, 'tabs'); // B-26bb: the new run's own tabs end the stopped run's
         st.tabs = Array.isArray(m.tabs) ? m.tabs.map((x) => ({ tabId: String(x.tabId || ''), targetId: String(x.targetId || ''), title: String(x.title || ''), url: String(x.url || ''), active: !!x.active })) : [];
         if (H) { const act = st.tabs.find((x) => x.active); if (act && act.url && act.url !== st.url) { st.url = act.url; renderUrl(); } } // his tab switched (a popup he opened): the address row follows
         { const act = st.tabs.find((x) => x.active); if (act && act.url && !st.url) { st.url = act.url; renderUrl(); } }
@@ -2373,7 +2377,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabsStale = false; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
+    st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabsStale = tabsStaleStep(st.tabsStale, 'switch'); st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds

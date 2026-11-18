@@ -657,12 +657,15 @@ console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the
     const hs = http.createServer(); servers.push(hs); hs.on('upgrade', (req, sock, head) => br.handleUpgrade(req, sock, head));
     await new Promise((r) => hs.listen(0, '127.0.0.1', r));
     const ws = new WebSocket(`ws://127.0.0.1:${hs.address().port}/api/browser/stream?session=sess-a`);
+    let gotTabs = 0; ws.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'tabs') gotTabs++; } catch { /* binary */ } });
     await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
-    await until(() => seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), 1500); // its reason to end: the report that names the tab
-    const tabsRecordSeen = await until(() => (br.activeTargetsFor({ browserKey: KA, profileId: 'bp-0000c0f1' }) || []).includes(T(1)), 1500);
-    await sleep(300); // past the second (identical) tabs record
+    // its ONE reason to end, the same for the leg and its control (no fixed wait for a report the control never makes): the viewer
+    // holds the second (identical) tabs record. The bridge judges a record (notePicture: the re-ask) in onUpstream BEFORE it forwards
+    // it, so every report either record could cause is in `seen` by then
+    await until(() => gotTabs >= 2, 1500);
+    const tabsRecordSeen = (br.activeTargetsFor({ browserKey: KA, profileId: 'bp-0000c0f1' }) || []).includes(T(1));
     ws.close(); br.shutdown?.(); upWss.close();
-    return { seen, tabsRecordSeen };
+    return { seen, tabsRecordSeen, gotTabs };
   };
   const Bmod = require('../src/server/browser-stream.js');
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
@@ -672,9 +675,9 @@ console.log('— ③b B-1626: the viewer\'s thaw is asked again with the tab the
   const [r, c] = await Promise.all([viewersLeg(Bmod, 'now'), Bc ? viewersLeg(Bc, 'control') : Promise.resolve(null)]); // the leg beside its control
   const first = r.seen.find((x) => x.n >= 1);
   ok(first && first.tabs.length === 0 && r.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `B-1626: the viewer's join is reported before its relay knows its tab (the thaw's scope then: ${JSON.stringify(first && first.tabs)}); once the stream's tabs record names the tab on show, the viewers are reported AGAIN with that tab in scope — the thaw shows the view's own front`, r.seen);
-  ok(r.seen.filter((x) => x.n >= 1 && x.tabs.includes(T(1))).length === 1, `B-1626: …once per tab (a later tabs record for the same tab asks nothing more) — ${r.seen.length} report(s)`, r.seen);
+  ok(r.gotTabs >= 2 && r.seen.filter((x) => x.n >= 1 && x.tabs.includes(T(1))).length === 1, `B-1626: …once per tab (a later tabs record for the same tab asks nothing more) — ${r.seen.length} report(s) over ${r.gotTabs} tabs record(s) forwarded`, r.seen);
   if (c) {
-    ok(c.tabsRecordSeen && !c.seen.some((x) => x.tabs.includes(T(1))), `CONTROL (B-1626, the release's bridge): the viewer is reported only at its join, with an EMPTY scope (${JSON.stringify(c.seen)}) — on a frozen browser two conversations hold, the view's own front stays hidden: RED`, c.seen);
+    ok(c.gotTabs >= 2 && c.tabsRecordSeen && !c.seen.some((x) => x.n >= 1 && x.tabs.includes(T(1))), `CONTROL (B-1626, the release's bridge): the viewer is reported only at its join, with an EMPTY scope (${JSON.stringify(c.seen)}) — on a frozen browser two conversations hold, the view's own front stays hidden: RED`, c.seen);
   }
 }
 
@@ -694,9 +697,31 @@ console.log('— ③c B-26bb: no stale chip after a reconnect from a stop');
     const BTc = M.load('src/browser-tabs.js', tsrc.replace(ANCH, '  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId))'), 'b26bb-no-stale'); // stale-pins: kept — the release's line, planted back as this control's mutant
     ok(judge(BTc).stale === 3, 'CONTROL (B-26bb, the release\'s row): the stopped run\'s chips drawn after the reconnect (3 stale chips a person can press) — RED', judge(BTc));
   }
+  // its verdict (NOT TAKEN, 10:27Z — the Resume press's own road cleared the stop before it connected): THE LAW — stale from the
+  // moment the view RECORDS A STOP until the next tabs record, on EVERY road back. Each road as the events the view sees, through
+  // the PURE step (the drawn row is tabRowModel's, above):
+  const road = (B, events) => { let st = false; for (const e of events) st = B.tabsStaleStep(st, e); return st; };
+  const roads = { resume: ['stopped', 'resume-press', 'hello', 'upstream-open'], rejoin: ['stopped', 'rejoin', 'hello', 'upstream-open'], reconnect: ['stopped', 'upstream-closed', 'upstream-open'] };
+  const lit = Object.fromEntries(Object.entries(roads).map(([k, ev]) => [k, road(BTx, ev)]));
+  const cleared = road(BTx, [...roads.resume, 'tabs']), switched = road(BTx, ['stopped', 'switch']);
+  ok(lit.resume && lit.rejoin && lit.reconnect && !cleared && !switched && BTx.tabRowModel({ tabs: kept, owners, stale: lit.resume }).rows.length === 0,
+    `B-26bb (its verdict): the Resume press's own road, a rejoin and a reconnect — each still stale when the new run connects (${JSON.stringify(lit)}), so no stopped-run chip is drawn; the new run's tabs record (${cleared}) or a pane switch (${switched}) ends it`, lit);
+  const stepSrc = tsrc;
+  const SANCH = "  if (event === 'stopped') return true;";
+  if (!stepSrc.includes(SANCH)) ok(false, 'the anchor of the control «B-26bb the stop rule» is not in the source (src/browser-tabs.js)');
+  else {
+    const BTr = M.load('src/browser-tabs.js', stepSrc.replace(SANCH, "  // (no stop rule)"), 'b26bb-no-stop-rule');
+    ok(!road(BTr, roads.resume), 'CONTROL (B-26bb, the rule removed): the Resume press\'s road connects with the stopped run\'s chips drawn as live — RED', road(BTr, roads.resume));
+  }
+  // THE CENSUS (one rule at the stop, never one per road): every place the view RECORDS a stop (`st.stopped = …`, anything but
+  // false) runs the step on that same line; the tabs record and a pane switch end it
   const w = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(w.includes("if (st.stopped) { st.stopped = false; st.tabsStale = true; renderMode(); renderTabRow(); }") && w.includes("        st.tabsStale = false; // B-26bb: the new run's own tabs\n        st.tabs = Array.isArray(m.tabs)") && w.includes('tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale,') && w.includes("st.tabs = []; st.tabsStale = false;"),
-    'B-26bb wiring: the reconnect after a stop marks the chips stale and redraws the row; the new run\'s first tabs record ends it; a view that switches starts clean');
+  const stopSites = (src) => src.split('\n').filter((l) => /\bst\.stopped = (?!false\b)/.test(l));
+  const bare = (src) => stopSites(src).filter((l) => !l.includes('noteStop()'));
+  ok(stopSites(w).length >= 3 && bare(w).length === 0 && w.includes("const noteStop = () => { st.tabsStale = tabsStaleStep(st.tabsStale, 'stopped'); renderTabs(); };") && w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'tabs');") && w.includes("st.tabsStale = tabsStaleStep(st.tabsStale, 'switch');") && w.includes('tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale,') && w.includes('const tabsNow = st.tabsStale ? [] : st.tabs;'),
+    `B-26bb wiring: every one of the view's ${stopSites(w).length} stop records calls the ONE rule (noteStop: the stale step + the pane redrawn); the tabs record and a pane switch end it; the row model AND the tabs pane draw by it`, bare(w));
+  const planted = w + "\n          st.stopped = 'closed'; renderMode(); // a planted new road";
+  ok(bare(planted).length === 1, 'CONTROL (the census): a NEW stop site without the step is named (a rule per road would miss it)', bare(planted));
 }
 
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════

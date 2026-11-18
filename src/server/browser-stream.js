@@ -549,7 +549,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     relay.port = r.port;
     const up = new WebSocketImpl(`ws://127.0.0.1:${r.port}`, { headers: { Origin: S.originHeaderFor(r.port) }, maxPayload: MAX_PAYLOAD, handshakeTimeout: connectTimeoutMs });
     relay.upstream = up;
-    up.on('open', () => { broadcast(relay, { type: 'status', state: 'upstream-open' }); pushMaxFps(relay, true); armDialogs(relay); }); // lane browser-stuck: the dialog watch is on this browser before the user looks
+    // B-1626 (its verdict's should): a reopened upstream may be another run of the browser (new target ids) — the re-ask starts over
+    up.on('open', () => { relay.thawAskedFor = null; broadcast(relay, { type: 'status', state: 'upstream-open' }); pushMaxFps(relay, true); armDialogs(relay); }); // lane browser-stuck: the dialog watch is on this browser before the user looks
     up.on('message', (d, isBinary) => onUpstream(relay, d, isBinary));
     up.on('unexpected-response', (_req, res) => { broadcast(relay, { type: 'status', state: 'error', code: 'upstream-refused', error: `the stream server answered ${res && res.statusCode}` }); try { up.terminate(); } catch { /* */ } });
     up.on('error', (e) => { log.warn?.(`[browser-live] ${relay.key}: upstream error — ${e && e.message}`); if (up.readyState !== 1) broadcast(relay, { type: 'status', state: 'error', code: 'upstream-error', error: String(e && e.message) }); });
@@ -725,7 +726,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       // B-1626 (heavy test-browser-hidden-paint c: a live view on a frozen browser streamed a hidden page — 0 frames): a viewer's
       // thaw is asked when it JOINS, before its relay has read which tab it streams, so on a browser two conversations hold the
       // thaw's scope (activeTargetsFor) was empty and the view's own front stayed hidden. The moment the relay learns (or
-      // changes) the tab it streams while viewers watch, it says its viewers AGAIN — the thaw then shows THAT tab (only that one)
+      // changes) the tab it streams while viewers watch, it says its viewers AGAIN — the thaw then shows THAT tab (only that one).
+      // (a relay that kept no viewer — a recorder's tap — and gets one again relies on the JOIN's own report: by then its tab is known)
       if (relay.activeTarget && relay.activeTarget !== relay.thawAskedFor && relay.viewers.size) { relay.thawAskedFor = relay.activeTarget; noteViewers(relay); }
       if (relay.mode === 'takeover' && relay.viewers.has(relay.holder) && relay.activeTarget && (!relay.copyWatch || relay.copyWatch.targetId !== relay.activeTarget)) armCopyWatch(relay); // lane live-input: the copy watch follows the tab on show
       if (relay.anchor) { // verify r3: …and the takeover's anchor judges it (an agent's switch while the user drives ⇒ `switched`, inputs refused tab_switched)
