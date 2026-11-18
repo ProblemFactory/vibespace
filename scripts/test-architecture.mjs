@@ -7702,6 +7702,13 @@ await section(async () => {
   // a version ends at a non-digit — a sentence's full stop too («rides 2.369.408.»; the reader's find: 11 such in the kb) — and a
   // later MINOR of the same major is future as well (2.370.1 while package.json says 2.369.407)
   const futureIn = (text) => [...String(text).matchAll(/(?<!\d|\d\.)(\d+)\.(\d+)\.(\d+)(?!\d|\.\d)/g)].filter((m) => +m[1] === cMaj && (+m[2] > cMin || (+m[2] === cMin && +m[3] > cPat))).map((m) => m[0]);
+  // B-6617 cure (three readers' should): ⑩'s site list is READ from its own suite — a site ⑩ gains that this list lacks is red BY
+  // NAME here, so the fast twin never silently checks less than the heavy one (its kb files ride the docs/kb-*.md glob)
+  const sitesOf10 = (src) => { const m = /const SITES = \[([\s\S]*?)\];/.exec(src); return m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1].replace(/#INDEX$/, '')) : null; };
+  const lacks109 = (list) => (list || []).filter((f) => !SITES109.includes(f));
+  const s10 = sitesOf10(read('scripts/test-codex-effort-meta.mjs'));
+  ok(Array.isArray(s10) && s10.length >= 10 && lacks109(s10).length === 0, `§109 reads ⑩'s own site list (${s10 ? s10.length : 'NONE found'} sites in test-codex-effort-meta) and holds every one${s10 && lacks109(s10).length ? ` — ADD: ${lacks109(s10).join(', ')}` : ''}`);
+  ok(lacks109(sitesOf10("const SITES = ['src/ws-handler.js', 'src/new-site.js'];")).join() === 'src/new-site.js', '§109 RED CONTROL: a site ⑩ gains that §109 lacks is named (src/new-site.js)');
   const hits = SITES109.flatMap((f) => read(f).split('\n').flatMap((l, i) => futureIn(l).map((v) => `${f}:${i + 1} ${v}`)));
   ok(SITES109.length >= 15 && SITES109.every((f) => read(f).length > 0) && hits.length === 0, `§109 no file of ${SITES109.length} (the kb, CLAUDE.md, the heavy ⑩'s sites) names a ${cMaj}.${cMin}.N past package.json's ${CUR} in full form — write «.NNN»${hits.length ? ' — ' + hits.slice(0, 8).join(' · ') : ''}`);
   const next = `${cMaj}.${cMin}.${cPat + 1}`;

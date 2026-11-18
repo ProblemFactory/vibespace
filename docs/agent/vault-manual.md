@@ -250,7 +250,8 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
   Quote `$VAULT_FILE{…}` so your own shell leaves it alone. The file is shredded when the command ends.
 - **The run card — the user decides each new command SHAPE**: an urgent For-you card «<this conversation> wants to run a
   command with a stored secret» showing the whole command (references, never values), the program that runs, the secrets
-  and how each is given, the hosts, the folder — **Allow once / Always (this command) / Deny** (允许一次 / 总是（这条命令） / 拒绝).
+  and how each is given, the hosts, the folder — **Allow once / Always (this command) / Deny** (允许一次 / 总是（这条命令） / 拒绝); a card that names no single command
+  offers «Always let this conversation use it (these hosts)» (总是允许这个对话用它（这些主机）) in its place.
   *This shape = the tool + its flags + the hosts + the entries; positional arguments may change.* On a shared (cluster)
   instance every run asks unless the user chose «always»; on their own machine a shape allowed once runs again without
   asking until the vault locks. **Your own entries draw no card** (see «Your own secrets» below); a card that does come
@@ -292,7 +293,8 @@ A command whose destination cannot be told asks too: a shell, an interpreter, a 
 own code, a client's shell escape (`psql -c '\! …'`, `psql -f <file>`, `mysql -e 'system …'`) — and a known tool naming no host the vault can read (`curl -s` with no address, `psql` over a service or
 `PGSERVICE`, `rclone remote:`, `git push origin`, `kubectl` on its kubeconfig): every tool the vault knows reaches the
 network, so «no host read» is not «no host». It asks ONCE per command shape on the user's own machine and EVERY run on a
-shared (cluster) instance, unless the user chose «Always (this command)» (where offered, behind the second password). A host
+shared (cluster) instance, unless the user chose «Always (this command)» — or «Always let this conversation use it (these hosts)» on a card that names
+no single command (where offered, behind the second password). A host
 written without `https://` (`curl api.example.com`), in a connection string (`psql "host=…"`), attached (`-hdb.example.com`)
 or in a host list (`postgresql://a,b/db`) is read like any other. So name the host, in the tool itself:
 `curl https://<its host>/…`, `psql -h <its host>` — never a script. Every use is still recorded (`uses`), scrubbed and refused
