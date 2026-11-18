@@ -43,6 +43,7 @@ export function installSidebarColumn(Sidebar) {
       this._columnObserver?.disconnect?.(); this._columnObserver = null;
       this.listEl.innerHTML = '';
       this._appendKindHint?.();
+      this._appendStatusHint?.(); // what the person's status filter hides of the tile door's search (B-54d9 N5)
       this._renderServiceHintRows?.(sessions);
       const isLive = (s) => s.status === 'live' || s.status === 'tmux' || s.status === 'external' || s.status === 'remote-running';
       const live = sessions.filter(isLive);

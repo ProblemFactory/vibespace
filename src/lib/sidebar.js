@@ -275,6 +275,7 @@ class Sidebar {
     // over ~5k sessions (audit round-2)
     document.getElementById('session-filter').oninput = () => {
       this._doorFound = null; // the tile door's one match is marked only while its search stands (r4)
+      this._doorQuery = null; // …and what the status filter hides of it is said only then (B-54d9 N5)
       clearTimeout(this._filterTimer);
       this._filterTimer = setTimeout(() => this._render(), 150);
     };
@@ -979,6 +980,7 @@ class Sidebar {
     if (f) f.value = q;
     clearTimeout(this._filterTimer);
     this._doorFound = null;
+    this._doorQuery = q.toLowerCase() || null; // its search, while it stands: what the status filter hides of it is said (B-54d9 N5)
     this.toggle(true);
     this._renderQuickTabs();
     this._render();
@@ -1284,6 +1286,19 @@ class Sidebar {
     this.listEl.appendChild(row);
   }
 
+  /** THE DOOR'S SEARCH SAYS WHAT THE FILTER HIDES (B-54d9 N5 — the layout-stopped-window r4 review: a status filter the person
+   *  narrowed hid a conversation of the tile's name without a word): while the «Open the session list» search stands, the matches
+   *  the person's status filter (Archived included) leaves out are counted in one line — not a quick view's (LIVE / STOP), not the
+   *  Tasks tab's. The filter stays theirs. Drawn again by each render that wipes the list (sidebar-workbench, sidebar-column). */
+  _appendStatusHint() {
+    const n = this._statusHid || 0;
+    if (!n || !this.listEl) return;
+    const row = document.createElement('div');
+    row.className = 'empty-hint sidebar-status-hint';
+    row.textContent = n === 1 ? tr('1 more match is hidden by your status filter.') : tr('{n} more matches are hidden by your status filter.', { n });
+    this.listEl.appendChild(row);
+  }
+
   _renderInner() {
     const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
     let sessions = this._allSessions;
@@ -1302,6 +1317,7 @@ class Sidebar {
       sessions = sessions.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
     }
 
+    const searched = sessions.length; let statusLeft = null; // the rows the search and the other filters leave, before the status filter (B-54d9 N5)
     // Archive filter: hide archived sessions unless 'archived' filter is on
     const showArchived = this._statusFilter.has('archived');
     if (this._activeTab === 'tasks') {
@@ -1327,11 +1343,13 @@ class Sidebar {
           sessions = sessions.filter(s => nonArchivedFilters.has(s.status));
         }
       }
+      statusLeft = sessions.length; // after the person's status filter (and Archived), before a quick view (B-54d9 N5)
       // Quick tab view: narrow down to a single status
       if (this._activeView) {
         sessions = sessions.filter(s => s.status === this._activeView);
       }
     }
+    this._statusHid = f && this._doorQuery === f && statusLeft != null ? searched - statusLeft : 0; // what the person's status filter hides of the door's search
 
     // Rail panel tabs dispatch BEFORE the innerHTML wipe (2.195.0, real
     // report): _renderRailPanel's renders-once guard checks for the live
@@ -1376,6 +1394,7 @@ class Sidebar {
     // Agent-kind disclosure (2026-09-24) — also drawn by the workbench, which
     // re-wipes the list (sidebar-workbench.js _renderWorkbench)
     this._appendKindHint();
+    this._appendStatusHint();
 
     // "New Session" card at the top — NOT on the Tasks tab (it has its own
     // "+ New Task Group" card; a bare New Session there is meaningless).

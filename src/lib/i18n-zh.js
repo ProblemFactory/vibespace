@@ -11968,6 +11968,8 @@ export default {
   "This window was saved without its conversation, so it cannot be reopened from here.": "这个窗口保存时没有记下它的会话，所以无法从这里重新打开。",
   "This window was saved without its conversation or its folder, so it cannot be reopened from here.": "这个窗口保存时没有记下它的会话和文件夹，所以无法从这里重新打开。",
   "Open the session list": "打开会话列表",
+  "1 more match is hidden by your status filter.": "还有 1 个匹配被你的状态筛选隐藏了。",
+  "{n} more matches are hidden by your status filter.": "还有 {n} 个匹配被你的状态筛选隐藏了。",
   "Remove this window?": "移除这个窗口？",
   "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」会从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
   "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "已选中：仍记着「{name}」的会话的最新回滚点 — 点它就能把那个桌面恢复成当时的样子。",

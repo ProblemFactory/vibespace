@@ -60,6 +60,9 @@
 //        hidden) inside the debounce ⇒ its save goes at once
 //      B-6352 a dismissed resume-all offer has a way back — «Resume all N» in each stopped window's Resume bar while two or
 //        more of its conversations stay stopped, the same question, the same paced resume
+//      B-54d9 the r4 nits — one abort wait per phone switcher row (the REAL _buildWindowItem), the tile door's search says
+//        what the person's status filter hides (the REAL Sidebar), two pins on the heavy chrome suite (its shot order, its
+//        own data/bin)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -579,7 +582,7 @@ await section('§7 r3 THE TILE WITH NO PRESS HAS A WAY FORWARD — why, in one l
   const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
   const histCalls = [], listCalls = [], confirms = [];
   W.app._showLayoutHistory = (slot) => { histCalls.push(slot); return null; };
-  W.app.sidebar.showStopped = W.app.sidebar.showSessionsNamed = (q) => listCalls.push(q);
+  W.app.sidebar.showSessionsNamed = (q) => listCalls.push(q);
   let answer = false;
   W.lm.confirmRemovePlaceholder = async ({ name }) => { confirms.push(name); return answer; };
   await W.lm.restoreState({ windows: rec });
@@ -1066,6 +1069,77 @@ await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the RE
   const { LayoutManager: LM1 } = await mutantEsm('src/lib/layout.js', 'if (!ok) { this._keepOffer(stopped); return; }', 'if (!ok) return;');
   const red = await scene(LM1);
   ok(J(red.afterNo) === J([null, null, null]), '§9 CONTROL: a dismissal that keeps nothing ⇒ no door after it (the second leg goes RED)', red.afterNo);
+});
+
+await section('§9 B-54d9 the r4 nits — ONE wait per switcher row (N3); the door\'s search says what the status filter hides (N5)', async () => {
+  // N3 — the REAL _buildWindowItem: a nameless tile's ✕ cancelled three times, and the switcher opened again, leave ONE live wait on
+  // the window — its close redraws the list once (each live wait is one redraw)
+  const rows3 = async (MobileNav, { reopen = false } = {}) => {
+    const rec = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));
+    const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+    await W.lm.restoreState({ windows: rec });
+    W.lm.confirmRemovePlaceholder = async () => false; // the person cancels each time
+    const win = W.wins.get('win-new-4');
+    let redraws = 0;
+    const build = () => MobileNav.prototype._buildWindowItem.call({ app: W.app }, win, W.app.wm, () => {}, () => { redraws++; });
+    const item = build();
+    for (let i = 0; i < 3; i++) { item.children.at(-1).onclick({ stopPropagation() {} }); await tick(2); }
+    if (reopen) { const again = build(); again.children.at(-1).onclick({ stopPropagation() {} }); await tick(2); } // the list opened again, its ✕ cancelled
+    const kept = W.wins.has('win-new-4');
+    W.app.wm.closeWindow('win-new-4'); await tick(10); // it closes another way (another page, the group's question)
+    return { kept, redraws };
+  };
+  const { MobileNav } = await import(pathToFileURL(path.join(LIB, 'mobile-nav.js')).href);
+  const n3 = await rows3(MobileNav), n3b = await rows3(MobileNav, { reopen: true });
+  ok(n3.kept && n3.redraws === 1 && n3b.redraws === 1, '§9 N3 three cancelled ✕ on a tile that asks first — and the switcher opened again — leave ONE wait on the window: its close redraws once (r4: one wait per press)', { n3, n3b });
+  const { MobileNav: MN0 } = await mutantEsm('src/lib/mobile-nav.js', "else { win._switcherWait?.abort?.(); const wait = win._switcherWait = new AbortController(); win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true, signal: wait.signal }); } };", "else win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true }); };");
+  const n3red = await rows3(MN0, { reopen: true });
+  ok(n3red.redraws === 4, '§9 N3 CONTROL: the r4 line ⇒ four waits, four redraws (the leg above goes RED)', n3red);
+  // N5 — the REAL Sidebar: showSessionsNamed + _renderInner over a list the person narrowed to Live
+  const hintOf = async (SidebarCls, filter, query = null, view = undefined) => {
+    const input = { value: '' };
+    const gid = document.getElementById; document.getElementById = (id) => (id === 'session-filter' ? input : gid(id));
+    try {
+      const now = Date.now(), VAN = NAMES[5];
+      const rows = [{ sessionId: 'cw-13', status: 'live', name: VAN, cwd: '/srv/u/van', startedAt: now - 60e3 }, { sessionId: 'old-2', status: 'stopped', name: VAN, cwd: '/srv/u/van', startedAt: now - 7200e3 }, { sessionId: 'old-3', status: 'stopped', name: VAN + ' (2)', cwd: '/srv/u/van', startedAt: now - 9200e3 }, { sessionId: 'old-1', status: 'stopped', name: 'Other thing', cwd: '/srv/u/other', startedAt: now - 3600e3 }];
+      const rowsAppended = [];
+      const sb = Object.assign(Object.create(SidebarCls.prototype), {
+        _activeTab: 'tasks', _statusFilter: new Set(filter), _activeView: null, _allSessions: rows, _backendFilter: new Set(), _hostFilter: new Set(), _agentKindFilter: null, _mobileMode: false,
+        isArchived: () => false, el: { classList: { toggle() {} } }, _hostsData: null, handed: null,
+        _appendKindHint() {}, _ensureHostsData() {}, _wbHealHostSelections() {}, _renderServiceHintRows() {}, _updateTabs() {}, toggle() {}, _renderQuickTabs() {},
+        _render() { rowsAppended.length = 0; SidebarCls.prototype._renderInner.call(this); },
+        // as the REAL one (sidebar-workbench.js, pinned below): the list wiped, then its hints drawn again
+        _renderWorkbench(list) { this.handed = list.map((x) => x.sessionId); rowsAppended.length = 0; this._appendKindHint?.(); this._appendStatusHint?.(); },
+      });
+      sb.listEl = { insertAdjacentHTML() {}, appendChild: (c) => { rowsAppended.push(c); return c; }, querySelectorAll: () => [] };
+      sb.showSessionsNamed(VAN);
+      const first = rowsAppended.filter((c) => /sidebar-status-hint/.test(c.className)).map((c) => c.textContent);
+      let later = null;
+      if (view !== undefined) sb._activeView = view; // the person picks a quick view (LIVE / STOP…) after the door
+      if (query != null || view !== undefined) { if (query != null) input.value = query; sb._render(); later = rowsAppended.filter((c) => /sidebar-status-hint/.test(c.className)).map((c) => c.textContent); }
+      return { handed: sb.handed, first, later, filter: [...sb._statusFilter] };
+    } finally { document.getElementById = gid; }
+  };
+  const { Sidebar } = await import(pathToFileURL(path.join(LIB, 'sidebar.js')).href);
+  const live = await hintOf(Sidebar, ['live'], 'van');
+  ok(J(live.handed) === J(['cw-13']) && J(live.first) === J(['2 more matches are hidden by your status filter.']) && J(live.filter) === J(['live']), '§9 N5 the tile door\'s search on a list the person narrowed to Live: the running row shown, and ONE line «2 more matches are hidden by your status filter.» — the filter stays theirs (r4: hidden without a word)', live);
+  ok(J(live.later) === J([]), '§9 N5 …the person types another search ⇒ the line goes (it speaks for the door\'s search only)', live.later);
+  const all = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped']);
+  ok(J(all.first) === J([]) && all.handed.length === 3, '§9 N5 …nothing hidden ⇒ no line', all);
+  const one = await hintOf(Sidebar, ['live', 'tmux', 'external']);
+  ok(J(one.first) === J(['2 more matches are hidden by your status filter.']), '§9 N5 …the same count with Stopped alone left out', one.first);
+  const qv = await hintOf(Sidebar, ['live', 'tmux', 'external', 'stopped'], null, 'live');
+  ok(J(qv.later) === J([]), '§9 N5 …rows a QUICK VIEW (LIVE) hides are not worded as the status filter\'s', qv.later);
+  ok(/this\.listEl\.innerHTML = '';[\s\S]{0,400}this\._appendKindHint\?\.\(\);[^\n]*\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-workbench.js')) && /this\.listEl\.innerHTML = '';\n\s*this\._appendKindHint\?\.\(\);\n\s*this\._appendStatusHint\?\.\(\);/.test(read('src/lib/sidebar-column.js')), '§9 N5 …the two renders that WIPE the list (the workbench, the column list) draw the line again after the wipe (the adversarial read: drawn once in _renderInner, it was wiped)');
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  ok(['1 more match is hidden by your status filter.', '{n} more matches are hidden by your status filter.'].every((k) => zh.includes(J(k) + ': "') && ja.includes(J(k) + ': "')), '§9 N5 …both words have a zh AND a ja entry');
+  const { Sidebar: SB0 } = await mutantEsm('src/lib/sidebar.js', '    this._statusHid = f && this._doorQuery === f && statusLeft != null ? searched - statusLeft : 0;', '    this._statusHid = 0;');
+  const red = await hintOf(SB0, ['live']);
+  ok(J(red.first) === J([]), '§9 N5 CONTROL: the line taken out ⇒ the narrowed list says nothing (the first N5 leg goes RED)', red.first);
+  // N1 + N2 live in the heavy chrome suite (test-layout-placeholder-ui): the second tile's shot no longer stands in for the first;
+  // the scratch hub keeps its worktree's own data/bin
+  const PU = read('scripts/test-layout-placeholder-ui.mjs');
+  ok(PU.indexOf("await P1.shot('dialog-zh')") >= 0 && PU.indexOf("await P1.shot('dialog-zh')") < PU.indexOf("await P1.shot('dialog-second-tile-zh')") && !/execFileSync\('cp', \['-r', path\.join\(repo, 'data', 'bin'\)/.test(PU) && /if \(e !== 'bin'\) fs\.rmSync\(path\.join\(wt, 'data', e\)/.test(PU), '§9 N1/N2 (pins on the heavy chrome suite): «dialog-zh» is shot BEFORE the second tile\'s press; the scratch data/ is wiped except its own data/bin (never copied from the caller\'s tree)');
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

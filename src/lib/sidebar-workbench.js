@@ -630,6 +630,7 @@ export function installSidebarWorkbench(Sidebar) {
       // bar commits them all at once so the list never reshuffles mid-select.
       if (this._manageMode) this.listEl.appendChild(this._buildManageBar());
       this._appendKindHint?.(); // the list is not primary-only — say so (2026-09-24)
+      this._appendStatusHint?.(); // …and what the person's status filter hides of the tile door's search (B-54d9 N5)
       // A harness whose STOPPED conversations live behind an opt-in background
       // service (opencode → the 'opencode-serve' plugin, OFF by default since
       // 2026-09-07) must SAY that its history is missing — otherwise this list

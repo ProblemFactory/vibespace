@@ -97,8 +97,11 @@ else await (async () => {
   point.desktops['desk-p'].autoSave.windows = [...NAMES.map((_, i) => named(i)), filesWin('win-p-files', dir('p-files'), GB(11))];
   point.desktops['desk-w'].autoSave.windows.push(filesWin('w-3', dir('w3'), GB(2)));
   const POINT = 'layout-2026-10-30T06-50-53-927Z-1h.json', SUMMARY = { 个人: 12, 工作: 3, 研究: 1 };
-  fs.rmSync(path.join(wt, 'data'), { recursive: true, force: true }); fs.mkdirSync(path.join(wt, 'data', 'layout-history'), { recursive: true });
-  execFileSync('cp', ['-r', path.join(repo, 'data', 'bin'), path.join(wt, 'data', 'bin')]); // r4: the tracked wrappers (pty-wrapper.js…) — without them every session a test starts dies at birth («Cannot find module …/data/bin/pty-wrapper.js», socket=gone)
+  // the scratch data/ is wiped EXCEPT data/bin (r4: the tracked wrappers — pty-wrapper.js… — without them every session a test starts dies at
+  // birth, «Cannot find module …/data/bin/pty-wrapper.js», socket=gone): the worktree's OWN git copy stays (B-54d9 N2 — r4 copied the
+  // caller's data/bin, a production checkout's when run from one)
+  for (const e of fs.readdirSync(path.join(wt, 'data'))) if (e !== 'bin') fs.rmSync(path.join(wt, 'data', e), { recursive: true, force: true });
+  fs.mkdirSync(path.join(wt, 'data', 'layout-history'), { recursive: true });
   fs.writeFileSync(path.join(wt, 'data', 'layouts.json'), J(layouts, null, 1));
   fs.writeFileSync(path.join(wt, 'data', 'layout-history', POINT), J({ at: 1793343053927, summary: SUMMARY, totalWindows: 16, change: [['个人', 12, 11]], layouts: point }));
   fs.writeFileSync(path.join(wt, 'data', 'layout-history', POINT.replace(/\.json$/, '.meta.json')), J({ at: 1793343053927, summary: SUMMARY, totalWindows: 16, change: [['个人', 12, 11]] }));
@@ -233,13 +236,13 @@ else await (async () => {
     const picked = await P1.ev(`[...document.querySelectorAll('.lh-desk.is-picked')].map((b) => ({ id: b.dataset.id, desk: b.dataset.desk, current: b.getAttribute('aria-current'), focused: document.activeElement === b }))`);
     const note = await P1.ev(`document.querySelector('.lh-slot')?.textContent || ''`);
     ok(picked.length === 1 && picked[0].id === POINT && picked[0].desk === '个人' && picked[0].current === 'true' && /Trip planner/.test(note), '④ …with the 06:50 point\'s 个人 SELECTED (the newest point whose 个人 still names «Trip planner»\'s conversation — the newer ones hold it nameless) and a line that says so', { picked, note, rows: await P1.ev(`[...document.querySelectorAll('.lh-row')].length`) });
+    await P1.shot('dialog-zh'); // tile A's OWN dialog, before the second tile's press (B-54d9 N1: taken after it, the two shots were one picture)
     // r4: a SECOND tile's door while the dialog is open ⇒ the dialog is redrawn for ITS slot (23eaffef5: raised with A's line)
     ok(await P1.ev(`(() => { const b = app.wm.windows.get('win-p-9')?.element.querySelector('[data-door="rollback"]'); if (!b) return false; b.click(); return true; })()`) && await until(() => P1.ev(`/Cluster admin/.test(document.querySelector('.lh-slot')?.textContent || '') && document.querySelectorAll('.lh-slot').length === 1 && !!document.querySelector('${deskBtn}.is-picked')`), 8000), '④ …tile «Cluster admin»\'s «恢复之前的布局…» pressed while it is open: ONE dialog, redrawn for «Cluster admin» (its line, its point selected)', await P1.ev(`({ notes: [...document.querySelectorAll('.lh-slot')].map((x) => x.textContent), picked: [...document.querySelectorAll('.lh-desk.is-picked')].map((b) => b.dataset.id + '/' + b.dataset.desk) })`).catch((e) => e.message));
     await P1.shot('dialog-second-tile-zh');
     const deskWords = await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => [b.textContent, b.title])`);
     const w0650 = await P1.ev(`(() => { const b = document.querySelector('${deskBtn}'); return b ? [b.textContent, b.title] : null; })()`);
     ok(w0650 && /^个人 12/.test(w0650[0]) && w0650[1] === '只恢复「个人」', '④ the 06:50 row\'s button says the desktop and its count («个人 12 …»), its title «只恢复「个人」»', { w0650, all: deskWords });
-    await P1.shot('dialog-zh');
     ok(await P1.click(`document.querySelector('${deskBtn}')`) && await until(() => P1.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '只恢复「个人」')`), 5000), '④ the press asks first: «只恢复「个人」…？» (the other desktops stay as they are now)');
     await P1.shot('confirm-zh');
     const reloads = (X) => X.ev('window.__lswMark = 1; true');

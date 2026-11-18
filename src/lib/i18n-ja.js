@@ -11967,6 +11967,8 @@ export default {
   "This window was saved without its conversation, so it cannot be reopened from here.": "このウィンドウは会話を記録せずに保存されたため、ここから開き直せません。",
   "This window was saved without its conversation or its folder, so it cannot be reopened from here.": "このウィンドウは会話もフォルダーも記録せずに保存されたため、ここから開き直せません。",
   "Open the session list": "セッション一覧を開く",
+  "1 more match is hidden by your status filter.": "ほかに 1 件が、ステータスの絞り込みで隠れています。",
+  "{n} more matches are hidden by your status filter.": "ほかに {n} 件が、ステータスの絞り込みで隠れています。",
   "Remove this window?": "このウィンドウを削除しますか？",
   "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」はこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "選択済み：「{name}」の会話をまだ記録している最新のロールバックポイントです — 押すとそのデスクトップを当時の状態に戻します。",

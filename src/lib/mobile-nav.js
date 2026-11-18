@@ -799,7 +799,8 @@ export class MobileNav {
     closeBtn.title = t('Close'); closeBtn.setAttribute('aria-label', t('Close'));   // its word (the ✕ is a glyph — lane ui-controls-and-bugs)
     // a window that asks first (requestClose answered false — a «Session unavailable» tile's confirm, a desktop app's own ask)
     // closes LATER: the list redraws when it does (r4: its row stayed, and a tap revealed a window that was gone)
-    closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); else win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true }); };
+    // …ONE wait per WINDOW (B-54d9 N3): a ✕ cancelled again, or the list opened again, replaces the wait (its own signal ends the old one)
+    closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); else { win._switcherWait?.abort?.(); const wait = win._switcherWait = new AbortController(); win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true, signal: wait.signal }); } };
 
     // lane ui-controls-and-bugs (the walk's window-manager-3: the window's menu hid behind a long press nobody guesses): a
     // visible ⋯ opens THE SAME menu (the For-you row's ⋯ is the precedent); the long press stays
