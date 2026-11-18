@@ -5132,6 +5132,8 @@ export default {
   "Search: {q}": "搜索：{q}",
   "Search all conversations": "搜索全部对话",
   "Show the search results": "查看搜索结果",
+  "in the Outbox — this row shows the search results": "在发件箱中——点这一行查看搜索结果",
+  "Show the search results — the draft waits in the Outbox": "查看搜索结果——草稿在发件箱中等待",
   "Show every conversation this search found": "查看这次搜索命中的全部对话",
   "{n} of the agent’s hits are not in the saved copy": "智能体的命中里有 {n} 条已不在保存的副本中",
   "That account is no longer connected": "该账号已不再连接",

@@ -5131,6 +5131,8 @@ export default {
   "Search: {q}": "検索：{q}",
   "Search all conversations": "すべての会話を検索",
   "Show the search results": "検索結果を表示",
+  "in the Outbox — this row shows the search results": "送信箱にあります。この行は検索結果を表示します",
+  "Show the search results — the draft waits in the Outbox": "検索結果を表示します。下書きは送信箱で待っています",
   "Show every conversation this search found": "この検索で見つかったすべての会話を表示",
   "{n} of the agent’s hits are not in the saved copy": "エージェントのヒットのうち {n} 件は保存済みのコピーにありません",
   "That account is no longer connected": "そのアカウントはもう接続されていません",

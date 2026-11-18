@@ -586,6 +586,15 @@ function openVerdict(row, { filter = null, recordOf = null } = {}) {
   if (named) return { open: 'outbox', show: named, filter };
   return { open: 'conversation', adapterId: row.adapterId, convId: row.convId };
 }
+/** B-0f26 (the outbox-chip-door follow-up, decided «keep the door, fix the wording»): a row whose press opens the SEARCH
+ *  results (its newest op is a search — J1) while it names a proposal (law 3: it says that proposal's state) promised an
+ *  approval its door does not hold. True for such a row: its words then say the draft waits in the Outbox and what the
+ *  press shows. `recordOf` as rowProposalOf's (a held proposal); PURE. */
+function draftBehindSearch(row, recordOf = null) {
+  if (!row || !row.convId) return false;
+  const v = openVerdict(row, { recordOf });
+  return !!v && v.open === 'search' && !!rowProposalOf(row, recordOf);
+}
 /** WHAT THE FOLD'S TAIL ("+N more") OPENS: every hidden row a search of ONE query ⇒ that search UNSCOPED (every
  *  conversation, grouped by conversation) over the accounts its rows name; anything else ⇒ the fold expands. */
 function tailVerdict(rows, { max = FOLD_SHOWN } = {}) {
@@ -748,5 +757,5 @@ module.exports = {
   HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, channelsMayRun, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
   RUNS_NOTHING, SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, commandsRun, RUNS_A_COMMAND, REAPERS, producerOf,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, namesExactly, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
-  GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, rowProposalOf, tailVerdict,
+  GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, rowProposalOf, draftBehindSearch, tailVerdict,
 };

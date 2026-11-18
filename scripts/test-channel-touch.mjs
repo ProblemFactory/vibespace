@@ -525,6 +525,22 @@ await section('⑦', async () => {
   ok(d3src.split(D3FROM).length === 2, 'CONTROL setup: the API row reads the fate once (B-d3d3)');
   const blind = MUT.load('src/channel-touch.js', d3src.replace(D3FROM, '  const f = undefined;'), 'api-fate-blind');
   ok(blind.rowWords(apiRow, tEn, { apiFateOf: fates([rec('rejected', { decidedBy: 'user' })]) }) === 'API call POST /v1/items · awaiting you', 'CONTROL the fate unread: a rejected call\'s row says «awaiting you» again — the row\'s report (the table above goes red)');
+  // B-0f26 (the outbox-chip-door follow-up, decided «keep the door, fix the wording»): a reply-then-search row opens the
+  // search results (J1) and says its proposal's state (law 3) — its words now say where the draft waits; the PURE rule
+  const held = (state) => (id) => (id === 'pq' ? { id: 'pq', state, at: 1 } : null);
+  const RS = T.foldTouches([touch({ id: 'q1', op: 'reply', convId: 'cq', proposalId: 'pq', at: 1000 }), touch({ id: 'q2', op: 'search', convId: 'cq', query: 'budget', hits: [], count: 1, at: 2000 })])[0];
+  const RO = T.foldTouches([touch({ id: 'q3', op: 'reply', convId: 'cq', proposalId: 'pq', at: 1000 })])[0];
+  const SO = T.foldTouches([touch({ id: 'q4', op: 'search', convId: 'cq', query: 'budget', hits: [], count: 1, at: 2000 })])[0];
+  const F26 = { rs: T.draftBehindSearch(RS, held('awaiting-approval')), ro: T.draftBehindSearch(RO, held('awaiting-approval')), so: T.draftBehindSearch(SO, held('awaiting-approval')), noList: T.draftBehindSearch(RS, null), gone: T.draftBehindSearch(RS, () => null), door: T.openVerdict(RS, { recordOf: held('awaiting-approval') }).open };
+  ok(F26.rs === true && F26.ro === false && F26.so === false && F26.noList === false && F26.gone === false && F26.door === 'search',
+    'B-0f26 draftBehindSearch: a reply-then-search row (its door the search results — kept) names a held proposal ⇒ its words say the draft waits in the Outbox; a reply alone (its door the draft), a search alone, no list held, a proposal gone ⇒ not', F26);
+  const F26SRC = 'return !!v && v.open === \'search\' && !!rowProposalOf(row, recordOf);';
+  ok(src.split(F26SRC).length === 2, 'CONTROL setup: the B-0f26 rule is spelled once');
+  const f26 = MUT.load('src/channel-touch.js', src.replace(F26SRC, 'return false;'), 'draft-behind-search');
+  ok(f26.draftBehindSearch(RS, held('awaiting-approval')) === false, 'CONTROL the B-0f26 rule removed: the reply-then-search row reads as any row — its «awaiting your approval» promises a door it does not open (the row\'s report)');
+  const tvSrc = read('src/lib/channel-touch-view.js'), coSrc = read('src/lib/channel-outbox.js');
+  ok(tvSrc.includes("if (out.length && T.draftBehindSearch(row, recordOf)) out.push({ cls: 'chat-status-dim', text: t('in the Outbox — this row shows the search results') });") && tvSrc.includes("(T.draftBehindSearch(r, recordOf) ? t('Show the search results — the draft waits in the Outbox') : t('Show the search results'))") && coSrc.includes("row._row && draftBehindSearch(row._row, (id) => (String(id) === String(p.id) ? p : null)) ? `${proposalChipText(p)} · ${t('in the Outbox — this row shows the search results')}`"),
+    'B-0f26 wiring: the Channels chip menu\'s state words, the tool-card row\'s tooltip and its proposal chip each ask the rule');
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '⑦ ' })) ok(c.pass, c.name, c.detail);
   // the wiring: the card row draws them through the Outbox's ONE card module; a card with no touches clears them; a reattach re-reads
   const tv = read('src/lib/channel-touch-view.js');

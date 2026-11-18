@@ -3626,6 +3626,12 @@ async function chatReadLegs(ENGmod, name) {
               const none = [rowOf({ op: 'read', convId: 'oc', count: 1 }), rowOf({ op: 'api', id: 'c1', proposalId: 'pa', title: 'x' }), rowOf({ op: 'compose', proposalId: 'p-gone' })].map((r) => W.rowProposalWords(r).length);
               return [J(three) === J(['awaiting your approval', 'sent ×2']) && J(none) === J([0, 0, 0]), { three, none }];
             }],
+            ['B-0f26 a reply-then-search row (its press shows the search results) says its draft waits in the Outbox; a reply row alone does not', async () => {
+              W.noteOutbox({ ...OBX, proposals: [{ id: 'pb', state: 'awaiting-approval', at: 1 }], at: (stamp += 1000) });
+              const behind = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pb' }, { op: 'search', convId: 'oc', query: 'budget', hits: [], count: 1 })).map((w) => w.text);
+              const plain = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pb' })).map((w) => w.text);
+              return [J(behind) === J(['awaiting your approval', 'in the Outbox — this row shows the search results']) && J(plain) === J(['awaiting your approval']), { behind, plain }];
+            }],
           ];
         };
         const runOCD = async (W, only = null) => { const out = []; for (const [n, fn] of ocdLegs(W)) { if (only && !only.test(n)) continue; let r; try { r = W ? await fn() : [false, 'no bundle']; } catch (e) { r = [false, String((e && e.stack) || e).slice(0, 300)]; } out.push([n, r]); } return out; };

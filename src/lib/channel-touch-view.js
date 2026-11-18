@@ -95,7 +95,10 @@ export function rowProposalWords(row) {
   recs.sort((a, b) => (b.state === 'awaiting-approval') - (a.state === 'awaiting-approval'));
   const seen = new Map();
   for (const p of recs) for (const w of proposalWords(p)) { const k = `${w.cls}|${w.text}`; if (seen.has(k)) seen.get(k).n += 1; else seen.set(k, { ...w, n: 1 }); }
-  return [...seen.values()].map((w) => ({ cls: w.cls, text: w.n > 1 ? `${w.text} ×${w.n}` : w.text }));
+  const out = [...seen.values()].map((w) => ({ cls: w.cls, text: w.n > 1 ? `${w.text} ×${w.n}` : w.text }));
+  // B-0f26: a row whose press shows the search results says where its draft waits (never a promise the door does not keep)
+  if (out.length && T.draftBehindSearch(row, recordOf)) out.push({ cls: 'chat-status-dim', text: t('in the Outbox — this row shows the search results') });
+  return out;
 }
 
 /** B-d3d3: does a folded row carry a raw API call that FILED a proposal (its words follow the proposal's fate)? */
@@ -279,7 +282,7 @@ export function createChannelTouchView(view) {
       rowEl._row = r;
       const openV = T.openVerdict(r, { recordOf });
       const verdict = openV.open;
-      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'connect' ? t('Sign in — the Connect dialog opens on this account type') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? (openV.show ? t('Show this proposal in the Outbox') : t('Not sent yet — open the Outbox')) : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
+      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'connect' ? t('Sign in — the Connect dialog opens on this account type') : verdict === 'search' ? (T.draftBehindSearch(r, recordOf) ? t('Show the search results — the draft waits in the Outbox') : t('Show the search results')) : verdict === 'outbox' ? (openV.show ? t('Show this proposal in the Outbox') : t('Not sent yet — open the Outbox')) : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
       if (rowEl.title !== tip) rowEl.title = tip;
       const glyph = T.glyphFor(r.icon);
       const g = rowEl.querySelector('.cct-glyph');
