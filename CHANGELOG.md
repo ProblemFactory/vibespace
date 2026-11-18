@@ -9,11 +9,15 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
+- A conversation on another machine no longer joins a Task Group through a symbolic link on the server's disk; only its folder as written counts.
 
 ### Fixed
 - On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
 - A conversation VibeSpace is still checking is never resumed by Resume all or a restored layout; resuming it yourself asks you first.
 - In a Claude chat, when a Stop comes too late to keep a message you sent into the turn from reaching the model, the chat now says so, and that it may be billed.
+- On a workspace with sign-in, the welcome tour's first screen waits up to 3 seconds for the server, so it usually starts at three steps, not four.
+- In Diagnostics, a new kind of record from a Codex conversation is no longer counted as Claude Code's, and no longer counted twice.
+- An agent running many commands on a paired machine no longer slows the whole workspace: each command's record is written in the background.
 
 ## 2.369.410 — 2026-11-18
 
