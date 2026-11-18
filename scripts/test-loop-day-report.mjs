@@ -19,10 +19,13 @@
 //      ⑭ a keeper browser counts only while its start time is still the record's, a CLI launcher and its native CLI are ONE;
 //      ⑤ the zero-sync cut also over stand-in trees of all three group shapes (the command-line and start-time reads);
 //      ⑰ a split file's own bucket in the line, and ⚙ Diagnostics' table: busy ticks, split buckets, unwatched hours, a short age read.
+//      ⑱ a hold with NO FRAME OF OURS (主开发 2026-11-18 12:20Z) is counted apart (no-ours-holds / no-ours-held) and booked in top
+//        under «(no frame of ours)», never under a verdict's word — in the line and in the day; RED: the release's cause.
 // Run: node scripts/test-loop-day-report.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import vm from 'node:vm';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const L = require(path.join(REPO, 'src/loop-day-report.js'));
@@ -71,7 +74,7 @@ const fixedRep = (h) => ({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.37
   mem: { heapUsed: 312 * 1048576, heapLimit: 4096 * 1048576, rss: 640 * 1048576, kids: { how: 'service', cli: { n: 2, rss: 1200 * 1048576 }, wrapper: { n: 2, rss: 160 * 1048576 }, browser: { n: 3, rss: 900 * 1048576 }, agentd: { n: 1, rss: 80 * 1048576 }, other: { n: 4, rss: 40 * 1048576 } } },
   upMs: 26.5 * 3600000, agesRead: { read: 12, total: 12 }, turns: { 'turn-running': 2, 'turn-waiting': 1, 'idle-under-1h': 3, 'idle-1-2h': 1, 'idle-2-4h': 2, 'idle-over-4h': 4, 'turn-unknown': 1 }, browsers: { ready: 3, idle1h: 2 },
   sizes: { conversations: 12, pageSockets: 3, deviceLinks: 1, wsIn: 1203, wsOut: 5402, parsedChars: 12345678, creates: 2, resumes: 1, writes: 350, writeMaxMs: 1234 } });
-const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 lost-holds=0 busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 census-asks=812 census-paid=0.37s hub-up=26.5h hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB wrapper=2/160MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 turn-running=2 turn-waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 ages-read=12/12 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s';
+const LINE = '[loop-hour] hour=2026-11-16T20Z span=3600s held=9.2s holds=4 longest=4.0s boot-held=0.0s boot-holds=0 lost-holds=0 no-ours-holds=0 no-ours-held=0.0s busy=37.3% top="src/channel-store.js:275 5.5s; src/normalizers.js:812 2.5s; waiting for a CPU 1.2s" engines="interface 20%; vault 0%; channels 41%; money 10%; workspace 0%; machines 0%; conversation 12%; native 5%; outside 12%" census-ticks=3040 busy-ticks=1000 held-ticks=10 idle-ticks=2000 stopped-ticks=0 not-sampled=30 via-helper=140 deep=7 census-asks=812 census-paid=0.37s hub-up=26.5h hub-heap=312MB/4096MB hub-rss=640MB cli=2/1200MB wrapper=2/160MB browser=3/900MB agentd=1/80MB other=4/40MB procs-by=service conversations=12 turn-running=2 turn-waiting=1 idle-under-1h=3 idle-1-2h=1 idle-2-4h=2 idle-over-4h=4 turn-unknown=1 ages-read=12/12 browsers-ready=3 browsers-idle-1h=2 page-sockets=3 device-links=1 ws-in=1203 ws-out=5402 parsed=12.3M creates=2 resumes=1 writes=350 write-max=1.2s';
 const got = L.line(fixedRep(Object.assign(fixedHour(), { lost: 0 })));
 ok(got === LINE, '① the fixed hour prints the fixed line (held 9.2 s over 4 holds, the top three by cause, the longest, busy, the engines in their order, memory by kind, the sizes)', { got, want: LINE });
 ok(L.LINE_RE.test(got) && L.causesOk(got) && (typeof L.enginesOk === 'function' && L.enginesOk(got)), '① the line passes its own shape check (LINE_RE) and names only causes and engines it may');
@@ -122,7 +125,7 @@ console.log('④ the ORCH: fold as they come, cut first, counts taken, census «
   wall = T0 + 3600000;
   const r1 = await R.tick();
   ok(now0.holds === 5002 && r1.hour.holds === 5002 && Object.keys(r1.hour.by).length === 2 && !Object.values(r1.hour).some(Array.isArray), '④ 5 002 holds folded AS THEY CAME into one entry per cause (2 entries — never a list of rows); a hold of the boot is apart (boot-held)', { holds: r1.hour.holds, by: r1.hour.by });
-  ok(/^\[loop-hour\] hour=2026-11-16T20Z span=3300s held=5005\.5s holds=5002 longest=4\.0s boot-held=9\.0s boot-holds=1 lost-holds=\? busy=25\.0% top="src\/normalizers\.js:812 5000\.0s; src\/channel-store\.js:275 5\.5s" engines="interface 20%;/.test(r1.line) && / ws-in=7 ws-out=9 parsed=0\.0M creates=1 resumes=0 writes=0 write-max=0\.8s$/.test(r1.line) && lines[0] === r1.line,
+  ok(/^\[loop-hour\] hour=2026-11-16T20Z span=3300s held=5005\.5s holds=5002 longest=4\.0s boot-held=9\.0s boot-holds=1 lost-holds=\? no-ours-holds=0 no-ours-held=0\.0s busy=25\.0% top="src\/normalizers\.js:812 5000\.0s; src\/channel-store\.js:275 5\.5s" engines="interface 20%;/.test(r1.line) && / ws-in=7 ws-out=9 parsed=0\.0M creates=1 resumes=0 writes=0 write-max=0\.8s$/.test(r1.line) && lines[0] === r1.line,
     '④ the cut prints ONE line: the hour from the start (20:05Z, 3300 s), the counts taken, the census folded, the busy share between the two cuts', r1.line);
   ok(R.hours().now.holds === 1 && R.hours().now.heldMs === 3000 && LC.peek().wsIn === 0, '④ the cut swapped the hour FIRST: a hold booked while the cut read the census counts in the NEXT hour, and the counts were taken', R.hours().now);
   R.onHold({ ms: 2000, verdict: 'waiting for a CPU', frame: null });
@@ -184,7 +187,7 @@ console.log('⑥ processes by kind; the counts wired where they leave');
   ok(/^const LC = require\('\.\/server\/loop-counts\.js'\);/m.test(ws) && (ws.match(/loop-counts\.js/g) || []).length === 1, '⑫ R2: a bump on the hot path is an ADD — ws-handler binds the counter module ONCE at load (no require per message)');
   ok((sw.match(/LC\.inc\('writes'\);/g) || []).length === 2 && /if \(!onMain\) LC\.max\('writeMaxMs', ms\);/.test(sw), '⑥ store writes: counted at both posts to the writer thread, the longest at its finish');
   ok(/ptyProcess\.onData\(\(o\) => LC\.inc\('parsedChars'/.test(so) && /inc\(data && \(data\.resumeId \|\| data\.resume\) \? 'resumes' : 'creates'\)/.test(wc), '⑥ conversation output handed to a parser (the registry\'s attach) and creates / resumes (the create handler)');
-  ok(/for \(const f of each\) \{ try \{ f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot \}\); \} catch \{ \} \}/.test(lh) && /hourly: hourly \?/.test(lh) && /loop-day-report\.js'\)\.wire\(\{ witness: syncFs, sessions: \(\) => activeSessions\.entries\(\), socketsDir: SOCKETS_DIR, buffersDir: BUFFERS_DIR, sizes: /.test(sv) && /book\.onEach\(\(h\) => r\.onHold\(h\)\); book\.setHourly\(\(\) => r\.hours\(\)\);/.test(src('src/server/loop-day-report.js')), '⑥ the hold book hands each hold to the hour; server.js starts the report and Diagnostics reads its hours');
+  ok(/for \(const f of each\) \{ try \{ f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot, noOurs: !!h\.fold\.noOurs \}\); \} catch \{ \} \}/.test(lh) && /hourly: hourly \?/.test(lh) && /loop-day-report\.js'\)\.wire\(\{ witness: syncFs, sessions: \(\) => activeSessions\.entries\(\), socketsDir: SOCKETS_DIR, buffersDir: BUFFERS_DIR, sizes: /.test(sv) && /book\.onEach\(\(h\) => r\.onHold\(h\)\); book\.setHourly\(\(\) => r\.hours\(\)\);/.test(src('src/server/loop-day-report.js')), '⑥ the hold book hands each hold to the hour; server.js starts the report and Diagnostics reads its hours');
 }
 
 console.log('⑦ R1 / R4: the census\'s paid cost printed; the engines and native add to 100 % of the busy ticks; each field counts what it says');
@@ -205,7 +208,7 @@ console.log('⑧ R3: an hour no watchdog watched prints «?» — never a clean 
 try {
   const h = L.newHour(T0, { watched: false }); L.holdAdd(h, { ms: 3000, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
   const ln = L.line({ kind: 'hour', hour: h, toMs: T0 + 3600000, busy: 0.2, engines: null, mem: null, sizes: {} });
-  ok(L.LINE_RE.test(ln) && / held=\? holds=\? longest=\? boot-held=\? boot-holds=\? lost-holds=\? busy=20\.0% top="\?" /.test(ln), '⑧ an unwatched hour: held, holds, longest, the boot\'s and top print «?» (busy is the loop\'s own reading and stays)', ln);
+  ok(L.LINE_RE.test(ln) && / held=\? holds=\? longest=\? boot-held=\? boot-holds=\? lost-holds=\? no-ours-holds=\? no-ours-held=\? busy=20\.0% top="\?" /.test(ln), '⑧ an unwatched hour: held, holds, longest, the boot\'s and top print «?» (busy is the loop\'s own reading and stays)', ln);
   let alive = true;
   const R = O.create({ log: quietLog([]), wallNow: () => T0 + 7200000, census: async () => null, kids: async () => null, watched: () => alive });
   R.onHold({ ms: 1500, verdict: 'JavaScript', frame: 'x (src/a.js:1)' });
@@ -449,6 +452,36 @@ console.log('⑰ cure r3: a split file\'s own bucket in the line; ⚙ Diagnostic
   const noZh = keys.filter((k) => !Object.prototype.hasOwnProperty.call(zh, k)), noJa = keys.filter((k) => !Object.prototype.hasOwnProperty.call(ja, k));
   ok(keys.length >= 15 && !noZh.length && !noJa.length, `⑰ every one of the table's ${keys.length} words has its zh and ja`, { noZh, noJa });
 } catch (e) { ok(false, '⑰ the leg threw on this tree', (e && e.message) || String(e)); } }
+
+console.log('⑱ a hold with NO FRAME OF OURS is counted apart — booked under «(no frame of ours)», never a verdict\'s word');
+{
+  const book = (LDR) => {
+    const h = LDR.newHour(T0);
+    LDR.holdAdd(h, { ms: 1500, verdict: 'JavaScript', frame: '(node’s own code — fs)', noOurs: true });
+    LDR.holdAdd(h, { ms: 2500, verdict: 'JavaScript', frame: 'storePath (src/agy-store-fs.js:24)' });
+    LDR.holdAdd(h, { ms: 1200, verdict: 'JavaScript', frame: '(node’s own code — undici)', noOurs: true });
+    LDR.holdAdd(h, { ms: 9000, verdict: 'JavaScript', frame: '(node’s own code — fs)', noOurs: true, boot: true });   // the boot's own: apart from both
+    return { h, line: LDR.line(fixedRep(h)), day: LDR.dayFold([{ hour: h, toMs: T0 + 3600000, busy: 0.1 }]) };
+  };
+  const r = book(L);
+  ok(L.LINE_RE.test(r.line) && L.causesOk(r.line) && / holds=3 /.test(r.line) && / no-ours-holds=2 no-ours-held=2\.7s /.test(r.line) && / boot-holds=1 /.test(r.line)
+    && /top="\(no frame of ours\) 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(r.line) && r.day.noOurs.holds === 2 && r.day.noOurs.heldMs === 2700 && r.day.by[L.NO_OURS] === 2700 && !r.day.by.JavaScript,
+    '⑱ two holds with no frame of ours: no-ours-holds=2 no-ours-held=2.7s, booked in top under «(no frame of ours)» and in the day the same — never under «JavaScript»; the boot\'s own stays apart', { line: r.line.slice(0, 260), day: r.day.noOurs, by: r.day.by });
+  { // …and THE DAY TABLE (Telemetry.heldDays, ⚙ Diagnostics) books it the same: the hold book's record carries the mark
+    const Tel = TEL.Telemetry || TEL;
+    const rows = [{ ms: 1500, frame: '(node’s own code — fs)', no: true }, { ms: 2500, frame: 'storePath (src/agy-store-fs.js:24)' }, { ms: 1200, frame: '(node’s own code — undici)', no: true }]
+      .map((x, i) => ({ kind: 'metric', name: 'srv-loop-hold-ms', ts: T0 + (i + 1) * 60000, value: x.ms, detail: `JavaScript · ${x.frame}${x.no ? ' · (no frame of ours)' : ''}` }));
+    const dd = Tel.heldDays(rows, T0 + 3600000).today, by = Object.fromEntries(dd.causes.map((c) => [c.cause, c.ms]));
+    ok(by[L.NO_OURS] === 2700 && by['src/agy-store-fs.js:24'] === 2500 && !by.JavaScript && dd.count === 3,
+      '⑱ the day table (heldDays over the hold book\'s rows) books the marked holds under «(no frame of ours)» as the hour does — one key in both', by);
+  }
+  const SRC = fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8'), CUT = '  if (noOurs === true) return NO_OURS;\n';
+  const m = { exports: {} };
+  if (SRC.split(CUT).length === 2) vm.compileFunction(SRC.replace(CUT, ''), ['module', 'exports', 'require'], { filename: 'loop-day-report-no-mark.js' })(m, m.exports, require);
+  const red = m.exports.newHour ? book(m.exports) : null;
+  ok(red && /top="JavaScript 2\.7s; src\/agy-store-fs\.js:24 2\.5s"/.test(red.line) && !red.line.includes('(no frame of ours)'),
+    '⑱ RED CONTROL: the release\'s cause (no mark) books those holds under the verdict «JavaScript» — mixed with every JavaScript hold of the hour', red && red.line.slice(0, 260));
+}
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

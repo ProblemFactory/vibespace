@@ -284,9 +284,11 @@ class Telemetry {
       let d = typeof r.detail === 'string' ? r.detail : '';
       const boot = d.endsWith(' · (the boot)');
       if (boot) d = d.slice(0, -' · (the boot)'.length);
+      const noOurs = d.endsWith(' · (no frame of ours)');   // the hold book's mark (a row with no frame of the tree): the hour's cause
+      if (noOurs) d = d.slice(0, -' · (no frame of ours)'.length);
       const cut = d.indexOf(' · ');
       const verdict = (cut < 0 ? d : d.slice(0, cut)).trim(), frame = cut < 0 ? null : d.slice(cut + 3);
-      const cause = verdict || frame ? LDR.causeOf({ verdict: verdict || null, frame }) : NO_CAUSE;
+      const cause = verdict || frame ? LDR.causeOf({ verdict: verdict || null, frame, noOurs }) : NO_CAUSE;
       for (const p of Object.values(out)) {
         if (day < p.from || day > p.to) continue;
         if (boot) { p.boot.ms += r.value; p.boot.count++; continue; }
