@@ -113,6 +113,7 @@ const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
 let HMm = null;
 const HM = () => HMm || (HMm = require('../browser-human.js'));
 const PROMPT_FY_KEY = 'prompt-auth:'; // B-ebb7: a sign-in's For-you item is keyed — a past hub life's open ones are swept when a watch starts
+const THAW_PROBE_TABS = 4; // B-1626 cure 4: a viewer's thaw confirms its holder's window by at most this many of the tabs the keeper names its own (read at once)
 const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
 const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
 const REARM_HEALTHY = 10; // a socket that stayed open this many REARM_MS was healthy: its close starts the backoff over
@@ -1019,7 +1020,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); if (v && v.result && v.result.result && v.result.result.value === 'visible') fronts.push(e.targetId); }
     // B-1626 cure 3 (its readers): each front's window, read ONCE here — a viewer's thaw then knows at once whether a front sits in
     // its holder's own window (no round of window reads for a front that is another holder's)
-    const wins = new Map(); for (const tid of fronts) wins.set(tid, await windowOfTarget(w, tid));
+    // (cure 4: the reads at once — each its own 1 s cap, so the freeze waits at most ~1 s for them, never a second per front)
+    const wins = new Map(); (await Promise.all(fronts.map((tid) => windowOfTarget(w, tid)))).forEach((win, i) => wins.set(fronts[i], win));
     if (w.thawing || (w.lastVerbAt || 0) >= t0) return { ok: false }; // a verb arrived while the fronts were read
     // r2: a front another conversation has not shown again since the last freeze stays owed to it (it is hidden now, not visible)
     const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
@@ -1046,7 +1048,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // read a tabs record, and the witness and the grant can miss a tab. Its window is read off Chrome at the thaw; a front in
     // another holder's window stays owed (heavy test-browser-hidden-paint e)
     const ownWin = holder && holder.windowId != null ? holder.windowId : null;
-    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (w.frontWin || new Map()).get(tid) === ownWin);
+    if (!w.frontWin) w.frontWin = new Map();
+    const fw = w.frontWin;
+    // B-1626 cure 4 (its verdict's must): a window Chrome did not report at the freeze (null) is UNKNOWN, never «not yours» — it is
+    // read again at this thaw (below); a missed read never blanks every later visit
+    const byWindow = ownWin == null ? [] : [...(w.hiddenFronts || [])].filter((tid) => !need.includes(tid) && (fw.get(tid) == null || fw.get(tid) === ownWin));
     if (w.paint !== 'frozen' && !need.length && !byWindow.length) return Promise.resolve({ ok: true, thawed: false });
     w.thawing = (async () => {
       try {
@@ -1054,10 +1060,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         // B-1626 cure 3 (its readers): the stamp is never trusted alone — a mediated lease keeps a previous run's windowId, and a
         // window id is a small number per Chrome run (it can name ANOTHER holder's window now). The window is the holder's only
         // while a tab the keeper names the holder's (its scope: its root, its witnessed tabs) sits in it at this thaw
+        // (cure 4: the probe is bounded — at most THAW_PROBE_TABS of the scope's tabs, read at once, each its own 1 s cap: a verb
+        // never waits behind a viewer's thaw for a second per tab)
         if (byWindow.length) {
-          let mine = false;
-          for (const t of (scope instanceof Set ? [...scope] : [])) if (w.targets.has(t) && (await windowOfTarget(w, t)) === ownWin) { mine = true; break; }
-          if (mine) for (const tid of byWindow) if (w.targets.has(tid)) need.push(tid);
+          const probe = (scope instanceof Set ? [...scope] : []).filter((t) => w.targets.has(t)).slice(0, THAW_PROBE_TABS);
+          const mine = probe.length > 0 && (await Promise.all(probe.map((t) => windowOfTarget(w, t)))).includes(ownWin);
+          if (mine) {
+            const unknown = byWindow.filter((tid) => w.targets.has(tid) && fw.get(tid) == null);
+            (await Promise.all(unknown.map((tid) => windowOfTarget(w, tid)))).forEach((win, i) => { if (win != null) fw.set(unknown[i], win); });
+            for (const tid of byWindow) if (w.targets.has(tid) && fw.get(tid) === ownWin) need.push(tid);
+          }
         }
         const shown = [];
         for (const tid of need) { w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.targets.has(tid)) shown.push(await showFront(w, tid)); }
@@ -1067,7 +1079,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return w.thawing;
   }
   /** The CDP window a tab sits in (Browser.getWindowForTarget), null when Chrome does not say. */
-  async function windowOfTarget(w, id) { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result ? r.result.windowId : null; }
+  async function windowOfTarget(w, id) { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result && r.result.windowId != null ? r.result.windowId : null; }
   /** One frozen front shown again IN ITS OWN WINDOW: activated first (its window becomes the last activated one — where a
    *  plain create lands), a blank opened, its window read off Chrome (getWindowForTarget), closed, the front activated. A
    *  blank that landed elsewhere (another holder's activation raced it) is closed at once and journaled — never kept. */
