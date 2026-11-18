@@ -910,12 +910,19 @@ const headReads = (raw, assigned) => {
  *  Not read: a value written by `read` / `printf -v` / `mapfile` from text (indirect — the same family, OPEN). */
 const PARAM_VALUES = 64;
 const TAINT_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=/;
-/** the commands that EVALUATE the words they are handed (arithmetic, a script, a subscript in a name, a value as code) */
-const EVALUATORS = new Set(['let', 'eval', 'source', '.', 'trap', 'alias', 'fc', 'sched', '[[', 'test', '[', 'declare', 'typeset', 'local', 'export', 'readonly', 'integer', 'float', ...SHELLS]);
+/** the commands that EVALUATE what they are handed — the readers' should (00:05Z): only what really evaluates. As CODE, a
+ *  `$name` reference in their words (eval, trap, alias, fc, sched, a shell's script); as ARITHMETIC, the bare name too (let,
+ *  zsh's integer / float, the declare family with `-i`, `[[`'s arithmetic operands). Never `[` / `test` / a plain `local` —
+ *  `[ -n "$MSG" ]` evaluates nothing (a subscript in any word is the span rule's). */
+const EVAL_CODE = new Set(['eval', 'trap', 'alias', 'fc', 'sched', ...SHELLS]);
+const EVAL_ARITH = new Set(['let', 'integer', 'float']);
+const DECLARERS = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
+const ARITH_TESTS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);
 /** B-e779: is `name` read by an evaluator in `text` past `from` — inside a SUBSCRIPT's span (`a[$x]`, `"a[$i]"`), inside
- *  arithmetic (`(( … ))`, `$(( … ))`, `$[ … ]`), or a word of an EVALUATORS command (`cmds`)? Linear: each span read once. */
+ *  arithmetic (`(( … ))`, `$(( … ))`, `$[ … ]`), or by an evaluating command (`cmds`)? A name is a name, never a part of
+ *  a word (`MSG.txt`, `my-MSG`). Linear: each span read once. */
 function valueEvaluated(name, text, from, cmds) {
-  const re = new RegExp(`(^|[^A-Za-z0-9_])${name}(?![A-Za-z0-9_])`);
+  const re = new RegExp(`(^|[^A-Za-z0-9_./-])${name}(?![A-Za-z0-9_./-])`), ref = new RegExp(`\\$\\{?[=~^]*${name}(?![A-Za-z0-9_])`);
   const t = text.slice(from);
   let seen = -1;
   for (const m of t.matchAll(SUB_START)) {
@@ -930,8 +937,12 @@ function valueEvaluated(name, text, from, cmds) {
   for (let i = t.indexOf('$['); i >= 0; i = t.indexOf('$[', i + 2)) { const e = t.indexOf(']', i); if (re.test(t.slice(i, e < 0 ? t.length : e))) return true; if (e < 0) break; i = e - 1; }
   for (const c of cmds) {
     const cw = commandWord(c.words);
-    if (!cw || !EVALUATORS.has(cw.base) || !c.src) continue;
-    if (c.words.some((w) => w.at >= from && re.test(c.src.slice(w.at, w.end)))) return true;
+    if (!cw || !c.src) continue;
+    const raw = (w) => (w && w.at >= from ? c.src.slice(w.at, w.end) : '');
+    const rest = c.words.slice(cw.k + 1);
+    if (EVAL_CODE.has(cw.base) && rest.some((w) => ref.test(raw(w)))) return true;
+    if ((EVAL_ARITH.has(cw.base) || (DECLARERS.has(cw.base) && rest.some((w) => /^-[A-Za-z]*i/.test(w.v)))) && rest.some((w) => re.test(raw(w)))) return true;
+    if (cw.base === '[[') for (let j = 1; j < c.words.length - 1; j++) if (ARITH_TESTS.has(c.words[j].v) && (re.test(raw(c.words[j - 1])) || re.test(raw(c.words[j + 1])))) return true;
   }
   return false;
 }

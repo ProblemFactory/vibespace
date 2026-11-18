@@ -3227,8 +3227,9 @@ await section('⑬', async () => {
   // measure the head, the r15 review measured the value shapes in all three shells — the B-e779 legs below pin the reading);
   // + 10 at the lane's adversarial read r1 — the value read only by an EVALUATOR (valueEvaluated: a subscript's span, the
   // arithmetic spans, the evaluating commands — 9), both readings of a computed head (1), the `x+=` / `a[0]=` mark (1, one
-  // replaced): UNKNOWN or a may name, never exact
-  const BRANCHES = 242;
+  // replaced): UNKNOWN or a may name, never exact; + 3 at the readers' should (00:05Z) — only what really evaluates (the code
+  // commands' `$name`, the arithmetic ones' bare name, `[[`'s arithmetic operands): fewer UNKNOWNs, never an exact reading more
+  const BRANCHES = 245;
   const rowCensus = (text, rows) => {
     const bad = [], marks = [...text.matchAll(/row:([\w-]+)/g)].map((m) => m[1]), branches = (text.match(/\bif \(/g) || []).length;
     if (!rows || !Object.keys(rows).length) bad.push('no ROWS table');
@@ -3311,10 +3312,13 @@ await section('⑬', async () => {
     V5: ['param-value', `x=; x+='$(${CLIR} > /dev/null &)'; let "a[$x]=1"`],
     V6: ['param-value', `a[0]='$(${CLIR} > /dev/null &)'; let "b[$a]=1"`],
     V7: ['param-value', `x='$(${CLIR} &)'; bash -c "echo $x"`],
+    // the readers' should (00:05Z): the arithmetic evaluators — the declare family's integer form, `[[`'s arithmetic operand
+    V8: ['param-value', `x='$(${CLIR} &)'; declare -i n=$x`],
+    V9: ['param-value', `x='$(${CLIR} &)'; [[ $x -eq 0 ]]`],
   };
   const e779 = Object.fromEntries(Object.entries(E779).map(([k, [why, l]]) => [k, { why: unknownOf(T, l).map((u) => u.why), exact: T.channelsRuns(l).length, may: mayOf(T, l).length, inert: T.runsNothing(l) }]));
   ok(Object.entries(E779).every(([k, [why]]) => e779[k].why.includes(why) && !e779[k].exact && (k === 'H3' ? e779[k].may === 0 : e779[k].may > 0) && !e779[k].inert),
-    'B-e779 THE ROW\'S SHAPES: a parameter in command position (H1 `${x:-vibespace-channels} read …`, H2 `CMD=vibespace-channels; $CMD read …`, H3 `"${CMD}" read …` — H3 names nothing: could run, never inert; H4 / H5 / H6 a name a default or a literal SPLITS — named by the head\'s readings; r1: H7 / H8 under `find -exec` / `-execdir`, H9–H11 zsh\'s `$=` `$~` `$^`, H12 a split behind a quote, H13 an alternate `:+`) and a value with a literal substitution an EVALUATOR reads (V1 `let "a[$x]=1"`, V2 `printf -v "a[$i]"`, V3 `eval echo $x`, V4 a `local`; r1: V5 `x+=`, V6 `a[0]=`, V7 a shell\'s `-c` script) — UNKNOWN by its reason, no exact run, may run the CLI, never inert (base: exact-empty, may none)', e779);
+    'B-e779 THE ROW\'S SHAPES: a parameter in command position (H1 `${x:-vibespace-channels} read …`, H2 `CMD=vibespace-channels; $CMD read …`, H3 `"${CMD}" read …` — H3 names nothing: could run, never inert; H4 / H5 / H6 a name a default or a literal SPLITS — named by the head\'s readings; r1: H7 / H8 under `find -exec` / `-execdir`, H9–H11 zsh\'s `$=` `$~` `$^`, H12 a split behind a quote, H13 an alternate `:+`) and a value with a literal substitution an EVALUATOR reads (V1 `let "a[$x]=1"`, V2 `printf -v "a[$i]"`, V3 `eval echo $x`, V4 a `local`; r1: V5 `x+=`, V6 `a[0]=`, V7 a shell\'s `-c` script; the readers\' should: V8 `declare -i`, V9 `[[ $x -eq 0 ]]`) — UNKNOWN by its reason, no exact run, may run the CLI, never inert (base: exact-empty, may none)', e779);
   const KEPT779 = {
     lit: `"$HOME/bin/vibespace-channels" read lark/inbox`,
     dir: `$(npm bin)/eslint x.js && ${CLIR}`,
@@ -3325,10 +3329,14 @@ await section('⑬', async () => {
     tick: "MSG='Fixed the `foo` bug'; vibespace-channels reply lark/oc_1 \"$MSG\"",
     tickFile: "MSG='Fixed the `foo` bug'; echo \"$MSG\" > f && vibespace-channels reply lark/oc_1 --text-file f",
     echoed: `x='$(not run)'; echo "$x"; ${CLIR}`,
+    // the readers' should (00:05Z): an agent's daily guard and copies evaluate nothing
+    guard: "MSG='Fixed the `foo` bug'; [ -n \"$MSG\" ] && vibespace-channels reply lark/oc_1 \"$MSG\"",
+    copied: "MSG='Fixed the `foo` bug'; local m=\"$MSG\"; vibespace-channels reply lark/oc_1 \"$m\"",
+    partOfWord: "MSG='see `x`'; cat MSG.txt && vibespace-channels read lark/inbox",
   };
   const kept779 = Object.fromEntries(Object.entries(KEPT779).map(([k, l]) => [k, { unknown: unknownOf(T, l).map((u) => u.why), exact: T.channelsRuns(l).length }]));
   ok(Object.values(kept779).every((x) => !x.unknown.length && x.exact === 1),
-    'B-e779 THE KEPT READINGS: a literal BASE after a computed directory (`"$HOME/bin/vibespace-channels"`, `$(npm bin)/eslint`, `${HOME}/bin/x`), a value a real substitution computed (`MSG=$(cat …)` — that substitution was read), a plain value read by a subscript; r1: a value with a backtick or `$(` in its literal text handed to commands that evaluate nothing (`reply … "$MSG"`, `echo "$MSG" > f`, `echo "$x"`) — each line keeps its exact run of the CLI', kept779);
+    'B-e779 THE KEPT READINGS: a literal BASE after a computed directory (`"$HOME/bin/vibespace-channels"`, `$(npm bin)/eslint`, `${HOME}/bin/x`), a value a real substitution computed (`MSG=$(cat …)` — that substitution was read), a plain value read by a subscript; r1: a value with a backtick or `$(` in its literal text handed to commands that evaluate nothing (`reply … "$MSG"`, `echo "$MSG" > f`, `echo "$x"`); the readers\' should: `[ -n "$MSG" ]`, `local m="$MSG"`, a name inside a longer word (`MSG.txt`) — each line keeps its exact run of the CLI', kept779);
   const COST779 = `$PY x.py && ${CLIR}`;
   ok(unknownOf(T, COST779).some((u) => u.why === 'param-head') && !T.channelsRuns(COST779).length && mayOf(T, COST779).length === 1,
     'B-e779 THE COST, named: a parameter head elsewhere on the line (`$PY x.py && vibespace-channels read …`) makes the line UNKNOWN — the CLI\'s run is a may, no longer exact');
@@ -3336,8 +3344,8 @@ await section('⑬', async () => {
   const noVal779 = sw('e779-value', "    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque('param-value', x.end); break; }", '    ');
   const noSplit779 = sw('e779-split', "if (!raw.includes(CLI) && headReads(raw, assigned).includes(CLI)) heads.push(", 'if (false) heads.push(');
   const lost779 = (M, ks) => ks.every((k) => !M.channelsMayRun(E779[k][1]).length);
-  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7']) && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
-    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V7 may run nothing; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
+  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9']) && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
+    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V9 may run nothing; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
   // r15: THE COMPACT HEAD READS THE WHOLE COMMAND (the r14 verdict MINOR — commandHeadWords read a 2048-character cut: a
   // quote or a `$( … )` the cut left open made the line UNKNOWN since r14 — no exact run — and a long chained compose's head
   // the `vibespace-status` again, the r1 H1 shape)
