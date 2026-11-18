@@ -516,6 +516,23 @@ console.log('§11 who wrote a hit (B-19bd): a user row the person never typed ca
   ok(W3.split(NO).length === 2, 'the control\'s anchor is in the worker once');
   const oc = await run(MUT.write('src/search-index-worker.js', W3.replace(NO, NO.replace('whoOf(m)', 'null')), 'nowho'));
   ok(oc.peer && !oc.peer.other && oc.live && !oc.live.other, 'CONTROL (the verdict not stored): every user hit is drawn as the person\'s again — the leg goes RED', oc);
+  // B-9a2e (the search road, bound 4): the backfill HANDED the conversation's rows labels VibeSpace's continue as VibeSpace's
+  {
+    const SP = require(path.join(REPO, 'src/sent-provenance.js'));
+    const CONT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
+    const AS = '0f5e1a00-0000-4000-8000-00000000d0b1', at0 = 2e12 + 7000;
+    const pa = path.join(home, '.claude/projects/-w-ar'); fs.mkdirSync(pa, { recursive: true });
+    fs.writeFileSync(path.join(pa, AS + '.jsonl'), JSON.stringify({ type: 'user', uuid: 'ar-1', sessionId: AS, timestamp: new Date(at0 + 20000).toISOString(), promptSource: 'sdk', message: { role: 'user', content: CONT } }) + '\n');
+    const label = async (sent) => {
+      const x = SI.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-ar-')), homeDir: home, log: quiet, exitHook: false, bootDelayMs: 1e9 }); x.start();
+      await x.call('indexConversation', { sid: AS, backend: 'claude', cwd: '/w/ar', sent });
+      const h = (await x.search({ q: 'usage limit', scope: 'chats' })).hits.find((y) => y.sid === AS);
+      await x.close({ final: true });
+      return h ? (h.other || 'person') : 'none';
+    };
+    const withRows = await label([SP.rowOf(CONT, 'auto-resume', at0)]), noRows = await label(null);
+    ok(`the search backfill, handed the conversation's rows, labels the continue as VibeSpace's (${withRows}); without them as the person's (${noRows})`, withRows === 'auto-resume' && noRows === 'person');
+  }
   const SWT = read('src/lib/search-window.js');
   ok(/const hitWho = \(h\) => \(h\.role === 'user' \? \(h\.other \? otherWord\(h\.other\) : t\('You'\)\) : t\('Agent'\)\);/.test(SWT) && SWT.includes('${fmtTime(h.ts)} · ${hitWho(h)}'), 'the search window labels a hit by it: You only for the person\'s own words');
 }

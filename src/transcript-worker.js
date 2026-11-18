@@ -36,7 +36,7 @@ function runOp(op, payload = {}) {
       return { result: _codex().readJsonlLineRange(payload.fp, payload.startLine, payload.endLine) };
     }
     case 'userTurns': {
-      return { result: _codex().scanJsonlUserTurns(payload.fp, payload.backend) };
+      return { result: _codex().scanJsonlUserTurns(payload.fp, payload.backend, payload.sent || null) };
     }
     case 'boundedParsed': {
       // readJsonlBounded + line split + JSON.parse, all off-loop. Returns raw

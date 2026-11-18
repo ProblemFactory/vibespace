@@ -30,6 +30,7 @@ const path = require('path');
 const { parentPort, workerData, isMainThread } = require('worker_threads');
 const { answerMemory } = require('./worker-memory.js');
 const M = require('./search-model.js');
+const SP = require('./sent-provenance.js'); // B-9a2e (PURE): rows handed by the owner, never the store
 const RC = require('./record-clear.js'); // PURE: the cleared sentence + the witness rule the ladder's judge uses (B-b291)
 const AN = require('./assistant-note.js'); // PURE (B-19bd): THE verdict «did the person type this record?» — personRow
 const crypto = require('crypto');
@@ -291,7 +292,7 @@ function clearConversation({ sid, host = '' } = {}) {
 }
 
 /** THE BACKFILL STEP: one conversation through its harness's own reader. */
-async function indexConversation({ sid, host = '', backend, cwd = '', live = false, maxBytes = 512 * 1024 * 1024 } = {}) {
+async function indexConversation({ sid, host = '', backend, cwd = '', live = false, maxBytes = 512 * 1024 * 1024, sent = null } = {}) {
   const harnesses = require('./harnesses');
   const h = harnesses.get(backend);
   const store = h && h.store;
@@ -312,7 +313,7 @@ async function indexConversation({ sid, host = '', backend, cwd = '', live = fal
   const reader = store.createReader(shape, sid, { buffersDir });
   if (typeof reader.prepare === 'function') { S.putCursor.run(file, sid, host, st.size, mtime, 0, 'serve-backed'); return { skipped: 'serve-backed', file }; }
   const mm = require('./normalizers').createMessageManager(backend, 'ix', { threadId: sid });
-  await mm.convertHistoryAsync(reader.raw() || []);
+  await SP.withRows(Array.isArray(sent) ? sent : [], () => mm.convertHistoryAsync(reader.raw() || []));   // B-9a2e: VibeSpace's own record of this conversation, handed as data
   const msgs = mm.messages || [];
   const rows = tx(() => { if (reread) dropRowsOf(sid, host); const n = insertMessages(sid, host, backend, msgs); S.putCursor.run(file, sid, host, st.size, mtime, msgs.length, 'done'); return n; });
   return { rows, parsed: true, cards: msgs.length, file, bytes: st.size };

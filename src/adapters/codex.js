@@ -9,6 +9,7 @@ const { BackendAdapter } = require('./base');
 const { QUEUE_VERBS } = require('../backend-caps');   // the closed verb set — the caps row and this constructor read the SAME list
 const path = require('path');
 const fs = require('fs');
+const SP = require('../sent-provenance.js'); // B-9a2e (PURE): a scan's own conversation rows, handed as data
 const os = require('os');
 const crypto = require('crypto');
 // S3: the codex naming rule + zstd rollout readers live in discovery-facts
@@ -548,10 +549,10 @@ async function readJsonlLineRangeAsync(fp, startLine, endLine) {
   if (pool) { try { return await pool.call('lineRange', { fp, startLine, endLine }); } catch {} }
   return readJsonlLineRange(fp, startLine, endLine);
 }
-async function scanJsonlUserTurnsAsync(fp, backend) {
+async function scanJsonlUserTurnsAsync(fp, backend, sent = null) {
   const pool = _transcriptPoolGet();
-  if (pool) { try { return await pool.call('userTurns', { fp, backend }); } catch {} }
-  return scanJsonlUserTurns(fp, backend);
+  if (pool) { try { return await pool.call('userTurns', { fp, backend, sent }); } catch {} }
+  return scanJsonlUserTurns(fp, backend, sent);
 }
 /** readJsonlTail's FULL read in the worker (the async warm's cold path, chunk
  *  C): resolves `{entry, mode, bytes}` — the same span entry the sync reader
@@ -595,11 +596,16 @@ function jsonlGapInfo(fp) {
 // (~2k of 300k lines), JSON-parses only those. Returns turns in TIME coordinates
 // (the universal minimap axis) plus each turn's file line (for seek-jumping).
 const _turnScanCache = new Map(); // fp -> { mtimeMs, size, turns }
-function scanJsonlUserTurns(fp, backend) {
+/** `sent` = VibeSpace's own record of this ONE conversation (B-9a2e — handed as data: the worker never opens the store). */
+function scanJsonlUserTurns(fp, backend, sent = null) {
   fp = plainJsonlPath(fp);
   const stat = fs.statSync(fp);
   const hit = _turnScanCache.get(fp);
-  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.turns;
+  const sig = SP.sigOf(sent);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size && hit.sig === sig) return hit.turns;
+  return SP.withRows(Array.isArray(sent) ? sent : [], () => scanTurnsOf(fp, backend, stat, sig));
+}
+function scanTurnsOf(fp, backend, stat, sig) {
   const fd = fs.openSync(fp, 'r');
   const turns = [];
   const needle = '"role":"user"';
@@ -623,7 +629,7 @@ function scanJsonlUserTurns(fp, backend) {
     }
     handleLine(carry.trim(), line);
   } finally { fs.closeSync(fd); }
-  _turnScanCache.set(fp, { mtimeMs: stat.mtimeMs, size: stat.size, turns });
+  _turnScanCache.set(fp, { mtimeMs: stat.mtimeMs, size: stat.size, sig, turns });
   if (_turnScanCache.size > 32) _turnScanCache.delete(_turnScanCache.keys().next().value);
   return turns;
 }
@@ -650,7 +656,7 @@ function _claudeUserTurn(rec, line) {
 
 function _codexUserTurn(rec, line) {
   if (rec.type !== 'response_item' || rec.payload?.type !== 'message' || rec.payload?.role !== 'user') return null;
-  const u = userItemOf(rec.payload); // THE codex normalizer's message (lane minimap-person-rows r2): the marker OR the rollout copy's frame, the goal's continue, auto-resume
+  const u = userItemOf(rec.payload, { conv: null, at: rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0 }); // THE codex normalizer's message (lane minimap-person-rows r2): the marker OR the rollout copy's frame, the goal's continue, auto-resume
   if (!u) return null;
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
   return _turnOf(line, ts, { role: 'user', content: u.content, ...u.stamps });

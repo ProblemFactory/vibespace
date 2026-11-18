@@ -160,7 +160,9 @@ function peerRecordOf(item, content) {
 //     card shows); stamps = the message's provenance: the peer card's originKind + name + PATH + group + channel, or a
 //     plain message's auto-resume label
 const GOAL_CONTINUE = 'Continue working toward the active thread goal';
-function userItemOf(item) {
+const SP = require('./sent-provenance.js'); // B-9a2e (PURE): what VibeSpace itself sent — a rollout keeps no mark of who typed
+/** `ctx` = {conv, at}: the record's conversation and instant (no ctx ⇒ no record is asked — today's answer). */
+function userItemOf(item, ctx = null) {
   if (asArray(item.content).map((b) => b.text || '').join('').includes(GOAL_CONTINUE)) return null; // the goal's auto-continue: never a message (its state: _processResponseMessage)
   const content = [];
   for (const block of asArray(item.content)) {
@@ -181,14 +183,18 @@ function userItemOf(item) {
   // in the owner's session were agent-to-agent messages and must keep their
   // labelled card), and it never reaches the merge fingerprint.
   const queueMsgId = item.webui_queue_id || item.webuiQueueId || null;
-  // Typed records (webuiMsgId) are never peer records, whatever their text looks like.
-  const peer = webuiMsgId ? null : peerRecordOf(item, content);
+  // B-9a2e: VibeSpace's own record of this record (the rollout copy has no marker): typed ⇒ never a peer however it reads;
+  // auto-resume ⇒ VibeSpace's continue; peer ⇒ a peer card though its words carry no frame
+  const sentKind = webuiMsgId || item.webui_origin || !ctx ? null : SP.kindFor({ conv: ctx.conv, at: ctx.at, text: content.filter((b) => b.type === 'text').map((b) => b.text).join('') });
+  // Typed records (webuiMsgId, or VibeSpace's own record says typed) are never peer records, whatever their text looks like.
+  const peer = webuiMsgId || sentKind === 'typed' ? null : peerRecordOf(item, content);
   if (peer) return { content: peer.content, webuiMsgId, queueMsgId, peer: true, stamps: { originKind: 'peer-message', peerFrom: peer.from,
     ...(peer.via ? { peerVia: peer.via } : {}), // S3 verify F3: never read off the words
     ...(peer.group ? { peerGroup: peer.group } : {}), // lane group-report-card: sender → group
     ...(peer.channel ? { peerChannel: peer.channel } : {}) } }; // B-c127: the channel notice's conversation (its name is the link)
   // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
-  const stamps = item.webui_origin === 'auto-resume' ? { originKind: 'auto-resume', ...(typeof item.webui_origin_note === 'string' && item.webui_origin_note ? { originNote: item.webui_origin_note } : {}) } : {};
+  if (sentKind === 'peer') return { content, webuiMsgId, queueMsgId, peer: true, stamps: { originKind: 'peer-message', peerFrom: null, peerVia: 'peer' } };
+  const stamps = item.webui_origin === 'auto-resume' || sentKind === 'auto-resume' ? { originKind: 'auto-resume', ...(typeof item.webui_origin_note === 'string' && item.webui_origin_note ? { originNote: item.webui_origin_note } : {}) } : {};
   return { content, webuiMsgId, queueMsgId, peer: false, stamps };
 }
 
@@ -1302,7 +1308,7 @@ class CodexMessageManager extends MessageWindow {
     }
     if (role === 'user') {
       // THE MESSAGE THIS ITEM MAKES (lane minimap-person-rows r2): userItemOf above — the huge-session scan asks the same function
-      const u = userItemOf(item);
+      const u = userItemOf(item, { conv: this._recordThreadId || this._threadId, at: this._currentTsKind === 'record' ? this._currentTs : null });
       if (!u) return;
       const { content, webuiMsgId, queueMsgId, peer } = u;
       // Peer / notification record (rpc-queue lane live, rollout on rebuild)

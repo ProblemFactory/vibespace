@@ -348,6 +348,7 @@ const META_NOTE_RE = /^\s*(?:\[Image source: |Base directory for this skill: |Ca
 //              no turn of its own; never a record the person typed or one with an origin
 //   nudge      the safety stop's nudge (PURE safety-stop): it joins the stop card — no bubble, no turn
 //   peer       {po, said}: a peer delivery's name + PATH (peerOriginOf) and the words it carried (applyPeerOrigin)
+const SP = require('./sent-provenance.js'); // B-9a2e + B-3d90 item 2 (PURE): what VibeSpace itself sent — no match is today's answer
 function userRecordOf(raw) {
   const content = raw.message?.content;
   const blocks = Array.isArray(content) ? content : [{ type: 'text', text: String(content ?? '') }];
@@ -358,7 +359,10 @@ function userRecordOf(raw) {
   // on this box and in the tree's fixtures carries an origin (peer / task-notification — those win above); one without an
   // origin is UNMEASURED, so it keeps today's answer — a person's own words are never labelled not theirs on a reading.
   const wakeup = !raw._fromWebui && (typeof raw.wakeupSource === 'string' && !!raw.wakeupSource);
-  const typed = !!((raw.promptSource && !wakeup) || raw._fromWebui);
+  // B-3d90 item 2: a record VibeSpace's own record names (equal digest, inside the window after its send) — the auto-resume
+  // continue a rebuild read as typed is VibeSpace's again; a typed one stays typed; anything else is today's answer
+  const sentKind = raw.originKind || raw._fromWebui ? null : SP.kindFor({ conv: raw.sessionId, at: Date.parse(raw.timestamp), text });
+  const typed = !!((raw.promptSource && !wakeup && sentKind !== 'auto-resume') || raw._fromWebui || sentKind === 'typed');
   const companion = raw.isMeta === true && !raw.origin && !typed && META_NOTE_RE.test(text);
   // THE SAFETY STOP'S NUDGE (lane classifier-stop-card): the CLI's note to the MODEL after a classifier stop (isMeta +
   // turnCompanion in the transcript, isSynthetic on the stream). Read from the census TEXT (a transport may drop the
@@ -382,7 +386,7 @@ function userRecordOf(raw) {
     // task-notification: origin.kind wins, render a distinct card.
     : raw.origin?.kind === 'peer' ? { originKind: 'peer-message' }
     // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
-    : raw.originKind === 'auto-resume' ? { originKind: 'auto-resume', typed: false, ...(typeof raw.originNote === 'string' && raw.originNote ? { originNote: raw.originNote } : {}) }
+    : raw.originKind === 'auto-resume' || sentKind === 'auto-resume' ? { originKind: 'auto-resume', typed: false, ...(typeof raw.originNote === 'string' && raw.originNote ? { originNote: raw.originNote } : {}) }
     : wakeup ? { originKind: 'wakeup' }
     : typed ? { typed: true } : {};
   const said = stamps.originKind === 'peer-message' ? ((raw.message && (typeof content === 'string' ? content : (content || []).map((b) => b.text || '').join('\n'))) || '') : null;

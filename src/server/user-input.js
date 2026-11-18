@@ -48,7 +48,12 @@ const { capsOf, sendDoors, doorCapsOf } = require('../backend-caps.js');
 const { requestInFlight, noteTurnFlight, noteRequestSent } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 
+const SENT = require('./sent-record.js'); // B-9a2e: what VibeSpace itself sent (instant, length, digest, kind — never the words)
+/** The words a send carries: a client-built frame (a picture beside them) is its text blocks — what the transcript keeps. */
+function wordsOfFrame(text) { try { const j = JSON.parse(text); if (j && j.type === 'user' && j.message) { const c = j.message.content; return Array.isArray(c) ? c.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('') : String(c == null ? '' : c); } } catch { } return text; }
 function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput = (s, line) => s.pty.write(line + '\n'), log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
+  // B-9a2e: the hub's record of what VibeSpace sent, installed once beside the conversations' metadata (data/) — a suite's scratch buffers dir installs none
+  if (!SENT.isInstalled() && BUFFERS_DIR && require('path').basename(String(BUFFERS_DIR)) === 'session-buffers') SENT.install({ dataDir: require('path').dirname(String(BUFFERS_DIR)), log: (...a) => log(...a) });
   /** THE CONVERSATION'S OWN ENTER DOOR (lane reply-door-follows-enter — the owner, 2026-11-13: a For-you reply sat «queued»
    *  while a message typed after it was already steered in): what plain Enter does to this conversation's running turn —
    *  its harness row ∩ its RUNNING wrapper's verbs (the sidecar), the page composer's decision (backend-caps sendDoors). */
@@ -181,6 +186,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
       log(`[${sessionId}] chat-input write failed (${origin}): ${e.message}`);
       return { ok: false, code: 'send_failed', error: 'the session did not accept the message: ' + e.message };
     }
+    SENT.note({ conv: SENT.convOf(session), text: wordsOfFrame(text), kind: human ? 'typed' : 'dispatch' });   // B-9a2e: the typed door's own record — a rebuild tells the person's words from a machine's
     if (userMsg) {
       // verify r1 ① (lane worker-dispatch): the live record of a frame an AGENT typed carries who typed it — the
       // owner's viewers and the buffer replay see `origin {kind:'dispatch', name}`, never a user turn of their own

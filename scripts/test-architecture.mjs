@@ -277,6 +277,7 @@ const PURE = new Set(['src/browser-notes.js' /* B-402f: the browser's own Resize
   // answer AUTHORISES A BILLED TURN — that decision must be unit-testable
   // without a server.
   'src/auto-resume-signal.js',
+  'src/sent-provenance.js', // B-9a2e: what VibeSpace itself sent — the digest, the match (equal + inside the window), the scoped rows of a worker
   'src/record-clear.js', // "Clear content…" (2026-09-28): the five record kinds, which text fields a clear replaces, WHO may clear (owner any · an agent its own session's · a job token never), the group log's replacement-record fold — the stores' doors, the routes and the client dialog ask ONE definition
   'src/inbox-reply.js', // a reply to a For-you item (design-user-inbox-reply D1): the quote block, its parser, the ONE availability verdict — the route and the panel ask the same rule (lane S1 verify r3: its card_item rung is a lookup into helper-ask.js's table)
   'src/inbox-reopen.js', // lane inbox-reply-dead-session: a For-you reply to an ENDED conversation reopens it — the create message the page's own resume road sends (session-lifecycle resumeSession → createSession, field for field); requires only resume-continuity (PURE)

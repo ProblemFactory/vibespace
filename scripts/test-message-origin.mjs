@@ -186,7 +186,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
   ok('the huge-session scan asks the claude normalizer\'s ONE function (message-manager userRecordOf) and keeps no ladder of its own — no origin, promptSource or task-tag test in _claudeUserTurn',
     /const u = userRecordOf\(rec\);/.test(cu) && /if \(u\.companion \|\| u\.nudge\) return null;/.test(cu) && /if \(u\.peer\) applyPeerOrigin\(msg, u\.peer\.po, u\.peer\.said\);/.test(cu) && !/task-notification|promptSource|_fromWebui|origin\?\.kind|originKind ===/.test(cu));
   const xu = fnBody(cxs, 'function _codexUserTurn(rec, line) {');
-  ok('…and the codex normalizer\'s (codex-message-manager userItemOf) for a codex item — never the wrapper\'s marker alone', /const u = userItemOf\(rec\.payload\);/.test(xu) && !/webui_peer|webui_origin/.test(xu));
+  ok('…and the codex normalizer\'s (codex-message-manager userItemOf) for a codex item — never the wrapper\'s marker alone', /const u = userItemOf\(rec\.payload[,)]/.test(xu) && !/webui_peer|webui_origin/.test(xu));
   const mms = read('src/message-manager.js');
   const pu = mms.slice(mms.indexOf('  _processUser(raw, emit) {'), mms.indexOf('  _processAssistant(raw, emit) {'));
   ok('the claude normalizer writes its stamps from that function, once: _processUser keeps no companion, task-tag, nudge or typed test of its own',
@@ -194,7 +194,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
   const cms = read('src/codex-message-manager.js');
   const ru = cms.slice(cms.indexOf('  _processResponseMessage(item, emit) {'), cms.indexOf("    if (role === 'assistant') {", cms.indexOf('  _processResponseMessage(item, emit) {')));
   ok('…and the codex normalizer its message: _processResponseMessage asks userItemOf once, peer detection lives only there',
-    (ru.match(/userItemOf\(item\)/g) || []).length === 1 && !/peerRecordOf\(|webui_origin/.test(ru) && (cms.match(/(?<!function )peerRecordOf\(item, content\)/g) || []).length === 1);
+    (ru.match(/userItemOf\(item[,)]/g) || []).length === 1 && !/peerRecordOf\(|webui_origin/.test(ru) && (cms.match(/(?<!function )peerRecordOf\(item, content\)/g) || []).length === 1);
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) {
     const s = read(f);
     ok(`${path.basename(f)} words both chip states and the empty list`, /"System & other sources ×\{n\} · Show": "[^"]*×\{n\}[^"]*"/.test(s) && /"System & other sources ×\{n\} · Hide": "[^"]*×\{n\}[^"]*"/.test(s) && /"Nothing you typed here — the button above lists the rest": "[^"]+"/.test(s));
@@ -339,6 +339,117 @@ console.log('§4 THE CENSUS — every role === \'user\' site in src/lib/ reads t
     if (why === true) ok(`${f} «${needle.slice(0, 60)}» reads the verdict`, !!READS[f + '|' + needle] && READS[f + '|' + needle](read(f)));
   }
   ok('every named site says its reason in words (no empty or one-word reasons)', ROWS.every(([, , why]) => why === true || (typeof why === 'string' && why.split(' ').length >= 6)));
+}
+
+console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpace sent, matched by digest + window — no match is today\'s answer');
+{
+  const SP = require(path.join(REPO, 'src/sent-provenance.js'));
+  const SR = require(path.join(REPO, 'src/server/sent-record.js'));
+  const MMod = require(path.join(REPO, 'src/message-manager.js'));
+  const CMod = require(path.join(REPO, 'src/codex-message-manager.js'));
+  const T0 = Date.parse('2026-11-04T20:00:00.000Z');
+  const CONT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
+  // the PURE rules: bound 1 (equal digest AND inside the window — else null), bound 3 (no words in a row), bound 5 (the newer send)
+  const r1 = [SP.rowOf(CONT, 'auto-resume', T0)];
+  ok('bound 1: an equal text inside the window is the recorded kind; one more character, a minute past the window or a minute before the send is today\'s answer (null)',
+    SP.matchKind(r1, { at: T0 + 30000, text: CONT }) === 'auto-resume' && SP.matchKind(r1, { at: T0 + 30000, text: CONT + '.' }) === null
+    && SP.matchKind(r1, { at: T0 + SP.WINDOW_MS + 60000, text: CONT }) === null && SP.matchKind(r1, { at: T0 - 60000, text: CONT }) === null && SP.matchKind([], { at: T0, text: CONT }) === null);
+  const autoThenTyped = [SP.rowOf('continue', 'auto-resume', T0), SP.rowOf('continue', 'typed', T0 + 2000)];
+  const typedThenAuto = [SP.rowOf('continue', 'typed', T0), SP.rowOf('continue', 'auto-resume', T0 + 2000)];
+  ok('bound 5: two equal texts inside the window — the NEWER send\'s kind (a typed «continue» right after an automatic one is typed; the reverse is automatic)',
+    SP.matchKind(autoThenTyped, { at: T0 + 5000, text: 'continue' }) === 'typed' && SP.matchKind(typedThenAuto, { at: T0 + 5000, text: 'continue' }) === 'auto-resume');
+  ok('bound 5 (the reader\'s S1): a record BETWEEN two equal sends is the send before it — never the later one inside the clock skew; a send inside the skew after the record counts only when none came before',
+    SP.matchKind(autoThenTyped, { at: T0 + 500, text: 'continue' }) === 'auto-resume' && SP.matchKind(typedThenAuto, { at: T0 + 500, text: 'continue' }) === 'typed' && SP.matchKind([SP.rowOf('continue', 'typed', T0)], { at: T0 - 2000, text: 'continue' }) === 'typed');
+  ok('bound 3: a row is {at, n, h, k} — no word of the text', JSON.stringify(r1).indexOf('continue') === -1 && Object.keys(r1[0]).join() === 'at,n,h,k');
+  // the store: bounded (newest win), every change one store-writer dirty() (never a write of its own), no words on disk,
+  // an unreadable file never written over
+  const writes = [];
+  const fakeWriter = { dirty: (file, o) => writes.push({ file, name: o.name, bytes: o.produce() }) };
+  const none = () => { throw Object.assign(new Error('no file'), { code: 'ENOENT' }); };
+  const st = SR.create({ dataDir: '/sent-record-suite', writer: fakeWriter, readFile: none, now: () => T0 });
+  for (let i = 0; i < SR.PER_CONV_MAX + 5; i++) st.note({ conv: 'conv-a', text: `the secret word ${i}`, kind: 'typed', at: T0 + i });
+  const last = writes[writes.length - 1];
+  ok(`bound 3: the store keeps the ${SR.PER_CONV_MAX} newest sends of a conversation, each change ONE store-writer dirty(), and its bytes hold no words`,
+    st.rowsFor('conv-a').length === SR.PER_CONV_MAX && st.rowsFor('conv-a')[0].at === T0 + 5 && writes.length === SR.PER_CONV_MAX + 5 && writes.every((w) => w.name === SR.STORE_NAME) && !last.bytes.includes('secret') && JSON.parse(last.bytes).v === 1);
+  for (let c = 0; c < SR.CONV_MAX + 2; c++) st.note({ conv: `conv-${c}`, text: 'hello there', kind: 'typed', at: T0 + 1000 + c });
+  ok(`…and the ${SR.CONV_MAX} conversations whose last send is newest (the oldest leaves)`, st.rowsFor('conv-0') === null && !!st.rowsFor(`conv-${SR.CONV_MAX + 1}`));
+  const n0 = writes.length;
+  const bad = SR.create({ dataDir: '/sent-record-suite', writer: fakeWriter, readFile: () => { throw Object.assign(new Error('unreadable'), { code: 'EIO' }); } });
+  bad.note({ conv: 'conv-b', text: 'hello there', kind: 'typed' });
+  ok('a record file that could not be read is never written over in that run', writes.length === n0 && bad.isUnread());
+  // THE NORMALIZERS with the hub's source: claude (userRecordOf) and codex (userItemOf)
+  SP.setSource((conv) => (conv === 'cv-a' ? [SP.rowOf(CONT, 'auto-resume', T0), SP.rowOf('fix the login page', 'typed', T0)] : null));
+  try {
+    const crec = (text, over = {}) => ({ type: 'user', promptSource: 'sdk', sessionId: 'cv-a', uuid: 'r', timestamp: new Date(T0 + 20000).toISOString(), message: { role: 'user', content: text }, ...over });
+    const a = MMod.userRecordOf(crec(CONT)).stamps;
+    const b = MMod.userRecordOf(crec(CONT, { sessionId: 'cv-other' })).stamps;
+    const c = MMod.userRecordOf(crec(CONT, { timestamp: new Date(T0 + SP.WINDOW_MS + 60000).toISOString() })).stamps;
+    const d = MMod.userRecordOf(crec('a message the person typed in the CLI\'s own terminal')).stamps;
+    ok('claude, a rebuild: VibeSpace\'s auto-resume continue reads as VibeSpace\'s again (B-3d90 item 2); another conversation, past the window, or a terminal message with no record is today\'s answer (typed)',
+      a.originKind === 'auto-resume' && a.typed === false && b.typed === true && !b.originKind && c.typed === true && !c.originKind && d.typed === true && !d.originKind, { a, b, c, d });
+    const frame = 'Message from session "Lane worker" (via vibespace-msg): done — the report is in report.md';
+    SP.setSource((conv) => (conv === 'th-1' ? [SP.rowOf(frame, 'typed', T0), SP.rowOf(CONT, 'auto-resume', T0)] : null));
+    const item = (text) => ({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+    const p = CMod.userItemOf(item(frame), { conv: 'th-1', at: T0 + 20000 });
+    const q = CMod.userItemOf(item(CONT), { conv: 'th-1', at: T0 + 20000 });
+    const p0 = CMod.userItemOf(item(frame), null);
+    ok('codex, a rollout read: a peer frame the person TYPED through VibeSpace stays the person\'s, VibeSpace\'s continue is VibeSpace\'s (B-9a2e); with no record the frame is a peer as today',
+      p && p.peer === false && !p.stamps.originKind && q && q.stamps.originKind === 'auto-resume' && p0 && p0.peer === true, { p, q, p0 });
+    // THE WORKER ROADS get the rows as data: the huge-session scan (no source — scoped rows only) gives the same verdict
+    SP.setSource(null);
+    const tmp = fs.mkdtempSync(path.join(MUTC.dir, 'scan-'));
+    const fp = path.join(tmp, 'cv-a.jsonl');
+    fs.writeFileSync(fp, JSON.stringify(crec(CONT, { uuid: 's1' })) + '\n');
+    const plain = CX.scanJsonlUserTurns(fp, 'claude');
+    const handed = CX.scanJsonlUserTurns(fp, 'claude', [SP.rowOf(CONT, 'auto-resume', T0)]);
+    ok('bound 4: the huge-session scan, handed the conversation\'s rows as data (the worker opens no store), lists the continue as VibeSpace\'s; without them as today; the cache keys the rows',
+      plain.length === 1 && !plain[0].other && handed.length === 1 && handed[0].other === 'auto-resume', { plain, handed });
+  } finally { SP.setSource(null); }
+  // THE CONTROLS: each piece removed ⇒ its leg goes RED
+  {
+    const SPS = read('src/sent-provenance.js'), MMS = read('src/message-manager.js'), CMS = read('src/codex-message-manager.js');
+    const cut = (src, from, to, rel, tag) => { if (src.split(from).length !== 2) { ok(`the control's anchor is in ${rel} once: ${from.slice(0, 60)}`, false); return null; } return MUTC.load(rel, src.replace(from, to), tag); };
+    const noWin = cut(SPS, '!(t >= r.at - SKEW_MS && t <= r.at + WINDOW_MS)', 'false', 'src/sent-provenance.js', 'nowindow');
+    ok('CONTROL (no window): a send long before the record still names it — bound 1\'s leg goes RED', !!noWin && noWin.matchKind([noWin.rowOf(CONT, 'auto-resume', T0)], { at: T0 + noWin.WINDOW_MS + 60000, text: CONT }) === 'auto-resume');
+    const older = cut(SPS, 'r.at >= before.at', 'r.at < before.at', 'src/sent-provenance.js', 'olderwins');
+    ok('CONTROL (the older send wins): a typed «continue» right after an automatic one reads as automatic — bound 5\'s leg goes RED', !!older && older.matchKind([older.rowOf('continue', 'auto-resume', T0), older.rowOf('continue', 'typed', T0 + 2000)], { at: T0 + 5000, text: 'continue' }) === 'auto-resume');
+    SP.setSource((conv) => (conv === 'cv-a' ? [SP.rowOf(CONT, 'auto-resume', T0)] : conv === 'th-1' ? [SP.rowOf('Message from session "Lane worker" (via vibespace-msg): done — the report is in report.md', 'typed', T0)] : null));
+    try {
+      const noStamp = cut(MMS, "raw.originKind === 'auto-resume' || sentKind === 'auto-resume' ?", "raw.originKind === 'auto-resume' ?", 'src/message-manager.js', 'nostamp');   // stale-pins: kept (the RED control puts the release's line back)
+      const st0 = noStamp && noStamp.userRecordOf({ type: 'user', promptSource: 'sdk', sessionId: 'cv-a', uuid: 'r', timestamp: new Date(T0 + 20000).toISOString(), message: { role: 'user', content: CONT } }).stamps;
+      ok('CONTROL (claude reads no record): the auto-resume continue is the person\'s again after a rebuild — the item 2 leg goes RED', !!st0 && st0.originKind !== 'auto-resume');
+      const noTyped = cut(CMS, "const peer = webuiMsgId || sentKind === 'typed' ? null : peerRecordOf(item, content);", "const peer = webuiMsgId ? null : peerRecordOf(item, content);", 'src/codex-message-manager.js', 'notyped');   // stale-pins: kept (the RED control puts the release's line back)
+      const pp = noTyped && noTyped.userItemOf({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Message from session "Lane worker" (via vibespace-msg): done — the report is in report.md' }] }, { conv: 'th-1', at: T0 + 20000 });
+      ok('CONTROL (codex ignores a typed record): the peer frame the person typed folds as a peer again — the B-9a2e leg goes RED', !!pp && pp.peer === true);
+    } finally { SP.setSource(null); }
+  }
+  // THE WIRING (the reader's S2): the hub's ONE store through install (the PURE source), a codex rollout scanned with its rows,
+  // the worker's pass-through, and a census of every writer of the record
+  {
+    const wr = [];
+    SR.install({ dataDir: '/sent-record-suite', writer: { dirty: (f, o) => wr.push(o.produce()) }, readFile: none, now: () => T0 });
+    try {
+      SR.note({ conv: 'cv-i', text: CONT, kind: 'auto-resume', at: T0 });
+      const viaInstall = MMod.userRecordOf({ type: 'user', promptSource: 'sdk', sessionId: 'cv-i', uuid: 'i', timestamp: new Date(T0 + 20000).toISOString(), message: { role: 'user', content: CONT } }).stamps;
+      SR.install(null);
+      const afterUninstall = MMod.userRecordOf({ type: 'user', promptSource: 'sdk', sessionId: 'cv-i', uuid: 'i', timestamp: new Date(T0 + 20000).toISOString(), message: { role: 'user', content: CONT } }).stamps;
+      ok('the hub\'s store, installed, IS the PURE source: a noted continue reads as VibeSpace\'s; uninstalled, as today', viaInstall.originKind === 'auto-resume' && afterUninstall.typed === true && !afterUninstall.originKind && wr.length === 1);
+    } finally { SR.install(null); }
+    const tmpc = fs.mkdtempSync(path.join(MUTC.dir, 'cx-'));
+    const fpc = path.join(tmpc, 'rollout.jsonl');
+    fs.writeFileSync(fpc, JSON.stringify({ timestamp: new Date(T0 + 20000).toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: CONT }] } }) + '\n');
+    const cPlain = CX.scanJsonlUserTurns(fpc, 'codex'), cHanded = CX.scanJsonlUserTurns(fpc, 'codex', [SP.rowOf(CONT, 'auto-resume', T0)]);
+    ok('B-9a2e\'s headline: a codex huge-session list, its rollout scanned with the conversation\'s rows, lists the continue as VibeSpace\'s; without them as the person\'s (today)', cPlain.length === 1 && !cPlain[0].other && cHanded.length === 1 && cHanded[0].other === 'auto-resume', { cPlain, cHanded });
+    ok('bound 4: the transcript worker hands the rows through (payload.sent), never a store', /scanJsonlUserTurns\(payload\.fp, payload\.backend, payload\.sent \|\| null\)/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/transcript-worker.js')) && !/sent-record/.test(read('src/search-index-worker.js')) && !/sent-record/.test(read('src/transcript-service.js')));
+    const writers = [];
+    const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) { const n = (read(rel).match(/(?:\bSENT|require\('\.\/sent-record\.js'\))\.note\(/g) || []).length; if (n) writers.push(`${rel}:${n}`); } } };
+    walk('src');
+    ok(`bound 2: the record has exactly its three writers — the typed door, the auto-resume continue, the rpc-queue road (${writers.join(', ')})`, writers.join() === 'src/server/auto-resume.js:1,src/server/conversation-deliver.js:1,src/server/user-input.js:1', writers);
+  }
+  // the send doors (bound 2): only VibeSpace's own — the typed door, the auto-resume continue, the rpc-queue road's peer frame
+  const ui = read('src/server/user-input.js'), ar = read('src/server/auto-resume.js'), cd = read('src/server/conversation-deliver.js');
+  ok('bound 2: the three send doors note their own sends (typed / dispatch at the typed door, auto-resume, peer) — and nothing else writes the record',
+    /SENT\.note\(\{ conv: SENT\.convOf\(session\), text: wordsOfFrame\(text\), kind: human \? 'typed' : 'dispatch' \}\);/.test(ui) && /kind: 'auto-resume' \}\); return sent; \}/.test(ar) && /kind: 'peer' \}\);/.test(cd));
 }
 
 const ms = Number(process.hrtime.bigint() - T0) / 1e6;

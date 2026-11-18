@@ -299,7 +299,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       const viaDev = await tryDevice(norm(ref), 'fullTurnmap', {});
       return viaDev?.turns || [];
     }
-    return scanJsonlUserTurnsAsync(fp, norm(ref).backend);
+    return scanJsonlUserTurnsAsync(fp, norm(ref).backend, require('./sent-provenance.js').rowsOf(norm(ref).sessionId));   // B-9a2e: the conversation's own record, as data (the PURE source: the hub's store on the hub, none on a device)
   }
 
   /** RESCUE (2.360.0, owner request after the 79928a2b 38MB poisoning): a

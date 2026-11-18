@@ -965,7 +965,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // notice survives only where no prompt reached the conversation (the
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
-      try { ok = !!verb.deliver(session, continuePromptFor(note, label2), { sendChatInput: (s2, text) => sendToSession(id, s2, text, carried) }); }
+      try { ok = !!verb.deliver(session, continuePromptFor(note, label2), { sendChatInput: (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; } }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       armed.delete(id);

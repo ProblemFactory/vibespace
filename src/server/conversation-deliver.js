@@ -1743,7 +1743,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         const queuedFull = !steersIntoRunningTurn && rpc.s._isStreaming === true ? queued.full(cid) : null;
         if (queuedFull) return { ok: false, lane: 'rpc-queue', kind, refused: 'queued-full', reason: queuedFull };
         try {
-          rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }) + '\n');   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
+          rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }) + '\n');
+          require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(rpc.s), text, kind: 'peer' });   // B-9a2e: the rpc-queue road's own record (a codex rollout keeps no peer mark)   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
           // EVERY frame joins the settle queue, charged or not — the wrapper
           // answers in write order, so a queue holding only the predicted-free
           // ones would hand this frame's answer to the next frame's entry.

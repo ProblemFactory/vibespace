@@ -243,7 +243,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
         const key = (c.host || '') + '|' + c.sid;
         names.set(key, { name: c.name || null, backend: c.backend, cwd: c.cwd || '' });
         try {
-          const r = await call('indexConversation', { sid: c.sid, host: c.host || '', backend: c.backend, cwd: c.cwd || '', live: live.has(key) });
+          const r = await call('indexConversation', { sid: c.sid, host: c.host || '', backend: c.backend, cwd: c.cwd || '', live: live.has(key), sent: require('./sent-record.js').rowsFor(c.sid) || null });   // B-9a2e: the conversation's own record, as data
           if (r && r.parsed) { counts.walked++; progress.rows += r.rows || 0; progress.bytes += r.bytes || 0; }
         } catch (e) { counts.failed++; if (e.reason === REASON.EXITED) { await sleep(1000); } }
         progress.done++;
