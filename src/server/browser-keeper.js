@@ -1300,6 +1300,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       else { try { fetching = await d.installKernel(c.id, { by: 'first-use', answer: true }); } catch (e) { fetching = e && e.code === 'install_running' ? d.kernelFact(c.id) : null; refused = fetching ? null : e; if (refused) log.warn?.(`[browser] ${p.id} "${p.label}": its engine's kernel cannot be downloaded — ${e && e.message}`); } }
       // round 3: the previous kernel PUT BACK in its place (a landing stopped between its renames) — no download: asked again
       if (fetching && fetching.restored) { fetching = null; engine = await engineFactOf(c.id, { host: p.host || null }); }
+      // B-4d35 (the lane's adversarial read): its download stepped aside from a put-back in flight (past its bound) — the start is
+      // refused BY THAT NAME, never «kernel missing» with a For-you item (the kernel is coming back into its place)
+      if (refused && refused.code === 'engine_kernel_landing') throw namedError('engine_kernel_landing', refused.message || 'the kernel is being put back in its place — try again in a moment', { engine: c.id });
     } else if (d && engine && !engine.code && engine.installed && engine.source !== 'user' && typeof d.kernelDue === 'function') {
       // lane fleet-plugin-catalog: the kernel in its place is not the one named now (the cluster's new kernel, the plugin's new
       // kernel.json) ⇒ THIS start runs the current one and the new one downloads beside it — it serves the next start
