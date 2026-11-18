@@ -106,7 +106,7 @@ function resumeAccountVerdict({ pinned = {}, accounts = [], loginStates = null, 
   const doors = [];
   if (row) doors.push({ kind: 'relogin', accountId: row.id, via: isPool(row) || judged.why === 'remote-cannot-ship' ? 'manage' : 'login' });
   doors.push({ kind: 'switch', to });
-  return { ok: false, why: judged.why, account: { id, name: row ? row.name || id : null }, since: judged.since ?? null, viaDefault, ...(host ? { host } : {}), doors };
+  return { ok: false, why: judged.why, account: { id, name: row ? row.name || id : null }, since: judged.since ?? null, viaDefault, ...(host ? { host } : {}), ...(heldBy ? { held: true } : {}), doors };
 }
 
 const fill = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : String(s));
@@ -144,7 +144,8 @@ function resumeAccountWords(v, { t = fill, date = isoDay, hostName = '' } = {}) 
     sentence,
     relogin: re ? (re.via === 'login' ? t('Log in to {name} again', { name }) : t('Open {name} in Manage agents', { name })) : null,
     switch: t('Use another account'),
-    none: sw && sw.to.length ? null : t('No other account can run it right now — add one in Manage agents.'),
+    // cure 2: a conversation that lives in ONE account's own store — another account cannot help, only that account's login
+    none: sw && sw.to.length ? null : v.held ? t('This conversation lives in this account’s own store — no other account can run it.') : t('No other account can run it right now — add one in Manage agents.'),
   };
 }
 

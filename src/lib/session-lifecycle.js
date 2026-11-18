@@ -25,7 +25,7 @@ import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority
 import { deviceLocale } from './i18n.js';
 import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE «did the person open a dialog?» selector
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
-import { resumeAccountOf, keptAccountOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
+import { resumeAccountOf, keptAccountOf, i18nParams } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
 import { openCliMissingDialog, cliMissingWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: a CLI the person's login shell cannot find is refused by name — a dialog
 
@@ -271,7 +271,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           return true;
         }
         if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
-        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, msg.i18n.params || {}) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
+        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, i18nParams(msg.i18n)) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which

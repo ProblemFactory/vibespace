@@ -853,7 +853,8 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
     if (!threw && !a) return { refuse: ACCT_GONE_BOUND, code: 'resume-account-gone', accountId: held.accountId, message: ACCT_GONE_BOUND };
   }
   const params = { name: heldNameOf(backend, held.accountId, opts.accounts) };
-  return { refuse: BOUND_ELSEWHERE, params, accountId: held.accountId, message: fillWords(BOUND_ELSEWHERE, params) };
+  // cure 2: the machine's login is named in the billing WORD — the page says that word in the reader's language too (`words`)
+  return { refuse: BOUND_ELSEWHERE, params, accountId: held.accountId, message: fillWords(BOUND_ELSEWHERE, params), ...(held.accountId === 'subscription' ? { words: ['name'] } : {}) };
 }
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);

@@ -18,6 +18,7 @@
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang } from './i18n.js';
+import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's interface words in the reader's language
 import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
@@ -306,7 +307,7 @@ export function inboxModel(app) {
       else showToast(sentToast || t('Reply sent'));
       return true;
     }
-    const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, r.i18n.params || {}) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account
+    const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
     if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
     showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : t('Could not reply: {why}', { why }), { type: 'error' });

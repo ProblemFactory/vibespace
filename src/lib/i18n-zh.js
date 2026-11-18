@@ -9470,6 +9470,7 @@ export default {
   "Open {name} in Manage agents": "在「管理 Agents」中打开 {name}",
   "Use another account": "改用别的账号",
   "No other account can run it right now — add one in Manage agents.": "现在没有别的账号能运行它——请在「管理 Agents」中添加一个。",
+  "This conversation lives in this account’s own store — no other account can run it.": "这个对话在这个账号自己的存储里 — 别的账号运行不了它。",
   "{name} (pool)": "{name}（池）",
   "{name} (default account)": "{name}（默认账号）",
   "Resume on this account": "用这个账号恢复",

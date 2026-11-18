@@ -9469,6 +9469,7 @@ export default {
   "Open {name} in Manage agents": "「エージェント管理」で {name} を開く",
   "Use another account": "別のアカウントを使う",
   "No other account can run it right now — add one in Manage agents.": "今これを実行できる別のアカウントはありません——「エージェント管理」で追加してください。",
+  "This conversation lives in this account’s own store — no other account can run it.": "この会話はこのアカウント自身の保存先にあります — ほかのアカウントでは動かせません。",
   "{name} (pool)": "{name}（プール）",
   "{name} (default account)": "{name}（既定のアカウント）",
   "Resume on this account": "このアカウントで再開",

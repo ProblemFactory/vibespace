@@ -493,6 +493,12 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   const accts = { get: (id) => (id === 'agy-e0e0e0e0e0e0' ? { id, name: 'Kiln notes' } : null) };
   const n1 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [kg], accounts: accts });
   const n2 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [{ ...kg, accountId: 'subscription' }], accounts: accts });
+  ok(n1 && !n1.words && n2 && n2.words && n2.words.join() === 'name' && read('src/ws-create.js').includes('...(wrong.words ? { words: wrong.words } : {})'),
+    '§11 cure 2: the machine\'s login is named in its billing WORD and marked `words` (the page says it in the reader\'s language); a person\'s own account name is never translated', { n1: n1 && n1.words, n2: n2 && n2.words });
+  const SWp = await import(pathToFileURL(path.join(REPO, 'src/lib/stopped-why.js')).href);
+  const ip = SWp.i18nParams({ params: { name: 'Kiln notes', other: 3 }, words: ['missing'] });
+  ok(typeof SWp.i18nParams === 'function' && J(ip) === J({ name: 'Kiln notes', other: 3 }) && J(SWp.i18nParams({})) === J({}) && /for \(const k of \(i && Array\.isArray\(i\.words\) \? i\.words : \[\]\)\) if \(typeof p\[k\] === 'string'\) p\[k\] = t\(p\[k\]\);/.test(read('src/lib/stopped-why.js')),
+    '§11 cure 2: i18nParams says only the params named in `words` through t(), the rest as they are');
   ok(n1 && n1.params.name === 'Kiln notes' && n1.message === 'this conversation lives in the store of the account «Kiln notes» — it can be resumed only on that account' && n2 && n2.params.name === 'Google login' && /\{name\}/.test(RS.BOUND_ELSEWHERE),
     '§11 (2) the refusal names the account that holds the conversation ({name}: its row\'s name; the machine\'s login in agy\'s billing word)', { n1, n2 });
   const n3 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [{ ...kg, accountId: 'agy-dddddddddddd' }], accounts: accts });
@@ -514,6 +520,12 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   const roster = [sub('agy-aaaaaaaaaaaa', 'A', { loggedIn: false, loginState: { state: 'logged-out' } }), sub('agy-bbbbbbbbbbbb', 'B'), sub('agy-cccccccccccc', 'C')];
   const sw = (Mod, heldBy, account = 'agy-aaaaaaaaaaaa') => { const v = Mod.resumeAccountVerdict({ pinned: { account, backend: 'antigravity', heldBy }, accounts: roster, loginStates: null, defaults: { machineLogin: { loggedIn: true } } }); const d = (v.doors || []).find((x) => x.kind === 'switch'); return v.ok ? 'ok' : (d ? d.to.map((x) => x.id).join() : '(none)'); };
   const free = sw(RA, undefined), held = sw(RA, 'agy-aaaaaaaaaaaa'), stale = sw(RA, 'agy-bbbbbbbbbbbb');
+  // cure 2: the EMPTY switch of a held conversation says why (another account cannot help) — never «add one in Manage agents»
+  const vOf = (heldBy) => RA.resumeAccountVerdict({ pinned: { account: 'agy-aaaaaaaaaaaa', backend: 'antigravity', heldBy }, accounts: roster, loginStates: null, defaults: { machineLogin: { loggedIn: true } } });
+  const wHeld = RA.resumeAccountWords(vOf('agy-aaaaaaaaaaaa')), wFree = RA.resumeAccountWords({ ...vOf(undefined), doors: [{ kind: 'switch', to: [] }] });
+  ok(vOf('agy-aaaaaaaaaaaa').held === true && wHeld.none === 'This conversation lives in this account’s own store — no other account can run it.' && /Log in to A again|Open A in Manage agents/.test(wHeld.relogin || '')
+    && wFree.none === 'No other account can run it right now — add one in Manage agents.' && RA.resumeAccountWords(vOf('agy-bbbbbbbbbbbb')).none === null,
+    '§11 cure 2: a held conversation whose own account is logged out says another account cannot help (its re-login door stays); a free one keeps «add one in Manage agents»; a stale pick still offers the holder', { wHeld, wFree });
   ok(free.includes('agy-bbbbbbbbbbbb') && free.includes('subscription') && held === '' && stale === 'agy-bbbbbbbbbbbb',
     '§11 (2) the switch: a harness that is not account-bound offers the others (as before); held by the pinned account ⇒ nothing to switch to (its re-login door stays); a stale on-resume account ⇒ ONLY the account that holds it', { free, held, stale });
   const RASRC = read('src/resume-account.js'), HB = '(heldBy && a.id !== heldBy) || ';
@@ -527,11 +539,11 @@ await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one pr
   const LSRC = read('src/lib/session-lifecycle.js');
   ok(/heldBy: accountBound\(backend\) && !hostId \? keptAccountOf\(this\.sidebar\?\._allSessions, backend, backendSessionId\) : undefined \}/.test(LSRC)
     && (LSRC.match(/\{ bound: accountBound\(backend\) && !hostId \}\)/g) || []).length === 2
-    && /\(msg\.i18n && msg\.i18n\.key \? t\(msg\.i18n\.key, msg\.i18n\.params \|\| \{\}\) : ''\) \|\| \(msg\.message \? t\(msg\.message\) : ''\)/.test(LSRC),
+    && /\(msg\.i18n && msg\.i18n\.key \? t\(msg\.i18n\.key, i18nParams\(msg\.i18n\)\) : ''\) \|\| \(msg\.message \? t\(msg\.message\) : ''\)/.test(LSRC),
     'WIRING (§11 (2)): the Resume verdict and the create both resume an account-bound harness on the held account (a host\'s resume aside); a sentence with a name is said from its key + params');
   ok(read('src/server/inbox-reopen.js').includes("return { ok: false, why, ...(err && err.i18n && err.i18n.key ? { i18n: err.i18n } : {}) };")
     && read('src/routes/user-todos-reply.js').includes("fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened', o && o.i18n ? { i18n: o.i18n } : null)")
-    && read('src/lib/user-todos-actions.js').includes("const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, r.i18n.params || {}) : r && r.error ? t(r.error) : t('server unreachable');"),
+    && read('src/lib/user-todos-actions.js').includes("const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');"),
     'WIRING (§11 (2) r2): a For-you reply\'s refusal keeps its key + params from the create to the page (a zh / ja page says it in the reader\'s words)');
   ok(read('src/server/inbox-reopen.js').includes("try { held = await require('../routes/sessions').heldAccountOfNow(conv.backend, conv.id); } catch { held = null; }")
     && read('src/server/inbox-reopen.js').includes('if (held && held.accountId) spec.data.accountId = held.accountId;'),
