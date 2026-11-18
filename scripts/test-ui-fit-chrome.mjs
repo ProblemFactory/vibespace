@@ -27,7 +27,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { mintRoot, startHub, DAEMON_ROOT_ENV } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { armWatchdog } from './suite-watchdog.mjs';
 import { clientSources, checkLabelSites } from './ui-fit-census.mjs';
 import { columnFactsSource as FIT_FACTS, columnReads as reads, SIDEBAR_LADDER } from './lib/fit-ladder.mjs'; // ONE ladder helper (pick 0)
@@ -40,8 +41,12 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 if (!fs.existsSync(path.join(repo, 'public', 'bundle.js'))) { console.log('✗ no public/bundle.js — run `npm run build` first'); process.exit(1); }
 
 const [PORT, CDP_PORT, SVC_PORT] = await freePorts(3);
-const wt = scratch('ui-fit-wt');
-const fakeHome = scratchHome('ui-fit-home', fs);
+// the tree and the home live in ONE root the boot helper minted: at exit it ends the hub and everything rooted there, removes the
+// worktree through git, then the root (test-architecture §57c — no hub boot outside scripts/hub-boot.mjs)
+const root = mintRoot('ui-fit');
+const wt = path.join(root, 't');
+const fakeHome = path.join(root, 'home');
+for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('ui-fit-chrome');
 const stubDir = scratch('ui-fit-stub');
 const CWD = path.join(stubDir, 'work');
@@ -81,27 +86,26 @@ fs.writeFileSync(path.join(dataDir, 'job-notifications.json'), JSON.stringify(fx
 const sleeper = spawn('sleep', ['900'], { stdio: 'ignore' });
 for (const id of [fx.ids.running, fx.ids.awaiting]) writeAliveStamp(fs, path, dataDir, fx.jobs.find((j) => j.id === id), sleeper.pid);
 const svc = await new Promise((res) => { const s = http.createServer((q, r) => r.end('<!doctype html><title>svc</title>')); s.listen(SVC_PORT, '127.0.0.1', () => res(s)); });
-const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOST: '127.0.0.1', HOME: fakeHome, PATH: hubPath, SHELL: path.join(SHAPE_DIR, 'login-shell'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1' };
 for (const k of ['CLAUDE_CMD', 'CODEX_CMD', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) delete srvEnv[k];
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', srvLog, srvLog] });
+for (const k of DAEMON_ROOT_ENV) delete srvEnv[k];   // a device root, if the caller's env names one, would lie outside the minted root
+const hub = startHub({ root, tree: wt, port: PORT, env: srvEnv });   // its output: <root>/hub.log
 const chromeEnv = { ...process.env }; delete chromeEnv.DBUS_SESSION_BUS_ADDRESS; delete chromeEnv.DISPLAY;
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
   '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
+  try { hub.stop(); } catch { }
   try { sleeper.kill('SIGKILL'); } catch { }
   try { svc.close(); } catch { }
-  for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the shells (§57b)
+  for (const r of [stubDir, chromeDir]) { try { endRootedProcesses(r); } catch { } } // what this suite roots outside the minted root (§57b); the helper ends the hub's own
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   for (const d of [chromeDir, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
-process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
+process.on('exit', cleanup);   // a signal is the boot helper's (armed at mintRoot: each ends in exit, so this runs) — no signal line here
 const PENDS = new Map();
 armWatchdog({ capMs: 840e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
-for (let i = 0; i < 160; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+if (!(await hub.ready({ ms: 40000 }))) console.log(`  (the hub did not answer in 40 s — its log:)\n${hub.log().slice(-2000)}`);   // the log lives in the minted root, gone at exit
 const api = async (p, body) => (await fetch(ORIGIN + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
 const ACC = {};
 for (const [k, n] of [['A', 'Work Max'], ['B', 'Personal Max'], ['L', 'A very long subscription account name that runs to sixty chars']]) ACC[k] = (await api('/api/accounts/subscription', { name: n })).id;

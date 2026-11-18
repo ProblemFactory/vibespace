@@ -228,7 +228,10 @@ const CLI_PRESENCE = {
 };
 const hitOf = (code, alts) => alts.some((x) => Array.isArray(x) ? x.every((r) => r.test(code)) : x.test(code));
 const memo = (fn) => { const m = new Map(); return (src) => { let v = m.get(src); if (v === undefined) { v = fn(src); m.set(src, v); } return v; }; }; // the controls re-judge the same texts
-const spawnsHub = memo((src) => SPAWN_HUB.test(src));
+// test-architecture §57c's ONE boot: a suite that starts its hub through scripts/hub-boot.mjs (mintRoot + startHub) boots one too —
+// it never spells the spawn itself (test-ui-fit-chrome since pick 1's cure on 8386298f8, test-chat-e2e since piece 1)
+const STARTS_HUB = /\bstartHub\s*\(/, VIA_HELPER = /from\s+['"]\.\/hub-boot\.mjs['"]/;
+const spawnsHub = memo((src) => SPAWN_HUB.test(src) || (STARTS_HUB.test(src) && VIA_HELPER.test(src)));
 const doorsMemo = new Map();
 function census(srcs, table, doors, { reach = null } = {}) {
   const names = Object.keys(srcs);
@@ -289,6 +292,12 @@ ok(c.stale.length === 0, `no row names a suite outside the census (${c.stale.len
   const tabbed = census({ ...srcs, 'test-zz-planted.mjs': boot + "await evalJs(`localStorage.setItem('vibespace.agentsTab', 'machines'); app._showAgentsDialog()`);\nawait evalJs(`app._showAgentsDialog()`);\n" }, { ...CLI_PRESENCE, 'test-zz-planted.mjs': { doors: ['renderer'], whyNot: WHY_MACHINES, machinesOnly: true } }, DOORS);
   const reads = census({ ...srcs, 'test-zz-planted.mjs': boot + "await evalJs(`app._showAgentsDialog(); document.querySelectorAll('.agent-actions button').length`);\n" }, { ...CLI_PRESENCE, 'test-zz-planted.mjs': { doors: ['renderer'], whyNot: 'reads nothing about the CLI' } }, DOORS);
   const pick = (r, re) => r.bad.some((b) => re.test(b));
+  // the ONE boot counts as a boot: a planted suite that starts its hub through hub-boot.mjs and reaches the dialog with no row is named;
+  // RED: the census's spawn-only spelling (the form before) lets it pass unseen
+  const viaHelper = "import { mintRoot, startHub } from './hub-boot.mjs';\nconst hub = startHub({ root, tree: wt, port: PORT, env });\n";
+  const plantedH = census({ ...srcs, 'test-zz-planted.mjs': viaHelper + "await evalJs(`app._showAgentsDialog(); document.querySelector('.ob-backend .agent-actions')`);\n" }, CLI_PRESENCE, DOORS);
+  ok(pick(plantedH, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) renderer — and has no row/) && !SPAWN_HUB.test(viaHelper),
+    'CONTROL: a planted suite that boots through hub-boot.mjs startHub (no spawn of its own) and reaches the dialog with no row is named — the spawn-only spelling alone would miss it', plantedH.bad.slice(-1));
   ok(pick(planted, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) renderer — and has no row/) && pick(railOnly, /^test-zz-planted\.mjs: boots a hub and reaches the door\(s\) rail — and has no row/) && pick(wrongDoors, /^test-zz-planted\.mjs: its row names the door\(s\) renderer, its code reaches rail/) && pick(tabbed, /^test-zz-planted\.mjs: «Machines only» — and an open draws another tab/) && pick(reads, /^test-zz-planted\.mjs: says its verdict cannot depend/),
     'CONTROL: a planted suite with no row (through the dialog, and through the rail panel alone), a row whose doors are not its code\'s, a «Machines only» suite that also opens the Accounts tab and a «why not» suite that reads .agent-actions are each named',
     { planted: planted.bad.slice(-1), railOnly: railOnly.bad.slice(-1), wrongDoors: wrongDoors.bad.slice(-1), tabbed: tabbed.bad.slice(-1), reads: reads.bad.slice(-1) });
