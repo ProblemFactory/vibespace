@@ -112,6 +112,17 @@ console.log('— ③c a LONG real path steps a Context row down — and the row 
     `③c within ${budget} B the short path's row is told whole at «file names», no note`);
   ok(!!(lAt && lAt.rows[0].level !== 'names' && /\[over the injection budget: file names need [^\]]* — told as [^\]]* instead/.test(lLine) && lAt.rows[0].bytes <= cl),
     `③c within the same ${budget} B the LONG path steps the row down (to «${lAt ? lAt.rows[0].level : '?'}») and its own line says so; the measured row only shrinks (${lAt ? lAt.rows[0].bytes : '?'} ≤ ${cl} B)`);
+  // The words the line says are the row's OWN level's — not merely some «told as …»: a line that named another depth than the one
+  // told would mislead the reader. The depths' words as a person reads them (src/task-groups.js TELL_WORDS, pinned here); the line
+  // says the row's level and NO other level's words.
+  const DEPTH_WORDS = { note: 'the path and note only', names: 'file names', index: 'file names + key files', contents: 'full contents' };
+  const saysAs = (line, lv) => line.includes(`— told as ${DEPTH_WORDS[lv]} instead`);
+  const lv = lAt ? lAt.rows[0].level : '', othersIn = (line) => Object.keys(DEPTH_WORDS).filter((k) => k !== lv && saysAs(line, k));
+  const saysOwn = (line) => !!(DEPTH_WORDS[lv] && saysAs(line, lv) && othersIn(line).length === 0);
+  // control: the same line with another level's words in place of its own is refused (a pin that cannot tell them apart pins nothing)
+  const wrongLv = lv === 'index' ? 'names' : 'index', wrong = DEPTH_WORDS[lv] ? lLine.replace(`— told as ${DEPTH_WORDS[lv]} instead`, `— told as ${DEPTH_WORDS[wrongLv]} instead`) : '';
+  ok(saysOwn(lLine) && wrong !== lLine && !saysOwn(wrong),
+    `③c the line says «told as ${DEPTH_WORDS[lv] || '?'} instead» — the words of the row's own level («${lv || '?'}»), no other level's (${othersIn(lLine).join(' ') || 'none'}); control: the line with «${DEPTH_WORDS[wrongLv]}» in their place is refused`);
 }
 
 console.log('— ④ every pointer names a served manual; every surface has one');
