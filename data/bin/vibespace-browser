@@ -109,6 +109,18 @@ function loadPasskey() {
   return null;
 }
 const PKS = loadPasskey();
+/** lane digit-zero (2026-11-17): the read-back of a fill (PURE src/browser-read-back.js — the source in a checkout, the boot-time
+ *  copy `vibespace-browser-read-back.js` beside this file on a host). OPTIONAL like the passkey words: without it a fill answers
+ *  as the driver does. */
+function loadReadBack() {
+  const root = path.join(__dirname, '..', '..');
+  const cands = fs.existsSync(path.join(root, 'server.js')) && fs.existsSync(path.join(root, 'src', 'browser-read-back.js'))
+    ? [path.join(root, 'src', 'browser-read-back.js'), path.join(__dirname, 'vibespace-browser-read-back.js')]
+    : [path.join(__dirname, 'vibespace-browser-read-back.js')];
+  for (const f of cands) { try { if (fs.existsSync(f)) return require(f); } catch { /* an unreadable copy = none */ } }
+  return null;
+}
+const RB = loadReadBack();
 const API = process.env.VIBESPACE_API;
 // lane jobs-browser (B-dbc1): a Background Work job's process carries VIBESPACE_JOB_TOKEN — it browses as the conversation
 // that owns it (the server's rule: the owner's profile, its own window; verbs that change the conversation's browsers refused)
@@ -1101,7 +1113,7 @@ async function runPage(c) {
   }
   // lane digit-zero: what this command reads back after the driver answers (a fill / type / keyboard type; never a vault fill,
   // a batch, or a tab under the read fence — its reads are the hub's to judge)
-  const readPlan = typeof V.readBackPlan === 'function' && !isVaultFill && !r.scrubOutput && cls.verb !== 'batch' ? V.readBackPlan(cls.argv) : null;
+  const readPlan = RB && typeof RB.readBack === 'function' && typeof V.readBackPlan === 'function' && !isVaultFill && !r.scrubOutput && cls.verb !== 'batch' ? V.readBackPlan(cls.argv) : null;
   // r5 F1 (b): the binary (and a daemon this spawn starts) runs in the private directory, never this shell's
   const child = spawn(bin.path, argv, { stdio, env, cwd: runCwd.dir });
   if (stdinJson != null) child.stdin.end(stdinJson);
@@ -1151,7 +1163,7 @@ async function runPage(c) {
     // read back), nothing landed is refused, a different value is said (V.readBack); the audit below records what it found
     if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {
       // ONE bound (10 s) for all of the read-back's driver runs together: each run gets what is left of it
-      const rb = await V.readBack({ plan: readPlan, json: wantsJson, run: (args, o) => runBinQuiet(bin.path, [...(argv.includes('--pin-tab') ? ['--pin-tab'] : []), ...args], { env, cwd: runCwd.dir, ms: o && o.ms > 0 ? Math.min(o.ms, 10000) : 10000 }) });
+      const rb = await RB.readBack({ plan: readPlan, json: wantsJson, run: (args, o) => runBinQuiet(bin.path, [...(argv.includes('--pin-tab') ? ['--pin-tab'] : []), ...args], { env, cwd: runCwd.dir, ms: o && o.ms > 0 ? Math.min(o.ms, 10000) : 10000 }) });
       if (rb && rb.note) errText += rb.note + '\n';
       else if (rb) { outText = rb.out; errText = rb.err; code = rb.code; }
     }

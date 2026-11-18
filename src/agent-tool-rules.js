@@ -151,6 +151,7 @@ const HELD_TOOLS = Object.freeze({
   'vibespace-browser-verbs.js': 'a module the browser CLI requires, not a command',
   'vibespace-browser-stuck.js': 'a module the browser CLI requires (its page-dialog words), not a command',
   'vibespace-browser-passkey.js': 'a module the browser CLI requires (its passkey words), not a command',
+  'vibespace-browser-read-back.js': 'a module the browser CLI requires (its read-back of a fill), not a command',
   'vibespace-local-index.js': 'a module the person\'s CLI requires (its PURE half — lane human-cli), not a command',
 });
 

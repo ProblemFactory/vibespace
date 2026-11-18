@@ -1162,12 +1162,13 @@ class HostManager {
    *  table the shipped `vibespace-browser` runs (copied at boot from
    *  src/browser-verbs.js); `vibespace-browser-stuck.js` its page-dialog words (lane browser-stuck, copied at boot from
    *  src/browser-stuck.js); `vibespace-browser-passkey.js` its passkey words (lane browser-passkey, copied at boot from
-   *  src/browser-passkey.js); `agent-cli-text.js` the ONE-text rule vibespace-msg / -channels / -ask / -task
+   *  src/browser-passkey.js); `vibespace-browser-read-back.js` its read-back of a fill (lane digit-zero, copied at boot from
+   *  src/browser-read-back.js); `agent-cli-text.js` the ONE-text rule vibespace-msg / -channels / -ask / -task
    *  share (lane cli-one-text-arg, copied at boot from src/agent-cli-text.js); `cli-call.js` THE ONE CALL every agent CLI makes
    *  to the hub (lane cli-call-timeouts, copied at boot from src/cli-call.js); `vibespace` the PERSON'S CLI (lane human-cli — on a
    *  machine with no hub it answers «no VibeSpace hub has run here» with the door) + `vibespace-local-index.js` its PURE
    *  half (copied at boot from src/local-index.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'cli-call.js', 'vibespace', 'vibespace-local-index.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-api', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'vibespace-browser-read-back.js', 'agent-cli-text.js', 'cli-call.js', 'vibespace', 'vibespace-local-index.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-api', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the

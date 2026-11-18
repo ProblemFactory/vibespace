@@ -384,6 +384,18 @@ function createBrowserPasskeyCopy() {
   } catch (e) { console.warn('[tools] browser passkey words not copied beside vibespace-browser: ' + e.message); }
 }
 createBrowserPasskeyCopy();
+// lane digit-zero (2026-11-17): the read-back of a fill (PURE src/browser-read-back.js — its own file so the device bundle never
+// carries it) rides beside it the same way — `vibespace-browser-read-back.js`, copied at every boot, gitignored, in AGENT_TOOLS;
+// loaded OPTIONALLY by the CLI. Copied OFF the loop (no sync write — the store-write and sync-fs censuses): a fill before it lands
+// answers as the driver does
+function createBrowserReadBackCopy() {
+  const dst = path.join(AGENT_BIN_DIR, 'vibespace-browser-read-back.js'), tmp = dst + '.tmp';
+  fs.promises.mkdir(AGENT_BIN_DIR, { recursive: true })
+    .then(() => fs.promises.copyFile(path.join(rootDir, 'src', 'browser-read-back.js'), tmp))
+    .then(() => fs.promises.rename(tmp, dst))
+    .catch((e) => console.warn('[tools] browser read-back not copied beside vibespace-browser: ' + (e && e.message)));
+}
+createBrowserReadBackCopy();
 // lane cli-one-text-arg (the owner 2026-10-14): ONE TEXT PER FREE-TEXT COMMAND — the rule vibespace-msg / -channels / -ask /
 // -task share (PURE src/agent-cli-text.js: the stray-word refusal, the --text-file / --text - doors, the `sent: N` echo)
 // rides beside them the same way — `agent-cli-text.js` (its own name: the CLIs require it by that literal name), copied at

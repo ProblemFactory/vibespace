@@ -28,6 +28,8 @@ data/bin/vibespace-browser-verbs.js
 data/bin/vibespace-browser-stuck.js
 # lane browser-passkey: the passkey words beside the CLI, copied at startup from src/browser-passkey.js
 data/bin/vibespace-browser-passkey.js
+# lane digit-zero: the read-back of a fill beside the CLI, copied at startup from src/browser-read-back.js
+data/bin/vibespace-browser-read-back.js
 # lane cli-one-text-arg: the ONE-text rule beside the four free-text CLIs, copied at startup from src/agent-cli-text.js
 data/bin/agent-cli-text.js
 # lane cli-call-timeouts: THE ONE CALL every agent CLI makes to the hub, copied at startup from src/cli-call.js

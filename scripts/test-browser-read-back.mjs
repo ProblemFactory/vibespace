@@ -31,7 +31,8 @@ import { mutantCopies, treeLitter } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const V = require('../src/browser-verbs.js');
+const V = require('../src/browser-verbs.js');      // which commands are read back, a key's code
+const RB = require('../src/browser-read-back.js'); // the read-back itself (its own file: the device bundle never carries it)
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 700) : '')); } return !!c; };
 
@@ -69,7 +70,7 @@ console.log('② keyNameVerdict — a key\'s CODE types nothing; its NAME is ask
 
 console.log('③ FIELD_FORMS — each kind holds its value in ONE form');
 {
-  const F = V.FIELD_FORMS;
+  const F = RB.FIELD_FORMS;
   const kinds = ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'];
   ok(kinds.every((k) => F[k] && F[k].re.test(F[k].example) && F[k].words.length > 3) && Object.keys(F).length === kinds.length, `the seven kinds that take no typed text (${kinds.join(', ')}): each one's example is in its own form, each says its form in words`);
   const notForms = [['date', '01072027'], ['date', '01/07/2027'], ['date', '2027-1-7'], ['date', '7 January 2027'], ['time', '0905'], ['time', '9:05'], ['time', '09:05 AM'], ['datetime-local', '2027-01-07 09:05'], ['month', '01/2027'], ['week', '2027-01'], ['color', 'red'], ['color', '#36c'], ['range', 'half']];
@@ -104,7 +105,7 @@ function fakePage(fields, { focused = null, inFrame = false } = {}) {
   const ctx = vm.createContext({ document: doc, window: win, JSON });
   return { run: (js) => vm.runInContext(js, ctx), nodes, doc, events, focus };
 }
-const probe = (p, asked, target) => JSON.parse(p.run(V.fieldProbeJs(asked, target)));
+const probe = (p, asked, target) => JSON.parse(p.run(RB.fieldProbeJs(asked, target)));
 {
   const p = fakePage({ d: { kind: 'date' } }, { focused: 'd' });
   const a = probe(p, '01072027');
@@ -119,19 +120,19 @@ const probe = (p, asked, target) => JSON.parse(p.run(V.fieldProbeJs(asked, targe
   ok(bad.tag === null && bad.why === 'selector' && gone.tag === null && gone.why === 'missing', 'a selector the page cannot read answers why «selector», one it cannot find «missing» — never another field', { bad, gone });
   const fr = fakePage({ tm: { kind: 'time' } }, { focused: 'tm', inFrame: true });
   ok(probe(fr, '09:05').kind === 'time', 'the focused probe reaches a field focused inside a same-origin frame');
-  const s = JSON.parse(fr.run(V.fieldSetJs('09:05')));
+  const s = JSON.parse(fr.run(RB.fieldSetJs('09:05')));
   ok(s.set === true && s.value === '09:05' && s.before === '' && fr.nodes.tm._v === '09:05' && fr.events.join() === 'tm:input,tm:change', 'the setter goes through the field\'s OWN window\'s native value setter, fires input and change, answers before and after', { s, events: fr.events });
   const ex = fakePage({ d1: { kind: 'date', value: '2026-01-01' } }, { focused: 'd1' });
-  const n = JSON.parse(ex.run(V.fieldSetJs('2027-01-07', null, { kind: 'date', value: '' })));
+  const n = JSON.parse(ex.run(RB.fieldSetJs('2027-01-07', null, { kind: 'date', value: '' })));
   ok(n.set === false && n.why === 'not-target' && ex.nodes.d1._v === '2026-01-01', 'a setter told which field it must be (kind + value) sets nothing in another field — not-target', n);
   const lk = fakePage({ d: { kind: 'date', readOnly: true } }, { focused: 'd' });
-  const l = JSON.parse(lk.run(V.fieldSetJs('2027-01-07')));
+  const l = JSON.parse(lk.run(RB.fieldSetJs('2027-01-07')));
   ok(l.set === false && l.locked === true && lk.nodes.d._v === '', 'a read-only field: the setter sets nothing and says locked', l);
-  const none = JSON.parse(vm.runInContext(V.fieldProbeJs('x'), vm.createContext({ document: { activeElement: null }, JSON })));
+  const none = JSON.parse(vm.runInContext(RB.fieldProbeJs('x'), vm.createContext({ document: { activeElement: null }, JSON })));
   ok(none.tag === null, 'nothing focused ⇒ the probe says so (tag null)', none);
-  ok(V.evalAnswer({ code: 0, out: JSON.stringify({ a: 1 }, null, 2) + '\n' }).a === 1 && V.evalAnswer({ code: 0, out: 'noise\n' + JSON.stringify(JSON.stringify({ a: 2 })) + '\n' }).a === 2 && V.evalAnswer({ code: 1, out: '{}' }) === null,
+  ok(RB.evalAnswer({ code: 0, out: JSON.stringify({ a: 1 }, null, 2) + '\n' }).a === 1 && RB.evalAnswer({ code: 0, out: 'noise\n' + JSON.stringify(JSON.stringify({ a: 2 })) + '\n' }).a === 2 && RB.evalAnswer({ code: 1, out: '{}' }) === null,
     'evalAnswer parses the WHOLE answer first (an object printed over several lines), then its last line; a failed run answers null');
-  ok(V.driverRead({ code: 0, out: '{"success":true,"data":{"value":"4"}}' }) === '4' && V.driverRead({ code: 0, out: '{"success":true,"data":"4"}' }) === '4' && V.driverRead({ code: 0, out: '✓ 4' }) === null && V.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }) === null && V.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }, { absentIsEmpty: true }) === '',
+  ok(RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":"4"}}' }) === '4' && RB.driverRead({ code: 0, out: '{"success":true,"data":"4"}' }) === '4' && RB.driverRead({ code: 0, out: '✓ 4' }) === null && RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }) === null && RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }, { absentIsEmpty: true }) === '',
     'driverRead takes only the driver\'s JSON answer — any other shape is UNREADABLE (null), never an empty field; an absent attribute is empty only when asked');
 }
 
@@ -236,7 +237,7 @@ async function readBackCensus(readBack) {
   return { bad, cost };
 }
 {
-  const { bad, cost } = await readBackCensus(V.readBack);
+  const { bad, cost } = await readBackCensus(RB.readBack);
   ok(bad.length === 0, `readBack judges the verb's TARGET (a CSS selector in the page, an @ref through the driver), sets a date / time / … field through its own setter in the kind's normal form, clears on an empty fill, never blames the field for a failed run, reads the answer whole, keeps ONE 10 s bound — a bare keyboard type's findings said, never refused`, bad);
   ok(Object.keys(cost).length >= 7, `(e) THE COST, measured on the fake — driver runs per read-back: ${Object.entries(cost).map(([k, n]) => `${k} ${n}`).join(' · ')}`, cost);
 }
@@ -247,9 +248,10 @@ function wiringFindings(src) {
   const bad = [];
   const kn = src.indexOf('V.keyNameVerdict(cls.argv)'), cwd = src.indexOf('const runCwd = startsNothing ? { ok: true, dir: null } : daemonCwd();'), resolve1 = src.indexOf("call('POST', '/api/agent/browser/resolve'");
   if (!(kn > 0 && kn < cwd && kn < resolve1)) bad.push('the key\'s-code refusal is not judged before the daemon directory / the binary / the resolve');
-  if (!/const readPlan = typeof V\.readBackPlan === 'function' && !isVaultFill && !r\.scrubOutput && cls\.verb !== 'batch' \? V\.readBackPlan\(cls\.argv\) : null;/.test(src)) bad.push('the read-back plan does not exclude a vault fill, a read-fenced tab and a batch');
+  if (!/const readPlan = RB && typeof RB\.readBack === 'function' && typeof V\.readBackPlan === 'function' && !isVaultFill && !r\.scrubOutput && cls\.verb !== 'batch' \? V\.readBackPlan\(cls\.argv\) : null;/.test(src)) bad.push('the read-back plan does not exclude a vault fill, a read-fenced tab and a batch');
+  if (!/function loadReadBack\(\)[\s\S]{0,600}'src', 'browser-read-back\.js'[\s\S]{0,300}'vibespace-browser-read-back\.js'/.test(src) || !/^const RB = loadReadBack\(\);$/m.test(src)) bad.push('the CLI does not load the read-back from the source in a checkout, else its copy beside it');
   const exitAt = src.indexOf("child.on('exit', async (code) => {");
-  const rbAt = src.indexOf('await V.readBack({ plan: readPlan', exitAt), auditAt = src.indexOf("call('POST', '/api/agent/browser/audit'", exitAt);
+  const rbAt = src.indexOf('await RB.readBack({ plan: readPlan', exitAt), auditAt = src.indexOf("call('POST', '/api/agent/browser/audit'", exitAt);
   if (!(exitAt > 0 && rbAt > exitAt && auditAt > rbAt)) bad.push('the read-back does not run in the exit handler before the audit');
   if (!/if \(code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit\)/.test(src)) bad.push('the read-back is not limited to a 0 answer with no dialog / loop / passkey / prompt');
   if (!/else if \(rb\) \{ outText = rb\.out; errText = rb\.err; code = rb\.code; \}/.test(src)) bad.push('the read-back\'s answer does not replace the driver\'s');
@@ -257,24 +259,32 @@ function wiringFindings(src) {
   if (!/run: \(args, o\) => runBinQuiet\(bin\.path, .*?, \{ env, cwd: runCwd\.dir, ms: o && o\.ms > 0 \? Math\.min\(o\.ms, 10000\) : 10000 \}\)/.test(src)) bad.push('each read-back run is not handed what is left of the ONE bound');
   return bad;
 }
+{
+  const hosts = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'), gen = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8'), gi = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8');
+  const tools = (/static AGENT_TOOLS = \[([^\]]+)\]/.exec(hosts) || [, ''])[1];
+  ok(/'vibespace-browser-read-back\.js'/.test(tools) && /function createBrowserReadBackCopy\(\)[\s\S]{0,400}'src', 'browser-read-back\.js'[\s\S]{0,200}fs\.promises\.rename\(tmp, dst\)/.test(gen) && /^createBrowserReadBackCopy\(\);$/m.test(gen) && /^data\/bin\/vibespace-browser-read-back\.js$/m.test(gi),
+    'the read-back SHIPS beside the CLI: copied at every boot (off the loop) as vibespace-browser-read-back.js, in AGENT_TOOLS (a host gets it), gitignored');
+  const devBundled = ['src/browser-verbs.js', 'src/browser-facts.js', 'src/browser-serve.js', 'src/exit-proxy.js'].filter((f) => /require\([^)]*browser-read-back/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(devBundled.length === 0, 'no module the device bundle carries requires the read-back (test-architecture §107: it is the CLI\'s alone)', devBundled);
+}
 { const bad = wiringFindings(CLI_SRC); ok(bad.length === 0, 'the CLI: the key\'s code refused before anything runs; the read-back after a 0 answer, before the audit, never a vault fill / batch / fenced tab; every run handed what is left of ONE 10 s bound', bad); }
 
 console.log('⑦ RED CONTROLS (patched copies, the tree untouched)');
 const MUT = mutantCopies('read-back', REPO);
 {
   // the release's behaviour: the driver's answer is trusted — a date field filled «Done» stays empty
-  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const from = '  const form = f.tag === \'input\' ? FIELD_FORMS[f.kind] : null;\n';
-  const f = MUT.write('src/browser-verbs.js', SRC.replace(from, '  const form = null; // CONTROL: the driver is trusted\n'), 'trust');
+  const f = MUT.write('src/browser-read-back.js', SRC.replace(from, '  const form = null; // CONTROL: the driver is trusted\n'), 'trust');
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill ISO ⇒ the setter')) && bad.some((b) => b.startsWith('the owner\'s act')), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
 }
 {
   // 68da75fa2's read-back (the must): whatever holds the FOCUS after the verb is judged, the target named only in the words
-  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
   const from = '  if (plan.sel == null) {\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));';
-  const f = MUT.write('src/browser-verbs.js', SRC.replace(from, '  if (true) { // CONTROL: the focused field, whatever the verb named\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));'), 'focused');
+  const f = MUT.write('src/browser-read-back.js', SRC.replace(from, '  if (true) { // CONTROL: the focused field, whatever the verb named\n    f = evalAnswer(await call([\'eval\', fieldProbeJs(plan.asked)]));'), 'focused');
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('scene 1:')) && bad.some((b) => b.startsWith('scene 2:')) && bad.some((b) => b.startsWith('scene 3:')), 'CONTROL: the read-back that judges the FOCUSED field (68da75fa2) FAILS the three scenes — a one-time-code box, a card number, an earlier date field', bad.filter((b) => b.startsWith('scene')).map((b) => b.slice(0, 120)));
