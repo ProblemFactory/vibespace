@@ -83,9 +83,12 @@ function isMountDaemonOf(argv, mountpoint) {
  *  time as scanProc: the shared threadpool is never flooded), each with the identity read in the same pass ({pid,
  *  starttime}: /proc/<pid>/stat field 22, counted from the last ')'). Never this process. [] where there is no /proc. */
 // cure 2 (the readers' should): a process LEFT because it sleeps in the kernel is SAID once (per mount point and pid) —
-// never read further (its command line is the hazard), so the walk names it by /proc/<pid>/comm (no memory-map lock)
+// never read further (its command line is the hazard), so the walk names it by /proc/<pid>/comm (no memory-map lock).
+// The key is the line's KIND + mount point + pid + START TIME: a recycled pid asleep there again is a new process (said
+// again), and a daemon the walk said «may be» stale that is found later and asleep at the re-check still gets the re-check's
+// line. The set keeps its newest 1024 keys (the oldest leaves first)
 const asleepSaid = new Set();
-const sayAsleep = (say, mountpoint, pid, line) => { const k = mountpoint + '\0' + pid; if (!say || asleepSaid.has(k)) return; asleepSaid.add(k); try { say(line); } catch { } };
+const sayAsleep = (say, kind, mountpoint, pid, start, line) => { const k = kind + '\0' + mountpoint + '\0' + pid + '\0' + start; if (!say || asleepSaid.has(k)) return; if (asleepSaid.size >= 1024) asleepSaid.delete(asleepSaid.values().next().value); asleepSaid.add(k); try { say(line); } catch { } };
 async function mountDaemonsOf(mountpoint, { procRoot = '/proc', say = null } = {}) {
   const out = [];
   let pids = [];
@@ -96,7 +99,7 @@ async function mountDaemonsOf(mountpoint, { procRoot = '/proc', say = null } = {
     const st = await statOf(procRoot, pid);
     if (!st) continue;
     if (st.state === 'D') {
-      if (/rclone/.test(st.comm)) sayAsleep(say, mountpoint, pid, `pull mount ${mountpoint}: rclone process ${pid} is asleep in the kernel — not read, not signalled (it may be a stale daemon of this folder); tried again at the next release`);
+      if (/rclone/.test(st.comm)) sayAsleep(say, 'walk', mountpoint, pid, st.start, `pull mount ${mountpoint}: rclone process ${pid} is asleep in the kernel — not read, not signalled (it may be a stale daemon of this folder); tried again at the next release`);
       continue;
     }
     let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
@@ -119,8 +122,9 @@ async function killMountDaemons(mountpoint, { procRoot = '/proc', kill = null, s
   for (const id of await mountDaemonsOf(mountpoint, { procRoot, say })) {
     const st = await statOf(procRoot, id.pid);
     if (!st) continue;
-    if (st.state === 'D') {   // asleep in the kernel now: never read further (a SIGKILL would wait for it anyway) — said once
-      sayAsleep(say, mountpoint, id.pid, `pull mount ${mountpoint}: its stale daemon ${id.pid} is asleep in the kernel — left; tried again at the next release`);
+    if (st.state === 'D') {   // asleep in the kernel now: never read further (a SIGKILL would wait for it anyway) — said once,
+      // and named the stale daemon only while it IS the process the walk found (its start time)
+      if (st.start === id.starttime) sayAsleep(say, 'recheck', mountpoint, id.pid, st.start, `pull mount ${mountpoint}: its stale daemon ${id.pid} is asleep in the kernel — left; tried again at the next release`);
       continue;
     }
     let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${id.pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }

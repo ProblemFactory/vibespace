@@ -327,30 +327,73 @@ try {
     let foundD, sigD = [];
     try { foundD = await mountDaemonsOf(mac, { procRoot: P }); await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigD.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rpD; }
     check('a process asleep in the kernel (D) is skipped — its command line is never read, it is never signalled', JSON.stringify(foundD) === JSON.stringify([{ pid: 301, starttime: 1000 }]) && dRead === 0 && sigD.every(([p]) => p !== 306), JSON.stringify({ foundD, dRead, sigD }));
-    { // cure 2: a process LEFT asleep is SAID once — at the walk (named by its comm, never its command line) and at the re-check
-      fake(307, ['/usr/bin/rclone', ...pullMountArgs(mac)], 7000, 'D');   // a fresh pid (306 was said by the leg above)
-      const saidD = [];
-      await killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidD.push(l) });
-      await killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidD.push(l) });
-      const walkSaid = saidD.filter((l) => /rclone process 307 is asleep in the kernel — not read, not signalled/.test(l)).length;
-      fs.rmSync(path.join(P, '307'), { recursive: true, force: true });
-      let st2 = 0;
-      fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '301', 'stat') && ++st2 === 2) return `301 (rclone) D 1 301 301 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0`; return rpD.call(this, q, ...a); };
-      const sigR = [], saidR = [];
-      try { await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigR.push(p), say: (l) => saidR.push(l) }); } finally { fs.promises.readFile = rpD; }
-      check('cure 2: a process left asleep in the kernel is SAID once — at the walk by its comm (twice walked, once said), and the stale daemon found asleep at the re-check is said and left (never signalled)',
-        walkSaid === 1 && sigR.length === 0 && saidR.some((l) => /its stale daemon 301 is asleep in the kernel — left/.test(l)), JSON.stringify({ walkSaid, saidD, sigR, saidR }));
+    // the controls of §14's cures: ONE patched copy of device-mount.js, each cut behind its own flag (one compile — the fast
+    // tier's cap); every anchor found exactly once or the control is red by name
+    const dsrc0 = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
+    const SRCX = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
+    const dcuts = [
+      ['dskip', "    if (!st) continue;\n    if (st.state === 'D') {\n      if (/rclone/.test(st.comm))", "    if (!st) continue;\n    if (!globalThis.__dmCut.dskip && st.state === 'D') {\n      if (/rclone/.test(st.comm))"],
+      ['key/kind', "const k = kind + '\\0' + mountpoint + '\\0' + pid + '\\0' + start;", "const k = (globalThis.__dmCut.kind ? '' : kind + '\\0') + mountpoint + '\\0' + pid + (globalThis.__dmCut.key ? '' : '\\0' + start);"],
+      ['start', "if (st.start === id.starttime) sayAsleep(", "if (globalThis.__dmCut.start || st.start === id.starttime) sayAsleep("],
+    ];
+    const dmiss = dcuts.filter(([, a]) => dsrc0.split(a).length !== 2).map(([k]) => k);
+    let DC = null;
+    if (dmiss.length) check('CONTROL: the device-mount.js anchors were found once each', false, dmiss.join());
+    else {
+      globalThis.__dmCut = {};
+      const cpD = path.join(tmp, 'device-mount-cuts.js');
+      fs.writeFileSync(cpD, dcuts.reduce((x, [, a, b]) => x.replace(a, () => b), dsrc0).replace(/require\('\.\//g, `require('${SRCX}/`));
+      DC = require(cpD);
     }
-    {
-      const dsrc0 = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
-      const noSkip = "    if (!st || st.state === 'D') continue;\n    let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`";
-      if (!dsrc0.includes(noSkip)) check('CONTROL: the D-skip anchor was found in mountDaemonsOf', false);
-      else {
-        const SRCX = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
-        const cpD = path.join(tmp, 'device-mount-no-dskip.js');
-        fs.writeFileSync(cpD, dsrc0.replace(noSkip, noSkip.replace("if (!st || st.state === 'D') continue;", 'if (!st) continue;')).replace(/require\('\.\//g, `require('${SRCX}/`));
-        const foundC = await require(cpD).mountDaemonsOf(mac, { procRoot: P });
-        check('CONTROL (no D skip): the sleeping process is read and found (red)', foundC.some((x) => x.pid === 306), JSON.stringify(foundC));
+    const dcut = async (k, f) => { globalThis.__dmCut = { [k]: true }; try { return await f(); } finally { globalThis.__dmCut = {}; } };
+    if (DC) {
+      const foundC = await dcut('dskip', () => DC.mountDaemonsOf(mac, { procRoot: P }));
+      check('CONTROL (no D skip): the sleeping process is read and found (red)', foundC.some((x) => x.pid === 306), JSON.stringify(foundC));
+    }
+    { // cure 2: a process LEFT asleep is SAID once — at the walk (named by its comm, never its command line) and at the re-check
+      const asleepLegs = async (K) => {
+        const out = {}, said307 = (l) => /rclone process 307 is asleep in the kernel — not read, not signalled/.test(l);
+        fake(307, ['/usr/bin/rclone', ...pullMountArgs(mac)], 7000, 'D');   // a fresh pid (306 was said by the leg above)
+        const saidD = [];
+        await K.killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidD.push(l) });
+        await K.killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidD.push(l) });
+        out.walkSaid = saidD.filter(said307).length;
+        fake(307, ['/usr/bin/rclone', ...pullMountArgs(mac)], 7001, 'D');   // cure 3 (the cure-2 read #7): the pid RECYCLED — a new process asleep there
+        const saidN = [];
+        await K.killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidN.push(l) });
+        out.recycledSaid = saidN.filter(said307).length;
+        fs.rmSync(path.join(P, '307'), { recursive: true, force: true });
+        const recheck = async (start) => {   // 301's SECOND stat read (the re-check at the signal) says D
+          let st2 = 0; const sigR = [], saidR = [];
+          fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '301', 'stat') && ++st2 === 2) return `301 (rclone) D 1 301 301 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${start} 0 0`; return rpD.call(this, q, ...a); };
+          try { await K.killMountDaemons(mac, { procRoot: P, kill: (p) => sigR.push(p), say: (l) => saidR.push(l) }); } finally { fs.promises.readFile = rpD; }
+          return { sig: sigR.length, said: saidR.some((l) => /its stale daemon 301 is asleep in the kernel — left/.test(l)) };
+        };
+        out.same = await recheck(1000);    // the daemon the walk found, asleep at the re-check: said and left
+        out.other = await recheck(1001);   // cure 3 (the cure-2 read #8): the pid names ANOTHER process now, asleep
+        // cure 3 (the cure-3 read #8): the walk's line and the re-check's are two keys — a daemon the walk said «may be» stale
+        // (asleep then), found at a later release and asleep at ITS re-check, still gets the re-check's line
+        fake(308, ['/usr/bin/rclone', ...pullMountArgs(mac)], 8000, 'D');
+        await K.killMountDaemons(mac, { procRoot: P, kill: () => {}, say: () => {} });
+        fake(308, ['/usr/bin/rclone', ...pullMountArgs(mac)], 8000, 'S');
+        { let st3 = 0; const said8 = [], sig8 = [];
+          fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '308', 'stat') && ++st3 === 2) return `308 (rclone) D 1 308 308 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 8000 0 0`; return rpD.call(this, q, ...a); };
+          try { await K.killMountDaemons(mac, { procRoot: P, kill: (p) => sig8.push(p), say: (l) => said8.push(l) }); } finally { fs.promises.readFile = rpD; }
+          out.woke = { said: said8.some((l) => /its stale daemon 308 is asleep in the kernel — left/.test(l)), sig: sig8.includes(308) }; }
+        fs.rmSync(path.join(P, '308'), { recursive: true, force: true });
+        return out;
+      };
+      const a = await asleepLegs({ killMountDaemons });
+      check('cure 2: a process left asleep in the kernel is SAID once — at the walk by its comm (twice walked, once said), and the stale daemon found asleep at the re-check is said and left (never signalled)',
+        a.walkSaid === 1 && a.same.sig === 0 && a.same.said === true, JSON.stringify(a));
+      check('cure 3 (the cure-2 read #7, #8): a recycled pid asleep again is a NEW process — said again; a pid that names another sleeping process at the re-check is never called the stale daemon',
+        a.recycledSaid === 1 && a.other.said === false, JSON.stringify(a));
+      check('cure 3 (the cure-3 read #8): a daemon the walk said «may be» stale, found later and asleep at the re-check, still gets the re-check\'s line (never signalled)',
+        a.woke.said === true && a.woke.sig === false, JSON.stringify(a.woke));
+      if (DC) {
+        const ak = await dcut('key', () => asleepLegs(DC)), as = await dcut('start', () => asleepLegs(DC)), an = await dcut('kind', () => asleepLegs(DC));
+        check('CONTROL (the said key without the start time / the re-check without its start check / one key for both lines): the recycled sleeper is never said / the other process is named the stale daemon / the re-check\'s line is never said (red)',
+          ak.recycledSaid === 0 && as.other.said === true && an.woke.said === false, JSON.stringify({ ak, as, an }));
       }
     }
     fs.rmSync(path.join(P, '306'), { recursive: true, force: true });
