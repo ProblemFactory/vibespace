@@ -616,6 +616,15 @@ export function installSidebarState(SidebarClass) {
     else delete this._sessionConfigs[stateKey];
     const legacyId = this._getLegacySessionId(sessionOrKey);
     if (legacyId && legacyId !== stateKey) delete this._sessionConfigs[legacyId];
+    if (!this._configBatch) this._pushUserState();
+  };
+  /** lane auto-resume-bulk: a WHOLE BATCH of setSessionConfig writes, ONE user-state push — «对所有会话开启自动继续»
+   *  writes the resume carrier (`autoResume`) of every session the sidebar knows, live or stopped.
+   *  pairs = [[sessionOrKey, patch], …] — each patch is written OVER the session's saved config (never a fresh object:
+   *  that would drop its pin, its model pick…). */
+  proto.setSessionConfigs = function(pairs) {
+    this._configBatch = true;
+    try { for (const [s, patch] of pairs || []) this.setSessionConfig(s, { ...(this.getSessionConfig(s) || {}), ...patch }); } finally { this._configBatch = false; }
     this._pushUserState();
   };
 

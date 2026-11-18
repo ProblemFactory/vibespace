@@ -46,6 +46,7 @@
   "test-attach-ack": 2012,
   "test-attach-rescue": 142955,
   "test-attention-policy-ui": 9754,
+  "test-auto-resume-bulk-chrome": 88000,
   "test-auto-resume-loop": 19782,
   "test-automation-keys-chrome": 50420,
   "test-automation-verbs": 8269,

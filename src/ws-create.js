@@ -1751,6 +1751,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             cwd,
             spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
             cpuNice: session._cpuNice || undefined, // B-460d: the CPU priority this start got — a restored session still says it
+            autoResume: data.autoResume !== undefined && data.autoResume !== null ? !!data.autoResume : undefined, // lane auto-resume-bulk: the carried choice survives a restart (boot-restore reads it)
             agentdPipe: r6Handle ? true : undefined, // R6: daemon-owned pipe session (restore re-opens it, no dtach socket exists)
             host: session.host || null,
             hostName: session.hostName || null,

@@ -1058,6 +1058,10 @@ const SETTINGS_SCHEMA = {
     label: t('Continue automatically when a usage limit resets'),
     description: t('DEFAULT for new chat sessions on any agent that reports usage limits (Claude, Codex): when the account is out of quota and there is no other account to switch to, wait for the reset — or for the quota to come back early — and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
     category: t('Spending'), liveApply: true,
+    // lane auto-resume-bulk (.349): the row also holds the two bulk acts — «对所有会话开启自动继续» / «全部关闭» over the
+    // sessions you HAVE (never this default), «恢复所有因用量/过载停止的会话 (N)» and the passive cost line
+    // (src/lib/bulk-resume.js renderAutoResumeBulk; settings-ui draws it on this tag)
+    fact: 'auto-resume-bulk',
   },
   // lane design-systems-home (design 003 §2 S5): the design system a new design follows when the agent names none
   // (vibespace-design new copies its tokens.css); the chat's design chip preselects it. Read by the hub (serverSetting).

@@ -15,6 +15,7 @@ import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   /
 import { mountSuggestionList } from './voice-teach-ui.js';   // lane voice-dictionary-nag: 「词典建议」's words, each 加入 / 忽略
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
 import { holdWords } from './user-todos-row.js';   // lane setting-doors pick 2: a held row's words («1600 until 22:00, then 800») — ONE spelling with the For-you card's held line
+import { renderAutoResumeBulk } from './bulk-resume.js'; // lane auto-resume-bulk: the auto-resume row's two bulk acts + the passive cost line
 const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 const VOICE_SUGGEST_PATH = 'plugin.voice-input.suggest';     // src/plugin-settings.js: 「词典建议」 — its row lists the words suggested now
 
@@ -487,6 +488,7 @@ class SettingsUI {
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
     if (schema.proposable === true) this._renderHeldLine(info, path);   // lane setting-doors pick 2: a hold an agent's proposed change left on the row — its words and «End now»
+    if (schema.fact === 'auto-resume-bulk') { row.classList.add('has-wide-fact'); renderAutoResumeBulk(row, this.app); } // lane auto-resume-bulk: the two bulk acts + the batch's cost, said before the click (src/lib/bulk-resume.js)
 
     const controlWrap = document.createElement('div');
     controlWrap.className = 'settings-row-control';

@@ -144,8 +144,10 @@ function sessionFromMeta(meta, transportFacts) {
     // compiled alone by test-oat-identity) — the running process keeps it across the hub's restart, so its properties do
     _cpuNice: meta.cpuNice && typeof meta.cpuNice === 'object' && Number.isInteger(meta.cpuNice.by) && meta.cpuNice.by >= 0 && meta.cpuNice.by <= 19 && (meta.cpuNice.by > 0 || ['off', 'no-nice', 'remote'].includes(meta.cpuNice.why)) ? (meta.cpuNice.by > 0 ? { by: meta.cpuNice.by } : { by: 0, why: meta.cpuNice.why }) : null,
     // lane auto-resume-bulk: WHY it stopped (a usage wall / an overloaded model) survives a restart — the card keeps its
-    // mark until the session runs again
+    // mark until the session runs again — and so does a per-session auto-resume choice (the bulk «turn it on for every
+    // session» was undone by every deploy before: the flag lived only in memory and in the client's resume config)
     _stoppedBy: meta.stoppedBy && typeof meta.stoppedBy === 'object' ? meta.stoppedBy : null, // every reader re-validates it (src/stopped-by.js normalizeStoppedBy); this function is also evaluated stand-alone by suites, so it names nothing outside it
+    ...(typeof meta.autoResume === 'boolean' ? { _autoResume: meta.autoResume } : {}),
     // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
     // user-data-dir rung it spawned on. Restored so a later resume of this
     // conversation finds its key and the orphan sweep sees this session as

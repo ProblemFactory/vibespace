@@ -1024,6 +1024,13 @@ class UsageHistory {
     const f = 1 - disc;
     return { input: base.input * f, output: base.output * f, cacheWrite5m: base.cacheWrite5m * f, cacheWrite1h: base.cacheWrite1h * f, cacheRead: base.cacheRead * f };
   }
+  /** The PUBLIC price row for one request of `model` (lane auto-resume-bulk: the bulk resume's cost estimate prices N
+   *  cold reads with THIS table and THIS match — never a second one). `{label, input, output, cacheWrite5m,
+   *  cacheWrite1h, cacheRead}` USD per million; `label` = the tier key the model matched ('_default' when none did). */
+  priceRowFor(model, { acct = null, ts = Date.now(), prompt = 0 } = {}) {
+    const tier = this._tier(model);
+    return { label: tier, ...this._rateFor(acct, tier, ts, prompt) };
+  }
   // `prompt`: the WHOLE request's input (i + cr + cw5 + cw1) when a caller
   // prices ONE request in parts (the token-class splits) — the long-context
   // rule is decided on the request, never on the part, or the parts stop

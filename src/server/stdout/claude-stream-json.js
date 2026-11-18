@@ -751,6 +751,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             // main-thread work ⇒ not limit-blocked ⇒ stale armed waits drop
             // (readings-based disarm misses accounts that emit no events)
             try { noteSessionProduced?.(session, msg); } catch { }
+            // lane auto-resume-bulk: this conversation's CURRENT context size (the status bar's own formula) — what a cold
+            // resume re-reads; the bulk resume's cost estimate prefers it to the ledger's last request (the walk lags)
+            try { const u = msg.message.usage; const n = u ? (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0; if (n > 0 && !recordIsLate?.(session, msg)) session._lastContext = { tokens: n, model: String(msg.message.model), at: Date.now() }; } catch { }
             // THE FACT BEFORE ITS READERS (2026-09-13 r4, the round-3 verifier).
             // The incident's FIRST announcement is a `fallback` CONTENT BLOCK on
             // the very record the substitute answered, and the loop that stamps

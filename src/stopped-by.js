@@ -7,8 +7,8 @@
 //
 // THE FACT: `stoppedBy: { kind: 'quota' | 'overload', at, resetsAt?, memberId?, said }` on the session (persisted in its
 // session-meta, carried on the live list), written at the turn end that stopped it and CLEARED by the next turn that
-// runs. Everything here is PURE — the verdict from signals the core ALREADY has (never a second parser), the live
-// list's fact, and the words the card and the filter print.
+// runs. Everything here is PURE — the verdict from signals the core ALREADY has (never a second parser), the still-
+// walled rule the bulk resume skips by, the batch's plan, and the words the card / the filter / the dialog print.
 //   quota     the wall machine's own walled-turn verdict (usage-pool-engine onWalledTurn: a turn whose wall signals the
 //             turn end confirmed) — its stated reset and the slot it landed on ride along, nothing is re-read
 //   overload  a turn the harness ended because the model was overloaded, from a field the harness already TYPES:
@@ -81,6 +81,49 @@ function liveFactOf(sb, status = null) {
 /** THE FILTER PREDICATE — the sidebar's «stopped by a limit or overload» filter and the bulk resume's candidate set. */
 function isStoppedBy(row) { return !!(row && normalizeStoppedBy(row.stoppedBy)); }
 
+/** IS THE WALL STILL STANDING? The bulk resume SKIPS a session whose wall has not reset (and says until when) — it never
+ *  retries one blindly. `verdict` = the pool's live answer for this session ({usable: true|false|undefined,
+ *  blockedUntil}) — it outranks the stored reset in BOTH directions (a pool with a free member serves a quota-stopped
+ *  conversation now; an overloaded conversation on an account that has since walled waits like any other). With no
+ *  verdict, a quota stop waits out its own stated reset; an overload has no reset to wait for. */
+function stillWalled(sb, verdict = null, now = Date.now()) {
+  const f = normalizeStoppedBy(sb);
+  if (!f) return { walled: false, until: null };
+  if (verdict && verdict.usable === true) return { walled: false, until: null };
+  if (verdict && verdict.usable === false) {
+    const until = num(verdict.blockedUntil) || (f.kind === 'quota' ? f.resetsAt : null) || null;
+    return { walled: true, until: until && until > now ? until : null };
+  }
+  if (f.kind === 'quota' && f.resetsAt && f.resetsAt > now) return { walled: true, until: f.resetsAt };
+  return { walled: false, until: null };
+}
+
+/** THE BATCH'S PLAN. rows: [{id, name, stoppedBy, live, streaming, canResume, quarantined, verdict}] → who is resumed,
+ *  in which order (EARLIEST STOP FIRST — the order «只恢复前 K 个» cuts), and who is skipped and why. Skip reasons:
+ *    walled       its wall has not reset (`until` = when it does, null = not known)
+ *    running      it is already running a turn — nothing to resume
+ *    gone         no live process to continue (a resume of a stopped process is a respawn, not a continue)
+ *    no-verb      its harness declares no resume verb (capsOf(backend).autoResume says never-armed)
+ *    quarantined  the loop breaker: a continue onto this identity was just rejected again */
+function planBatch(rows, { now = Date.now() } = {}) {
+  const eligible = [], skipped = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || !r.id) continue;
+    const sb = normalizeStoppedBy(r.stoppedBy);
+    if (!sb) continue;
+    const base = { id: String(r.id), name: r.name || null, kind: sb.kind, at: sb.at };
+    if (!r.live) { skipped.push({ ...base, why: 'gone', until: null }); continue; }
+    if (r.streaming) { skipped.push({ ...base, why: 'running', until: null }); continue; }
+    if (!r.canResume) { skipped.push({ ...base, why: 'no-verb', until: null }); continue; }
+    const w = stillWalled(sb, r.verdict || null, now);
+    if (w.walled) { skipped.push({ ...base, why: 'walled', until: w.until }); continue; }
+    if (r.quarantined) { skipped.push({ ...base, why: 'quarantined', until: num(r.quarantined) || null }); continue; }
+    eligible.push(base);
+  }
+  eligible.sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { eligible, skipped };
+}
+
 // ── THE WORDS ────────────────────────────────────────────────────────────────
 const plain = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
 const tOf = (tIn) => (typeof tIn === 'function' ? (s, p) => tIn(s, p) : plain);
@@ -112,15 +155,70 @@ function chipWords(sb, tIn, { now = Date.now(), autoResumeOn = null, waiting = n
 /** The filter row's entry. */
 function filterWords(n, tIn) { return tOf(tIn)('Stopped by a limit or overload ({n})', { n: Number(n) || 0 }); }
 
+/** The «turn auto-resume on for every session» counts: «将开启 37 个会话；已开启 3 个». */
+function autoResumeAllWords({ total = 0, on = 0 } = {}, tIn) {
+  const t = tOf(tIn);
+  const off = Math.max(0, (Number(total) || 0) - (Number(on) || 0));
+  return {
+    line: t('Will turn on {n} sessions; {m} already on', { n: off, m: Number(on) || 0 }),
+    onButton: t('Turn auto-continue on for every session'),
+    offButton: t('Turn it off for all'),
+  };
+}
+
+/** The resume button's label — N = the stoppedBy set the person may act on; an empty set SAYS so (never a greyed hint). */
+function resumeButtonWords(n, tIn) {
+  const t = tOf(tIn);
+  return n > 0 ? t('Resume every session a usage limit or overload stopped ({n})', { n }) : t('No sessions stopped by a limit');
+}
+
+const SKIP_KEYS = Object.freeze({
+  walled: 'still inside a limit',
+  running: 'already running',
+  gone: 'its process has ended',
+  'no-verb': 'its harness cannot continue a turn',
+  quarantined: 'a continue onto its account was just rejected',
+  'no-answer': 'the quota check before it gave no answer',
+  resumed: 'it has run again since',
+  pending: 'a continue onto it is already on its way',
+  'moved-refused': 'the account it moved to refused the spend',
+});
+/** One skipped row's words: «仍在限额内，至 14:00». */
+function skipWords(s, tIn, { now = Date.now(), clock = isoClock } = {}) {
+  const t = tOf(tIn);
+  const why = t(SKIP_KEYS[s && s.why] || 'skipped');
+  return s && s.until ? t('{why} until {time}', { why, time: clock(s.until, now) }) : why;
+}
+/** The dialog's outcome line: «恢复了 29 个 · 跳过 8 个（仍在限额内）· 拒绝 0». `refused` = the number the spend guard
+ *  refused (a refusal resumes NONE, so it is all of the planned set or 0). */
+function summaryWords({ resumed = 0, skipped = [], refused = 0, failed = 0, notReached = 0 } = {}, tIn) {
+  const t = tOf(tIn);
+  const list = Array.isArray(skipped) ? skipped : [];
+  const walled = list.filter((s) => s && s.why === 'walled').length;
+  const other = list.length - walled;
+  const parts = [t('Resumed {n}', { n: resumed })];
+  parts.push(walled && !other ? t('skipped {n} (still inside a limit)', { n: walled })
+    : walled ? t('skipped {n} ({w} still inside a limit)', { n: list.length, w: walled })
+      : t('skipped {n}', { n: list.length }));
+  parts.push(t('refused {n}', { n: refused }));
+  if (failed) parts.push(t('could not deliver {n}', { n: failed }));
+  if (notReached) parts.push(t('not reached {n}', { n: notReached }));
+  return parts.join(' · ').replace(/） · /g, '）· '); // a full-width paren carries its own space
+}
+
 /** Every key the words above can print — test-stopped-by holds zh + ja to it. */
 const WORD_KEYS = Object.freeze([
   'Stopped by a usage limit', 'Stopped by a usage limit · resets {time}', 'Stopped by a usage limit · the limit has reset',
   'Model overloaded · stopped {time}', 'Auto-continue: on', 'Auto-continue: off', 'The harness said: {said}',
   'This mark stays until the session runs again.', 'Stopped by a limit or overload ({n})', 'Auto-continue: on · not waiting for this limit', 'Auto-continue: on · continues only if the limit clears early',
+  'Will turn on {n} sessions; {m} already on', 'Turn auto-continue on for every session', 'Turn it off for all',
+  'Resume every session a usage limit or overload stopped ({n})', 'No sessions stopped by a limit',
+  ...Object.values(SKIP_KEYS), 'skipped', '{why} until {time}',
+  'Resumed {n}', 'skipped {n} (still inside a limit)', 'skipped {n} ({w} still inside a limit)', 'skipped {n}', 'refused {n}', 'could not deliver {n}', 'not reached {n}',
 ]);
 
 module.exports = {
-  STOP_KINDS, SAID_MAX, WORD_KEYS,
-  boundSaid, isOverloadError, stopVerdict, normalizeStoppedBy, liveFactOf, isStoppedBy,
-  chipWords, filterWords,
+  STOP_KINDS, SAID_MAX, SKIP_KEYS, WORD_KEYS,
+  boundSaid, isOverloadError, stopVerdict, normalizeStoppedBy, liveFactOf, isStoppedBy, stillWalled, planBatch,
+  chipWords, filterWords, autoResumeAllWords, resumeButtonWords, skipWords, summaryWords,
 };

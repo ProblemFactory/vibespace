@@ -316,7 +316,9 @@
   "/api/workflow",
   "/api/chat-picture/:tx/:key/:n",
   "/api/chat-attachments/usage",
-  "/api/chat-attachments/orphans"
+  "/api/chat-attachments/orphans",
+  "/api/sessions/stopped",
+  "/api/sessions/resume-stopped/:batchId"
  ],
  "windows": {
   "skip": {

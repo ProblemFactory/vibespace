@@ -3,7 +3,7 @@
 // 2026-10-15: manual only). HEAVY: a scratch worktree server (private HOME, a fake claude that answers init with the
 // conversation it resumes, writes its pid and idles) + headless Chrome clients over raw CDP.
 //   desk 1100 (zh) · three conversations resumed live; the third's CLI dies (its window stays: "Session ended.") ⇒ the
-//     session list's ⋯ ⇒ the ONE entry ⇒ the confirm names 2 live + 1 open stopped, the note pre-filled in Chinese ⇒
+//     session list's ⋯ ⇒ its refresh entry (the first of its list-wide actions) ⇒ the confirm names 2 live + 1 open stopped, the note pre-filled in Chinese ⇒
 //     确定 ⇒ the toast 「已排给 2 个，跳过 1 个已停止的」; the strip above the composer shows the note on the 2 live
 //     windows (Details = its words), none on the stopped one; the stash file holds ONE note each under the 2 live
 //     conversations and nothing under the stopped one; no create / input / kill frame left the page, no ledger row
@@ -160,7 +160,7 @@ try {
   const stopped = await until(() => D.ev(`(() => { const f = ${stripOf(SIDS[2])}; const ids = (app.sidebar._webuiSessions || []).map((s) => s.backendSessionId); return f.win && f.readOnly && !ids.includes(${JSON.stringify(SIDS[2])}) ? f : null; })()`), 30000, 250);
   check('desk: the third conversation\'s CLI died — its window stays, read-only ("Session ended."), gone from the live list', !!stopped, await D.ev(stripOf(SIDS[2])));
   await D.ev('(window.__frames.length = 0, window.__toasts.length = 0, true)');
-  // the door: the session list's ⋯ (its list-wide actions) — ONE entry; the list is folded on the rail after the
+  // the door: the session list's ⋯ (its list-wide actions) — the refresh entry first; the list is folded on the rail after the
   // windows opened, so its rail button (Folders) unfolds it first, as a person would
   await D.ev('(app.sidebar.toggle(true), true)');
   await until(() => D.ev("document.getElementById('session-list-menu')?.offsetParent ? true : null"), 5000, 100);
@@ -168,7 +168,8 @@ try {
   check(`desk: the ⋯ sits in the session list's own header row, an SVG icon, titled 「${btn?.title}」`, !!btn && btn.shown && btn.svg && btn.row === 'session-filter-row' && btn.title === '会话列表操作', btn);
   await press(D.S, D.ev, '#session-list-menu');
   const menu = await until(() => D.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); if (!m) return null; return [...m.querySelectorAll('.context-menu-item')].map((n) => ({ text: n.textContent.trim(), svg: !!n.querySelector('svg') })); })()`), 5000, 100);
-  check(`desk: the menu holds the ONE entry 「${menu?.[0]?.text}」 with its SVG icon`, !!menu && menu.length === 1 && menu[0].text === '刷新所有活着的会话…' && menu[0].svg, menu);
+  // lane auto-resume-bulk (.349): the ⋯ also holds the two bulk auto-resume acts now — the refresh entry stays FIRST
+  check(`desk: the menu's FIRST entry is 「${menu?.[0]?.text}」 with its SVG icon (the list-wide actions: refresh + the bulk auto-resume acts)`, !!menu && menu.length === 4 && menu[0].text === '刷新所有活着的会话…' && menu.every((x) => x.svg) && /^对所有会话开启自动继续$/.test(menu[1].text), menu);
   const sideRect = await D.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); const s = document.getElementById('sidebar').getBoundingClientRect(); const q = m.getBoundingClientRect(); return { x: 0, y: 0, width: Math.min(innerWidth, Math.max(s.right, q.right) + 12), height: Math.min(innerHeight, Math.max(q.bottom + 40, 260)) }; })()`);
   const pMenu = await shot(D.S, 'desk-menu.png', sideRect);
   await press(D.S, D.ev, MENU_ITEM);
@@ -264,7 +265,7 @@ try {
   await until(async () => { const x = await Ph.ev("Math.round(document.getElementById('session-list-menu').getBoundingClientRect().left)"); const still = x === lastX; lastX = x; return still; }, 5000, 120);
   await tap(Ph.S, Ph.ev, '#session-list-menu');
   const pmenu = await until(() => Ph.ev(`(() => { const m = [...document.querySelectorAll('.context-menu')].pop(); return m ? [...m.querySelectorAll('.context-menu-item')].map((n) => n.textContent.trim()) : null; })()`), 5000, 100);
-  check('phone: the same ONE entry', !!pmenu && pmenu.length === 1 && pmenu[0] === '刷新所有活着的会话…', { pmenu, clicks: await Ph.ev('window.__clicks.slice(-5)'), at: await Ph.ev(`(() => { const b = document.getElementById('session-list-menu').getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return e ? (e.id || e.className || e.tagName) + '' : null; })()`) });
+  check('phone: the same entries, the refresh first', !!pmenu && pmenu.length === 4 && pmenu[0] === '刷新所有活着的会话…', { pmenu, clicks: await Ph.ev('window.__clicks.slice(-5)'), at: await Ph.ev(`(() => { const b = document.getElementById('session-list-menu').getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return e ? (e.id || e.className || e.tagName) + '' : null; })()`) });
   const pPhoneMenu = await shot(Ph.S, 'phone-menu.png');
   await tap(Ph.S, Ph.ev, MENU_ITEM);
   const pdlg = await until(() => Ph.ev(dialogFacts), 5000, 100);

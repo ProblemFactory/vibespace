@@ -2851,6 +2851,13 @@ function noteTurnError(session, error, said = null, { final = false, at = null }
   session._turnLastError = null;
   if (v) noteStoppedBy(session, v);
 }
+/** The pool's LIVE answer for this conversation — the bulk resume's skip rule reads it (never re-derived there). */
+function sessionWallVerdict(session) {
+  try {
+    const v = quotaVerdictFor(_wallScope(session), { model: sessionModelFor(session), session });
+    return v ? { usable: v.usable, blockedUntil: Number(v.blockedUntil) || 0, reason: v.reason || null } : null;
+  } catch { return null; }
+}
 
 /** Main-thread assistant output — work evidence for turn classification. */
 function noteSessionProduced(session, rec = null) {
@@ -8234,7 +8241,7 @@ function maybeStopOnFallback(session, id, from, to) {
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
-    noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnError, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer and the turn-start + typed-error hooks the stdout consumers call
+    noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnError, sessionWallVerdict, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer, the turn-start + typed-error hooks the stdout consumers call, and the pool's live answer the bulk resume skips by
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,

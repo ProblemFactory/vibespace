@@ -7,8 +7,11 @@
 //      claude `overloaded`, codex `serverOverloaded` in both spellings); a 429 `rate_limit`, a `server_error`, no error,
 //      a harness that declares none ⇒ nothing. CONTROL: with no declared list the claude enum is NOT an overload
 //   §2 normalizeStoppedBy: a persisted value re-validated (bad kinds / no `at` ⇒ null, overload carries no reset)
+//   §3 stillWalled: the pool's live verdict outranks the stored reset BOTH ways; no verdict ⇒ the stated reset
+//   §4 planBatch: earliest stop first; every skip reason (gone / running / no-verb / walled + until / quarantined)
 //   §5 the words, through the REAL client dictionaries: «因用量上限停止 · 14:00 重置», «模型过载 · 停于 13:42»,
-//      «自动继续：开/关», «因用量上限/过载停止 (N)» — and every WORD_KEYS key in zh AND ja with its {params} kept
+//      «自动继续：开/关», «因用量上限/过载停止 (N)», «将开启 37 个会话；已开启 3 个», «恢复了 29 个 · 跳过 8 个（仍在用量上限内）· 拒绝 0»,
+//      «没有因用量上限停止的会话» — and every WORD_KEYS key in zh AND ja with its {params} kept
 //   §6 wiring pins (the fact's writer, clearers, restore, the live list, the card, the filter, the descriptors' rows)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -76,6 +79,46 @@ ok('the fact keeps the WALL\'s lane / bucket / scoped name (the switch\'s arm is
 ok('the live fact carries the SERVER\'s waiting bound (statusFor maxWaitMs ⇒ waitBoundMs) — none for a stop that cannot continue', SB.liveFactOf({ kind: 'quota', at: 1, resetsAt: 2 }, { resume: 'prompt', enabled: true, armed: true, maxWaitMs: 93600000 }).waitBoundMs === 93600000 && SB.liveFactOf({ kind: 'overload', at: 1 }, { resume: 'prompt', enabled: true, maxWaitMs: 93600000 }).waitBoundMs === null);
 ok('isStoppedBy is the filter predicate (a row with a valid fact; nothing else)', SB.isStoppedBy({ stoppedBy: { kind: 'overload', at: NOW } }) && !SB.isStoppedBy({ stoppedBy: null }) && !SB.isStoppedBy({}) && !SB.isStoppedBy(null));
 
+// ── §3 STILL WALLED ─────────────────────────────────────────────────────────
+console.log('§3 stillWalled (the pool\'s live verdict outranks the stored reset, both ways)');
+{
+  const qF = { kind: 'quota', at: NOW - HOUR, resetsAt: NOW + 2 * HOUR };
+  const qP = { kind: 'quota', at: NOW - 3 * HOUR, resetsAt: NOW - MIN };
+  const ov = { kind: 'overload', at: NOW - 5 * MIN };
+  const W = (sb, v) => SB.stillWalled(sb, v, NOW);
+  ok('quota, reset ahead, no verdict ⇒ walled until its stated reset', W(qF, null).walled && W(qF, null).until === NOW + 2 * HOUR);
+  ok('quota, reset passed, no verdict ⇒ open', !W(qP, null).walled);
+  ok('quota, reset ahead, but the pool serves NOW (usable:true — another member) ⇒ open', !W(qF, { usable: true }).walled);
+  ok('quota, reset passed, but the pool says blocked until T ⇒ walled until T', W(qP, { usable: false, blockedUntil: NOW + HOUR }).walled && W(qP, { usable: false, blockedUntil: NOW + HOUR }).until === NOW + HOUR);
+  ok('overload, no verdict ⇒ open (an overload has no reset to wait for)', !W(ov, null).walled);
+  ok('overload on an account that has since WALLED ⇒ waits like any other', W(ov, { usable: false, blockedUntil: NOW + HOUR }).walled);
+  ok('a verdict that cannot tell (usable undefined) falls back to the stated reset', W(qF, { usable: undefined }).walled && !W(qP, { usable: undefined }).walled);
+}
+
+// ── §4 THE PLAN ─────────────────────────────────────────────────────────────
+console.log('§4 planBatch (who, in which order, who is skipped and why)');
+{
+  const f = (at, extra = {}) => ({ kind: 'quota', at, resetsAt: NOW - MIN, ...extra });
+  const rows = [
+    { id: 'late', name: 'Late', stoppedBy: f(NOW - 1 * HOUR), live: true, canResume: true },
+    { id: 'early', name: 'Early', stoppedBy: { kind: 'overload', at: NOW - 5 * HOUR }, live: true, canResume: true },
+    { id: 'mid', name: 'Mid', stoppedBy: f(NOW - 3 * HOUR), live: true, canResume: true },
+    { id: 'gone', stoppedBy: f(NOW - 2 * HOUR), live: false, canResume: true },
+    { id: 'busy', stoppedBy: f(NOW - 2 * HOUR), live: true, streaming: true, canResume: true },
+    { id: 'shell', stoppedBy: f(NOW - 2 * HOUR), live: true, canResume: false },
+    { id: 'walled', stoppedBy: f(NOW - 2 * HOUR, { resetsAt: NOW + HOUR }), live: true, canResume: true },
+    { id: 'pool-walled', stoppedBy: f(NOW - 2 * HOUR), live: true, canResume: true, verdict: { usable: false, blockedUntil: NOW + 30 * MIN } },
+    { id: 'quar', stoppedBy: f(NOW - 2 * HOUR), live: true, canResume: true, quarantined: NOW + 9 * MIN },
+    { id: 'clean', live: true, canResume: true },
+  ];
+  const p = SB.planBatch(rows, { now: NOW });
+  ok('EARLIEST STOP FIRST (the order «只恢复前 K 个» cuts)', p.eligible.map((e) => e.id).join(',') === 'early,mid,late', p.eligible.map((e) => e.id));
+  const why = Object.fromEntries(p.skipped.map((s) => [s.id, s]));
+  ok('skipped and NAMED: gone / running / no-verb / walled (stated reset) / walled (the pool) / quarantined', why.gone.why === 'gone' && why.busy.why === 'running' && why.shell.why === 'no-verb' && why.walled.why === 'walled' && why.walled.until === NOW + HOUR && why['pool-walled'].why === 'walled' && why['pool-walled'].until === NOW + 30 * MIN && why.quar.why === 'quarantined' && why.quar.until === NOW + 9 * MIN, p.skipped);
+  ok('a session with no stop fact is neither resumed nor skipped (it is not in the set)', !p.eligible.some((e) => e.id === 'clean') && !p.skipped.some((s) => s.id === 'clean'));
+  ok('the plan is deterministic on a tie (same instant ⇒ by id)', SB.planBatch([{ id: 'b', stoppedBy: f(NOW), live: true, canResume: true }, { id: 'a', stoppedBy: f(NOW), live: true, canResume: true }], { now: NOW + HOUR }).eligible.map((e) => e.id).join() === 'a,b');
+}
+
 // ── §5 THE WORDS ────────────────────────────────────────────────────────────
 console.log('§5 the words (en, and zh/ja through the REAL client dictionaries)');
 const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
@@ -90,13 +133,20 @@ const tZh = (s, p) => fill(zh[s] !== undefined ? zh[s] : s, p);
   ok('zh toggle: «自动继续：开» / «自动继续：关»; a harness with no verb draws none (null)', SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true }).toggle === '自动继续：开' && SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: false }).toggle === '自动继续：关' && SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: null }).toggle === null);
   ok('en: "Stopped by a usage limit · resets 14:00" and a passed reset says so', SB.chipWords(q, null, { now, clock: CLK }).text === 'Stopped by a usage limit · resets 14:00' && SB.chipWords(q, null, { clock: CLK, now: reset + MIN }).text === 'Stopped by a usage limit · the limit has reset');
   ok('another day: the chip names the date (M/D HH:MM)', SB.chipWords({ kind: 'quota', at, resetsAt: new Date(2026, 9, 25, 9, 5).getTime() }, null, { now, clock: CLK }).text.endsWith('10/25 09:05'));
-  ok('the page prints every stop time through page-time (the ONE formatter): the card hands its stampAt; the PURE default is no hand-built clock', /stoppedChipWords\(stopF, tr, \{[^}]*clock: stopClock \}\)/.test(read('src/lib/session-card.js')) && /const stopClock = \(ms, now\) => whenAt\(ms, \{ now \}\)/.test(read('src/lib/session-card.js')) && !/getHours|getMinutes/.test(read('src/stopped-by.js')));
+  ok('the page prints every stop time through page-time (the ONE formatter): the card and the skip rows hand its stampAt; the PURE default is no hand-built clock', /stoppedChipWords\(stopF, tr, \{[^}]*clock: stopClock \}\)/.test(read('src/lib/session-card.js')) && /const stopClock = \(ms, now\) => whenAt\(ms, \{ now \}\)/.test(read('src/lib/session-card.js')) && /skipWords\(s, t, \{ clock: \(ms, now\) => stampAt\(ms, \{ now \}\) \}\)/.test(read('src/lib/bulk-resume.js')) && !/getHours|getMinutes/.test(read('src/stopped-by.js')));
   ok('the tip carries the harness\'s own line and how long the mark stays', /You hit your limit/.test(SB.chipWords(q, tZh, { now, clock: CLK }).tip) && /再次运行/.test(SB.chipWords(q, tZh, { now, clock: CLK }).tip));
   ok('zh filter: «因用量上限/过载停止 (3)»', SB.filterWords(3, tZh) === '因用量上限/过载停止 (3)');
   ok('the tip is ONE line (the instant tooltip collapses a newline): its parts joined by « · »', !/\n/.test(SB.chipWords(q, tZh, { now, clock: CLK }).tip) && SB.chipWords(q, tZh, { now, clock: CLK }).tip.split(' · ').length >= 3);
   ok('ON with no wait for THIS limit says so: «自动继续：开 · 这次上限不等待»', SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true, waiting: false }).toggle === '自动继续：开 · 这次上限不等待' && SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true, waiting: true }).toggle === '自动继续：开');
   ok('a WATCH it can open early says so: «自动继续：开 · 只在上限提前解除时继续» (never the timed promise)', SB.chipWords(q, tZh, { now, clock: CLK, autoResumeOn: true, waiting: 'early' }).toggle === '自动继续：开 · 只在上限提前解除时继续');
+  ok('zh counts: «将开启 37 个会话；已开启 3 个»', SB.autoResumeAllWords({ total: 40, on: 3 }, tZh).line === '将开启 37 个会话；已开启 3 个', SB.autoResumeAllWords({ total: 40, on: 3 }, tZh));
+  ok('zh buttons: «对所有会话开启自动继续» + «全部关闭»', SB.autoResumeAllWords({}, tZh).onButton === '对所有会话开启自动继续' && SB.autoResumeAllWords({}, tZh).offButton === '全部关闭');
+  ok('zh resume button: «恢复所有因用量上限/过载停止的会话 (12)»; an EMPTY set SAYS so: «没有因用量上限停止的会话»', SB.resumeButtonWords(12, tZh) === '恢复所有因用量上限/过载停止的会话 (12)' && SB.resumeButtonWords(0, tZh) === '没有因用量上限停止的会话');
   const skipped = Array.from({ length: 8 }, (_, i) => ({ id: 's' + i, why: 'walled', until: reset }));
+  ok('zh outcome: «恢复了 29 个 · 跳过 8 个（仍在用量上限内）· 拒绝 0»', SB.summaryWords({ resumed: 29, skipped, refused: 0 }, tZh) === '恢复了 29 个 · 跳过 8 个（仍在用量上限内）· 拒绝 0', SB.summaryWords({ resumed: 29, skipped, refused: 0 }, tZh));
+  ok('mixed skips say how many of them are walls; an undelivered continue is counted aloud', /跳过 9 个（其中 8 个仍在用量上限内）/.test(SB.summaryWords({ resumed: 1, skipped: [...skipped, { why: 'running' }], refused: 0, failed: 2 }, tZh)) && /未能送达 2/.test(SB.summaryWords({ resumed: 1, skipped, failed: 2 }, tZh)));
+  ok('a batch cut short says how many it never reached: «… · 未轮到 2»; the cure\'s three skip reasons have words', /· 未轮到 2$/.test(SB.summaryWords({ resumed: 1, skipped: [], refused: 0, notReached: 2 }, tZh)) && ['resumed', 'pending', 'moved-refused'].every((k) => SB.SKIP_KEYS[k] && zh[SB.SKIP_KEYS[k]]));
+  ok('zh skip row: «仍在用量上限内，至 14:00»', SB.skipWords({ why: 'walled', until: reset }, tZh, { now, clock: CLK }) === '仍在用量上限内，至 14:00', SB.skipWords({ why: 'walled', until: reset }, tZh, { now, clock: CLK }));
   const params = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join();
   const miss = { zh: [], ja: [], params: [] };
   for (const k of SB.WORD_KEYS) {
@@ -124,7 +174,7 @@ console.log('§6 wiring pins');
   ok('the stream\'s road reads nothing from the mount: the stop fact goes through the store\'s patchSessionMeta (its pending copy, else an async read; no stub for a socket with no meta)', (() => { const i = eng.indexOf('function persistStoppedBy(session) {'); const b = eng.slice(i, eng.indexOf('\n}\n', i)); const st = read('src/server/session-stdout.js'); return i > 0 && !/readSessionMeta/.test(b) && /function patchSessionMeta\(sockName, patch, \{ owner = null \} = \{\}\)/.test(st) && /fs\.promises\.readFile\(fp, 'utf-8'\)/.test(st) && /if \(!m \|\| typeof m !== 'object' \|\| !Object\.keys\(m\)\.length \|\| !mine\(m\)\) return false;/.test(st); })());
   ok('the claude consumer notes the typed error of EVERY main-thread assistant record (synthetic ones included), never a backlog\'s', /!msg\.isSidechain && !recordIsLate\?\.\(session, msg\)\) \{\s*\n\s*try \{ const tb = [^\n]*noteTurnError\?\.\(session, typeof msg\.error === 'string' \? msg\.error : null/.test(read('src/server/stdout/claude-stream-json.js')));
   ok('the descriptors DECLARE the enum (quota.overloadErrors) and the registry validates + hands it out', /overloadErrors: Object\.freeze\(\['overloaded'\]\)/.test(read('src/harnesses/claude-quota.js')) && /overloadErrors: Object\.freeze\(\['serverOverloaded'/.test(read('src/harnesses/codex-quota.js')) && /function overloadErrorsOf\(id\)/.test(read('src/harnesses/index.js')) && /quota\.overloadErrors must be a list/.test(read('src/harnesses/index.js')));
-  ok('boot restores the fact (sessionFromMeta — all restore paths)', /_stoppedBy: meta\.stoppedBy && typeof meta\.stoppedBy === 'object' \? meta\.stoppedBy : null/.test(read('src/server/boot-restore.js')));
+  ok('boot restores the fact AND the per-session auto-resume flag (sessionFromMeta — all restore paths)', /_stoppedBy: meta\.stoppedBy && typeof meta\.stoppedBy === 'object' \? meta\.stoppedBy : null/.test(read('src/server/boot-restore.js')) && /typeof meta\.autoResume === 'boolean' \? \{ _autoResume: meta\.autoResume \}/.test(read('src/server/boot-restore.js')));
   ok('the live list carries it (server.js payload) and the sidebar GATES on a scalar projection of it', /stoppedBy: s\._stoppedBy \? \(\(\) => \{ try \{ return require\('\.\/src\/stopped-by\.js'\)\.liveFactOf\(s\._stoppedBy, autoResume\.statusFor\(id\)\); \} catch \{ return require\('\.\/src\/stopped-by\.js'\)\.liveFactOf\(s\._stoppedBy, null\); \} \}\)\(\) : null,/.test(read('server.js')) && /stoppedBy: \{ digest: \(v\) => \(v && typeof v === 'object' \? `\$\{v\.kind\}\|/.test(read('src/lib/sidebar.js')));
   ok('the card draws the chip from chipWords; the filter row\'s pill reads isStoppedBy', /stoppedChipWords\(stopF, tr,/.test(read('src/lib/session-card.js')) && /if \(this\._stoppedOnly && this\._activeTab !== 'tasks'\) sessions = sessions\.filter\(\(s\) => isStoppedBy\(s\)\);/.test(read('src/lib/sidebar.js')));
   ok('PURE: src/stopped-by.js requires nothing and names no harness id', !/require\(/.test(read('src/stopped-by.js').replace(/^\s*\/\/.*$/gm, '')) && !/'(claude|codex|shell|opencode|antigravity)'/.test(read('src/stopped-by.js').replace(/^\s*\/\/.*$/gm, '')));

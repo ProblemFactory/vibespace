@@ -1254,7 +1254,7 @@ if (!probe) {
   const srv = read('server.js');
   // executable lines only — a refuted mechanism must stay NAMED in comments
   const engCode = eng.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-  ok('WIRING: a walled turn tells the breaker the fire failed, BEFORE anything re-arms or re-switches', /function onWalledTurn\(session, sigs, said = null\) \{[\s\S]{0,600}noteFireOutcome\?\.\(id, false, 'limit rejection'\)[\s\S]{0,900}demoteWalledAccount\(session, sigs\)/.test(eng));
+  ok('WIRING: a walled turn tells the breaker the fire failed, BEFORE anything re-arms or re-switches', /function onWalledTurn\(session, sigs(?:, said = null)?\) \{[\s\S]{0,600}noteFireOutcome\?\.\(id, false, 'limit rejection'\)[\s\S]{0,900}demoteWalledAccount\(session, sigs\)/.test(eng));
   ok('WIRING: server.js gives auto-resume its identity from the engine (the SAME fact the wall demotes)', /fireIdentity: \(id, s\) => \{ try \{ return fireIdentityFor\(s\); \}/.test(srv) && /fireIdentityFor,/.test(srv));
   ok('WIRING: fireIdentityFor IS wallKeyFor (no second opinion about which account a fire lands on)', /function fireIdentityFor\(session\) \{[\s\S]{0,200}const key = wallKeyFor\(session\);/.test(eng));
   // 2026-09-07 (the VALUE half of the same incident): a READING is keyed to the
@@ -1615,6 +1615,136 @@ if (!probe) {
   const wy = setup(); wy.session._turnState = undefined;
   { wy.session._isStreaming = false; const c = capture(); wy.eng.noteTurnEnd(wy.session); c.done(); }
   ok('§7 全B: …with the exception the same CLI keeps it (armed at the result boundary)', wy.linkNow() === wy.SPARE && !!wy.ar._armed.get(wy.SID), JSON.stringify({ on: wy.nameOf(wy.linkNow()), armed: !!wy.ar._armed.get(wy.SID) }));
+}
+
+// ── §8 THE BULK RESUME (lane auto-resume-bulk, .349 — a fleet power user's dozens of wall-stopped sessions) ─────────
+// «恢复所有因用量/过载停止的会话»: ONE owner click, N billed continues. Driven through the REAL module and the REAL
+// spend guard (scratch ledger) over stub channels: ONE authorization names the whole batch, the continues go out PACED
+// and earliest-stop-first through the harness's verb, a wall that has not reset is SKIPPED and said, the pre-fire gate
+// decides each one at its moment, a refusal resumes NONE (all-or-nothing, the boundary exact), every hold settles.
+{
+  console.log('\n§8 the bulk resume: N continues under ONE spend authorization, paced, walls skipped, a refusal resumes none');
+  const SG = require(path.join(REPO, 'src/server/spend-guard.js'));
+  const { CONTINUE_PROMPT_OVERLOAD } = arMod;
+  const NOW0 = Date.now(), H = 3600e3;
+  const PACE = 40;
+  let world = 0;
+  const mkWorld = ({ cap = 30, sessions, authorize = null, mod = arMod, sendOk = () => true } = {}) => {
+    const dir = path.join(scratch('arl-bulk'), String(++world));
+    fs.mkdirSync(dir, { recursive: true });
+    const settings = { 'spend.unattendedPerIdentityHour': cap };
+    const guard = SG.create({ dataDir: dir, serverSetting: (k) => settings[k], identityOf: (s) => (s && s._slot ? { key: s._slot, name: s._slot } : null), log: () => { } });
+    const active = new Map(Object.entries(sessions));
+    const sent = [], cleared = [];
+    let batchCalls = 0, batchItems = 0, listChanges = 0;
+    const ar = mod.create({
+      dataDir: dir, activeSessions: active, serverSetting: () => undefined, log: () => { },
+      resumeVerb: () => ({ form: 'message', deliver: (session, text, d) => d.sendChatInput(session, text) }),
+      sendToSession: (id, s, text, carried) => { if (!sendOk(id)) return false; sent.push({ id, text, at: Date.now(), note: carried && carried.note }); s._isStreaming = true; return true; },
+      fireIdentity: (id, s) => (s && s._slot ? { key: s._slot, name: s._slot } : null),
+      beforeFire: async (id, s) => { if (s._onGate) s._onGate.call(s, ar); return s._gate !== false; },
+      wallVerdict: (id, s) => s._verdict || null,
+      authorizeSpendBatch: authorize === 'absent' ? null : (items) => { batchCalls++; batchItems = items.length; if (authorize) return authorize(items); return guard.authorizeBatch({ reason: 'bulk-resume', items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }); },
+      noteBatchSpend: (id, s, identity, hold) => guard.note({ reason: 'bulk-resume', identity, hold }),
+      releaseSpend: (id, s, hold) => guard.release({ hold }),
+      clearStopped: (id, s) => { s._stoppedBy = null; cleared.push(id); },
+      onListChange: () => { listChanges++; },
+      bulkPaceMs: PACE,
+    });
+    const settle = async (rec) => { for (let i = 0; i < 200 && rec && !rec.done; i++) { await new Promise((r) => setTimeout(r, 15)); rec = ar.batchStatus(rec.batchId); } return rec; };
+    const stamps = () => { const b = guard.snapshot().budget; return Object.values(b.identities || {}).flat().filter((x) => x && x.reason === 'bulk-resume').length; };
+    return { ar, guard, active, sent, cleared, settle, stamps, counts: () => ({ batchCalls, batchItems, listChanges }) };
+  };
+  const S = (slot, stoppedBy, extra = {}) => ({ backend: 'claude', mode: 'chat', name: extra.name || slot, _slot: slot, _stoppedBy: stoppedBy, pty: {}, _isStreaming: false, ...extra });
+  const quota = (agoH, resetIn = -0.1) => ({ kind: 'quota', at: NOW0 - agoH * H, resetsAt: NOW0 + resetIn * H, said: "You've hit your limit" });
+
+  // A — the batch
+  const w = mkWorld({ sessions: {
+    q1: S('A', quota(5)), q2: S('A', quota(3)), ov: S('B', { kind: 'overload', at: NOW0 - 4 * H }),
+    walled: S('A', quota(2, +2)), busy: S('A', quota(6), { _isStreaming: true }),
+    gateNo: S('B', quota(1), { _gate: false, _onGate: function () { this._verdict = { usable: false, blockedUntil: NOW0 + H }; } }), // the wall is still there only when the gate looks
+  } });
+  const plan = w.ar.stoppedPlan();
+  ok('§8 the PLAN before anything runs: 4 eligible earliest-first (q1, ov, q2, gateNo); walled + busy skipped and named', plan.eligible.map((e) => e.id).join() === 'q1,ov,q2,gateNo' && plan.skipped.map((s) => s.id + ':' + s.why).sort().join() === 'busy:running,walled:walled', JSON.stringify(plan));
+  const t0 = Date.now();
+  let rec = w.ar.resumeBatch();
+  ok('§8 the press answers at once with the batch (planned 4) — the continues run after it', rec && rec.planned === 4 && !rec.refused, JSON.stringify(rec));
+  ok('§8 a SECOND press while it runs is refused by name (in-flight) — never a second batch', w.ar.resumeBatch().why === 'in-flight');
+  rec = await w.settle(rec);
+  const c = w.counts();
+  ok('§8 ONE authorization for the whole batch (one call, naming all 4)', c.batchCalls === 1 && c.batchItems === 4, JSON.stringify(c));
+  ok('§8 the continues went out EARLIEST STOP FIRST, one at a time, through the harness verb (q1, ov, q2)', w.sent.map((x) => x.id).join() === 'q1,ov,q2', JSON.stringify(w.sent.map((x) => x.id)));
+  const gaps = w.sent.slice(1).map((x, i) => x.at - w.sent[i].at);
+  ok(`§8 PACED: every gap ≥ the pace (${PACE} ms) — never a storm`, gaps.length === 2 && gaps.every((g) => g >= PACE - 5), JSON.stringify(gaps));
+  ok('§8 an overload is continued with ITS words, a wall with the usage-limit words', w.sent.find((x) => x.id === 'ov').text === CONTINUE_PROMPT_OVERLOAD && w.sent.find((x) => x.id === 'q1').text === CONTINUE_PROMPT);
+  ok('§8 the gate that still reads a wall SKIPS that one and says until when (never retried blindly)', rec.skipped.some((s) => s.id === 'gateNo' && s.why === 'walled' && s.until === NOW0 + H), JSON.stringify(rec.skipped));
+  ok('§8 the outcome: resumed 3 · skipped 3 · refused none · nothing undelivered', rec.done && rec.resumed.length === 3 && rec.skipped.length === 3 && !rec.refused && !rec.failed.length, JSON.stringify(rec));
+  ok('§8 CHARGED what was delivered: 3 ledger stamps under bulk-resume, every hold settled (0 open)', w.stamps() === 3 && w.guard.snapshot().holdsOpen === 0, JSON.stringify({ stamps: w.stamps(), open: w.guard.snapshot().holdsOpen }));
+  ok('§8 a delivered continue CLEARS the mark (the turn starts) and the breaker remembers it fired', w.cleared.join() === 'q1,ov,q2' && !!(w.ar._fires.get('q1') && w.ar._fires.get('q1').last), JSON.stringify(w.cleared));
+  ok('§8 ONE list broadcast at the end of the batch', w.counts().listChanges === 1, JSON.stringify(w.counts()));
+  ok('§8 the batch ran in ~pace × (n−1), not n × a gate storm', Date.now() - t0 < 5000);
+
+  // B — ALL OR NOTHING: three continues on slot A against a cap of 2 ⇒ the WHOLE batch refused
+  const mk3 = (cap) => mkWorld({ cap, sessions: { a1: S('A', quota(3)), a2: S('A', quota(2)), a3: S('A', quota(1)) } });
+  const r2 = mk3(2);
+  let rr = await r2.settle(r2.ar.resumeBatch());
+  ok('§8 a refusal resumes NONE: 3 on slot A at an hour cap of 2 ⇒ refused by name (hour-cap, slot A), 0 delivered, 0 holds, 0 stamps', rr.refused && rr.refused.why === 'hour-cap' && /A/.test(rr.refused.detail) && r2.sent.length === 0 && r2.guard.snapshot().holdsOpen === 0 && r2.stamps() === 0, JSON.stringify({ rr, sent: r2.sent.length }));
+  ok('§8 …the marks stay (nothing ran) — the person can raise the cap and press again', [...r2.active.values()].every((s) => s._stoppedBy));
+  const r3 = mk3(3);
+  rr = await r3.settle(r3.ar.resumeBatch());
+  ok('§8 CONTROL (the boundary is exact): at a cap of 3 the same batch is authorized and all 3 land', !rr.refused && rr.resumed.length === 3 && r3.stamps() === 3, JSON.stringify(rr));
+  // …and the hour already holds what this batch spent: a single unattended turn on A is now refused
+  ok('§8 the batch COUNTS: after it, slot A\'s cap of 3 is spent — a single auto-resume authorization is refused', r3.guard.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }).why === 'hour-cap');
+
+  // C — FAIL CLOSED
+  const rT = mkWorld({ sessions: { a1: S('A', quota(3)) }, authorize: () => { throw new Error('boom'); } });
+  rr = await rT.settle(rT.ar.resumeBatch());
+  ok('§8 FAIL CLOSED: a gate that throws resumes none (gate-error)', rr.refused && rr.refused.why === 'gate-error' && rT.sent.length === 0, JSON.stringify(rr));
+  const rA = mkWorld({ sessions: { a1: S('A', quota(3)) }, authorize: 'absent' });
+  rr = await rA.settle(rA.ar.resumeBatch());
+  ok('§8 FAIL CLOSED: no batch gate wired resumes none (no-gate) — there is no "absent means allow" for a batch', rr.refused && rr.refused.why === 'no-gate' && rA.sent.length === 0, JSON.stringify(rr));
+  const rU = mkWorld({ sessions: { a1: S('A', quota(3)), x: S(null, quota(2)) } });
+  rr = await rU.settle(rU.ar.resumeBatch());
+  ok('§8 FAIL CLOSED: one conversation whose slot cannot be named refuses the WHOLE batch (identity-unknown)', rr.refused && rr.refused.why === 'identity-unknown' && rU.sent.length === 0, JSON.stringify(rr));
+
+  // D — «只恢复前 K 个»
+  const rK = mkWorld({ sessions: { a1: S('A', quota(3)), a2: S('A', quota(2)), a3: S('B', quota(1)) } });
+  rr = await rK.settle(rK.ar.resumeBatch({ limit: 1 }));
+  ok('§8 «只恢复前 K 个»: limit 1 continues ONLY the earliest stop (a1), authorizes 1, leaves 2', rr.resumed.map((x) => x.id).join() === 'a1' && rr.left === 2 && rK.counts().batchItems === 1 && rK.stamps() === 1, JSON.stringify(rr));
+
+  // E — an undelivered continue gives its hold back
+  const rF = mkWorld({ sessions: { a1: S('A', quota(3)), a2: S('A', quota(2)) }, sendOk: (id) => id !== 'a1' });
+  rr = await rF.settle(rF.ar.resumeBatch());
+  ok('§8 a continue the channel refused is NOT charged — its hold goes back, the mark stays, it is counted as undelivered', rr.failed.map((x) => x.id).join() === 'a1' && rr.resumed.map((x) => x.id).join() === 'a2' && rF.stamps() === 1 && rF.guard.snapshot().holdsOpen === 0 && rF.active.get('a1')._stoppedBy, JSON.stringify(rr));
+
+  // F — THE RE-ENTRY GUARD: the gate runs the pool's switch, which calls fireNow for an ARMED session
+  const reentry = async (mod) => {
+    const sess = S('A', quota(3), { _autoResume: true });
+    const rw = mkWorld({ mod, sessions: { a1: sess } });
+    rw.ar.armIfEnabled('a1', sess, Date.now() + 60e3, 'usage limit');
+    sess._onGate = (ar) => { ar.fireNow('a1', 'pool switch inside the gate'); };
+    const out = await rw.settle(rw.ar.resumeBatch());
+    await new Promise((r) => setTimeout(r, 60));
+    return { sent: rw.sent.length, batchResumed: out.resumed.length, out };
+  };
+  const re = await reentry(arMod);
+  ok('§8 a fireNow raised INSIDE the batch\'s gate (the pool switch) delivers nothing — ONE continue for one stop, and it is the BATCH\'s (charged to the batch\'s authorization, counted in its outcome)', re.sent === 1 && re.batchResumed === 1, JSON.stringify(re));
+  {
+    const MD = path.join(scratch('arl-bulk-mut'));
+    fs.mkdirSync(MD, { recursive: true });
+    let src = read('src/server/auto-resume.js');
+    const needle = '        let gate = true;\n        session._arFiring = true;\n';
+    const applies = src.includes(needle);
+    ok('§8 CONTROL: the re-entry patch applies to the real file', applies);
+    if (applies) {
+      src = src.replace(needle, '        let gate = true;\n').replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
+      const f = path.join(MD, 'auto-resume-mut.js'); fs.writeFileSync(f, src);
+      const bad = await reentry(require(f));
+      // (the post-gate `_isStreaming` re-check on both roads still keeps it to ONE send — defence in depth — but the
+      // continue that goes out is then the pool switch's own auto-resume, and the batch's outcome misreports it)
+      ok('§8 CONTROL: without the batch raising the in-flight flag the pool switch\'s own continue takes the turn from under the batch — the batch reports 0 resumed («already running») for the one continue that went out', bad.sent === 1 && bad.batchResumed === 0 && bad.out.skipped.some((x) => x.why === 'running'), JSON.stringify(bad));
+    }
+  }
 }
 
 // ── THE PAIR'S VERDICT (B-0220) ─────────────────────────────────────────────

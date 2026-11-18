@@ -459,6 +459,9 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/lib/usage-source.js', ['view-only', 'codexRefreshToast reads the ⟳ answer\'s two windows, which the engine built through quotaModel.bucketCounts — an empty window carries no reset and is said "starts on first use"']],
       ['src/routes/reset-credit.js', ['mention', 'the codex-refresh route\'s doc comment names the answer\'s fields; the route reads no bucket']],
       ['src/server/auto-resume.js', ['mention', 'one comment cites a sevenDay reset while explaining why the loop breaker keys on the WALL and not on a reset instant; it reads no bucket']],
+      // lane auto-resume-bulk (.349): the bulk resume's cost, said before the click
+      ['src/bulk-resume-cost.js', ['mention', 'names THRESH.fiveHour (the pool\'s soft band) in its header; it reads no bucket — a member\'s % used arrives computed']],
+      ['src/server/bulk-resume-routes.js', ['view-only', 'a member\'s 5 h % used through account-pool-auto bucketRemaining (bucketCounts: an empty window is 100 % free, never a used %), its reset only to bound the window\'s ledger rows']],
       ['src/lib/manage-agents.js', ['pending', 'the Agents roster donuts read u.fiveHour/u.sevenDay/u.scopedWeekly directly — they show the DERIVED view (now the plan limit, deterministically) but do not yet render the other limits or the not-started note']],
       ['src/lib/session-lifecycle.js', ['pending', "the billing switcher's per-account chips read the legacy pair for a one-line summary"]],
       ['src/lib/usage-pace.js', ['pending', "the pace/burn helper is a parity port of claude-swap's pace.py and reads the legacy pair verbatim"]],
@@ -2862,6 +2865,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/lib/session-lifecycle.js', 'the picker chip: pctOf(undefined) = null ⇒ seg() renders nothing'],
         ['src/lib/usage-source.js', 'codexRefreshToast skips a window with no usedPercent'],
         ['src/routes/reset-credit.js', 'a doc comment names the answer\'s fields; no read'],
+        ['src/bulk-resume-cost.js', 'a comment names the pool\'s 5h soft band (THRESH.fiveHour.hot); the PURE estimate reads no window — a member handed no `pctNow` has no measured share (lane auto-resume-bulk)'],
+        ['src/server/bulk-resume-routes.js', '`const fh = c && c.fiveHour; rem = fh ? bucketRemaining(…) : null` — a member with no 5h window has pctNow null and windowStart 0 ⇒ no measured share, the dollars still said (lane auto-resume-bulk)'],
         ['src/claude-oat-probe.js', 'the long-lived-token measurement\'s loopback MOCK answers the vendor\'s rate-limit headers (anthropic-ratelimit-unified-5h-*) to the CLI under test — it writes them, it reads no stored 5h window (lane cli-self-measure)'],
       ]);
       console.log('  … 5h readers found:', found.length);

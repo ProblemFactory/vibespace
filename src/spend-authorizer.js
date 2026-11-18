@@ -123,6 +123,11 @@ const SPEND_REASONS = Object.freeze({
   // `channel-message`. Declared HERE first; its ONE site is wired by wake-approve-card — test-spend-paths §2b's DEFERRED
   // census row names that lane, and goes red the day the site exists without the row being retired.
   'held-deliver': { turn: true, attended: true, what: 'a held channel digest the user chose to deliver now' },
+  // lane auto-resume-bulk (.349, a fleet power user): «恢复所有因用量/过载停止的会话» — ONE owner click for N continues.
+  // The click is one decision about N billed turns nobody typed one by one, so it is ONE authorization over the whole
+  // batch (authorizeUnattendedBatch: every slot's budget must hold ALL of its share, or NONE is resumed) and N charges.
+  // Producer: src/server/auto-resume.js resumeBatch (POST /api/sessions/resume-stopped, cookie only).
+  'bulk-resume': { turn: true, what: 'the resume of every conversation a usage limit or an overloaded model stopped' },
 });
 /** Is this reason ATTENDED (see the header of SPEND_REASONS)? Read off the table — never a second list. */
 const isAttended = (reason) => !!(reason && Object.prototype.hasOwnProperty.call(SPEND_REASONS, reason) && SPEND_REASONS[reason].attended === true);
@@ -382,6 +387,15 @@ function releasePending(pending, id) {
   return list.filter((p) => p && p.id !== want);
 }
 
+/** PURE. Renew holds by id (lane auto-resume-bulk, U2 cure): a batch opens all its holds at once and delivers them paced,
+ *  each behind a pre-fire gate (bounded at 90 s) — so the holds it has not reached yet are re-stamped `at = now` on every
+ *  pass, or a batch longer than RESERVE_TTL_MS would drop them and let another producer into budget the batch then
+ *  charges. Returns a NEW list; an id not held is ignored. */
+function renewPending(pending, ids, now = Date.now()) {
+  const want = new Set((Array.isArray(ids) ? ids : []).filter(Boolean).map(String));
+  return (Array.isArray(pending) ? pending : []).map((p) => (p && want.has(p.id) ? { ...p, at: Number(now) || 0 } : p));
+}
+
 /** PURE. Split holds into the live ones and the ones that timed out. The
  *  expired half is a CENSUS, not garbage: a hold nobody converted or released
  *  is a producer that authorized a spend and never said what happened, which is
@@ -571,6 +585,10 @@ function authorizeUnattendedSpend({
   reason, identity = null, state = null, limits = BUDGET_DEFAULTS,
   overage = null, overagePolicy = 'refuse', credential = null,
   spendControl = null, pending = null, ledger = null, now = Date.now(),
+  // HOW MANY TURNS this one answer is for (lane auto-resume-bulk): 1 for every producer but the batch, whose share on
+  // this slot is `need` and whose whole size is `instanceNeed` — so a cap is checked against what the batch WILL spend,
+  // never against its first turn. need = 1 is the old rule exactly (`used + 1 > cap` ⇔ `used >= cap`).
+  need = 1, instanceNeed = need,
 } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
@@ -631,13 +649,53 @@ function authorizeUnattendedSpend({
   // no oldest stamp — its retryAfter is 0, never `0 + HOUR_MS` (a 1970 instant the
   // client would say as «free now», lane owner-press-attended r2).
   const unsetSaid = (what) => `no cap is set for ${what} (the setting is empty) — every unattended turn is refused until a number is set in Settings → Spending`;   // B-0a33 (3)
+  // `need` / `instanceNeed` (lane auto-resume-bulk, the signature above): a cap holds what a batch WILL spend
+  const n = Math.max(1, Math.floor(Number(need)) || 1);
+  const nAll = Math.max(n, Math.floor(Number(instanceNeed)) || n);
+  const asks = (k) => (k > 1 ? ` — this batch needs ${k} more` : '');
   if (L.perIdentityHour === 0) return no('hour-cap', capUnset(L, 'perIdentityHour') ? unsetSaid('unattended turns per identity per hour') : `unattended turns per identity per hour are set to 0`, 0, null, capUnset(L, 'perIdentityHour') ? { capUnset: true } : null);
-  if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has ${spentWord(counts.promisedHour)} ${counts.hour}${flight(inFlight.identity)} unattended turns this hour${promisedTail(counts.promisedHour)} (cap ${L.perIdentityHour})`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
+  if (counts.hour + inFlight.identity + n > L.perIdentityHour) return no('hour-cap', `${name} has ${spentWord(counts.promisedHour)} ${counts.hour}${flight(inFlight.identity)} unattended turns this hour${promisedTail(counts.promisedHour)} (cap ${L.perIdentityHour})${asks(n)}`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
   if (L.perIdentityDay === 0) return no('day-cap', capUnset(L, 'perIdentityDay') ? unsetSaid('unattended turns per identity per day') : `unattended turns per identity per day are set to 0`, 0, null, capUnset(L, 'perIdentityDay') ? { capUnset: true } : null);
-  if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has ${spentWord(counts.promisedDay)} ${counts.day}${flight(inFlight.identity)} unattended turns today${promisedTail(counts.promisedDay)} (cap ${L.perIdentityDay})`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
+  if (counts.day + inFlight.identity + n > L.perIdentityDay) return no('day-cap', `${name} has ${spentWord(counts.promisedDay)} ${counts.day}${flight(inFlight.identity)} unattended turns today${promisedTail(counts.promisedDay)} (cap ${L.perIdentityDay})${asks(n)}`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
   if (L.perInstanceDay === 0) return no('instance-cap', capUnset(L, 'perInstanceDay') ? unsetSaid('unattended turns for this instance') : `unattended turns for this instance are set to 0`, 0, null, capUnset(L, 'perInstanceDay') ? { capUnset: true } : null);
-  if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has ${spentWord(counts.promisedInstanceDay)} ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today${promisedTail(counts.promisedInstanceDay)} (cap ${L.perInstanceDay})`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
+  if (counts.instanceDay + inFlight.instance + nAll > L.perInstanceDay) return no('instance-cap', `this instance has ${spentWord(counts.promisedInstanceDay)} ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today${promisedTail(counts.promisedInstanceDay)} (cap ${L.perInstanceDay})${asks(nAll)}`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
   return { ok: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
+}
+
+/** PURE. ONE AUTHORIZATION FOR A BATCH (lane auto-resume-bulk): one owner action that opens N billed turns — the resume of
+ *  every conversation a wall stopped — is decided ONCE, over the whole batch. `groups` = [{identity, n}] (the batch split
+ *  by the slot each turn bills — the engine's fireIdentityFor, exactly as every auto-resume); `ofKey(key)` hands the
+ *  per-slot facts ({overage, credential, spendControl}). Each slot must hold ALL of its share (`need: n`) and the
+ *  instance all N (`instanceNeed`), against charges AND live holds; the FIRST refusal refuses the WHOLE batch and names
+ *  its bucket and slot — a partial batch is a decision nobody made. FAIL CLOSED: an empty or malformed group refuses.
+ *  @returns {ok, why, detail, retryAfter, identity, reason, n, groups:[verdict…]} */
+function authorizeUnattendedBatch({
+  reason, groups = [], state = null, limits = BUDGET_DEFAULTS, ofKey = () => ({}), overagePolicy = 'refuse', pending = null, now = Date.now(),
+} = {}) {
+  const list = Array.isArray(groups) ? groups.filter((g) => g && Number(g.n) > 0) : [];
+  const total = list.reduce((a, g) => a + Math.floor(Number(g.n)), 0);
+  const no = (why, detail, extra = {}) => ({ ok: false, why, detail, retryAfter: 0, identity: null, reason, n: total, groups: [], ...extra });
+  if (!list.length || !total) return no('empty-batch', 'the batch names no turn to authorize');
+  const out = [];
+  for (const g of list) {
+    const key = g.identity && g.identity.key ? String(g.identity.key) : null;
+    let facts = {};
+    try { facts = (key && ofKey(key)) || {}; } catch { facts = {}; }
+    const v = authorizeUnattendedSpend({
+      reason, identity: g.identity || null, state, limits, overagePolicy, pending, now,
+      overage: facts.overage || null, credential: facts.credential || null, spendControl: facts.spendControl || null,
+      need: Math.floor(Number(g.n)), instanceNeed: total,
+    });
+    if (!v.ok) {
+      // the bucket's headroom, for the person's words and «resume only the first K» (U2 cure: the batch's own numbers)
+      const c = v.counts || {}, f = v.inFlight || {}, L = v.limits || {};
+      const left = v.why === 'hour-cap' ? L.perIdentityHour - (c.hour || 0) - (f.identity || 0) : v.why === 'day-cap' ? L.perIdentityDay - (c.day || 0) - (f.identity || 0)
+        : v.why === 'instance-cap' ? L.perInstanceDay - (c.instanceDay || 0) - (f.instance || 0) : null;
+      return { ...v, n: total, need: v.why === 'instance-cap' ? total : Math.floor(Number(g.n)), left: left === null ? null : Math.max(0, Math.floor(left)), groups: [v] };
+    }
+    out.push(v);
+  }
+  return { ok: true, why: null, detail: null, retryAfter: 0, identity: null, reason, n: total, groups: out };
 }
 
 /** PURE. Record a spend that ACTUALLY happened (two-phase, like the loop
@@ -942,10 +1000,11 @@ function noticeText(warn) {
 
 module.exports = {
   SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, warnRowOf,
+  authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
   budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
-  pendingCounts, reservePending, releasePending, expirePending,
+  pendingCounts, reservePending, releasePending, renewPending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,
   REFUSAL_WORDS, NEXT_WORDS, LINE_WORDS, DOOR_WORDS,

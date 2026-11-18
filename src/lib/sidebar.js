@@ -1,5 +1,5 @@
 import { Resizer } from './resizer.js';
-import { agoText, escHtml, createPopover, hostStateChip, sessionMatchesFilter, showContextMenu } from './utils.js';
+import { agoText, escHtml, createPopover, hostStateChip, sessionMatchesFilter, showContextMenu, showToast } from './utils.js';
 import { t as tr } from './i18n.js';
 import { BACKEND_META, createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey, AGENT_KIND_FILTER_KEY, agentKindFilterAtLoad, passesAgentKindFilter, agentKindsIn } from './agent-meta.js';
 import { installSidebarState } from './sidebar-state.js';
@@ -12,7 +12,8 @@ import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarColumn } from './sidebar-column.js'; // lane duo-build-1: the regular class's list column (one stream of rows)
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
-import { isStoppedBy, filterWords as stoppedFilterWords } from '../stopped-by.js'; // lane auto-resume-bulk: the «因限额/过载停止 (N)» filter
+import { isStoppedBy, filterWords as stoppedFilterWords, stillWalled } from '../stopped-by.js'; // lane auto-resume-bulk: the «因限额/过载停止 (N)» filter + the menu's count
+import { setAutoResumeForAll, openResumeStoppedDialog } from './bulk-resume.js'; // lane auto-resume-bulk: the two bulk acts
 import { UI_ICONS } from './icons.js';
 import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs: the filter row folds through THE chrome-bar fold
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
@@ -365,13 +366,28 @@ class Sidebar {
       listMenuBtn.onclick = (e) => {
         e.stopPropagation();
         const r = listMenuBtn.getBoundingClientRect();
+        // lane auto-resume-bulk: the two bulk acts (also on Settings → Spending, the auto-resume row). N = the marked
+        // sessions whose own stated reset has passed (the dialog re-asks the pool and says who is still walled)
+        const stoppedN = (this._allSessions || []).filter((s) => isStoppedBy(s) && !stillWalled(s.stoppedBy).walled).length;
+        const flipAll = async (on) => {
+          try {
+            const r = await setAutoResumeForAll(this.app, on);
+            showToast(on ? tr('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : tr('Auto-continue is off for {n} sessions', { n: r.changed || 0 }));
+          } catch (err) { showToast(tr('Could not change auto-continue: {why}', { why: err.message }), { type: 'error' }); }
+        };
         const ROWS = {
           refresh: { labelHtml: `${REFRESH_ICON} ${escHtml(tr('Refresh all live sessions…'))}`, label: tr('Refresh all live sessions…'), action: () => openRefreshLive(this.app) },
           sort: { label: tr('Sort by'), action: () => document.getElementById('sort-toggle')?.onclick?.(null, listMenuBtn) },   // its menu at this ⋯
           manage: { label: tr('Manage mode — show quick terminate buttons'), action: () => document.getElementById('manage-toggle')?.click() },
         };
         // the regular class's head has no room for sort / manage, and a narrow row folds them: they are rows of this ⋯ then
-        showContextMenu(r.left, r.bottom + 2, listMenuKeys({ regular: this._regularMode, folded: this._filterFold?.folded() }).map((k) => ROWS[k]));
+        const rows = listMenuKeys({ regular: this._regularMode, folded: this._filterFold?.folded() }).map((k) => ROWS[k]);
+        rows.splice(1, 0,   // the bulk acts sit beside the other act on every session (refresh), above the folded controls
+          { labelHtml: `${UI_ICONS.autoContinue || ''} ${escHtml(tr('Turn auto-continue on for every session'))}`, label: tr('Turn auto-continue on for every session'), action: () => flipAll(true) },
+          { labelHtml: `${UI_ICONS.pause || ''} ${escHtml(tr('Turn auto-continue off for every session'))}`, label: tr('Turn auto-continue off for every session'), action: () => flipAll(false) },
+          { labelHtml: `${UI_ICONS.playAll || ''} ${escHtml(tr('Resume every session a usage limit or overload stopped ({n})', { n: stoppedN }))}…`, label: tr('Resume every session a usage limit or overload stopped ({n})', { n: stoppedN }), action: () => openResumeStoppedDialog(this.app) },
+        );
+        showContextMenu(r.left, r.bottom + 2, rows);
       };
       // THE FILTER ROW never runs past the sidebar: search · filter · manage · sort · ⋯ through THE chrome-bar fold — the sort's
       // words go first (its icon, the order in its title), then manage, then sort fold into the ⋯ (above); the search and the

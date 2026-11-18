@@ -996,12 +996,15 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     ok(/autoResumeCapsFor\(this\._backend\)\.supported/.test(sb), 'WIRING: the status-bar chip is drawn from the DERIVED caps row, through the shared reader');
     const arSrc = fs.readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8');
     ok(/if \(!verbFor\(session\)\) \{ log\(/.test(arSrc), 'WIRING: armIfEnabled refuses a harness with no resume verb (never a promise nobody can keep)');
-    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}verb\.deliver\(session, continuePromptFor\(note, label2\), \{ sendChatInput/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
+    // lane auto-resume-bulk: the ONE `verb.deliver(` now lives in `deliverContinue`, which the single continue AND the
+    // bulk resume both call — each under its own gate (test-spend-paths' census reads every `sendToSession(` site)
+    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}deliverContinue\(session, verb, continuePromptFor\(note, label2\), \(s2, text\) => \{ const sent = sendToSession\(/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
+    ok((arSrc.match(/verb\.deliver\(/g) || []).length === 1 && /function deliverContinue\(session, verb, prompt, sendChatInput\) \{ return !!verb\.deliver\(session, prompt, \{ sendChatInput \}\); \}/.test(arSrc), 'WIRING: …and there is exactly ONE of them (a second fire path is how the loop breaker — and the spend authorizer — get bypassed)');
+    ok((arSrc.match(/\bdeliverContinue\(/g) || []).length === 3, 'WIRING: …called from exactly TWO gated places — attemptFire (one continue, spendOk) and resumeBatch (the bulk resume, ONE batch authorization) — never a third');
     // lg-recovery U1 cure: THE OVERLOAD LIST IS A CONFORMANCE ROW — every registered harness either DECLARES quota.overloadErrors
     // (and each declared value marks a stop through the PURE verdict) or declares none (and no error marks it)
     { const SBc = require(path.join(REPO, 'src/stopped-by.js')); const Hc = require(path.join(REPO, 'src/harnesses')); const rows = Hc.ids().map((id) => { const d = Hc.overloadErrorsOf(id); return { id, d, marks: d.every((e) => !!SBc.stopVerdict({ lastError: e, overloadErrors: d })), none: d.length || ['overloaded', 'serverOverloaded', 'server_error', 'rate_limit'].every((e) => !SBc.stopVerdict({ lastError: e, overloadErrors: d })) }; });
       ok(rows.length >= 3 && rows.every((r) => r.marks && r.none) && rows.some((r) => r.d.length), 'CONFORMANCE: every harness\'s declared overload list marks a stop, a harness that declares none is never marked', rows.map((r) => `${r.id}:${r.d.join('|') || '-'}`).join(' ')); }
-    ok((arSrc.match(/verb\.deliver\(/g) || []).length === 1, 'WIRING: …and there is exactly ONE of them (a second fire path is how the loop breaker — and the spend authorizer — get bypassed)');
     const engSrc2 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
     ok((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length === 3, 'WIRING: ONE shared reading edge with exactly its two producers (claude + codex), never a per-harness answer', String((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length));
   }

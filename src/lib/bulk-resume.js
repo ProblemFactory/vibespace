@@ -1,0 +1,235 @@
+// THE TWO BULK ACTS, ON THE PAGE (lane auto-resume-bulk, .349 — userW's fleet, 2026-10-23: dozens of conversations
+// stopped on usage walls the same day with auto-resume off, and nobody will open and resume them one by one).
+//   setAutoResumeForAll(app, on)  «对所有会话开启自动继续» / «全部关闭» — the server flips every live session (the
+//                                 per-session setEnabled road, one list broadcast); the RESUME CARRIER of every session
+//                                 the sidebar knows (live or stopped — user-state sessionConfigs.autoResume) is written
+//                                 in ONE push, so a later resume keeps the choice. The instance default for NEW sessions
+//                                 (Settings → `claude.autoResumeOnLimit`) is never changed by it.
+//   openResumeStoppedDialog(app)  «恢复所有因用量/过载停止的会话 (N)» — the confirm says the batch's expected COST before
+//                                 anything runs (src/bulk-resume-cost.js: dollars + the 5 h window share per member +
+//                                 «只恢复前 K 个»), then ONE POST (one spend authorization for the batch) and the paced
+//                                 continues' progress until the outcome line («恢复了 29 个 · 跳过 8 个（仍在限额内）· 拒绝 0»).
+// Both are reached from Settings → Spending (the auto-resume row) and the session list's ⋯ menu.
+import { t } from './i18n.js';
+import { api, fetchJson, createModalShell, showToast } from './utils.js';
+import { autoResumeAllWords, resumeButtonWords, skipWords, summaryWords } from '../stopped-by.js';
+import { costWords } from '../bulk-resume-cost.js';
+import { stampAt } from './page-time.js';   // the ONE formatter of a time a person reads
+import { autoResumeCapsFor } from './agent-meta.js';
+
+const POLL_MS = 1000;
+
+/** GET the plan the row and the dialog show first: {ok, counts, eligible, skipped, estimate, running}. */
+export function fetchStoppedPlan() { return fetchJson('/api/sessions/stopped'); }
+
+/** Flip auto-resume for every session (live: the server; live AND stopped: the resume carrier, one push). */
+export async function setAutoResumeForAll(app, on) {
+  const r = await api('/api/sessions/auto-resume-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!on }) });
+  const sb = app && app.sidebar;
+  let carriers = 0;
+  if (sb && typeof sb.setSessionConfigs === 'function') {
+    const pairs = [];
+    for (const s of sb._allSessions || []) {
+      // VibeSpace's own sessions only (a webui id: live, or stopped and kept) — never an archived one or a transcript the
+      // walk merely found (turning those on would make a months-old conversation continue by itself when next resumed)
+      if (!s.webuiId || (typeof sb.isArchived === 'function' && sb.isArchived(s))) continue;
+      if (!autoResumeCapsFor(s.backend || 'claude').supported) continue;   // no resume verb ⇒ nothing to turn on
+      const cfg = (sb.getSessionConfig && sb.getSessionConfig(s)) || {};
+      if (cfg.autoResume === !!on) continue;
+      pairs.push([s, { autoResume: !!on }]);   // a PATCH — setSessionConfigs writes it over the saved config
+    }
+    if (pairs.length) sb.setSessionConfigs(pairs);
+    carriers = pairs.length;
+  }
+  return { ...r, carriers };
+}
+
+/** The Settings row's / the menu's words for the current plan. */
+export function planWords(plan) {
+  if (!plan || !plan.ok) return null;
+  const counts = autoResumeAllWords({ total: plan.counts ? plan.counts.total : 0, on: plan.counts ? plan.counts.on : 0 }, t);
+  const n = plan.eligible ? plan.eligible.length : 0;
+  const cw = n ? costWords(plan.estimate, t) : null;
+  return { ...counts, n, resumeButton: resumeButtonWords(n, t), passive: cw ? cw.passive : null };
+}
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+/** A door's refusal in the person's words, by its code (never the hub's English sentence). */
+function answerWords(r) {
+  // the door's code (a plan read keeps it); a refused POST reaches here through api() as its message alone
+  const msg = r && r.message ? String(r.message) : '';
+  const code = (r && r.code) || (msg === 'a resume of the stopped sessions is already running' ? 'in_flight' : msg === 'auto-continue is not running' ? 'not_running' : msg === 'the bulk acts are pressed on this instance’s own page' ? 'not_a_page' : null);
+  if (code === 'not_running') return t('Auto-continue is not running on this hub — reopen VibeSpace and try again.');
+  if (code === 'in_flight') return t('A resume of these sessions is already running — following it here.');
+  if (code === 'not_a_page') return t('The bulk acts are pressed on this VibeSpace page only.');
+  return null;
+}
+/** The spend ceiling's refusal of a WHOLE batch, in the person's words: the bucket, what it has left, what the batch needs. */
+function batchRefusalWords(f) {
+  if (!f) return '';
+  const who = (f.identity && f.identity.name) || t('this account');
+  const left = Number.isFinite(f.left) ? f.left : null, need = Number.isFinite(f.need) ? f.need : f.n;
+  if (f.why === 'hour-cap' && left !== null) return t('{member} can take {left} more turns nobody typed this hour; this batch needs {need}.', { member: who, left, need });
+  if (f.why === 'day-cap' && left !== null) return t('{member} can take {left} more turns nobody typed today; this batch needs {need}.', { member: who, left, need });
+  if (f.why === 'instance-cap' && left !== null) return t('This VibeSpace can take {left} more turns nobody typed today; this batch needs {need}.', { left, need });
+  return t('The spend guard refused it ({why}).', { why: f.why || '?' });
+}
+
+/** The confirm → the batch → its outcome. Resolves with the final batch record (null = nothing ran). */
+export async function openResumeStoppedDialog(app, { plan = null, onDone = null } = {}) {
+  const p = plan || await fetchStoppedPlan();
+  let closed = false, resolveOuter = null;   // Escape / Close / the backdrop: the poll below stops, the promise settles
+  const shell = createModalShell({ id: 'resume-stopped-dialog', title: t('Resume sessions a limit or overload stopped'), dialogClass: 'resume-stopped-dialog', escapeToClose: true, kind: 'decision', onClose: () => { closed = true; try { resolveOuter && resolveOuter(null); } catch { } } }); // decision: a consent — N billed turns nobody typed go out when the person says so, after the cost is shown
+  const { body, dialog, close } = shell;
+  const footer = el('div', 'dialog-footer');
+  dialog.appendChild(footer);
+  const cancel = el('button', 'btn-cancel', t('Close'));
+  cancel.onclick = () => close();
+  if (!p || !p.ok) {
+    body.appendChild(el('p', 'dialog-hint', answerWords(p) || t('Could not read the stopped sessions — try again.')));
+    footer.appendChild(cancel);
+    return null;
+  }
+  const n = p.eligible.length;
+  const skippedList = (rows) => {
+    if (!rows || !rows.length) return null;
+    const box = el('div', 'resume-stopped-skipped');
+    box.appendChild(el('div', 'resume-stopped-sub', t('Skipped ({n}):', { n: rows.length })));
+    const ul = el('ul', 'dialog-list');
+    for (const s of rows.slice(0, 40)) ul.appendChild(el('li', null, `${s.name || s.id} — ${skipWords(s, t, { clock: (ms, now) => stampAt(ms, { now }) })}`));
+    if (rows.length > 40) ul.appendChild(el('li', null, t('…and {n} more', { n: rows.length - 40 })));
+    box.appendChild(ul);
+    return box;
+  };
+  if (!n) {
+    // NOTHING GREYED WITH A HINT: an empty set SAYS so (and why the ones it has are not resumable now)
+    body.appendChild(el('p', 'resume-stopped-empty', resumeButtonWords(0, t)));
+    const sk = skippedList(p.skipped); if (sk) body.appendChild(sk);
+    footer.appendChild(cancel);
+    return null;
+  }
+  body.appendChild(el('p', 'resume-stopped-lead', t('{n} sessions will be continued, earliest stopped first — each one is a billed turn, authorized together against your spend limits.', { n })));
+  const cw = costWords(p.estimate, t);
+  if (cw) {
+    const cost = el('div', 'resume-stopped-cost');
+    cost.appendChild(el('div', 'resume-stopped-dollars', cw.dollars));
+    cost.appendChild(el('div', 'resume-stopped-basis', cw.allowance));
+    for (const m of cw.members) {
+      cost.appendChild(el('div', 'resume-stopped-member', m.line));
+      if (m.basis) cost.appendChild(el('div', 'resume-stopped-basis', m.basis));
+    }
+    if (cw.unknown) cost.appendChild(el('div', 'resume-stopped-basis', cw.unknown));
+    body.appendChild(cost);
+  }
+  const sk = skippedList(p.skipped); if (sk) body.appendChild(sk);
+  const status = el('p', 'resume-stopped-status');
+  body.appendChild(status);
+  const all = el('button', 'btn-create resume-stopped-all', cw ? cw.allButton : t('Resume all ({n})', { n }));
+  const firstK = cw && cw.kButton ? el('button', 'btn-cancel resume-stopped-k', cw.kButton) : null;
+  footer.append(...[firstK, all, cancel].filter(Boolean));
+  setTimeout(() => all.focus(), 0);
+  return await new Promise((resolve) => {
+    resolveOuter = resolve;
+    // ONE press runs: while a batch is asked for or running, its two buttons are not drawn (a choice nobody can make now)
+    let busy = false;
+    const hideActs = () => { all.remove(); if (firstK) firstK.remove(); };
+    const showActs = () => { footer.prepend(...[firstK, all].filter(Boolean)); };
+    const run = async (limit) => {
+      if (busy) return;
+      busy = true; hideActs();
+      status.textContent = t('Authorizing the batch…');
+      let rec = null;
+      try {
+        const ids = p.eligible.slice(0, limit === null || limit === undefined ? p.eligible.length : limit).map((e) => e.id);   // exactly the rows shown, earliest first
+        rec = await api('/api/sessions/resume-stopped', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+      } catch (e) {
+        status.textContent = answerWords(e) || t('Could not start the resume — try again.');
+        busy = false; showActs();
+        return;
+      }
+      await follow(rec);
+    };
+    // the batch as it goes, to its outcome line (also a batch another page started: one batch at a time)
+    const follow = async (rec) => {
+      let misses = 0, lost = false;
+      while (rec && !rec.done && !closed) {
+        status.textContent = t('Resuming… {done} of {n} continued', { done: (rec.resumed || []).length, n: rec.planned });
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        const next = await fetchJson('/api/sessions/resume-stopped/' + encodeURIComponent(rec.batchId));
+        if (next && !next.error) { rec = next; misses = 0; continue; }
+        // a network blip is asked again; no record for a while (the hub restarted — batches live in its memory) = lost
+        if (++misses >= 10) { lost = true; break; }
+      }
+      if (closed) { resolve(rec); return; }
+      if (lost) { status.textContent = t('The batch was lost (VibeSpace restarted) — reopen this to see which sessions are still stopped.'); status.classList.add('done'); all.remove(); if (firstK) firstK.remove(); cancel.textContent = t('Done'); resolve(rec); return; }
+      const refused = rec && rec.refused ? rec.refused.n || rec.planned || 0 : 0;
+      const done = (rec && rec.resumed || []).length, failedN = (rec && rec.failed || []).length;
+      const notReached = rec && !rec.refused ? Math.max(0, (rec.planned || 0) - done - failedN - (rec.skipped || []).filter((x) => !(p.skipped || []).some((y) => y.id === x.id)).length) : 0;
+      const line = summaryWords({ resumed: done, skipped: rec ? rec.skipped : [], refused, failed: failedN, notReached }, t);
+      status.textContent = line;
+      status.classList.add('done');
+      if (rec && rec.refused) {
+        const why = el('p', 'resume-stopped-refused', t('The spend limit refused the whole batch — nothing was resumed: {detail}', { detail: batchRefusalWords(rec.refused) }));
+        body.insertBefore(why, status.nextSibling);
+        const k = Number.isFinite(rec.refused.left) ? Math.min(rec.refused.left, p.eligible.length) : 0;
+        if (k > 0 && k < p.eligible.length) {   // the earliest K the ceiling holds — one press, the same road
+          const fit = el('button', 'btn-create resume-stopped-fit', t('Resume only the first {k} (earliest stopped first)', { k }));
+          fit.onclick = () => { fit.remove(); why.remove(); status.classList.remove('done'); cancel.textContent = t('Close'); busy = false; run(k); };
+          footer.prepend(fit);
+        }
+      }
+      all.remove(); if (firstK) firstK.remove();
+      cancel.textContent = t('Done');
+      showToast(line, { type: rec && rec.refused ? 'error' : 'info' });
+      try { onDone && onDone(rec); } catch { }
+      if (!(rec && rec.refused)) resolve(rec);
+    };
+    all.onclick = () => run(null);
+    if (firstK) firstK.onclick = () => run(p.estimate.k);
+    cancel.addEventListener('click', () => resolve(null), { once: true });
+    if (p.running) {
+      // ONE batch at a time: a resume already running (another tab, another press) is followed, never doubled
+      busy = true; hideActs();
+      status.textContent = t('A resume of these sessions is already running — following it here.');
+      fetchJson('/api/sessions/resume-stopped/' + encodeURIComponent(p.running)).then((rec) => follow(rec && !rec.error ? rec : { batchId: p.running, done: false, planned: 0 }));
+    }
+  });
+}
+
+/** The Settings row's fact block: the counts, the two flip buttons, the resume button and the passive cost line. */
+export function renderAutoResumeBulk(container, app) {
+  const box = el('div', 'settings-row-fact auto-resume-bulk');
+  container.appendChild(box);
+  const paint = async () => {
+    const plan = await fetchStoppedPlan();
+    const w = planWords(plan);
+    box.textContent = '';
+    if (!w) { box.appendChild(el('span', 'settings-fact-text', t('Could not read the sessions — reopen Settings to retry.'))); return; }
+    box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-counts', w.line));
+    const row = el('div', 'auto-resume-bulk-buttons');
+    const onBtn = el('button', 'btn-create auto-resume-all-on', w.onButton);
+    const offBtn = el('button', 'btn-cancel auto-resume-all-off', w.offButton);
+    let flipping = false;   // one flip at a time — a second press while the first is out does nothing; paint() redraws the row after
+    const flip = async (on) => {
+      if (flipping) return;
+      flipping = true;
+      try {
+        const r = await setAutoResumeForAll(app, on);
+        showToast(on ? t('Auto-continue is on for {n} more sessions', { n: r.changed || 0 }) : t('Auto-continue is off for {n} sessions', { n: r.changed || 0 }));
+      } catch (e) { showToast(t('Could not change auto-continue: {why}', { why: e.message }), { type: 'error' }); }
+      paint();
+    };
+    onBtn.onclick = () => flip(true);
+    offBtn.onclick = () => flip(false);
+    const resumeBtn = el('button', 'btn-cancel resume-stopped-open', w.resumeButton);
+    resumeBtn.onclick = () => openResumeStoppedDialog(app, { plan: null, onDone: () => paint() });   // a fresh plan at the press
+    row.append(onBtn, offBtn, resumeBtn);
+    box.appendChild(row);
+    if (w.passive) box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-passive', w.passive));
+    box.appendChild(el('div', 'settings-fact-text auto-resume-bulk-note', t('These buttons change the sessions you have now — the default above decides for new ones.')));
+  };
+  paint();
+  return box;
+}
+

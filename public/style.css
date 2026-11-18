@@ -2028,6 +2028,22 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
 .settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
+/* lane auto-resume-bulk: the auto-resume row's bulk acts span the row (the counts, three buttons, the passive cost line) */
+.auto-resume-bulk { order: 3; flex: 1 1 100%; display: flex; flex-direction: column; gap: 4px; }
+.auto-resume-bulk-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.auto-resume-bulk-buttons button { font-size: 11px; padding: 3px 8px; }
+.auto-resume-bulk-passive { color: var(--text); }
+.resume-stopped-dialog { max-width: 560px; }
+.resume-stopped-cost { margin: 8px 0; padding: 6px 10px; border-left: 2px solid var(--yellow); font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.resume-stopped-dollars { font-weight: 600; color: var(--text); }
+.resume-stopped-member { color: var(--text); }
+.resume-stopped-basis { color: var(--text-secondary); font-size: 11px; }
+.resume-stopped-sub { font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+.resume-stopped-skipped .dialog-list { max-height: 160px; overflow-y: auto; font-size: 11px; }
+.resume-stopped-status { font-size: 12px; min-height: 1.4em; }
+.resume-stopped-status.done { font-weight: 600; color: var(--text); }
+.resume-stopped-refused { font-size: 12px; color: var(--red); }
+.resume-stopped-empty { font-size: 12px; color: var(--text); }
 .session-card-stop { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; margin-top: 2px; font-size: 10.5px; line-height: 1.4; } /* the toggle wraps under the words on a narrow card — the words stay whole */
 .session-card-stop .chip-icon { display: inline-flex; align-items: center; flex: none; }
 .session-card-stop .chip-icon svg { width: 11px; height: 11px; display: block; }

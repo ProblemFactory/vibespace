@@ -73,6 +73,22 @@ function continuePromptFor(note, account) {
     : CONTINUE_PROMPT.lifted;
   return `${head} ${CONTINUE_PROMPT.facts} ${CONTINUE_PROMPT.cli}`;
 }
+// …and its twin for a turn the harness ended because the MODEL WAS OVERLOADED (lane auto-resume-bulk): the same ask in
+// the same shape, without claiming a usage limit the conversation never hit.
+const CONTINUE_PROMPT_OVERLOAD = 'You can continue now. Your last turn ended because the model was overloaded; continue the task you were working on, and do not repeat work that is already complete.';
+const BULK_PACE_MS = 2500;  // the bulk resume's spacing between two continues — never a storm (lane auto-resume-bulk)
+// …and how long ONE pre-fire gate may take inside the batch. The gate probes quota (a CLI spawn on the claude rung); a
+// probe that never answers must not hold the batch — and its N spend holds — open: that session is SKIPPED by name
+// ('no-answer'), its hold given back, and the batch goes on. Fail closed: no answer is never a go.
+const BULK_GATE_WAIT_MS = 90 * 1000;
+const { planBatch, normalizeStoppedBy } = require('../stopped-by.js'); // PURE: the batch's plan (who, in which order, who is skipped and why)
+/** PURE: the continue the BULK resume delivers (lane auto-resume-bulk). An overload stop takes its twin above (no usage
+ *  limit is claimed); a quota stop takes continuePromptFor — `switchedTo` = the label of the account the pre-fire gate
+ *  landed it on when that is not the one the wall stopped (null = the wall on its own account lifted). */
+function bulkPromptFor(kind, switchedTo = null) {
+  if (kind === 'overload') return CONTINUE_PROMPT_OVERLOAD;
+  return continuePromptFor({ cls: switchedTo ? 'switched' : 'lifted' }, switchedTo || null);
+}
 const TICK_MS = 30000;      // the CLI polls at 30s; match it
 const GRACE_MS = 15000;     // let the reset actually land before asking
 const MAX_WAIT_MS = 26 * 60 * 60 * 1000; // a weekly bucket can be far out; refuse to sit forever
@@ -325,8 +341,25 @@ function writeJsonAtomic(file, obj) {
  *        stands, so the money has to go back — otherwise a pty that refuses one
  *        frame keeps that slot's budget booked until the hold times out.
  */
+/**
+ * THE BULK ACTS (lane auto-resume-bulk, .349) — deps:
+ * @param deps.authorizeSpendBatch (items:[{id, session, identity}]) => {ok, why, detail, holds:[{sessionId, identity, hold}]}
+ *        THE BATCH GATE: one owner click that opens N billed continues is ONE authorization (spend-guard
+ *        authorizeBatch, reason 'bulk-resume'). Absent = the batch is REFUSED (fail closed — there is no "absent means
+ *        a test" here: a batch with no gate is a money road nobody wired).
+ * @param deps.renewSpend (holds:[holdId]) => void — the holds the batch has not reached yet are renewed on every pass (a
+ *        batch can outlive one hold's lifetime; an expired hold would let another producer into the budget it charges).
+ * @param deps.noteBatchSpend (id, session, identity, hold) => void — a DELIVERED batch continue is charged (reason
+ *        'bulk-resume'), converting the hold the batch authorization opened for it; an undelivered one is released.
+ * @param deps.wallVerdict (id, session) => {usable, blockedUntil}|null — the pool's LIVE answer for this conversation
+ *        (the engine's quotaVerdictFor): a quota-stopped session whose wall has not reset is SKIPPED, never retried.
+ * @param deps.clearStopped (id, session, why) => void — the stop fact is cleared when a continue starts the turn.
+ * @param deps.persistFlag (id, session) => void — the per-session `autoResume` is written to the session's meta so a
+ *        deploy restart does not silently turn the bulk ON back off (boot-restore reads it back).
+ * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
+ */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  onListChange = null, clearStopped = null }) {   // clearStopped (U1 cure 2): the engine's clear of the stop fact, at a continue's delivery — lane auto-resume-bulk: the session list's one notify point — a STOPPED session's card shows its toggle
+  authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -350,6 +383,12 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       return v || null;
     } catch { return null; }
   }
+
+  /** THE ONE CONTINUE DELIVERY: the descriptor's own verb, handed the ORCH channel. Every continue this module sends —
+   *  the single one (attemptFire's deliver) and the bulk resume's (resumeBatch) — goes through THIS line (test-harness-
+   *  contract counts the verb's deliver call: exactly one), and each CALLER keeps its `sendToSession(` under its OWN gate (the spend-
+   *  paths census reads the site there: the single continue's spendOk, the batch's authorizeSpendBatch). */
+  function deliverContinue(session, verb, prompt, sendChatInput) { return !!verb.deliver(session, prompt, { sendChatInput }); }
 
   const save = () => {
     try {
@@ -429,9 +468,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const emit = (id) => { try { broadcast(id, { type: 'auto-resume', sessionId: id, status: statusFor(id) }); } catch { } };
 
   /** The live toggle (ws). Turning it OFF also cancels a pending wait. */
-  function setEnabled(id, on) {
+  function setEnabled(id, on, { quiet = false } = {}) {
     const session = activeSessions.get(id);
     if (session) session._autoResume = !!on;
+    if (session && persistFlag) { try { persistFlag(id, session); } catch (e) { log('[auto-resume] persisting the flag failed: ' + e.message); } }
     if (!on && armed.has(id)) { armed.delete(id); save(); }
     // TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure): a session a usage wall already STOPPED is armed on that
     // wall's own stated reset — the card's switch promises «continues by itself when its limit resets», and before this
@@ -445,8 +485,210 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     }
     emit(id);
     // a STOPPED session's card shows its auto-resume state beside the mark (lane auto-resume-bulk) — every list hears it
-    if (session && session._stoppedBy && onListChange) { try { onListChange(); } catch { } }
+    if (!quiet && session && session._stoppedBy && onListChange) { try { onListChange(); } catch { } }
     return statusFor(id);
+  }
+
+  /** WHO A BULK FLIP WOULD TOUCH: every live session whose harness can continue a turn (a harness with no resume verb
+   *  has no auto-resume to turn on — its chip is not drawn either). `on` = how many already have it effectively on. */
+  function bulkCounts() {
+    let total = 0, on = 0;
+    for (const [, s] of activeSessions) {
+      if (!s || s.isTmuxView || !verbFor(s)) continue;
+      total++;
+      if (enabledFor(s)) on++;
+    }
+    return { total, on, off: total - on, globalDefault: globalDefault() };
+  }
+  /** «对所有会话开启自动继续» / «全部关闭»: the SAME setEnabled road for every live session, then ONE list broadcast.
+   *  The instance DEFAULT for new sessions (GENERIC_LEGACY_KEYS.autoResumeOnLimit) is never touched here. */
+  function setEnabledAll(on) {
+    const before = bulkCounts();
+    let changed = 0, written = 0;
+    for (const [id, s] of activeSessions) {
+      if (!s || s.isTmuxView || !verbFor(s)) continue;
+      if (s._autoResume === !!on) continue;            // already its explicit choice
+      const flips = enabledFor(s) !== !!on;            // a session that only FOLLOWED the default gets the explicit choice too,
+      setEnabled(id, !!on, { quiet: true });           // but is not counted as turned on/off when nothing it does changes
+      written++; if (flips) changed++;
+    }
+    const after = bulkCounts();
+    log(`[auto-resume] bulk: turned ${on ? 'ON' : 'OFF'} for ${changed} session(s) (${before.on}/${before.total} → ${after.on}/${after.total} on${written !== changed ? `; ${written - changed} more now hold it explicitly` : ''})`);
+    if (written && onListChange) { try { onListChange(); } catch { } }
+    return { on: !!on, changed, written, before, after };
+  }
+
+  // ── THE BULK RESUME (lane auto-resume-bulk) ─────────────────────────────
+  // «恢复所有因用量/过载停止的会话»: ONE owner click, N billed continues. The click is the per-occurrence owner action
+  // for the WHOLE batch, so the batch is ONE authorization (authorizeSpendBatch — every slot's budget must hold all of
+  // its share, or NOTHING is resumed), and then the continues go out PACED, one at a time, each exactly like a single
+  // auto-resume: the loop breaker's quarantine is honoured, the pre-fire gate (beforeFire: a fresh probe, the pool's
+  // member pick, the verdict) decides at THAT moment, and the harness's own verb delivers. A wall that has not reset is
+  // SKIPPED and said («仍在限额内，至 14:00») — never retried blindly; a hold whose continue was not delivered goes back.
+  const batches = new Map();   // batchId → the batch's record (newest 8 kept; the dialog polls it)
+  let batchSeq = 0;
+  let batchRunning = null;
+  /** The loop breaker's quarantine, READ ONLY (canFire would mint a breaker record for a plan). */
+  function quarantinedUntil(id, key, now) { const h = fireHoldOf(id, key, now); return h ? h.until : 0; }
+  /** …and WHY: a continue onto this slot was just rejected ('quarantined'), or one is on its way ('pending'). */
+  function fireHoldOf(id, key, now) {
+    const r = fires.get(id);
+    if (!r) return null;
+    const hit = key ? (r.fails || []).find((f) => f && f.key === key && now - (f.at || 0) < FIRE_QUARANTINE_MS) : null;
+    if (hit) return { why: 'quarantined', until: hit.at + FIRE_QUARANTINE_MS };
+    if (r.last && now - (r.last.at || 0) < FIRE_PENDING_MS) return { why: 'pending', until: (r.last.at || now) + FIRE_PENDING_MS };
+    return null;
+  }
+  function stoppedRows(now = Date.now()) {
+    const rows = [];
+    for (const [id, s] of activeSessions) {
+      if (!s || s.isTmuxView || !normalizeStoppedBy(s._stoppedBy)) continue;
+      const ident = identityFor(id, s);
+      let verdict = null;
+      try { verdict = wallVerdict ? wallVerdict(id, s) : null; } catch { verdict = null; }
+      rows.push({ id, name: s.name || null, stoppedBy: s._stoppedBy, live: true, streaming: !!s._isStreaming, canResume: !!verbFor(s), quarantined: quarantinedUntil(id, ident ? ident.key : null, now), verdict, identity: ident });
+    }
+    return rows;
+  }
+  /** The plan as the Settings row / the dialog shows it BEFORE anything runs. */
+  function stoppedPlan(now = Date.now()) {
+    const rows = stoppedRows(now);
+    const plan = planBatch(rows, { now });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    plan.eligible = plan.eligible.map((e) => ({ ...e, identity: byId.get(e.id) ? byId.get(e.id).identity : null }));
+    return { ...plan, total: rows.length, running: batchRunning };
+  }
+  function batchStatus(batchId) { const b = batches.get(batchId); return b ? JSON.parse(JSON.stringify(b)) : null; }
+  const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, Math.max(0, ms)); if (t.unref) t.unref(); });
+
+  /** THE BATCH. `limit` = «只恢复前 K 个» (earliest stops first); `ids` narrows to the rows the dialog showed. Returns the
+   *  batch record at once (refused / nothing to do ⇒ already `done`); the paced continues run after it and fill it in. */
+  function resumeBatch({ limit = null, ids = null } = {}) {
+    if (batchRunning) return { ok: false, why: 'in-flight', batchId: batchRunning };
+    const now = Date.now();
+    const plan = stoppedPlan(now);
+    let take = plan.eligible;
+    if (Array.isArray(ids)) { const want = new Set(ids.map(String)); take = take.filter((e) => want.has(e.id)); }
+    const k = limit === null || limit === undefined || limit === '' ? take.length : Math.max(0, Math.floor(Number(limit)) || 0);
+    const chosen = take.slice(0, k);
+    const batchId = `rb-${(++batchSeq).toString(36)}-${now.toString(36)}`;
+    const rec = { ok: true, batchId, at: now, planned: chosen.length, left: take.length - chosen.length, resumed: [], skipped: plan.skipped.slice(), failed: [], refused: null, done: false };
+    batches.set(batchId, rec);
+    while (batches.size > 8) batches.delete(batches.keys().next().value);
+    if (!chosen.length) { rec.done = true; return batchStatus(batchId); }
+    // ONE AUTHORIZATION FOR THE WHOLE BATCH — each continue bills the slot the engine says it would (fireIdentityFor,
+    // the SAME identity every auto-resume charges); a refusal names its bucket and resumes NONE. FAIL CLOSED: no gate
+    // wired, a gate that throws, an answer without holds — all refuse.
+    let v = null;
+    try {
+      v = authorizeSpendBatch
+        ? authorizeSpendBatch(chosen.map((e) => ({ id: e.id, session: activeSessions.get(e.id) || null, identity: e.identity || null })))
+        : { ok: false, why: 'no-gate', detail: 'the batch spend gate is not wired' };
+    } catch (e) { v = { ok: false, why: 'gate-error', detail: (e && e.message) || String(e) }; try { global.__vsEvent?.('spend-gate-error', 'bulk-resume:threw'); } catch { } }
+    if (!v || v.ok === false || !Array.isArray(v.holds) || v.holds.length !== chosen.length) {
+      if (v && v.ok !== false && Array.isArray(v.holds) && releaseSpend) for (const h of v.holds) { try { releaseSpend(h.sessionId, null, h.hold); } catch { } }
+      rec.refused = { why: (v && v.why) || 'refused', detail: (v && v.detail) || null, identity: (v && v.identity) || null, retryAfter: (v && v.retryAfter) || 0, n: chosen.length, need: v && Number.isFinite(v.need) ? v.need : null, left: v && Number.isFinite(v.left) ? v.left : null };
+      rec.done = true;
+      log(`[auto-resume] bulk resume of ${chosen.length} refused by the spend gate — ${rec.refused.why}: ${rec.refused.detail || ''} (none resumed)`);
+      return batchStatus(batchId);
+    }
+    const holdOf = new Map(v.holds.map((h) => [String(h.sessionId), h]));
+    const open = new Map(holdOf);   // the holds not yet charged or given back — renewed on every pass
+    const renew = () => { if (renewSpend && open.size) { try { renewSpend([...open.values()].map((x) => x.hold)); } catch (err) { log('[auto-resume] renewing the batch holds failed: ' + err.message); } } };
+    batchRunning = batchId;
+    log(`[auto-resume] bulk resume ${batchId}: ${chosen.length} authorized as one batch, ${plan.skipped.length} skipped — continuing paced (${bulkPaceMs} ms apart)`);
+    (async () => {
+      for (let i = 0; i < chosen.length; i++) {
+        if (i > 0) await sleep(bulkPaceMs);
+        const e = chosen[i];
+        let h = holdOf.get(e.id) || null;
+        renew();   // every hold not reached yet lives on while this one waits its turn (U2 cure: a batch outlives one hold's TTL)
+        const giveBack = () => { open.delete(e.id); if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } } };
+        const skip = (why, until = null) => { giveBack(); rec.skipped.push({ id: e.id, name: e.name, kind: e.kind, at: e.at, why, until }); };
+        const session = activeSessions.get(e.id);
+        if (!session) { skip('gone'); continue; }
+        if (session._isStreaming || session._arFiring) { skip('running'); continue; }   // working, or its own continue is in flight
+        // STILL THE STOP THE PLAN SAW (U2 cure): a session that ran since (the person typed into it, the pool's own fire
+        // continued it) is not continued a second time — its new turn may be the person's own instruction
+        const stillSame = () => { const sb = normalizeStoppedBy(session._stoppedBy); return !!sb && sb.at === e.at; };
+        if (!stillSame()) { skip('resumed'); continue; }
+        const ident = identityFor(e.id, session);
+        const fh = fireHoldOf(e.id, ident ? ident.key : null, Date.now());
+        if (fh) { skip(fh.why, fh.until); continue; }
+        // THE PRE-FIRE GATE, as every continue: a fresh probe + the pool's member pick + the verdict, NOW. `false` = the
+        // wall still stands (the engine re-armed an enabled session to the new reset) — skipped and said, not retried.
+        // The in-flight flag is raised BEFORE the gate, exactly as attemptFire raises it: the gate runs the pool's switch,
+        // which calls fireNow for an ARMED session — and that continue plus this one would be two turns for one stop.
+        let gate = true;
+        session._arFiring = true;
+        try {
+          if (beforeFire) {
+            let timer = null;
+            const late = new Promise((r) => { timer = setTimeout(() => r('no-answer'), bulkGateWaitMs); if (timer.unref) timer.unref(); });
+            try { gate = await Promise.race([Promise.resolve(beforeFire(e.id, session)), late]); }
+            catch (err) { log(`[auto-resume] ${e.id}: pre-fire gate threw in the bulk resume — skipping (fail closed): ${(err && err.message) || err}`); gate = false; }
+            finally { clearTimeout(timer); }
+          }
+        } finally { session._arFiring = false; }
+        if (gate === 'no-answer') { log(`[auto-resume] ${e.id}: the pre-fire gate gave no answer in ${Math.round(bulkGateWaitMs / 1000)} s — skipped (fail closed)`); skip('no-answer'); continue; }
+        if (gate === false) {
+          let w = null;
+          try { w = wallVerdict ? wallVerdict(e.id, session) : null; } catch { w = null; }
+          skip('walled', w && w.blockedUntil > Date.now() ? w.blockedUntil : null);
+          continue;
+        }
+        renew();
+        if (session._isStreaming) { skip('running'); continue; }
+        if (!stillSame()) { skip('resumed'); continue; }   // the gate's own pool switch may have continued it (fireNow on an armed session)
+        const verb = verbFor(session);
+        if (!verb) { skip('no-verb'); continue; }
+        const ident2 = identityFor(e.id, session) || ident;
+        // THE SLOT IT WILL BILL (U2 cure): the gate runs the pool's switch, which may have moved this conversation onto another
+        // member — the hold was authorized on the slot named BEFORE it. Exactly as attemptFire re-checks after its gate: the
+        // old hold goes back, the breaker is asked about the NEW slot, and the new slot is authorized (a batch of one, same
+        // reason) — a refusal there skips this session and says so. The charge below names the slot that bills.
+        if (ident2 && ident2.key && !(h && h.identity && h.identity.key === ident2.key)) {
+          const fh2 = fireHoldOf(e.id, ident2.key, Date.now());
+          if (fh2) { skip(fh2.why, fh2.until); continue; }
+          let v2 = null;
+          try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: ident2 }]) : null; } catch (err) { v2 = null; log(`[auto-resume] ${e.id}: re-authorizing on ${ident2.name || ident2.key} threw: ${err.message}`); }
+          if (!v2 || v2.ok === false || !Array.isArray(v2.holds) || v2.holds.length !== 1) { skip('moved-refused'); continue; }
+          if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch { } }
+          h = v2.holds[0]; holdOf.set(e.id, h); open.set(e.id, h);
+          log(`[auto-resume] ${e.id}: the gate moved it onto ${ident2.name || ident2.key} — re-authorized there for the bulk resume`);
+        }
+        // the words say what unblocked it (the release's continue, lane resume-words): the gate moved it onto another
+        // account ⇒ «the pool now serves this conversation from X», else the wall on its account lifted; an overload, its twin
+        const switchedTo = ident2 && ident && ident2.key !== ident.key ? (ident2.name || null) : null;
+        const prompt = bulkPromptFor(e.kind, switchedTo);
+        const carried = { note: e.kind === 'overload' ? '模型过载后的批量恢复' : '因用量停止后的批量恢复' };
+        let ok = false;
+        try { ok = deliverContinue(session, verb, prompt, (s2, text) => { const sent = sendToSession(e.id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; }); }   // B-3d90: the batch's continue has its own record too
+        catch (err) { log(`[auto-resume] ${e.id}: the '${verb.form}' resume verb threw in the bulk resume: ${err.message}`); ok = false; }
+        if (!ok) { giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
+        open.delete(e.id);   // delivered: its hold becomes the charge below
+        // DELIVERED: the hold becomes the charge (on the slot the BATCH authorized for it), the breaker learns a continue
+        // went out (a walled answer quarantines that slot like any fire), a wait it superseded is dropped, the fact clears
+        if (noteBatchSpend) { try { noteBatchSpend(e.id, session, (h && h.identity) || ident2 || null, h ? h.hold : null); } catch (err) { log('[auto-resume] spend accounting failed: ' + err.message); } }
+        noteFired(e.id, ident2 ? ident2.key : null, 'timed', Date.now());
+        if (armed.has(e.id)) { armed.delete(e.id); _cancelArmNotify(e.id); }
+        save();
+        if (clearStopped) { try { clearStopped(e.id, session, 'bulk resume delivered'); } catch { } }
+        rec.resumed.push({ id: e.id, name: e.name, kind: e.kind });
+        log(`[auto-resume] ${e.id}: continued by the bulk resume ${batchId} (${e.kind}${ident2 ? `, on ${ident2.name}` : ''})`);
+        emit(e.id);
+      }
+    })()
+      .catch((err) => { log(`[auto-resume] bulk resume ${batchId} broke: ${(err && err.message) || err}`); })
+      .finally(() => {
+        // every hold that never became a turn goes back — including the ones a crash in the loop left behind
+        const settled = new Set([...rec.resumed.map((r) => r.id)]);
+        for (const [sid, h] of holdOf) if (!settled.has(sid) && releaseSpend) { try { releaseSpend(sid, null, h.hold); } catch { } }
+        rec.done = true; batchRunning = null;
+        log(`[auto-resume] bulk resume ${batchId} done: resumed ${rec.resumed.length} · skipped ${rec.skipped.length} · not delivered ${rec.failed.length}`);
+        if (onListChange) { try { onListChange(); } catch { } }
+      });
+    return batchStatus(batchId);
   }
 
   /** Exhaustion seen for this session (rate_limit_event status=rejected, or a
@@ -981,7 +1223,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // notice survives only where no prompt reached the conversation (the
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
-      try { ok = !!verb.deliver(session, continuePromptFor(note, label2), { sendChatInput: (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; } }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
+      try { ok = deliverContinue(session, verb, continuePromptFor(note, label2), (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       if (session._stoppedBy && session._stoppedBy.at) session._stopContinuedAt = session._stoppedBy.at;   // this stop has had its continue (the switch never arms it again)
@@ -1180,6 +1422,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   return {
     armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
     refreshStatus: (id) => emit(id), // lane cli-self-measure: a check that ended re-says every armed conversation's status (its chip drops «checking»)
+    bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
     _armed: armed, _fires: fires,
@@ -1187,7 +1430,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 }
 
 module.exports = {
-  create, CONTINUE_PROMPT, continuePromptFor, TICK_MS, GRACE_MS, MAX_WAIT_MS,
+  create, CONTINUE_PROMPT, continuePromptFor, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
 };

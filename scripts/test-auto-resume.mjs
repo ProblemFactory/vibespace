@@ -1430,7 +1430,7 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   const named = /the account "([^"]*)"/.exec(evil);
   ok('14b. the account label rides the peer-text belt: a frame tag inert, a line break folded, a bidi override gone, ≤ 80', !!named && !/<system-reminder/.test(evil) && !/\n/.test(evil) && !/\u202E/.test(evil) && named[1].length <= 80, named && named[1]);
   ok('14b. …a "$&" in the label is the label, not a replacement pattern', CPF({ cls: 'switched' }, 'A$&B').includes('the account "A$&B"'));
-  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /verb\.deliver\(session, continuePromptFor\(note, label2\), \{ sendChatInput/.test(read('src/server/auto-resume.js')));
+  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /deliverContinue\(session, verb, continuePromptFor\(note, label2\), \(s2, text\) => sendToSession\(/.test(read('src/server/auto-resume.js')));
 }
 
 // ── 16. WHY A SESSION STOPPED — the fact, through the REAL engine (lane auto-resume-bulk, .349) ──────────────────────
@@ -1489,6 +1489,49 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   ok('16. a 429 rate_limit turn end is NOT an overload (and a normal end clears the mark)', afterRateLimit === null);
   ok('16. an overload the turn RECOVERED from (a later record without an error) is not why it stopped', afterNormal === null);
   ok('16. codex: task_failed serverOverloaded (final) ⇒ overload; a turn start clears; usageLimitExceeded is the wall machine\'s, not this', codexOv && codexOv.kind === 'overload' && codexWall === null, JSON.stringify({ codexOv, codexWall }));
+  ok('16. sessionWallVerdict answers (or says nothing) — it never throws', (() => { try { const v = eng.sessionWallVerdict(s); return v === null || typeof v === 'object'; } catch { return false; } })());
+}
+
+// ── 17. «对所有会话开启自动继续» — the bulk flip (lane auto-resume-bulk) ─────────────────────────────────────────────
+{
+  console.log('\n17. the bulk flip: every live session through setEnabled, ONE list broadcast, the instance default untouched');
+  const { create } = require(AR_PATH);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkflip-'));
+  const persisted = [];
+  let lists = 0, settingWrites = 0;
+  const active = new Map([
+    ['a', { backend: 'claude', mode: 'chat' }],
+    ['b', { backend: 'claude', mode: 'chat', _autoResume: false }],
+    ['c', { backend: 'claude', mode: 'chat', _autoResume: true }],
+    ['d', { backend: 'shell', mode: 'terminal' }],
+    ['e', { backend: 'claude', mode: 'chat', _stoppedBy: { kind: 'quota', at: Date.now() } }],
+  ]);
+  const ar = create({
+    dataDir: dir, activeSessions: active, sendToSession: () => true, log: () => { },
+    serverSetting: new Proxy(() => false, { apply: () => false, set: () => { settingWrites++; return true; } }),
+    resumeVerb: (s) => (s.backend === 'shell' ? null : { form: 'message', deliver: () => true }),
+    persistFlag: (id) => persisted.push(id), onListChange: () => { lists++; },
+  });
+  const before = ar.bulkCounts();
+  ok('17. the counts BEFORE: 4 sessions can continue a turn (the shell cannot), 1 already on', before.total === 4 && before.on === 1 && before.off === 3 && before.globalDefault === false, JSON.stringify(before));
+  ar.armIfEnabled('c', active.get('c'), Date.now() + 3600e3, 'usage limit');
+  const on = ar.setEnabledAll(true);
+  ok('17. ON for every session: 3 changed, 1 → 4 on, ONE list broadcast, every changed flag persisted (a restart keeps it)', on.changed === 3 && on.before.on === 1 && on.after.on === 4 && lists === 1 && persisted.sort().join() === 'a,b,e', JSON.stringify({ on, lists, persisted }));
+  ok('17. the shell session is untouched (no resume verb ⇒ nothing to turn on)', active.get('d')._autoResume === undefined);
+  ok('17. the instance DEFAULT for new sessions is never written', settingWrites === 0 && ar.bulkCounts().globalDefault === false);
+  ok('17. a second ON changes nothing and broadcasts nothing', ar.setEnabledAll(true).changed === 0 && lists === 1);
+  const off = ar.setEnabledAll(false);
+  ok('17. «全部关闭»: 4 changed, 0 on after, and a pending wait is DROPPED (off cancels the promise, as the chip does)', off.changed === 4 && off.after.on === 0 && !ar.statusFor('c').armed, JSON.stringify(off));
+  // a session that only FOLLOWED the (off) default gets the explicit choice, but is not counted as «turned off»
+  const fresh = create({ dataDir: dir, activeSessions: new Map([['x', { backend: 'claude', mode: 'chat' }], ['y', { backend: 'claude', mode: 'chat', _autoResume: true }]]), sendToSession: () => true, log: () => { }, serverSetting: () => false, resumeVerb: () => ({ form: 'message', deliver: () => true }) });
+  const offAll = fresh.setEnabledAll(false);
+  ok('17. «全部关闭» counts only real flips (1: the one that was on) and still writes the explicit off on the default-follower (written 2)', offAll.changed === 1 && offAll.written === 2 && offAll.after.on === 0, JSON.stringify(offAll));
+  lists = 0;
+  ar.setEnabled('e', true);
+  const stoppedBroadcast = lists;
+  ar.setEnabled('a', true);
+  ok('17. a single toggle on a STOPPED session tells every list (its card shows the state); on another one it does not', stoppedBroadcast === 1 && lists === 1, String(lists));
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // ── 16c. THE FOLLOW-UP (主开发's verdict on U1, 2026-11-18 06:46Z): A the card never promises a continue that cannot happen,
@@ -1676,6 +1719,57 @@ await (async () => {
   if (mm) mm.setEnabled('s1', true);
   ok('16b. CONTROL: without the turned-on arm the same press arms nothing — the first leg goes red', m.hits === 1 && !!mm && mm.statusFor('s1').armed === false, m.err || null);
 }
+
+// ── 17b. THE BULK RESUME'S LOOP (lg-recovery U2 cure — the adversarial read's MUST 1-3): the holds it has not reached are
+// RENEWED each pass; a session that RAN since the plan (its stop gone or a new one) is skipped, its hold given back; a session
+// the pre-fire gate MOVED onto another slot is re-authorized THERE and charged THERE (a refusal there skips it). The REAL
+// module; the money doors are recorders.
+await (async () => {
+  console.log('\n17b. the bulk resume\'s loop: renewal, a session that ran since, a session the gate moved');
+  const { create } = require(AR_PATH);
+  const run = async (mod, { moveTo = null, refuseMoved = false, ranSince = false } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulk17b-'));
+    const at = Date.now() - 60000;
+    const active = new Map([
+      ['a', { backend: 'claude', mode: 'chat', pty: {}, name: 'A1', _slot: 'A', _stoppedBy: { kind: 'quota', at, resetsAt: Date.now() - 1000 } }],
+      ['b', { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'A', _stoppedBy: { kind: 'quota', at: at + 1, resetsAt: Date.now() - 1000 } }],
+    ]);
+    const L = { auth: [], renew: [], release: [], charge: [], sent: [] };
+    let seq = 0;
+    const ar = mod.create({
+      dataDir: dir, activeSessions: active, serverSetting: () => false,
+      sendToSession: (id) => { L.sent.push(id); return true; },
+      fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+      beforeFire: (id, s2) => { if (moveTo && id === 'b') s2._slot = moveTo; return true; },
+      authorizeSpendBatch: (items) => { L.auth.push(items.map((x) => `${x.id}@${x.identity && x.identity.key}`).join()); if (refuseMoved && items.length === 1) return { ok: false, why: 'hour-cap' }; return { ok: true, holds: items.map((x) => ({ sessionId: x.id, identity: x.identity, hold: 'h' + (++seq) })) }; },
+      renewSpend: (holds) => L.renew.push(holds.join()),
+      releaseSpend: (id, s2, hold) => L.release.push(hold),
+      noteBatchSpend: (id, s2, identity, hold) => L.charge.push(`${id}@${identity && identity.key}:${hold}`),
+      wallVerdict: () => ({ usable: true, blockedUntil: 0 }),
+      bulkPaceMs: 5, bulkGateWaitMs: 2000,
+    });
+    const r0 = ar.resumeBatch({});
+    if (ranSince) active.get('b')._stoppedBy = null;   // the person typed into b before the batch reached it
+    const until = Date.now() + 5000;
+    while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 10));
+    return { rec: ar.batchStatus(r0.batchId), L };
+  };
+  const real = { create };
+  const n = await run(real);
+  ok('17b. both continued, each charged on the slot its hold was opened for; the hold not reached yet was RENEWED while the first ran', n.rec.done && n.L.sent.join() === 'a,b' && n.L.charge.join() === 'a@A:h1,b@A:h2' && n.L.renew.some((x) => x.split(',').includes('h2')), JSON.stringify(n));
+  const r1 = await run(real, { ranSince: true });
+  ok('17b. a session that RAN since the plan is skipped («it has run again since»), never continued twice; its hold goes back', r1.L.sent.join() === 'a' && r1.rec.skipped.some((x) => x.id === 'b' && x.why === 'resumed') && r1.L.release.includes('h2'), JSON.stringify(r1));
+  const m1 = mutantAr([["        if (!stillSame()) { skip('resumed'); continue; }\n", ''], ["        if (!stillSame()) { skip('resumed'); continue; }   // the gate's own pool switch may have continued it (fireNow on an armed session)\n", '']]);
+  const c1 = m1.mod ? await run(m1.mod, { ranSince: true }) : null;
+  ok('17b. CONTROL: without the two re-checks the same batch continues b a second time — the leg above goes red', m1.hits === 2 && !!c1 && c1.L.sent.join() === 'a,b', m1.err || JSON.stringify(c1 && c1.L));
+  const mv = await run(real, { moveTo: 'C' });
+  ok('17b. the gate MOVED b onto slot C ⇒ re-authorized on C (a batch of one), its A hold given back, charged on C', mv.L.auth.join('|') === 'a@A,b@A|b@C' && mv.L.release.includes('h2') && mv.L.charge.join() === 'a@A:h1,b@C:h3' && mv.L.sent.join() === 'a,b', JSON.stringify(mv.L));
+  const rf = await run(real, { moveTo: 'C', refuseMoved: true });
+  ok('17b. …and when C refuses, b is skipped («the account it moved to refused the spend»), nothing sent or charged for it', rf.L.sent.join() === 'a' && rf.rec.skipped.some((x) => x.id === 'b' && x.why === 'moved-refused') && !rf.L.charge.some((x) => x.startsWith('b@')), JSON.stringify(rf));
+  const m2 = mutantAr([['        if (ident2 && ident2.key && !(h && h.identity && h.identity.key === ident2.key)) {', '        if (false) {']]);
+  const c2 = m2.mod ? await run(m2.mod, { moveTo: 'C' }) : null;
+  ok('17b. CONTROL: without the landing-slot check b is charged on A, the slot it never billed — the move leg goes red', m2.hits === 1 && !!c2 && c2.L.charge.includes('b@A:h2'), m2.err || JSON.stringify(c2 && c2.L));
+})();
 
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
