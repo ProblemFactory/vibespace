@@ -2844,7 +2844,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
   // B-8bd5 (its adversarial read r1): the panel is withdrawn only by the one that FILED it — the job itself (its jbt_) or its owner
   // conversation's lineage; a control grant (--control all) never closes the person's question
-  if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403).json({ error: `${job.id}'s question is withdrawn by the job itself or by its owner conversation — never by another conversation, one that holds control included`, code: 'not-the-filer' }) : res.status(404).json({ error: NOT_VISIBLE(ref) });   // 主开发 21:46Z: the refusal names its door
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });

@@ -3385,8 +3385,13 @@ class JobManager {
     // its adversarial read r1: the withdraw is a RECORD in the answers (as an expiry is) — a loop waiting on `answers --wait` learns
     // the panel is gone, whoever closed it
     job.interaction.answers = job.interaction.answers || [];
-    job.interaction.answers.push({ withdrawn: true, version: p.version, ts: now() });
+    const wrec = { withdrawn: true, version: p.version, ts: now() };
+    job.interaction.answers.push(wrec);
     if (job.interaction.answers.length > 50) job.interaction.answers.splice(0, job.interaction.answers.length - 50);   // its read r2: the same cap as an answer's
+    if (job.stdinOpen) { // 主开发 21:46Z: a stdin-open job reads the withdraw on its stdin, as it reads an answer (the wrapper's answers tail file)
+      const run = job.runs && job.runs[job.runs.length - 1];
+      if (run) { try { fs.appendFileSync(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(wrec) + '\n'); } catch { } }
+    }
     job.interaction.pending = null;
     if (job.state === 'awaiting-user') job.state = 'up';
     this._resolveAns(job);

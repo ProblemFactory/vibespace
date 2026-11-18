@@ -173,12 +173,12 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
   const wB = await cli('B', ['withdraw', job.id]);
   const stillOpen = !!(job.interaction && job.interaction.pending);
   const wA = await cli('A', ['withdraw', job.id]);
-  ok(wB.code !== 0 && stillOpen && wA.code === 0 && !(job.interaction && job.interaction.pending) && (job.interaction.answers || []).some((x) => x && x.withdrawn === true),
-    'B-8bd5: a groupmate holding CONTROL cannot withdraw the job\'s question (refused, it stays open); its owner can — and the answers record the withdraw', { B: [wB.code, wB.err.slice(0, 160)], A: [wA.code, wA.err.slice(0, 160)] });
-  const ARSRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'), WD = "  if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });\n";
+  ok(wB.code !== 0 && /withdrawn by the job itself or by its owner conversation/.test(wB.err) && stillOpen && wA.code === 0 && !(job.interaction && job.interaction.pending) && (job.interaction.answers || []).some((x) => x && x.withdrawn === true),
+    'B-8bd5: a groupmate holding CONTROL cannot withdraw the job\'s question (refused NAMING its door — 主开发 21:46Z; it stays open); its owner can — and the answers record the withdraw', { B: [wB.code, wB.err.slice(0, 160)], A: [wA.code, wA.err.slice(0, 160)] });
+  const ARSRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8'), WD = "act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403)";
   ok(ARSRC.split(WD).length === 2, 'B-8bd5 control setup: the anchor of the control «only the filer withdraws» is in the source');
   const MJW = mutantCopies('jobs-addressed-withdraw', REPO);
-  const ARX = MJW.load('src/agent-routes.js', ARSRC.replace(WD, "  if (!a.selfJob && act === 'withdraw' && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });   /* MUTANT: batch 8's first cut — a control grant withdraws */\n"), 'control-gate');
+  const ARX = MJW.load('src/agent-routes.js', ARSRC.replace(WD, WD.replace('!jobModel.canEdit(', '/* MUTANT: batch 8\'s first cut — a control grant withdraws */ !jobModel.canControl(')), 'control-gate');
   const routesX = {};
   hush(() => ARX.setupAgentRoutes({ app: { get: (p, h) => { routesX[`GET ${p}`] = h; }, post: (p, h) => { routesX[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } }, ...AR_DEPS }));
   jm.ask(job, PANEL_W);
