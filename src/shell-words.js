@@ -923,8 +923,9 @@ const ARITH_TESTS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);
  *  `source` / `.` no longer count (a value handed to `source <(echo "$x")` runs unread); zsh's `[` / `test` evaluates its
  *  `-eq` operands arithmetically (bash's does not) — not counted. */
 function valueEvaluated(name, text, from, cmds) {
-  // the follow-up's regression (verdict 02:27Z): in a subscript, arithmetic and the arithmetic commands the dash and the slash
-  // are OPERATORS (`x-1`, `x/2`) — the bare name is bounded by name characters only there, never by `.` / `/` / `-`
+  // the follow-up's regression (verdict 02:27Z): the bare name is bounded by NAME CHARACTERS ONLY, everywhere it is read
+  // (the subscript and arithmetic spans, the arithmetic commands — the code evaluators read `$name` through `ref`): in
+  // arithmetic the dash and the slash are OPERATORS (`x-1`, `x/2`), so `.` / `/` / `-` never bound a name
   const re = new RegExp(`(^|[^A-Za-z0-9_])${name}(?![A-Za-z0-9_])`), ref = new RegExp(`\\$\\{?[=~^]*${name}(?![A-Za-z0-9_])`);
   const t = text.slice(from);
   let seen = -1;

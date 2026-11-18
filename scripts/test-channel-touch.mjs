@@ -3347,8 +3347,11 @@ await section('⑬', async () => {
   const noVal779 = sw('e779-value', "    if (valueEvaluated(x.name, text, x.end, cmds)) { opaque('param-value', x.end); break; }", '    ');
   const noSplit779 = sw('e779-split', "if (!raw.includes(CLI) && headReads(raw, assigned).includes(CLI)) heads.push(", 'if (false) heads.push(');
   const lost779 = (M, ks) => ks.every((k) => !M.channelsMayRun(E779[k][1]).length);
-  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11']) && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
-    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V11 may run nothing; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
+  // the second follow-up's should (02:39Z): the BOUNDARY itself pinned — c3aeef35e's wide class (`.` / `/` / `-` around a name)
+  // put back ⇒ the arithmetic legs V10 V11 lose their may reading (the param-value control proves only the reason)
+  const wideBound779 = sw('e779-wide-boundary', '  const re = new RegExp(`(^|[^A-Za-z0-9_])${name}(?![A-Za-z0-9_])`)', '  const re = new RegExp(`(^|[^A-Za-z0-9_./-])${name}(?![A-Za-z0-9_./-])`)');
+  ok(lost779(noHead779, ['H1', 'H2', 'H4', 'H5', 'H7', 'H8', 'H9', 'H10', 'H11', 'H12', 'H13']) && lost779(noVal779, ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11']) && lost779(wideBound779, ['V10', 'V11']) && wideBound779.channelsMayRun(E779.V1[1]).length > 0 && lost779(noSplit779, ['H4', 'H5', 'H6', 'H12', 'H13']) && noSplit779.channelsMayRun(E779.H1[1]).length > 0,
+    'CONTROLS B-e779: the param-head reason off ⇒ H1 H2 H4 H5 H7–H13 may run nothing (the base\'s hole); the param-value reason off ⇒ V1–V11 may run nothing; the wide name boundary put back ⇒ V10 V11 (arithmetic) may run nothing, V1 still read; the split name off ⇒ H4–H6 H12 H13 named none (H1 still named by the line)');
   // r15: THE COMPACT HEAD READS THE WHOLE COMMAND (the r14 verdict MINOR — commandHeadWords read a 2048-character cut: a
   // quote or a `$( … )` the cut left open made the line UNKNOWN since r14 — no exact run — and a long chained compose's head
   // the `vibespace-status` again, the r1 H1 shape)
