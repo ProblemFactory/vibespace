@@ -393,7 +393,7 @@ export function installSidebarTasks(SidebarClass) {
     return t.colorSeq != null ? seqTaskColor(t.colorSeq, this.app?.settings?.get('tasks.autoStyleOrder')).pattern : null;
   };
 
-  proto._taskApi = async function(method, url, body) {
+  proto._taskApi = async function(method, url, body, onRefused = null) {   // lane lg-group-parents (cure 3): + onRefused(answer, status)
     try {
       const res = await fetch(url, {
         method,
@@ -410,6 +410,7 @@ export function installSidebarTasks(SidebarClass) {
         // engineer reading the report — NOTHING. Always name the status, and
         // leave a telemetry breadcrumb so it is diagnosable after the fact.
         if (data && data.code === 'TASK_GROUPS_UNREAD') { showToast(tr("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do."), { type: 'error' }); if (!this._tasksUnread) this._fetchTasks(); return null; }   // THE STORE HELD UNREAD: worded HERE, in the person's language (主开发 00:41Z (c)); the mirror learns the hold
+        if (typeof onRefused === 'function') { try { onRefused(data, res.status); } catch { } }   // a refusal that carries the store's state hands it on first
         const detail = data.error || (raw && !raw.startsWith('<') ? raw.slice(0, 120) : '');
         showToast(`${tr('Task Group operation failed')} (HTTP ${res.status}${detail ? ' — ' + detail : ''})`, { type: 'error' });
         try { track('error', `task-api-${res.status}`, `${method} ${url}`); } catch { }
@@ -452,7 +453,9 @@ export function installSidebarTasks(SidebarClass) {
     return data?.task || null;
   };
   proto._taskUpdate = async function(id, patch) {
-    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch);
+    // lane lg-group-parents (cure 3 (a)): a parents write refused as stale carries the store's list — the copy adopts it at once
+    // (a missed broadcast never leaves every later press refused until the tab is reopened)
+    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch, (d) => { if (d && d.code === 'parents_stale' && Array.isArray(d.parents)) this._upsertTaskLocal({ id, parents: d.parents.map(String) }); });
     if (data?.task) this._upsertTaskLocal(data.task);
     return data;
   };

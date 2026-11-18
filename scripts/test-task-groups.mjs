@@ -543,6 +543,16 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const { PARENT_REFUSALS: PR11 } = require(path.join(ROOT, 'src/task-groups.js'));
     ok(stale === 'parents_stale' && fresh === null && same(s11.get(C11.id).parents, [Q11.id]) && codeOf11(() => s11.update(C11.id, { parents: [P11.id] })) === null && PR11.includes('parents_stale') && /e\.code === 'except_unnamed' \|\| e\.code === 'parents_stale' \? 409/.test(read('src/server/task-groups-wiring.js')), 'cure\'s cure (2): a parents write whose base is stale is refused parents_stale (409) and writes nothing — the removed parent never comes back; a matching base writes; a write with no base (an API caller) is not checked', { stale, fresh });
   }
+  // cure 3 (a): the stale answer carries the store's list — the page's copy adopts it at once and the tab redraws from it (a missed
+  // broadcast never leaves every later press refused until the tab is reopened)
+  {
+    const s12 = freshStore();
+    const P12 = s12.create({ title: 'P12' }), Q12 = s12.create({ title: 'Q12' }), C12 = s12.create({ title: 'C12', parents: [P12.id] });
+    s12.update(C12.id, { parents: [Q12.id] });   // another window moved it to [Q]
+    let e12 = null; try { s12.update(C12.id, { parents: [], parentsBase: P12.id }); } catch (e) { e12 = e; }
+    const sb12 = read('src/lib/sidebar-tasks.js'), td12 = read('src/lib/task-detail.js');
+    ok(!!e12 && e12.code === 'parents_stale' && same(e12.parents, [Q12.id]) && same(s12.get(C12.id).parents, [Q12.id]) && /\.\.\.\(e\.code === 'parents_stale' && Array\.isArray\(e\.parents\) \? \{ parents: e\.parents \} : \{\}\) \}\); \}/.test(read('src/server/task-groups-wiring.js')) && /if \(typeof onRefused === 'function'\) \{ try \{ onRefused\(data, res\.status\); \} catch \{ \} \}/.test(sb12) && /patch, \(d\) => \{ if \(d && d\.code === 'parents_stale' && Array\.isArray\(d\.parents\)\) this\._upsertTaskLocal\(\{ id, parents: d\.parents\.map\(String\) \}\); \}\);/.test(sb12) && /if \(!r\) render\(\); \} finally \{ parentsBusy = false;/.test(td12), 'cure 3 (a): a stale parents write is refused WITH the store\'s list (the 409 carries it); the page\'s copy adopts it and the tab redraws from it', { code: e12 && e12.code, parents: e12 && e12.parents });
+  }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
   try {

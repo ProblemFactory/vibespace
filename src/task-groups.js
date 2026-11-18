@@ -2872,7 +2872,7 @@ class TaskGroupManager {
     const parents = patch.parents !== undefined ? this._sanitizeParents(patch.parents, t.id) : undefined;   // lane lg-group-parents: refused BEFORE any field moves; applied LAST (below)
     // the cure's cure (2): a whole-list write that names the list it READ (`parentsBase`, the ids joined by commas) is refused when the
     // list moved meanwhile — a second window's stale copy would write a removed parent back (the (A) class through a narrow door)
-    if (patch.parents !== undefined && patch.parentsBase !== undefined && String(patch.parentsBase) !== (Array.isArray(t.parents) ? t.parents : []).join(',')) throw Object.assign(new Error('the parent groups changed meanwhile (another window) — nothing was written; the tab shows them as they are now'), { code: 'parents_stale' });
+    if (patch.parents !== undefined && patch.parentsBase !== undefined && String(patch.parentsBase) !== (Array.isArray(t.parents) ? t.parents : []).join(',')) throw Object.assign(new Error('the parent groups changed meanwhile (another window) — nothing was written; the tab shows them as they are now'), { code: 'parents_stale', parents: Array.isArray(t.parents) ? [...t.parents] : [] });   // cure 3 (a): the answer carries the list as it is
     if (patch.title !== undefined) {
       const clean = String(patch.title || '').trim().slice(0, CAPS.title);
       if (!clean) throw new Error('title required');

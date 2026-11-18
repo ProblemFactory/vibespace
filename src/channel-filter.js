@@ -1237,7 +1237,12 @@ function viaJudge(keys, s, cid, rows, except) {
   // the cure's cure (1): each access row judged with its OWN «除了» — a wrapper's (the row being saved: this save's list), else the
   // row's own (the account / rule rows above, the wake's rows), else this grain's — rule ③ per grain, the model's union of rows
   const exOf = (r) => viaExceptOf(r && Array.isArray(r.except) && !r.principal ? r.except : r && r.row && Array.isArray(r.row.except) ? r.row.except : r && Array.isArray(r.except) ? r.except : except);
-  const parts = (Array.isArray(rows) ? rows : []).map((r) => ({ p: principalOfRow(r), ex: exOf(r) })).filter((x) => x.p && x.p.kind === 'group' && keyIds.has(str(x.p.id)));
+  // cure 3 (the cure's cure's read, must): ONE row per group id — the FIRST, the callers listing the rows in the store's own
+  // precedence (this grain's, then a matching rule's, then the account's: effectiveGrants' order). The effective grants keep one
+  // row per principal, the finest grain's, and the wake judges that one; a union over grains admitted at the save what the wake
+  // then refused (a notification saved, listed as active, never fired)
+  const seenIds = new Set();
+  const parts = (Array.isArray(rows) ? rows : []).map((r) => ({ p: principalOfRow(r), ex: exOf(r) })).filter((x) => x.p && x.p.kind === 'group' && keyIds.has(str(x.p.id)) && !seenIds.has(str(x.p.id)) && !!seenIds.add(str(x.p.id)));
   const gmRows = parts.map((x) => ({ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(x.p.id), ...(x.p.only === true ? { only: true } : {}) }], except: x.ex }));
   const rowIds = new Set(parts.map((x) => str(x.p.id)));
   const fromKeys = [...keyIds].filter((id) => !rowIds.has(id)).map((id) => ({ kind: 'group', id }));

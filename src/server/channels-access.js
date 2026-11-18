@@ -216,6 +216,9 @@ function create(engineCtx) {
     return h;
   }
   const rawPatternsOf = (adapterId) => Object.values(store.index.table('patternAssignments') || {}).filter((p) => p && p.adapterId === adapterId);
+  // lane lg-group-parents (cure 3): the rules in effectiveGrants' order (oldest first, then id) — the rows above a conversation are
+  // listed in the store's precedence (a rule's before the account's), the order the via judge's first-row-per-group reads
+  const rankedPatternsOf = (adapterId) => rawPatternsOf(adapterId).slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
   function accountGrainOf(adapterId) { const tb = store.index.table('accountAssignments'); return overlay((tb && tb[adapterId]) || null, 'account', adapterId); }
   function patternsOf(adapterId) { return rawPatternsOf(adapterId).map((pa) => overlay(pa, 'pattern', pa.id)).filter(Boolean); }
   function patternById(id) { const tb = store.index.table('patternAssignments') || {}; return tb[id] ? overlay(tb[id], 'pattern', id) : null; }
@@ -304,9 +307,9 @@ function create(engineCtx) {
   function convInheritedOf(en, { skipOwn = false, skipAccount = false, skipRule = null } = {}) {
     const acc = skipAccount ? [] : CG.accessOf(CG.RES.account(en.adapterId));
     const pats = [];
-    for (const pa of rawPatternsOf(en.adapterId)) if (pa && pa.pattern && pa.id !== skipRule && F.matchConversation(pa.pattern, convFacts(en)).hit) pats.push(...CG.accessOf(CG.RES.rule(pa.id)));
+    for (const pa of rankedPatternsOf(en.adapterId)) if (pa && pa.pattern && pa.id !== skipRule && F.matchConversation(pa.pattern, convFacts(en)).hit) pats.push(...CG.accessOf(CG.RES.rule(pa.id)));
     const grants = visibleKeysOf(grantsOfConversation(en, undefined, { skipAccount, skipRule }), skipOwn ? { skipOwnScope: { kind: 'conversation', id: en.key } } : {});
-    return [...acc, ...pats, ...grants];
+    return [...pats, ...acc, ...grants];   // cure 3: the store's precedence — a matching rule's rows before the account's
   }
   /** Who holds access above a grain being WRITTEN (setGrain's watcher check): a conversation's ancestors, an account's
    *  own non-access grants, a rule's account. */
@@ -476,9 +479,11 @@ function create(engineCtx) {
    *  above it (the account, a matching rule) or a visible grant here (an approved request); one row per principal. */
   function eligibleAboveView(en) {
     const out = new Map();
-    const add = (p, via) => { const k = p && pkOf(p.kind === 'everyone' ? { kind: 'everyone', id: '*' } : p); if (k && !out.has(k)) out.set(k, { principal: { kind: p.kind, id: p.kind === 'everyone' ? '*' : p.id, name: p.name || null }, via }); };
-    for (const r of CG.accessOf(CG.RES.account(en.adapterId))) add(r.principal, 'account');
-    for (const pa of rawPatternsOf(en.adapterId)) if (pa && pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit) for (const r of CG.accessOf(CG.RES.rule(pa.id))) add(r.principal, 'pattern');
+    // cure 3 (b): the editor judges a Notify… save from the SAME rows the server does — a matching rule's before the account's
+    // (the first row per principal is the one in effect), each with its own «除了» and «仅本组» (CG.accessOf's rows carry both)
+    const add = (p, via, ex) => { const k = p && pkOf(p.kind === 'everyone' ? { kind: 'everyone', id: '*' } : p); if (k && !out.has(k)) out.set(k, { principal: { kind: p.kind, id: p.kind === 'everyone' ? '*' : p.id, name: p.name || null, ...(p.kind === 'group' && p.only === true ? { only: true } : {}) }, via, ...(Array.isArray(ex) ? { except: [...ex] } : {}) }); };
+    for (const pa of rankedPatternsOf(en.adapterId)) if (pa && pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit) for (const r of CG.accessOf(CG.RES.rule(pa.id))) add(r.principal, 'pattern', r.except);
+    for (const r of CG.accessOf(CG.RES.account(en.adapterId))) add(r.principal, 'account', r.except);
     for (const g of grantsOfConversation(en)) if (g && g.level === 'visible' && g.principal && !(g.scope && g.scope.kind === 'conversation' && (g.origin === 'access' || g.origin === 'assignment'))) add(g.principal, g.scope && g.scope.kind === 'adapter' ? 'account' : 'grant');
     return [...out.values()];
   }

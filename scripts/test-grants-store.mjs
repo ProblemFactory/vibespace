@@ -748,6 +748,39 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const wakeRow = { principal: { kind: 'agent', id: 'k1' }, via: 'tg-p' };
     ok(!atConv.ok && /left out through its parent Task Group "Parent"|has no access here/.test(atConv.error) && atConvOk.ok && atConvOk.watchers[0].via === 'tg-p' && CF4.memberStill(wakeRow, membersE, { rows: [{ row: acctRowExC, source: 'account' }] }) === false && CF4.memberStill(wakeRow, membersE, { rows: [{ row: { ...acctRowExC, except: [] }, source: 'account' }] }) === true, 'channels (the cure\'s cure (1)): a child left out at the ACCOUNT grain is refused at the conversation grain (never a silent row) and is not woken; without that «除了» it is a watcher via the parent and woken', atConv.error);
   }
+  // cure 3 (the cure's cure's read, MUST): the via judge keeps ONE row per group in the store's precedence (this grain's, then a
+  // rule's, then the account's) — the save judges the row the wake keeps (one per principal, the finest grain's)
+  {
+    const CF6 = require('../src/channel-filter.js');
+    const P6 = { kind: 'group', id: 'tg-p', name: 'Parent' }, X6 = [{ kind: 'group', id: 'tg-c' }];
+    const convP6 = { principal: P6, authority: 'draft' }, acctP6 = { principal: P6, authority: 'draft', except: [] };
+    const members6 = [{ cid: 'k1', groups: ['tg-c'], inherited: ['tg-p'] }];
+    const w6 = { principal: { kind: 'agent', id: 'k1' }, notify: 'wake', mode: 'all', dailyWakeCap: 50 };
+    const atSave6 = CF6.validateWatchers([w6], [convP6], { inherited: [acctP6], members: members6, except: X6 });
+    ok(!atSave6.ok && /left out through its parent Task Group "Parent"|has no access here/.test(String(atSave6.error || '')), 'cure 3 (THE MUST): P on the account with no «除了», P on the conversation with X left out — a member of X is refused at the SAVE by name (the conversation\'s row decides, as at the wake); never a notification saved that never fires', atSave6.error || atSave6);
+    const atWake6 = CF6.memberStill({ principal: { kind: 'agent', id: 'k1' }, via: 'tg-p' }, members6, { rows: [{ row: { ...convP6, except: X6 }, source: 'conversation' }] });
+    ok(atWake6 === false, 'cure 3: …and the wake (the effective grants\' one row per principal — the conversation\'s, with its own «除了») does not wake it: the save and the wake judge the same row');
+    const ruleP6 = { principal: P6, authority: 'draft', except: X6 };
+    const ruleFirst6 = CF6.validateWatchers([w6], [], { inherited: [ruleP6, acctP6], members: members6, except: [] });
+    const acctFirst6 = CF6.validateWatchers([w6], [], { inherited: [acctP6, ruleP6], members: members6, except: [] });
+    ok(!ruleFirst6.ok && acctFirst6.ok, 'cure 3: the FIRST row per group decides — the callers list them in the store\'s precedence (a rule\'s row before the account\'s), never a union over grains', { ruleFirst: ruleFirst6.ok, acctFirst: acctFirst6.ok });
+    const ca6 = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
+    ok(/return \[\.\.\.pats, \.\.\.acc, \.\.\.grants\];/.test(ca6) && /for \(const pa of rankedPatternsOf\(en\.adapterId\)\) if \(pa && pa\.pattern && pa\.id !== skipRule/.test(ca6) && /const rankedPatternsOf = \(adapterId\) => rawPatternsOf\(adapterId\)\.slice\(\)\.sort\(\(a, b\) => \(Number\(a\.createdAt\) \|\| 0\) - \(Number\(b\.createdAt\) \|\| 0\) \|\| String\(a\.id\)\.localeCompare\(String\(b\.id\)\)\);/.test(ca6), 'cure 3: the server lists the rows above a conversation in the store\'s precedence — the matching rules (oldest first, as effectiveGrants ranks them) before the account');
+  }
+  // cure 3 (b): the editor judges a Notify… save from the SAME rows as the server — its rows above carry each row's own «除了»
+  // (the real engine's conversation view), a rule's listed before the account's
+  {
+    const wb6 = await world();
+    const GRP6 = { kind: 'group', id: 'g1', name: 'Ops' };
+    const sa6 = await wb6.e.setAccess(wb6.A, { kind: 'account' }, [{ principal: GRP6, authority: 'draft' }], { except: [{ kind: 'conversation', key: 'm1' }] });
+    const el6 = ((wb6.e.conversationView(wb6.A, 'ops') || {}).eligibleAbove) || [];
+    const g6 = el6.find((r) => r && r.principal && r.principal.kind === 'group' && r.principal.id === 'g1') || null;
+    ok(!!sa6 && sa6.ok === true && !!g6 && g6.via === 'account' && Array.isArray(g6.except) && JSON.stringify(g6.except).includes('m1'), 'cure 3 (b): the editor\'s rows above carry the row\'s OWN «除了» (the account\'s Task Group, m1 left out) — the page and the server judge from the same rows', { set: sa6 && sa6.ok, row: g6 });
+    const ca7 = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
+    const ev7 = ca7.slice(ca7.indexOf('  function eligibleAboveView(en) {'), ca7.indexOf('  function grainView('));
+    ok(ev7.indexOf("add(r.principal, 'pattern', r.except)") > 0 && ev7.indexOf("add(r.principal, 'pattern', r.except)") < ev7.indexOf("add(r.principal, 'account', r.except)") && /\.\.\.\(p\.kind === 'group' && p\.only === true \? \{ only: true \} : \{\}\) \}, via, \.\.\.\(Array\.isArray\(ex\) \? \{ except: \[\.\.\.ex\] \} : \{\}\)/.test(ev7), 'cure 3 (b): a rule\'s rows before the account\'s (the first per principal is the one in effect), each with its «除了» and «仅本组»');
+    try { wb6.e.stop(); } catch { }
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",
