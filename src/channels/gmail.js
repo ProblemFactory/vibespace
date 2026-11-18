@@ -1127,14 +1127,20 @@ function create(record = {}, deps = {}) {
         // verify r5: a refusal for a token the store has since REPLACED (a re-authorize, a sibling entry's rotation
         // that landed first) is superseded, not a fact about the account — the caller re-reads the store
         if (cur && !cur.invalidGrantAt && String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
-        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now(), ...(e.detail && e.detail.cause === 'client-changed' ? { refusedCause: 'client-changed', refusedClient: String(use.clientId || (use.minted && use.minted.id) || '') } : {}) }, { expiresAt: null, scopes: cur.scopes || [], user: cur.email || null, supersedes: String(cur.refresh_token || '') });
+        // cure 2 (the verdict 09:27Z, NOT TAKEN: a dead grant after a client-caused stamp kept the old client fields ⇒ the stamp
+        // never held, the vendor was asked on every pass, the account read «connected»): the stamp is written from the token
+        // WITHOUT a former refusal's client fields — they come back only when THIS refusal is client-caused
+        const plainOf = (t) => { const { refusedCause: _cause, refusedClient: _client, ...rest } = t; return rest; };
+        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...plainOf(cur), invalidGrantAt: now(), ...(e.detail && e.detail.cause === 'client-changed' ? { refusedCause: 'client-changed', refusedClient: String(use.clientId || (use.minted && use.minted.id) || '') } : {}) }, { expiresAt: null, scopes: cur.scopes || [], user: cur.email || null, supersedes: String(cur.refresh_token || '') });
       }
       throw e;
     }
     // verify r4 F1: an answer without an access token is not a token — nothing stored, the request not sent (it used to be stored as '' and refreshed again for ever)
     if (!d || typeof d.access_token !== 'string' || !d.access_token) throw new ChannelError('vendor-error', `gmail token refresh: the vendor's answer carried no access_token — nothing was stored; re-authorize if it persists`, { retryable: true, detail: { noAccessToken: true } });
     const next = { ...token, access_token: String(d.access_token || ''), expiresAt: now() + Number(d.expires_in || 3600) * 1000, refresh_token: String(d.refresh_token || token.refresh_token) };
-    // B-166e cure: a refresh that WORKED after a client-caused stamp stopped holding (the first preset put back) clears it
+    // B-166e cure: a refresh that WORKED after a client-caused stamp stopped holding (the first preset put back) clears it —
+    // today ONLY such a stamp lets a refresh through (a dead-grant stamp always holds): a later change that lets another
+    // stamp through must decide what a success clears
     delete next.invalidGrantAt; delete next.refusedCause; delete next.refusedClient;
     // B-166e: a token minted before the rule (or by a sign-in that could not seal) adopts the client that just refreshed it;
     // cure: the sealed copy FOLLOWS a secret rotated under the same id (a later swap sends the minted client with its live

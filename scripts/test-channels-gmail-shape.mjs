@@ -2279,6 +2279,23 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
     presetsHolder.list = [NEW]; presetsHolder.list = [OLD];
     const dd = await D1.refresh();
     ok(dd.e && dd.e.detail && dd.e.detail.cause === 'refresh-refused' && D1.tok.st.token.invalidGrantAt && (await D1.a.auth.state()).why === 'refresh-refused', '…a dead refresh grant (invalid_grant) stays a stamp whatever the preset under the key: refresh-refused on every surface', J({ e: dd.e && dd.e.message }));
+    // cure 2 (the verdict 09:27Z): a client-caused stamp, the old client PUT BACK, and meanwhile the grant DIED — the one
+    // more try is refused invalid_grant, and that stamp is a PLAIN dead-grant stamp: it holds, the vendor is asked nothing
+    const deadAfterSwap = async (mod) => {
+      const G = await account(mod, { legacy: true });
+      presetsHolder.list = [NEW];
+      await G.refresh();   // unauthorized_client ⇒ stamped client-changed, refusedClient NEW
+      presetsHolder.list = [OLD];
+      G.g.issued.clear();   // the stand-in Google forgot the grant (revoked, a Testing client's 7 days)
+      const tryOne = await G.refresh();   // the stamp no longer holds (another client) ⇒ ONE more try ⇒ invalid_grant
+      const posts = () => G.g.calls.filter((c) => c.form && c.form.grant_type === 'refresh_token').length;
+      const n0 = posts();
+      await G.refresh(); await G.refresh();
+      const st = await G.a.auth.state();
+      return { tryOne: tryOne.e ? `${tryOne.e.code}/${(tryOne.e.detail && tryOne.e.detail.cause) || ''}` : 'no error', more: posts() - n0, state: st.state, why: st.why, fields: ['refusedCause', 'refusedClient'].filter((k) => k in (G.tok.st.token || {})) };
+    };
+    const dg = await deadAfterSwap(gmail);
+    ok(/^auth-expired\//.test(dg.tryOne) && !/client-changed/.test(dg.tryOne) && dg.more === 0 && dg.state === 'needs-reauth' && dg.why === 'refresh-refused' && dg.fields.length === 0, 'cure 2: after a client-caused stamp, the old client put back and the grant dead — the one more try is refused, its stamp carries NO client field, the next two passes send ZERO refresh requests, and the state reads needs-reauth (refresh refused)', J(dg));
     // (A2) the minted client's sealed value MISSING: its next refresh is certain to be refused — the state says so now
     const M1 = await account(gmail);
     delete M1.tok.st.token.client.secretEnc;
@@ -2323,7 +2340,12 @@ console.log('\n㉖ B-166e: an account refreshes with the client it signed in wit
     presetsHolder.list = [{ ...OLD, clientSecret: ROT }];
     await cR.refresh();
     ok(SEAL.open(cR.tok.st.token.client.secretEnc) === OLD.clientSecret, 'RED CONTROL: without the re-seal the sealed copy keeps the OLD secret after a rotation', '');
-    for (const x of copiesCensus(MS2.files, MS2.dir, REPO, { minCopies: 3, label: '㉖ cure ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+    // cure 2's control: today's spread — the dead grant's stamp keeps the old client fields
+    const PLAIN = 'await tokens.write({ ...plainOf(cur), invalidGrantAt: now(),';
+    ok(GS2.split(PLAIN).length === 2, 'control setup: the plain stamp write is present once');
+    const dgc = await deadAfterSwap(MS2.load('src/channels/gmail.js', GS2.replace(PLAIN, 'await tokens.write({ ...cur, invalidGrantAt: now(),'), 'spread-stamp'));   // stale-pins: kept (the spread, restored by the red control)
+    ok(dgc.more === 2 && dgc.state === 'connected' && dgc.fields.length === 2, `RED CONTROL: the spread keeps «client changed» on a dead grant — Google is asked on EVERY pass (${dgc.more} in two) and the dead account reads ${dgc.state}`, J(dgc));
+    for (const x of copiesCensus(MS2.files, MS2.dir, REPO, { minCopies: 4, label: '㉖ cure ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
     // CONTROL: the release's refresh line — the preset's client whatever it is ⇒ the swap refuses the refresh (the outage)
     const GS = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
     const FORM = "form: { grant_type: 'refresh_token', client_id: use.clientId, client_secret: use.clientSecret, refresh_token: token.refresh_token } }).catch((e0) => {";
