@@ -25,6 +25,8 @@ import os from 'node:os';
 import http from 'node:http';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
+import { spawnSync } from 'node:child_process';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -140,9 +142,9 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
 }
 {
   // master's roads, MEASURED (round 13: no bound there — the bench reads each against master's same door; here each against the
-  // control, under a regression ceiling of 2×): the whole-key door at ~12 MiB, and an old tab's ONE change on a big store — 10× the owner's, and ~270 000
-  // archived ids (round 12 diffed the whole key through two Sets: ×2 master's write for one archive; now the common head and tail
-  // are skipped and the change looked up)
+  // control, under a regression ceiling of 2×): the whole-key door at ~12 MiB, and an old tab's ONE change on a big store — 10× the owner's
+  // (and ~270 000 archived ids below, judged by a COUNT since B-518e: round 12 diffed the whole key through two Sets — ×2 master's write for
+  // one archive; now the common head and tail are skipped and the change looked up)
   const tabName = (i) => (k(i) + '\t').padEnd(300, i % 2 ? '\t' : '\\');
   const rows = [
     ['config values at their bound', { sessionConfigs: Object.fromEntries(Array.from({ length: nCtl }, (_, i) => [k(i), { blob: OBJ }])) }],
@@ -196,22 +198,49 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
     ok(v1.ok && held[0] >= 2 * Cm, `CONTROL: one round of the road held past twice the control (${held[0].toFixed(0)} ms) does not decide — the median ×${v1.x.toFixed(2)} stays under the ceiling — ${ms0(one)}`, { one, ctlS });
   }
   // (10× the owner's store is PINNED under the control — round 13's law: within 1.25 of master or under 100 ms there; past it the numbers
-  // are the kb's, so ~270 000 ids carries only a ceiling against a regression of its shape: 3×)
+  // are the kb's, and ~270 000 ids carries a COUNT of its shape since B-518e — the leg below)
   {
     const onDisk = (JSON.parse(o10.h.file()).archivedSessions || []).length, v = roundsVerdict(o10.ms, ctlS, 1);
     ok(o10.status.every((st) => st === 200) && onDisk === o10.n + ROUNDS && v.ok,
       `law A, master's road: an old tab archives ONE more on 10× the owner's store (its whole key, measured over ${ROUNDS} rounds, ${o10.n + 1} to ${o10.n + ROUNDS} ids) ⇒ 200 in ${v.r.toFixed(0)} ms (median), ×${v.x.toFixed(2)} the control's median ${v.c.toFixed(0)} ms (ceiling 1×), ${onDisk} on disk — the leg ${ms0(o10.ms)}, the control ${ms0(ctlS)}`, { status: o10.status, ms: o10.ms, ctl: ctlS, onDisk });
   }
-  // STILL ONE SAMPLE AGAINST ONE (int403, the coordinator's ruling): the ~270 000 leg below decides on one sample against the one control C, with a
-  // margin of about a control's length (about 100 ms on the box, about 450 ms on the hosted runner); it has never been red. If it is ever
-  // red, it takes the same rounds then, with the row's debt (the rounds cost about 0.35 s and put the row over the tier rule's 10 s).
-  for (const [what, st, n, ceil] of [['~270 000 archived ids (≈ 12 MiB)', { archivedSessions: Array.from({ length: 270000 }, (_, i) => k(i)) }, 270000, 3]]) {
+  // B-518e (the test machine's wide run under eight lanes read this leg ×3.05 against its 3× ceiling — ONE sample against ONE control,
+  // a RATIO OF TWO WALL CLOCKS; the coordinator's law: a fast leg's verdict is a count or an order). What the ceiling guarded is the
+  // diff's SHAPE (round 12 put the whole key into two Sets — ×2 master's write): so the verdict is now a COUNT — the items the diff of
+  // that one more id puts into Sets (Set.prototype.add wrapped for the one call; `new Set(list)` adds through it) — beside the road's
+  // own answer and what lands on disk. Its time is printed, never judged. CONTROL: the round-12 shape (two Sets of the whole key, a
+  // patched copy of user-state-ops.js) puts the whole key in, twice.
+  // THE COUNT IS TAKEN IN A CHILD (the cure's adversarial read: a Set.prototype.add replaced in THIS process — even restored — may keep
+  // every later `new Set(list)` here on V8's slow path, and law B's ratios would lean red): a fresh node requires the module (the
+  // tree's, or the round-12 copy), builds the same two keys, and counts every Set.prototype.add AND Map.prototype.set the ONE diffOps
+  // call makes (a Map-shaped regression is a regression of the same shape); it answers { n, ops, op }
+  const diffCount = (modPath, n) => {
+    const code = `const UO = require(${JSON.stringify(modPath)});
+const k = (i) => 'claude:' + String(i).padStart(8, '0') + '-0000-4000-8000-000000000000';
+const US = (o) => ({ stateVersion: 2, starredSessions: [], archivedSessions: [], archivedFolders: [], customNames: {}, sessionModes: {}, sessionConfigs: {}, sessionGroups: {}, groupFolders: {}, ...o });
+const ids = Array.from({ length: ${n} }, (_, i) => k(i)), before = US({ archivedSessions: ids }), after = US({ archivedSessions: [...ids, k(${n} + 1)] });
+const add = Set.prototype.add, set = Map.prototype.set; let n = 0;
+Set.prototype.add = function (v) { n++; return add.call(this, v); }; Map.prototype.set = function (a, b) { n++; return set.call(this, a, b); };
+let out; try { out = UO.diffOps(before, after); } finally { Set.prototype.add = add; Map.prototype.set = set; }
+process.stdout.write(JSON.stringify({ n, ops: out.length, op: out[0] }));`;
+    const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 60000, maxBuffer: 1 << 20 });
+    try { return JSON.parse(r.stdout); } catch { return { err: `child: exit ${r.status} ${String(r.stderr || '').slice(-300)}` }; }
+  };
+  for (const [what, st, n] of [['~270 000 archived ids (≈ 12 MiB)', { archivedSessions: Array.from({ length: 270000 }, (_, i) => k(i)) }, 270000]]) {
     const h = hub();
     h.timed('post', '/api/config/import', parsed(IMPORT(US(st))));
-    const r = h.timed('patch', '/api/user-state', parsed({ archivedSessions: [...st.archivedSessions, k(n + 1)] }));
+    const more = { archivedSessions: [...st.archivedSessions, k(n + 1)] };
+    const r = h.timed('patch', '/api/user-state', parsed(more));
     const onDisk = (JSON.parse(h.file()).archivedSessions || []).length;
-    ok(r.status === 200 && onDisk === n + 1 && r.ms < ceil * C,
-      `law A, master's road: an old tab archives ONE more on ${what} (its whole key, ${n + 1} ids) ⇒ ${r.status} in ${xC(r.ms)} (ceiling ${ceil}×), ${onDisk} on disk`, { status: r.status, ms: r.ms, C, onDisk });
+    const d = diffCount(path.join(REPO, 'src/user-state-ops.js'), n);
+    const one = (x) => !!x && x.ops === 1 && !!x.op && x.op.key === 'archivedSessions' && x.op.item === k(n + 1) && x.op.value === true;
+    ok(r.status === 200 && onDisk === n + 1 && one(d) && d.n <= 64,
+      `law A, master's road: an old tab archives ONE more on ${what} (its whole key, ${n + 1} ids) ⇒ ${r.status}, ${onDisk} on disk; its diff is ONE op and puts ${d.n} item(s) into Sets / Maps (≤ 64 — counted in a child, not timed; the request read ${xC(r.ms)})`, { status: r.status, onDisk, d });
+    const src12 = fs.readFileSync(path.join(REPO, 'src/user-state-ops.js'), 'utf8'), HEAD = 'function listDiff(bl, al, gone, came) {\n  const nb = bl.length, na = al.length;';
+    const p12 = src12.includes(HEAD) ? mutantCopies('user-state-round12', REPO).write('src/user-state-ops.js', src12.replace(HEAD, 'function listDiff(bl, al, gone, came) {\n  { const as = new Set(al), bs = new Set(bl); for (const x of bl) if (!as.has(x)) gone(x); for (const x of al) if (!bs.has(x)) came(x); return; }\n  const nb = bl.length, na = al.length;'), 'two-sets') : null;
+    const d12 = p12 ? diffCount(p12, n) : null;
+    ok(!!d12 && one(d12) && d12.n >= 2 * n,
+      `CONTROL: the round-12 shape (two Sets of the whole key, a patched copy, counted in its own child) gives the same ONE op and puts ${d12 ? d12.n : '?'} items into Sets / Maps (≥ 2 × ${n}) — the count above is red on it`, d12);
   }
 }
 
