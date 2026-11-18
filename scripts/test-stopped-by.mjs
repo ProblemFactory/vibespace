@@ -112,7 +112,7 @@ console.log('§4 planBatch (who, in which order, who is skipped and why)');
     { id: 'clean', live: true, canResume: true },
   ];
   const p = SB.planBatch(rows, { now: NOW });
-  ok('EARLIEST STOP FIRST (the order «只恢复前 K 个» cuts)', p.eligible.map((e) => e.id).join(',') === 'early,mid,late', p.eligible.map((e) => e.id));
+  ok('EARLIEST STOP FIRST (the order the batch continues in)', p.eligible.map((e) => e.id).join(',') === 'early,mid,late', p.eligible.map((e) => e.id));
   const why = Object.fromEntries(p.skipped.map((s) => [s.id, s]));
   ok('skipped and NAMED: gone / running / no-verb / walled (stated reset) / walled (the pool) / quarantined', why.gone.why === 'gone' && why.busy.why === 'running' && why.shell.why === 'no-verb' && why.walled.why === 'walled' && why.walled.until === NOW + HOUR && why['pool-walled'].why === 'walled' && why['pool-walled'].until === NOW + 30 * MIN && why.quar.why === 'quarantined' && why.quar.until === NOW + 9 * MIN, p.skipped);
   ok('a session with no stop fact is neither resumed nor skipped (it is not in the set)', !p.eligible.some((e) => e.id === 'clean') && !p.skipped.some((s) => s.id === 'clean'));

@@ -135,7 +135,9 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     footer.appendChild(cancel);
     return null;
   }
-  if (n) body.appendChild(el('p', 'resume-stopped-lead', t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n })));
+  // THE OVERAGE SENTENCE IS TRUE ON EVERY INSTANCE (the cure): where the instance allows turns in paid overage, the press bills it — said
+  const overAllowed = !!(p.overage && p.overage.allowed);
+  if (n) body.appendChild(el('p', 'resume-stopped-lead', overAllowed ? t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.', { n }) : t('{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.', { n })));
   const cw = costWords(p.estimate, t);
   if (cw) {
     const cost = el('div', 'resume-stopped-cost');
@@ -147,6 +149,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
     }
     if (cw.unknown) cost.appendChild(el('div', 'resume-stopped-basis', cw.unknown));
     if (cw.unpriced) cost.appendChild(el('div', 'resume-stopped-basis', cw.unpriced));
+    for (const b of overAllowed && Array.isArray(p.overage.billed) ? p.overage.billed : []) cost.appendChild(el('div', 'resume-stopped-member', t('{member}: {n} of these continues bill paid overage', { member: memberWords(b.name, t), n: b.n })));   // the cost line names it (the cure)
     body.appendChild(cost);
   }
   let skBox = skippedList(p.skipped); if (skBox) body.appendChild(skBox);

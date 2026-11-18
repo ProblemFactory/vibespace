@@ -1713,12 +1713,12 @@ if (!probe) {
   ok('§8 FAIL CLOSED: no batch gate wired resumes none (no-gate) — there is no "absent means allow" for a batch', rr.refused && rr.refused.why === 'no-gate' && rA.sent.length === 0, JSON.stringify(rr));
   const rU = mkWorld({ sessions: { a1: S('A', quota(3)), x: S(null, quota(2)) } });
   rr = await rU.settle(rU.ar.resumeBatch());
-  ok('§8 FAIL CLOSED: one conversation whose slot cannot be named refuses the WHOLE batch (identity-unknown)', rr.refused && rr.refused.why === 'identity-unknown' && rU.sent.length === 0, JSON.stringify(rr));
+  ok('§8 A CONVERSATION WHOSE SLOT CANNOT BE NAMED is said BEFORE the press (skipped «no-slot», by name) and never refuses the batch — a1 continues (the cure\'s should, 主开发 2026-11-18 20:16Z)', !rr.refused && rr.resumed.map((x) => x.id).join() === 'a1' && rr.skipped.some((x) => x.id === 'x' && x.why === 'no-slot') && rU.sent.length === 1, JSON.stringify(rr));
 
-  // D — «只恢复前 K 个»
+  // D — the `limit` field (at most this many, earliest first — the dialog sends none since the owner's ruling 2026-11-18)
   const rK = mkWorld({ sessions: { a1: S('A', quota(3)), a2: S('A', quota(2)), a3: S('B', quota(1)) } });
   rr = await rK.settle(rK.ar.resumeBatch({ limit: 1 }));
-  ok('§8 «只恢复前 K 个»: limit 1 continues ONLY the earliest stop (a1), authorizes 1, leaves 2', rr.resumed.map((x) => x.id).join() === 'a1' && rr.left === 2 && rK.counts().batchItems === 1 && rK.stamps() === 1, JSON.stringify(rr));
+  ok('§8 `limit` 1 continues ONLY the earliest stop (a1), authorizes 1, leaves 2', rr.resumed.map((x) => x.id).join() === 'a1' && rr.left === 2 && rK.counts().batchItems === 1 && rK.stamps() === 1, JSON.stringify(rr));
 
   // E — an undelivered continue gives its hold back
   const rF = mkWorld({ sessions: { a1: S('A', quota(3)), a2: S('A', quota(2)) }, sendOk: (id) => id !== 'a1' });

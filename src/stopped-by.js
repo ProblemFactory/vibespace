@@ -190,6 +190,7 @@ const SKIP_KEYS = Object.freeze({
   'moved-refused': 'the account it moved to refused the spend',
   refused: 'the spend guard refused it now',   // U2 cure (law 1): the authorizer re-asked before THIS continue said no
   'account-refused': 'left stopped',            // form two (主开发 2026-11-18 16:20Z): the press is refused on ITS account — named
+  'no-slot': 'its billing account could not be named',   // the cure's should: said before the press, never the whole press refused
 });
 /** The authorizer's OWN reasons (src/spend-authorizer.js `why`) in a person's words — a skipped row says WHICH rule refused
  *  it (U2 cure, law 1). A reason not listed says the skip alone (never a raw code). */

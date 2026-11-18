@@ -171,6 +171,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
   const overCapNow = (now) => (unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
+  const ledgerFact = () => (unreadable ? { unreadable: true, error: unreadable.error } : null);   // B-3b0f, handed to every layer (the batch too)
 
   /** Retire the holds whose producer never came back. THE COUNT IS A CENSUS,
    *  not garbage collection: a hold that timed out is a site that authorized a
@@ -373,18 +374,22 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const list = Array.isArray(items) ? items.filter(Boolean) : [];
     const resolved = list.map((it) => ({ ...it, identity: identityFor(it.session || null, it.identity || null) }));
     const unnamed = resolved.find((it) => !(it.identity && it.identity.key));
-    if (!list.length || unnamed) {
+    // A CONVERSATION WITH NO BILLING SLOT never refuses the whole PRESS (the cure's should): an attended batch skips it by
+    // name and goes on with the named ones; a gated batch (the twin) still fails closed whole
+    const pressBatch = !!(A.SPEND_REASONS[reason] && A.SPEND_REASONS[reason].attended === true);
+    const named = resolved.filter((it) => it.identity && it.identity.key);
+    if (!list.length || (unnamed && (!pressBatch || !named.length))) {
       const v = { ok: false, why: list.length ? 'identity-unknown' : 'empty-batch', detail: list.length ? `the credential slot ${(unnamed && unnamed.sessionName) || 'one conversation'} would bill could not be resolved` : 'the batch names no turn to authorize', retryAfter: 0, identity: null, reason, n: list.length, groups: [], counts: { hour: 0, day: 0, instanceDay: 0 }, limits: limits() };
       if (list.length) sayRefusal({ reason, sessionId: unnamed && unnamed.sessionId, sessionName: unnamed && unnamed.sessionName, identity: null, key: null, v, now, inbox: false });
       return v;
     }
     const byKey = new Map();
-    for (const it of resolved) {
+    for (const it of named) {
       const g = byKey.get(it.identity.key) || { identity: it.identity, n: 0 };
       g.n++; byKey.set(it.identity.key, g);
     }
     const v = A.authorizeUnattendedBatch({
-      reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now,
+      reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now, ledger: ledgerFact(),
       ofKey: (k) => ({ overage: overageFor(k), credential: credentialFor(k), spendControl: spendControlFor(k) }),
     });
     if (!v.ok) {
@@ -400,16 +405,20 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (v.attended) {
       const off = new Map((v.refusedSlots || []).filter((r) => r && r.identity && r.identity.key).map((r) => [String(r.identity.key), r]));
       for (const r of off.values()) log(`[spend] bulk-resume: ${r.n} on ${r.identity.name || r.identity.key} left stopped — ${r.why}: ${r.detail || ''}`);
-      return { ...v, holds: resolved.filter((it) => !off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, hold: null })),
-        skipped: resolved.filter((it) => off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, why: off.get(it.identity.key).why })) };
+      return { ...v, holds: named.filter((it) => !off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, hold: null })),
+        skipped: [...named.filter((it) => off.has(it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: it.identity, why: off.get(it.identity.key).why })),
+          ...resolved.filter((it) => !(it.identity && it.identity.key)).map((it) => ({ sessionId: it.sessionId || null, identity: null, why: 'identity-unknown' }))] };
     }
-    const holds = resolved.map((it) => {
+    const holds = named.map((it) => {
       const hold = `h${++holdSeq}`;
       pending = A.reservePending(pending, { id: hold, key: it.identity.key, at: now });
       return { sessionId: it.sessionId || null, identity: it.identity, hold };
     });
     return { ...v, holds };
   }
+
+  /** THE RECORD OF A PRESS (the cure, 主开发 20:16Z): one row in the attended tally — when, how many, the batch id. */
+  function notePress({ reason, press, n = 0, now = Date.now() } = {}) { state = A.notePressRow(state, { at: now, reason, press, n }); persist(); return true; }
 
   /** A QUIET LOOK at what a batch's authorization WOULD answer, per account (the bulk dialog's plan, BEFORE the press — 主开发
    *  16:20Z: «… 10 on account B are left stopped: B is billing paid overage» is said before as well as after): nothing held,
@@ -419,9 +428,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (!resolved.length) return { refusedSlots: [] };
     const byKey = new Map();
     for (const it of resolved) { const g = byKey.get(it.identity.key) || { identity: it.identity, n: 0 }; g.n++; byKey.set(it.identity.key, g); }
-    const v = A.authorizeUnattendedBatch({ reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now,
+    const v = A.authorizeUnattendedBatch({ reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now, ledger: ledgerFact(),
       ofKey: (k) => ({ overage: overageFor(k), credential: credentialFor(k), spendControl: spendControlFor(k) }) });
-    return { refusedSlots: Array.isArray(v.refusedSlots) ? v.refusedSlots : v.ok ? [] : [{ identity: v.identity || null, why: v.why, detail: v.detail, n: resolved.length }] };
+    const refusedSlots = Array.isArray(v.refusedSlots) ? v.refusedSlots : v.ok ? [] : [{ identity: v.identity || null, why: v.why, detail: v.detail, n: resolved.length }];
+    // THE OVERAGE SENTENCE IS TRUE ON EVERY INSTANCE (the cure, 主开发 20:16Z): where the instance allows turns in paid overage,
+    // the accounts the press would BILL as overage — named for the dialog's cost box
+    const overageAllowed = overagePolicy() === 'allow';
+    const off = new Set(refusedSlots.map((r) => r && r.identity && r.identity.key).filter(Boolean));
+    const overageBilled = overageAllowed ? [...byKey.values()].filter((g) => !off.has(g.identity.key)).filter((g) => { const o = overageFor(g.identity.key); return !!o && o.inUse === 'yes'; }).map((g) => ({ identity: g.identity, n: g.n })) : [];
+    return { refusedSlots, overageAllowed, overageBilled };
   }
 
   /** Renew the batch's holds it has not reached yet (spend-authorizer renewPending) — see authorizeBatch. */
@@ -430,7 +445,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   /** Charge a spend that actually happened. The identity is the one
    *  `authorize()` resolved and put on its verdict — see identityFor; `hold` is
    *  the reservation that verdict opened, converted here into the stamp. */
-  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
+  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, press = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
     sweepHolds(now);
     // convert, never double-count: the stamp below IS this hold's outcome
     if (hold) pending = A.releasePending(pending, hold);
@@ -449,7 +464,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const identity = identityFor(session, identityHint);
     // the stamp carries its producer (5b ②) so a later reader can say who spent the slot
     // ended (B-0a33): queued-wakes stopped waiting for the frame and cannot tell whether it ran — the unit stays, placed in this hour
-    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind });
+    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press });
     state = r.state;
     persist();   // round 4: a reservation and a conversion are as durable as any spent turn — the guard's own debounce, never a write inside the send call or the carry callback
     if (r.warn) {
@@ -503,7 +518,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   }
 
   return {
-    authorize, authorizeBatch, previewBatch, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    authorize, authorizeBatch, previewBatch, notePress, renewHolds, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     // B-0a33 round 1: queued-wakes ends the ones no live entry holds. B-0a33 (2): the answer also carries `overCap` (read
     // lazily) — the waiting reservations no cap holds now: server.js wires this ONE function into the ladder, so the

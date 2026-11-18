@@ -5018,6 +5018,8 @@ export default {
   "Could not read the stopped sessions — try again.": "停止したセッションを読み込めませんでした。もう一度お試しください。",
   "Skipped ({n}):": "スキップ（{n}）：",
   "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.": "{n} 件のセッションを早く止まった順に続行します — それぞれが課金されるターンです。これはあなた自身の操作なので、無人のターンの上限には数えません。有料の超過利用中のアカウントは引き続き拒否され、残りはいつでも止められます。",
+  "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.": "{n} 件のセッションを早く止まった順に続行します — それぞれが課金されるターンです。これはあなた自身の操作なので、無人のターンの上限には数えません。このインスタンスは有料の超過利用中のターンを許可しているため（設定 → 支出）、超過利用中のアカウントでの続行は超過分として課金されます。残りはいつでも止められます。",
+  "{member}: {n} of these continues bill paid overage": "{member}：このうち {n} 件の続行は有料の超過分として課金されます",
   "Authorizing the batch…": "一括分を承認しています…",
   "Resuming… {done} of {n} continued": "再開中… {n} 件中 {done} 件を続行",
   "The whole batch was refused — nothing was resumed: {detail}": "一括分がすべて拒否されました — 何も再開されていません：{detail}",
@@ -5049,6 +5051,7 @@ export default {
   // lg-recovery U2 cure: a refusal by name, the Stop door, every skipped row by reason, the unpriced said
   "the spend guard refused it now": "支出ガードが今回は拒否しました",
   "left stopped": "停止したまま",
+  "its billing account could not be named": "課金アカウントを特定できません",
   "its account is billing paid overage": "アカウントが有料の超過分で課金中です",
   "{member} is billing paid overage": "{member} は有料の超過利用中です",
   "{member} cannot serve a turn now": "{member} は今ターンを処理できません",

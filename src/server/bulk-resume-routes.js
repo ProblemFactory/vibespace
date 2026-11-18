@@ -101,7 +101,7 @@ function create({ activeSessions, getAutoResume = () => null, getUsageHistory = 
     let estimate = null;
     try { estimate = estimateFor(plan.eligible, now); } catch (e) { log('[bulk-resume] estimate failed: ' + e.message); }
     const pub = (e) => ({ id: e.id, name: e.name, kind: e.kind, at: e.at, member: e.identity ? { key: e.identity.key, name: e.identity.name } : null });
-    return { ok: true, counts: ar.bulkCounts(), eligible: plan.eligible.map(pub), skipped: plan.skipped, total: plan.total, running: plan.running || null, estimate };
+    return { ok: true, counts: ar.bulkCounts(), eligible: plan.eligible.map(pub), skipped: plan.skipped, total: plan.total, running: plan.running || null, estimate, overage: plan.overage || null };
   }
 
   function register(app) {

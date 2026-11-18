@@ -11,7 +11,7 @@
 // real instance gets when that window rolls (75 % used, resets in 2 h) — the batch is resumable. The product keeps
 // fixture conversations OUT of its usage ledger (the walk skips fixture transcripts, the reader hides fixture rows), so
 // this world has no measured ratio: the confirm must still show the dollars and SAY the share cannot be estimated —
-// the measured share and the «只恢复前 K 个» cut are driven against the real gather in test-bulk-resume-cost §6 /
+// the measured share is driven against the real gather in test-bulk-resume-cost §6 /
 // test-auto-resume-loop §8.
 //   desk 1100 (zh) · four conversations; three hit the wall / the overload ⇒ each card wears its mark
 //     («因用量上限停止 · 上限已重置» / «模型过载 · 停于 HH:MM») with «自动继续：关» beside it; the normal one none;
@@ -27,7 +27,7 @@
 //     ITS words), the press is ATTENDED (the owner's ruling 2026-11-18): no stamp in the spend ledger, 3 in its attended
 //     tally; every mark and the pill are gone
 //   an agent bearer is refused by name on the four routes (cookie only)
-// PNGs: $VIBESPACE_ARB_PNG_DIR/{desk-marks,desk-filter,desk-settings,desk-dialog,en-dialog,phone-marks,phone-dialog,desk-done}.png
+// PNGs: $VIBESPACE_ARB_PNG_DIR/{desk-marks,desk-filter,desk-settings,desk-dialog,en-dialog,phone-marks,phone-dialog,desk-done,desk-overage}.png
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -135,7 +135,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 const turnsOf = (sid) => { try { return fs.readFileSync(path.join(TURNS, sid), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-const tallyOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return { stamps: Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length, attended: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume').length }; } catch { return { stamps: -1, attended: -1 }; } };
+const tallyOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return { stamps: Object.values(b.identities || {}).flat().filter((x) => x && (x.reason === 'bulk-resume' || x.reason === 'auto-resume')).length, attended: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && !(Number(x.total) >= 0)).reduce((n, x) => n + (Number(x.count) || 1), 0), presses: (b.attended || []).filter((x) => x && x.reason === 'bulk-resume' && Number(x.total) >= 0).length }; } catch { return { stamps: -1, attended: -1 }; } };
 const stamps = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); const b = j.budget || j; return Object.values(b.identities || {}).flat().filter((x) => x && x.reason === 'bulk-resume').length; } catch { return -1; } };
 
 try {
@@ -251,7 +251,7 @@ try {
   if (!dlg || !/6\.12/.test(dlg.dollars)) console.error('    (the plan the server answered:', JSON.stringify(await D.ev(`fetch('/api/sessions/stopped').then((r) => r.json())`)).slice(0, 1500) + ')');
   check(`desk: …the cost said BEFORE anything runs: «${dlg?.dollars}»`, !!dlg && dlg.dollars === '≈ $6.12（按 opus-5-5 缓存写入价 $5/M，冷读 1.20 M tokens）' && dlg.basis.includes('含每个会话名义上 2000 个输出 tokens'), dlg);
   check(`desk: …the login's share is NOT made up — «${dlg?.member?.[0]}» (named in the person's words, never its ledger key)`, !!dlg && dlg.member.length === 1 && dlg.member[0] === '本机自己的登录：无法估算：本窗口还没有实测比例' && !dlg.basis.some((b) => /未知/.test(b)), dlg && { member: dlg.member, basis: dlg.basis });
-  check('desk: …«全部恢复 (3)» + 关闭 (no «只恢复前 K 个»: nothing measured, nothing to cut)', !!dlg && dlg.btns.map((b) => b.text).join('|') === '全部恢复 (3)|关闭', dlg && dlg.btns);
+  check('desk: …«全部恢复 (3)» + 关闭 (one press for all — no «first K», the owner\'s ruling 2026-11-18)', !!dlg && dlg.btns.map((b) => b.text).join('|') === '全部恢复 (3)|关闭', dlg && dlg.btns);
   const pDialog = await shot(D.S, 'desk-dialog.png');
   await press(D.S, D.ev, '#resume-stopped-dialog .btn-cancel');
   check('desk: 关闭 ⇒ nothing ran (no continue reached any CLI, no ledger stamp)', (await until(() => D.ev("!document.getElementById('resume-stopped-dialog')"), 3000, 100)) && SIDS.slice(0, 3).every((sid) => turnsOf(sid).length === 1) && stamps() <= 0, { turns: SIDS.map(turnsOf), stamps: stamps() });
@@ -305,10 +305,28 @@ try {
   const gaps = (() => { const at = hub.log().split('\n').filter((l) => /continued by the bulk resume/.test(l)); return at.length; })();
   check('desk: the server says it: ONE batch authorization for the three, 3 continues, done', /bulk resume rb-[^:]+: 3 authorized as one batch, 0 skipped/.test(hub.log()) && gaps === 3 && /done: resumed 3 · skipped 0 · not delivered 0/.test(hub.log()), hub.log().split('\n').filter((l) => /bulk/.test(l)));
   const st3 = await until(() => { const x = tallyOf(); return x.attended === 3 ? x : null; }, 5000, 200); // the ledger is written on a 500 ms debounce
-  check('desk: the press is ATTENDED (the owner\'s ruling 2026-11-18): NO stamp in the spend ledger, 3 in its attended tally', !!st3 && st3.stamps === 0 && st3.attended === 3, JSON.stringify(tallyOf()));
+  check('desk: the press is ATTENDED (the owner\'s ruling 2026-11-18): NO stamp in the spend ledger, 3 continues in its attended tally (folded by account) + ONE press row', !!st3 && st3.stamps === 0 && st3.attended === 3 && st3.presses === 1, JSON.stringify(tallyOf()));
   const gone = await until(() => D.ev(`(() => { const m = ${marks}; const p = ${pill}; return Object.values(m).every((x) => x && !x.mark) && !p ? m : null; })()`), 15000, 200);
   check('desk: every mark is gone (the sessions ran again) and so is the filter pill', !!gone, { m: await D.ev(marks), p: await D.ev(pill) });
   const pDone = await shot(D.S, 'desk-done.png');
+  // FORM TWO ON THE PAGE (the cure, 主开发 2026-11-18 20:16Z): the machine's login reports PAID OVERAGE (its usage cache), the
+  // fourth conversation stops on an overload ⇒ the dialog names the account BEFORE the press — «留在停止状态（本机自己的登录 正在使用
+  // 付费超额）» — with the door (设置 → 花费), and offers nothing to start
+  {
+    const cacheDir = path.join(wt, 'data', 'usage-cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify({ overage: { inUse: true, asOf: Date.now() - 60e3 } }));
+    await D.ev(`(app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(live[SIDS[3]])}, text: 'OVERLOAD: go on' }), true)`);
+    const st4 = await until(() => D.ev(`(() => { const r = (app.sidebar._webuiSessions || []).find((s) => s.backendSessionId === ${JSON.stringify(SIDS[3])}); return r && r.stoppedBy ? r.stoppedBy.kind : null; })()`), 20000, 250);
+    check('desk: FORM TWO — CONTROL FIRST: the fourth conversation is stopped (overload) and the login reports paid overage (the plant)', st4 === 'overload' && fs.existsSync(path.join(cacheDir, '__global__.json')), String(st4));
+    await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
+    await press(D.S, D.ev, '.auto-resume-bulk .resume-stopped-open');
+    const ov = await until(() => D.ev(`(() => { const o = document.getElementById('resume-stopped-dialog'); if (!o) return null; const heads = [...o.querySelectorAll('.resume-stopped-group-head')].map((n) => n.textContent); if (!heads.length) return null; return { heads, hints: [...o.querySelectorAll('.resume-stopped-group .dialog-hint')].map((n) => n.textContent), btns: [...o.querySelectorAll('.dialog-footer button')].map((b) => b.textContent) }; })()`), 10000, 200);
+    check('desk: FORM TWO on the page — the account NAMED in words before the press, its door under it, and no «全部恢复»', !!ov && ov.heads.some((h) => /留在停止状态（本机自己的登录 正在使用付费超额）/.test(h)) && ov.hints.some((h) => /设置 → 花费/.test(h)) && !ov.btns.some((b) => /全部恢复/.test(b)), JSON.stringify(ov));
+    await shot(D.S, 'desk-overage.png');
+    await D.ev(`(document.getElementById('resume-stopped-dialog')?.remove(), true)`);
+    fs.rmSync(path.join(cacheDir, '__global__.json'), { force: true });
+  }
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
   if (PNG_DIR) console.log('  PNGs:', [pMarks, pFilter, pSettings, pDialog, pEn, pPhoneMarks, pPhoneDialog, pDone].filter(Boolean).join(' '));
 } catch (e) {

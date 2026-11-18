@@ -400,6 +400,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.previewSpendBatch (items:[{id, session, identity}]) => {refusedSlots:[{identity, why, detail, n}]} — the guard's QUIET
  *        look (nothing held, said or granted) at the press's authorization: the plan leaves a refused account's conversations
  *        stopped, by name, BEFORE the press (主开发 2026-11-18 16:20Z — form two).
+ * @param deps.notePress (batchId, n, reason) => void — THE RECORD OF A PRESS: one row in the attended tally (the cure).
  * @param deps.workflowRunAtWall (id, session, {fireAt}) => Promise<{runId, unfinished}|null> — B-3437: the Workflow run this
  *        conversation's usage wall cut short (src/server/auto-resume-workflow.js: off the main loop, bounded), asked every two
  *        minutes while the wall's arm stands; the continue names only a fresh answer.
@@ -418,7 +419,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, previewSpendBatch = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, previewSpendBatch = null, notePress = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -654,6 +655,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     return rows;
   }
   /** The plan as the Settings row / the dialog shows it BEFORE anything runs. */
+  /** The refusals that are about an ACCOUNT (form two): its conversations are left stopped, the account named. */
+  const ACCOUNT_REFUSALS = new Set(['overage-in-use', 'identity-cannot-serve', 'spend-control-reached']);
   /** A conversation left stopped because the press is refused on ITS account — the row names the account and the rule. */
   const accountSkip = (e, r) => ({ id: e.id, name: e.name, kind: e.kind, at: e.at, why: 'account-refused', until: null, reason: String((r && r.why) || 'refused').slice(0, 60), member: String((r && r.identity && (r.identity.name || r.identity.key)) || '').slice(0, 80) || null });
   function stoppedPlan(now = Date.now()) {
@@ -664,6 +667,12 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // THE ACCOUNT, NOT THE PRESS — SAID BEFORE IT (主开发 2026-11-18 16:20Z): an account the press would be refused on (paid
     // overage, a credential that cannot serve, the spend control) — its conversations leave the eligible set for the skipped
     // one, BY NAME, so the dialog's N, its cost and its list are what the press will do; the press asks the guard again
+    // a conversation with no billing slot is said BEFORE the press too (the cure's should): skipped by name, never the press
+    if (plan.eligible.some((e) => !(e.identity && e.identity.key))) {
+      plan.skipped.push(...plan.eligible.filter((e) => !(e.identity && e.identity.key)).map((e) => ({ id: e.id, name: e.name, kind: e.kind, at: e.at, why: 'no-slot', until: null })));
+      plan.eligible = plan.eligible.filter((e) => e.identity && e.identity.key);
+    }
+    plan.overage = null;
     if (previewSpendBatch && plan.eligible.length) {
       let pv = null;
       try { pv = previewSpendBatch(plan.eligible.map((e) => ({ id: e.id, session: activeSessions.get(e.id) || null, identity: e.identity || null }))); } catch (e) { pv = null; log('[auto-resume] the bulk plan\'s spend preview threw: ' + e.message); }
@@ -673,6 +682,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         for (const e of plan.eligible) { const r = e.identity && off.get(String(e.identity.key)); if (r) plan.skipped.push(accountSkip(e, r)); else keep.push(e); }
         plan.eligible = keep;
       }
+      // THE OVERAGE SENTENCE IS TRUE ON EVERY INSTANCE (the cure): whether this instance lets a press bill paid overage, and
+      // which accounts it would bill so — the dialog's lead and cost box say it
+      plan.overage = pv ? { allowed: !!pv.overageAllowed, billed: (Array.isArray(pv.overageBilled) ? pv.overageBilled : []).map((b) => ({ name: (b.identity && (b.identity.name || b.identity.key)) || null, n: Number(b.n) || 0 })) } : null;
     }
     return { ...plan, total: rows.length, running: batchRunning };
   }
@@ -715,9 +727,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const ix = chosen.findIndex((e) => e.id === String(x.sessionId));
         if (ix < 0) continue;
         const [e] = chosen.splice(ix, 1);
-        rec.skipped.push(accountSkip(e, { why: x.why, identity: x.identity }));
+        rec.skipped.push(x.why === 'identity-unknown' ? { id: e.id, name: e.name, kind: e.kind, at: e.at, why: 'no-slot', until: null } : accountSkip(e, { why: x.why, identity: x.identity }));
       }
       rec.planned = chosen.length;
+      rec.planSkipped += preSkip.length;   // skipped before the run, like the plan's: the not-reached count subtracts them ONCE (the cure's should)
       log(`[auto-resume] bulk resume ${batchId}: ${preSkip.length} left stopped — their account is refused (${[...new Set(preSkip.map((x) => (x.identity && (x.identity.name || x.identity.key)) || '?'))].join(', ')})`);
     }
     if (!v || v.ok === false || !Array.isArray(v.holds) || v.holds.length !== chosen.length) {
@@ -727,6 +740,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       log(`[auto-resume] bulk resume of ${chosen.length} refused by the spend gate — ${rec.refused.why}: ${rec.refused.detail || ''} (none resumed)`);
       return batchStatus(batchId);
     }
+    // THE RECORD OF A PRESS (the cure, 主开发 20:16Z): one row in the attended tally — when, how many, the batch id
+    if (v.attended && notePress) { try { notePress(batchId, chosen.length, paid.spendReason); } catch (err) { log('[auto-resume] recording the press failed: ' + err.message); } }
     const holdOf = new Map(v.holds.map((h) => [String(h.sessionId), h]));
     const open = new Map(holdOf);   // the holds not yet charged or given back — renewed on every pass
     const renew = () => { if (renewSpend && open.size) { try { renewSpend([...open.values()].map((x) => x.hold)); } catch (err) { log('[auto-resume] renewing the batch holds failed: ' + err.message); } } };
@@ -753,7 +768,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         let h = holdOf.get(e.id) || null;
         renew();   // every hold not reached yet lives on while this one waits its turn (U2 cure: a batch outlives one hold's TTL)
         const giveBack = () => { open.delete(e.id); holdOf.delete(e.id); if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } } h = null; };
-        const skip = (why, until = null, reason = null) => { giveBack(); rec.skipped.push({ id: e.id, name: e.name, kind: e.kind, at: e.at, why, until, ...(reason ? { reason: String(reason).slice(0, 60) } : {}) }); };
+        const skip = (why, until = null, reason = null, member = null) => { giveBack(); rec.skipped.push({ id: e.id, name: e.name, kind: e.kind, at: e.at, why, until, ...(reason ? { reason: String(reason).slice(0, 60) } : {}), ...(member ? { member: String(member).slice(0, 80) } : {}) }); };
         const session = activeSessions.get(e.id);
         if (!session) { skip('gone'); continue; }
         if (session._isStreaming || session._arFiring) { skip('running'); continue; }   // working, or its own continue is in flight
@@ -822,6 +837,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
           if (v2 && v2.ok !== false && Array.isArray(v2.holds) && releaseSpend) for (const hx of v2.holds) { try { releaseSpend(e.id, null, hx && hx.hold); } catch { } }   // a malformed answer's holds go back too
           const why = (v2 && v2.why) || 'refused';
           log(`[auto-resume] ${e.id}: the spend gate refused this continue of the bulk resume ${batchId} on ${(bill && (bill.name || bill.key)) || '?'} — ${why} (skipped, nothing charged)`);
+          // FORM TWO AFTER THE PRESS (the cure, 主开发 20:16Z): a refusal on an ACCOUNT names it (the one it moved to, if moved) with its door
+          if (ACCOUNT_REFUSALS.has(why)) { skip('account-refused', null, why, (bill && (bill.name || bill.key)) || null); continue; }
           skip(moved ? 'moved-refused' : 'refused', null, why); continue;
         }
         h = v2.holds[0]; holdOf.set(e.id, h); open.set(e.id, h);
@@ -838,7 +855,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         open.delete(e.id);   // delivered: its hold becomes the charge below
         // DELIVERED: the hold becomes the charge (on the slot the BATCH authorized for it), the breaker learns a continue
         // went out (a walled answer quarantines that slot like any fire), a wait it superseded is dropped, the fact clears
-        if (noteBatchSpend) { try { noteBatchSpend(e.id, session, (h && h.identity) || ident2 || null, h ? h.hold : null, paid.spendReason); } catch (err) { log('[auto-resume] spend accounting failed: ' + err.message); } }
+        if (noteBatchSpend) { try { noteBatchSpend(e.id, session, (h && h.identity) || ident2 || null, h ? h.hold : null, paid.spendReason, batchId); } catch (err) { log('[auto-resume] spend accounting failed: ' + err.message); } }
         noteFired(e.id, ident2 ? ident2.key : null, 'timed', Date.now());
         if (armed.has(e.id)) { armed.delete(e.id); _cancelArmNotify(e.id); }
         save();

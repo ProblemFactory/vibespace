@@ -262,8 +262,19 @@ const stampReason = (t) => (t && typeof t === 'object' && t.reason ? String(t.re
  *  reason-less legacy stamp counts under 'unknown'). */
 function producerCounts(list) {
   const out = {};
-  for (const t of Array.isArray(list) ? list : []) { const r = stampReason(t) || 'unknown'; out[r] = (out[r] || 0) + 1; }
+  for (const t of Array.isArray(list) ? list : []) {
+    if (t && Number(t.total) >= 0 && t.press) continue;   // a PRESS row (notePressRow) is the record of the press, not one more turn
+    const r = stampReason(t) || 'unknown'; out[r] = (out[r] || 0) + (t && Number(t.count) > 1 ? Number(t.count) : 1);   // a press's folded row counts its continues
+  }
   return out;
+}
+/** PURE (the cure, 主开发 20:16Z): THE RECORD OF A PRESS — one row in the attended tally: when, how many it started, the batch
+ *  id (`press`) — kept beside its folded per-continue rows; what the owner reads afterwards as what a press cost. */
+function notePressRow(state, { at = Date.now(), reason = null, press = null, n = 0 } = {}) {
+  const s = pruneBudget(state, at, LOAD_RETENTION);
+  if (!isAttended(reason) || !press) return s;
+  s.attended = [...s.attended, { at, reason, press: String(press).slice(0, 80), total: Math.max(0, Math.floor(Number(n)) || 0) }].slice(-ATTENDED_KEEP);
+  return s;
 }
 /** PURE. "job-notification ×9, auto-resume ×3" — the top producers, most first. */
 function producersText(counts, { top = 3 } = {}) {
@@ -674,8 +685,8 @@ function authorizeUnattendedSpend({
  *  its bucket and slot — a partial batch is a decision nobody made. FAIL CLOSED: an empty or malformed group refuses.
  *  @returns {ok, why, detail, retryAfter, identity, reason, n, groups:[verdict…]} */
 function authorizeUnattendedBatch({
-  reason, groups = [], state = null, limits = BUDGET_DEFAULTS, ofKey = () => ({}), overagePolicy = 'refuse', pending = null, now = Date.now(),
-} = {}) {
+  reason, groups = [], state = null, limits = BUDGET_DEFAULTS, ofKey = () => ({}), overagePolicy = 'refuse', pending = null, ledger = null, now = Date.now(),
+} = {}) {   // `ledger` (the cure, 主开发 20:16Z): every layer of the money gate fails closed — an unreadable budget refuses a gated batch by name
   const list = Array.isArray(groups) ? groups.filter((g) => g && Number(g.n) > 0) : [];
   const total = list.reduce((a, g) => a + Math.floor(Number(g.n)), 0);
   const no = (why, detail, extra = {}) => ({ ok: false, why, detail, retryAfter: 0, identity: null, reason, n: total, groups: [], ...extra });
@@ -687,7 +698,7 @@ function authorizeUnattendedBatch({
     let facts = {};
     try { facts = (key && ofKey(key)) || {}; } catch { facts = {}; }
     const v = authorizeUnattendedSpend({
-      reason, identity: g.identity || null, state, limits, overagePolicy, pending, now,
+      reason, identity: g.identity || null, state, limits, overagePolicy, pending, ledger, now,
       overage: facts.overage || null, credential: facts.credential || null, spendControl: facts.spendControl || null,
       need: Math.floor(Number(g.n)), instanceNeed: total,
     });
@@ -719,7 +730,7 @@ function authorizeUnattendedBatch({
  *  not consume budget). Returns the new state plus, when this spend crossed the
  *  notice threshold on some axis, ONE warn object — the 80% line the owner
  *  asked for, emitted at the crossing and never again inside that window. */
-function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false, behind = null } = {}) {
+function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false, behind = null, press = null } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   // A PRUNE NEVER FORGIVES (lane queued-is-not-woke round 4): it keeps what the LARGEST caps the settings accept could count —
@@ -747,7 +758,15 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   // A STASH DRAIN NEVER STAMPS (round 4): it rides somebody else's turn — it converts a stamp still there, adds nothing if gone
   if (ridKey && drain) return { state: s, warn: null };
   // ATTENDED: no stamp — the press joins the tally only (it never fills a window, never crosses the 80 % line)
-  if (isAttended(reason)) { s.attended = [...s.attended, { at, reason, key }].slice(-ATTENDED_KEEP); return { state: s, warn: null }; }
+  if (isAttended(reason)) {
+    // A PRESS'S CONTINUES ARE ONE ROW PER ACCOUNT (the cure, 主开发 20:16Z): a press of any size never pushes its own first rows
+    // or the day's earlier ones out of the tally — its per-continue rows are folded by (press, account), `count` = how many
+    const pid = press ? String(press).slice(0, 80) : null;
+    const i = pid ? s.attended.findIndex((t) => t && t.press === pid && t.key === key && t.reason === reason && !(Number(t.total) >= 0)) : -1;
+    if (i >= 0) { const row = s.attended[i]; s.attended = [...s.attended.slice(0, i), { ...row, count: (Number(row.count) || 1) + 1, last: at }, ...s.attended.slice(i + 1)]; return { state: s, warn: null }; }
+    s.attended = [...s.attended, { at, reason, key, ...(pid ? { press: pid, count: 1 } : {}) }].slice(-ATTENDED_KEEP);
+    return { state: s, warn: null };
+  }
   if (!key) return { state: s, warn: null };
   const cap = stampCap(LOAD_RETENTION);   // round 4: the retention, never the live caps (a lowered cap must not cut a stamp a raise needs)
   // the stamp names its producer (5b ②) — a SPEND_REASONS member or null
@@ -1022,7 +1041,7 @@ module.exports = {
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
+  budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText, notePressRow,
   pendingCounts, reservePending, releasePending, renewPending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,

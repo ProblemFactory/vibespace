@@ -1834,7 +1834,14 @@ await (async () => {
   // between item one and item two: item two is not continued and not charged, skipped BY NAME with the authorizer's reason
   const ov = await run(real, { overageAfter: 'a' });
   const ovSkip = ov.rec.skipped.find((x) => x.id === 'b');
-  ok('17b. LAW 1: overage turns «in use» after the first continue ⇒ the second is NOT continued and NOT charged — skipped by name with the authorizer\'s own reason, its hold back', ov.L.sent.join() === 'a' && !!ovSkip && ovSkip.why === 'refused' && ovSkip.reason === 'overage-in-use' && !ov.L.charge.some((x) => x.startsWith('b@')) && ov.L.release.includes('h2'), JSON.stringify(ov));
+  ok('17b. LAW 1 + FORM TWO AFTER THE PRESS (the cure): overage turns «in use» after the first continue ⇒ the second is NOT continued and NOT charged — skipped as «left stopped» with its ACCOUNT NAMED (A) and the rule, its hold back', ov.L.sent.join() === 'a' && !!ovSkip && ovSkip.why === 'account-refused' && ovSkip.reason === 'overage-in-use' && ovSkip.member === 'A' && !ov.L.charge.some((x) => x.startsWith('b@')), JSON.stringify(ov.rec.skipped));
+  { // its RED control, proving its plant first: the pre-cure row (the rule, no account) is what the leg above refuses
+    const mF = mutantAr([["          if (ACCOUNT_REFUSALS.has(why)) { skip('account-refused', null, why, (bill && (bill.name || bill.key)) || null); continue; }\n", '']]);
+    ok('17b. FORM TWO AFTER THE PRESS — CONTROL FIRST: the patch removing the named row applies (exactly once)', mF.hits === 1 && !!mF.mod, mF.err);
+    const cF = mF.mod ? await run(mF.mod, { overageAfter: 'a' }) : null;
+    const cSkip = cF && cF.rec.skipped.find((x) => x.id === 'b');
+    ok('17b. FORM TWO AFTER THE PRESS — RED: without it the row says the rule and NO account (the leg above goes red)', !!cSkip && cSkip.why === 'refused' && !cSkip.member, JSON.stringify(cF && cF.rec.skipped));
+  }
   const m3 = mutantAr([['        try { v2 = authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; }', "        try { v2 = !moved ? { ok: true, holds: [{ sessionId: e.id, identity: bill, hold: 'kept' }] } : authorizeSpendBatch ? authorizeSpendBatch([{ id: e.id, session, identity: bill }], paid.spendReason) : null; } /* PRE-CURE: an unmoved slot is never asked again */"]]);
   const c3 = m3.mod ? await run(m3.mod, { overageAfter: 'a' }) : null;
   ok('17b. LAW 1 RED: the loop that asks again only when the gate MOVED the conversation continues b onto paid overage and charges it', m3.hits === 1 && !!c3 && c3.L.sent.join() === 'a,b' && c3.L.charge.some((x) => x.startsWith('b@A')), m3.err || JSON.stringify(c3 && c3.L));
@@ -1909,9 +1916,44 @@ await (async () => {
     ok('17b. FORM TWO, BEFORE the press: the plan leaves B\'s conversation stopped BY NAME (account-refused, overage-in-use, B) — the eligible set (the dialog\'s N and its cost) is A\'s two', pre.plan.eligible.map((e) => e.id).join() === 'a1,a2' && !!pSkip && pSkip.why === 'account-refused' && pSkip.reason === 'overage-in-use' && pSkip.member === 'B', JSON.stringify(pre.plan));
     ok('17b. …and the press resumes A\'s two, B\'s stays stopped and named in the record', pre.sent === 'a1,a2' && !pre.rec.refused && pre.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.member === 'B'), JSON.stringify(pre.rec));
     const at = await world({ preview: () => ({ refusedSlots: [] }), authorize: (items) => okRows(items) });
-    ok('17b. FORM TWO AT the press: an account the guard refuses only at the press (overage since the plan) — its conversation is SKIPPED by name, the planned count drops, the rest resume', at.plan.eligible.length === 3 && at.sent === 'a1,a2' && at.rec.planned === 2 && at.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.reason === 'overage-in-use' && x.member === 'B') && !at.rec.refused, JSON.stringify(at.rec));
+    ok('17b. FORM TWO AT the press: an account the guard refuses only at the press (overage since the plan) — its conversation is SKIPPED by name, the planned count drops, the rest resume, and it is counted as skipped BEFORE the run (the not-reached count subtracts it ONCE)', at.plan.eligible.length === 3 && at.sent === 'a1,a2' && at.rec.planned === 2 && at.rec.planSkipped === 1 && at.rec.skipped.some((x) => x.id === 'b1' && x.why === 'account-refused' && x.reason === 'overage-in-use' && x.member === 'B') && !at.rec.refused, JSON.stringify(at.rec));
     const none = await world({ authorize: () => ({ ok: false, why: 'overage-in-use', detail: 'A is billing paid overage', identity: { key: 'A', name: 'A' }, refusedSlots: [{ identity: { key: 'A', name: 'A' }, why: 'overage-in-use', n: 2 }, B_OVER] }) });
     ok('17b. FORM TWO: every account refused at the press ⇒ it starts NOTHING and the refusal names each account', none.sent === '' && !!none.rec.refused && (none.rec.refused.slots || []).map((x) => x.name + ':' + x.why).join() === 'A:overage-in-use,B:overage-in-use', JSON.stringify(none.rec));
+  }
+  // FORM TWO THROUGH THE REAL ENGINE AND THE REAL GUARD (the cure's should): the guard's quiet preview names B before the press;
+  // A turns to overage after its first continue — its second is left stopped, named; the press row and the folded rows in the tally;
+  // where the instance ALLOWS paid overage the plan says so and names the account billed
+  {
+    const SGm = require(path.join(REPO, 'src/server/spend-guard.js'));
+    const PRESS3 = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+    const realWorld = async ({ allow = false, overFromStart = [], overAfterFirst = null }) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkreal-'));
+      const over = new Set(overFromStart);
+      const guard = SGm.create({ dataDir: dir, serverSetting: (k) => (k === 'spend.allowOverageTurns' ? allow : undefined), identityOf: (s2) => (s2 && s2._slot ? { key: s2._slot, name: s2._slot } : null), readCacheFor: (k) => (over.has(k) ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), log: () => { } });
+      const S3 = (slot, ago) => ({ backend: 'claude', mode: 'chat', name: slot + ago, _slot: slot, _stoppedBy: { kind: 'overload', at: Date.now() - ago * 3600e3 }, pty: {}, _isStreaming: false });
+      const active = new Map([['a1', S3('A', 5)], ['b1', S3('B', 4)], ['a2', S3('A', 3)], ['a3', S3('A', 2)]]);
+      const sent = [];
+      const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => undefined, log: () => { },
+        resumeVerb: () => ({ form: 'message', deliver: (session, text, d) => d.sendChatInput(session, text) }),
+        sendToSession: (id, s2) => { sent.push(id); s2._isStreaming = true; if (overAfterFirst && sent.length === 1) over.add(overAfterFirst); return true; }, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+        previewSpendBatch: (items) => guard.previewBatch({ reason: 'bulk-resume', items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
+        authorizeSpendBatch: (items, reason) => guard.authorizeBatch({ reason, items: items.map((it) => ({ session: it.session, sessionId: it.id, identity: it.identity })) }),
+        noteBatchSpend: (id, s2, identity, hold, reason, press) => guard.note({ reason, identity, hold, press }), notePress: (batchId, n, reason) => guard.notePress({ reason, press: batchId, n }),
+        releaseSpend: (id, s2, hold) => guard.release({ hold }), renewSpend: (h) => guard.renewHolds(h), wallVerdict: () => null, bulkPaceMs: 5 });
+      const plan = ar.stoppedPlan();
+      let rec = ar.resumeBatch({ pressed: PRESS3 });
+      const until = Date.now() + 3000;
+      while (Date.now() < until && rec && !rec.done) { await new Promise((r) => setTimeout(r, 5)); rec = ar.batchStatus(rec.batchId); }
+      const att = guard.snapshot().budget.attended || [];
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { plan, rec, sent: sent.join(), att };
+    };
+    const w1 = await realWorld({ overFromStart: ['B'], overAfterFirst: 'A' });
+    const b1 = w1.plan.skipped.find((x) => x.id === 'b1'), a2 = w1.rec.skipped.find((x) => x.id === 'a2');
+    ok('17b. FORM TWO, THE REAL ENGINE + THE REAL GUARD: B named before the press (left stopped, overage); A turns to overage after a1 — a2 and a3 left stopped, A NAMED; nothing else sent', !!b1 && b1.why === 'account-refused' && b1.member === 'B' && w1.sent === 'a1' && !!a2 && a2.why === 'account-refused' && a2.member === 'A' && a2.reason === 'overage-in-use' && w1.rec.skipped.filter((x) => x.member === 'A').length === 2, JSON.stringify({ plan: w1.plan.skipped, rec: w1.rec.skipped, sent: w1.sent }));
+    ok('17b. THE RECORD OF A PRESS through the real guard: ONE press row (3 planned, its batch id) and ONE folded row for A (1 continue); no stamp', w1.att.filter((t) => t.press === w1.rec.batchId && t.total === 3).length === 1 && w1.att.filter((t) => t.press === w1.rec.batchId && t.key === 'A' && (t.count || 1) === 1).length === 1, JSON.stringify(w1.att));
+    const w2 = await realWorld({ allow: true, overFromStart: ['B'] });
+    ok('17b. (2) where the instance ALLOWS paid overage: the plan says so and names B as billed (1 continue) — and B IS continued (the press bills it, as the dialog says)', !!w2.plan.overage && w2.plan.overage.allowed === true && w2.plan.overage.billed.map((b) => b.name + ':' + b.n).join() === 'B:1' && w2.sent === 'a1,b1,a2,a3', JSON.stringify({ overage: w2.plan.overage, sent: w2.sent }));
   }
   // THE OWNER'S RULING 2026-11-18 (B): the bulk press is the person's own act — the press its door minted selects the ATTENDED
   // reason for the batch's authorization, its every re-ask and its every charge; no press, or a press-shaped object no door

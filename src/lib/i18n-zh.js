@@ -5019,6 +5019,8 @@ export default {
   "Could not read the stopped sessions — try again.": "读取停止的会话失败，请重试。",
   "Skipped ({n}):": "跳过（{n}）：",
   "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed; an account in paid overage is still refused, and you can stop the rest at any time.": "将继续 {n} 个会话（最早停止的优先）——每个都是一次计费的轮次。这是你自己的操作：不计入无人值守轮次的上限；正在使用付费超额的账号仍会被拒绝，剩下的随时可以停止。",
+  "{n} sessions will be continued, earliest stopped first — each one is a billed turn. This press is your own: it is not counted against the limits on turns nobody typed. This instance allows turns in paid overage (Settings → Spending), so a continue on an account in paid overage bills it; you can stop the rest at any time.": "将继续 {n} 个会话（最早停止的优先）——每个都是一次计费的轮次。这是你自己的操作：不计入无人值守轮次的上限。本实例允许在付费超额时运行（设置 → 花费），所以在正在使用付费超额的账号上继续会按超额计费；剩下的随时可以停止。",
+  "{member}: {n} of these continues bill paid overage": "{member}：其中 {n} 个继续按付费超额计费",
   "Authorizing the batch…": "正在为这一批授权…",
   "Resuming… {done} of {n} continued": "正在恢复… 已继续 {done}/{n}",
   "The whole batch was refused — nothing was resumed: {detail}": "整批被拒绝 —— 一个都没有恢复：{detail}",
@@ -5050,6 +5052,7 @@ export default {
   // lg-recovery U2 cure: a refusal by name, the Stop door, every skipped row by reason, the unpriced said
   "the spend guard refused it now": "花费守卫这次拒绝了它",
   "left stopped": "留在停止状态",
+  "its billing account could not be named": "无法确定它的计费账号",
   "its account is billing paid overage": "它的账号正在按超额付费",
   "{member} is billing paid overage": "{member} 正在使用付费超额",
   "{member} cannot serve a turn now": "{member} 现在无法提供轮次",

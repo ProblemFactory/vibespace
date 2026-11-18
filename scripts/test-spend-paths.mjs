@@ -4348,7 +4348,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   ok('§10 the 80 % notice carries and prints the top producers of its window', w && w.producers && w.producers['job-notification'] === 6 && /Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w)), w && A.noticeText(w));
   // (e) the guard passes the reason through to the stamp (wiring pin + a real charge)
   const gsrc = read('src/server/spend-guard.js');
-  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2)
+  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind, press \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2) + the press id (the attended bulk press's record)
   {
     const dir = tmpdir('vs-spend-reason-');
     const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, identityOf: () => ({ key: 'sub-G', name: 'G' }), getUserTodos: () => null, log: () => { } });
@@ -4811,6 +4811,30 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   // FORM TWO (主开发 2026-11-18 16:20Z — «an ACCOUNT already in paid overage is still refused: the account, not the press»)
   ok('§13 PURE ATTENDED: paid overage in use on B refuses B BY NAME — and A\'s share goes on (the account, not the press)', (() => { const v = att([{ identity: IA, n: 3 }, { identity: IB, n: 2 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === true && v.attended === true && v.groups.length === 1 && v.refusedSlots.length === 1 && v.refusedSlots[0].identity.key === 'sub-b' && v.refusedSlots[0].why === 'overage-in-use' && v.refusedSlots[0].n === 2 && /B/.test(v.refusedSlots[0].detail); })());
   ok('§13 PURE ATTENDED: …EVERY account in overage ⇒ the press starts nothing, refused, each account named', (() => { const v = att([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: () => ({ overage: { inUse: 'yes' } }) }); return v.ok === false && v.why === 'overage-in-use' && v.refusedSlots.map((r) => r.identity.key).join() === 'sub-a,sub-b'; })());
+  // (4) THE BATCH LAYER FAILS CLOSED (主开发 20:16Z): handed the ledger, an unreadable budget refuses a gated batch BY NAME, as the
+  // single authorizer does; an attended press passes, as the single one does. The control proves its plant first
+  {
+    const LEDGER = { unreadable: true, error: 'Unexpected token in JSON' };
+    const tw = (ledger) => B([{ identity: IA, n: 1 }], ledger ? { ledger } : {});
+    const plant = tw(null), red = tw(LEDGER);
+    ok('§13 (4) CONTROL FIRST: the same twin batch with a READABLE ledger is allowed (the plant is the ledger fact alone)', plant.ok === true, JSON.stringify(plant));
+    ok('§13 (4) the batch authorizer handed an UNREADABLE ledger refuses the gated batch BY NAME (ledger-unreadable), as the single one does', red.ok === false && red.why === 'ledger-unreadable' && /could not be read/.test(red.detail), JSON.stringify(red));
+    ok('§13 (4) …an attended press passes it, exactly as the single authorizer does for an attended reason', att([{ identity: IA, n: 1 }], { ledger: LEDGER }).ok === true && A.authorizeUnattendedSpend({ reason: 'bulk-resume', identity: IA, state, limits: L, now, ledger: LEDGER }).ok === true);
+  }
+  // (3) THE RECORD OF A PRESS: one press row (when, how many, the batch id) beside its per-continue rows, FOLDED by account — a press
+  // of 600 never pushes its own first rows or the day's earlier ones out. The control proves the cap is the plant first
+  {
+    let st = A.emptyBudget();
+    for (let i = 0; i < 3; i++) st = A.noteUnattendedSpend(st, { identity: { key: 'Z' }, reason: 'held-deliver', at: now - 3600e3 + i }).state;
+    st = A.notePressRow(st, { reason: 'bulk-resume', press: 'rb-600', n: 600, at: now });
+    for (let i = 0; i < 600; i++) st = A.noteUnattendedSpend(st, { identity: { key: i % 2 ? 'sub-a' : 'sub-b' }, reason: 'bulk-resume', press: 'rb-600', at: now + i }).state;
+    const rows = A.pruneBudget(st, now + 1000).attended, counts = A.producerCounts(rows), pressRow = rows.find((t) => t.press === 'rb-600' && t.total === 600);
+    let un = A.emptyBudget();
+    for (let i = 0; i < 3; i++) un = A.noteUnattendedSpend(un, { identity: { key: 'Z' }, reason: 'held-deliver', at: now - 3600e3 + i }).state;
+    for (let i = 0; i < 600; i++) un = A.noteUnattendedSpend(un, { identity: { key: 'sub-a' }, reason: 'bulk-resume', at: now + i }).state;
+    ok('§13 (3) CONTROL FIRST: 600 UNFOLDED continues push the day\'s earlier rows out (the tally keeps ' + A.pruneBudget(un, now + 1000).attended.length + ' rows — the cap is the plant)', !A.pruneBudget(un, now + 1000).attended.some((t) => t.reason === 'held-deliver'));
+    ok('§13 (3) a press of 600: ONE press row (600, its batch id) + one folded row per account; the day\'s 3 earlier rows kept; the counts say 600 continues and 3 presses of the other reason', rows.length === 6 && !!pressRow && counts['bulk-resume'] === 600 && counts['held-deliver'] === 3, JSON.stringify({ n: rows.length, counts }));
+  }
   ok('§13 PURE CONTROL: the gated twin stays ALL OR NOTHING — overage on B refuses its whole batch', (() => { const v = B([{ identity: IA, n: 1 }, { identity: IB, n: 1 }], { ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.ok === false && v.why === 'overage-in-use' && !v.refusedSlots; })());
   ok('§13 PURE CONTROL: the same 40 + 40 on the gated twin is refused by the hour cap', B([{ identity: IA, n: 40 }, { identity: IB, n: 40 }]).why === 'hour-cap');
   ok('§13 PURE: A holds 2 of 5 this hour ⇒ a share of 3 on A + 2 on B fits (instance 2 + 5 = 7 ≤ 8)', B([{ identity: IA, n: 3 }, { identity: IB, n: 2 }]).ok === true);
@@ -4842,6 +4866,25 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const x3 = [0, 1, 2].map(() => gA.authorize({ reason: 'auto-resume', identity: { key: 'A', name: 'A' } }));
     ok('§13 GUARD ATTENDED: …and A\'s hourly room is whole for its OWN automatic continues (3 of 3 still authorized)', x3.every((x) => x.ok === true), JSON.stringify(x3.map((x) => x.why)));
   }
+  { // the cure's should: a conversation with NO billing slot never refuses the whole PRESS — skipped by name, the rest held; the twin still fails closed whole
+    const gU = guardMod.create({ dataDir: tmpdir('vs-spend-bulkun-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const ghost = { session: { name: 'ghost' }, sessionId: 'g', sessionName: 'ghost' };
+    const vU = gU.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'a1'), ghost] }), tU = gU.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), ghost] });
+    ok('§13 GUARD ATTENDED: an item whose slot cannot be named is SKIPPED (identity-unknown) and the press goes on with the named; the gated twin refuses whole', vU.ok === true && vU.holds.map((h) => h.sessionId).join() === 'a1' && vU.skipped.some((x) => x.sessionId === 'g' && x.why === 'identity-unknown') && tU.ok === false && tU.why === 'identity-unknown', JSON.stringify({ vU, tU }));
+    // (3) on the guard: the press row and the folded continues, through note({press}) and notePress
+    gU.notePress({ reason: 'bulk-resume', press: 'rb-g', n: 2 });
+    gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' }); gU.note({ reason: 'bulk-resume', identity: { key: 'A', name: 'A' }, hold: null, press: 'rb-g' });
+    const attG = gU.snapshot().budget.attended || [];
+    ok('§13 (3) GUARD: notePress writes ONE press row (2, rb-g); its two continues on A fold into one row counting 2; nothing stamped', attG.filter((t) => t.press === 'rb-g' && t.total === 2).length === 1 && attG.filter((t) => t.press === 'rb-g' && t.key === 'A' && t.count === 2).length === 1 && (gU.snapshot().budget.identities.A || []).length === 0, JSON.stringify(attG));
+  }
+  { // (4) on the guard: an UNREADABLE budget file — the twin batch and its quiet preview refuse by name (control first: the file is unreadable)
+    const dU = tmpdir('vs-spend-bulkled-');
+    fs.writeFileSync(path.join(dU, 'spend-budget.json'), '{ not json');
+    const gL = guardMod.create({ dataDir: dU, serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    ok('§13 (4) CONTROL FIRST: the guard reads its budget file as UNREADABLE (the plant)', !!gL.snapshot().ledgerUnreadable, JSON.stringify(gL.snapshot().ledgerUnreadable));
+    const tL = gL.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1')] }), pL = gL.previewBatch({ reason: TWIN, items: [sess('A', 'a1')] });
+    ok('§13 (4) GUARD: the twin batch AND its quiet preview refuse BY NAME on the unreadable ledger (every layer of the money gate fails closed)', tL.ok === false && tL.why === 'ledger-unreadable' && pL.refusedSlots.length === 1 && pL.refusedSlots[0].why === 'ledger-unreadable', JSON.stringify({ tL: tL.why, pL }));
+  }
   { // FORM TWO on the guard: B in paid overage — A's items go on, B's come back SKIPPED by name; the plan's preview is QUIET
     const logsB = [], todosB = [];
     const gB = guardMod.create({ dataDir: tmpdir('vs-spend-bulkov-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, readCacheFor: (k) => (k === 'B' ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), getUserTodos: () => ({ add: (k, it) => { todosB.push(it); } }), log: (l) => logsB.push(String(l)) });
@@ -4850,6 +4893,10 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
     const quiet = logsB.length === 0 && todosB.length === 0 && gB.snapshot().holdsOpen === 0;
     ok('§13 GUARD previewBatch: B named (overage-in-use, 2 conversations) — and QUIET: nothing held, nothing journalled, nothing filed', pv.refusedSlots.length === 1 && pv.refusedSlots[0].identity.key === 'B' && pv.refusedSlots[0].why === 'overage-in-use' && pv.refusedSlots[0].n === 2 && quiet, JSON.stringify({ pv, logsB, todosB }));
     const vB = gB.authorizeBatch({ reason: 'bulk-resume', items });
+    // (2) where the instance ALLOWS turns in paid overage, the preview says so and names the account the press would bill as overage
+    const gO = guardMod.create({ dataDir: tmpdir('vs-spend-bulkovok-'), serverSetting: (k) => (k === 'spend.allowOverageTurns' ? true : settings[k]), identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, readCacheFor: (k) => (k === 'B' ? { overage: { inUse: true, asOf: Date.now() - 60e3 } } : null), getUserTodos: () => ({ add: () => { } }), log: () => { } });
+    const pvO = gO.previewBatch({ reason: 'bulk-resume', items });
+    ok('§13 (2) GUARD previewBatch where paid overage is ALLOWED: nothing refused, overageAllowed, and B named as billed (2 continues) — the dialog\'s sentence and cost line read it', pvO.refusedSlots.length === 0 && pvO.overageAllowed === true && pvO.overageBilled.length === 1 && pvO.overageBilled[0].identity.key === 'B' && pvO.overageBilled[0].n === 2 && pv.overageAllowed === false && pv.overageBilled.length === 0, JSON.stringify({ pvO, pv }));
     ok('§13 GUARD ATTENDED FORM TWO: the press holds rows for A\'s two only; B\'s two come back SKIPPED, by name and rule; the journal names B; no For-you item', vB.ok === true && vB.holds.map((h) => h.sessionId).join() === 'a1,a2' && vB.skipped.map((x) => `${x.sessionId}:${x.identity.key}:${x.why}`).join() === 'b1:B:overage-in-use,b2:B:overage-in-use' && logsB.some((l) => /bulk-resume: 2 on B left stopped — overage-in-use/.test(l)) && todosB.length === 0, JSON.stringify({ vB, logsB }));
   }
   const ok1 = g.authorizeBatch({ reason: TWIN, items: [sess('A', 'a1'), sess('A', 'a2'), sess('B', 'b1')] });
@@ -4911,8 +4958,9 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   fs.writeFileSync(path.join(mDir, 'src/server/auto-resume.js'), arSrc.replace(from, '      v = authorizeSpendBatch\n        ? ((x) => ({ ok: true, holds: x }))(chosen.map(').replace(fromMoved, 'v2 = ((x) => ({ ok: true, holds: x }))([{ sessionId: e.id, identity: bill, hold: null }], paid.spendReason);'));
   const mRows = censusOver(mDir, ['src/server/auto-resume.js']).filter((h) => h.prim === 'continue-send');
   ok('§13 CENSUS MUTANT: the same file without its two batch gates (the batch\'s, the per-continue re-ask\'s) reads the bulk site UNWIRED (and the single one still GATED)', arSrc.includes(from) && arSrc.includes(fromMoved) && mRows.length === 2 && mRows.filter((h) => !h.gated).length === 1 && mRows.find((h) => !h.gated).line === bulkLine, JSON.stringify(mRows));
-  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason\) => spendGuard\.note\(\{ reason, session: s, identity, hold \}\)/.test(read('server.js')));
-  ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask and every charge', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 3);
+  ok('§13 WIRING: server.js hands the core the REAL batch gate and the batch charge, under the reason the core chose', /authorizeSpendBatch: \(items, reason\) => spendGuard\.authorizeBatch\(\{ reason, items: items\.map\(/.test(read('server.js')) && /renewSpend: \(holds\) => spendGuard\.renewHolds\(holds\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
+  ok('§13 WIRING (the cure): server.js hands the core the guard\'s QUIET preview (as the press would ask), the press record, and the press id on every charge', /previewSpendBatch: \(items\) => spendGuard\.previewBatch\(\{ reason: 'bulk-resume', items: items\.map\(/.test(read('server.js')) && /notePress: \(batchId, n, reason\) => spendGuard\.notePress\(\{ reason, press: batchId, n \}\)/.test(read('server.js')) && /noteBatchSpend: \(id, s, identity, hold, reason, press\) => spendGuard\.note\(\{ reason, session: s, identity, hold, press \}\)/.test(read('server.js')));
+  ok('§13 THE PRESS (the owner\'s ruling 2026-11-18): the core selects the attended reason ONLY on the press its door minted (else the gated twin), and that reason rides the batch\'s authorization, every re-ask, every charge and the press record', /const paid = isPress\(pressed\) \? \{ spendReason: 'bulk-resume' \} : \{ spendReason: 'auto-resume' \};/.test(arSrc) && (arSrc.match(/paid\.spendReason/g) || []).length === 4);
   { const rt = read('src/server/bulk-resume-routes.js'), h = rt.indexOf("app.post('/api/sessions/resume-stopped'"), body = rt.slice(h, rt.indexOf('app.post(', h + 10));
     ok('§13 THE DOOR: POST /api/sessions/resume-stopped refuses EVERY bearer first, then the page, and mints the press it hands the batch (pressOf(req))', h > 0 && /try \{\s*(?:\/\/[^\n]*\n\s*)*if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(body) && /ar\.resumeBatch\(\{ limit, ids, pressed: pressOf\(req\) \}\)/.test(body)); }
   { // THE REAL DOOR, driven (the read's should): a person's page reaches the batch WITH a press; every bearer is refused first; a header-less local request is not a press
