@@ -573,6 +573,10 @@ function exitTechFold(cmd, { encoding = null } = {}) {
 /** lane exit-card-margin: a Machines RUN card's words — actor + verb + named object ("Ran a command on Macbook — exit 0 ·
  *  0.2 s"), read off the card's own record (its exitRun + the hub's words); the command is in the 技术细节 fold. null = not
  *  a run card that holds its command (an older card without `cmd`, a copy, a refusal): its words stay as the hub wrote them. */
+// a run's seconds in the hub's own spelling (exit-reach cardText: the elapsed ms, one decimal) and the hub's «access was removed
+// while it ran» tail in the page's words — ONE helper each for the card's sentence (machineRunWords) and its row (runOutcomeWords)
+const runSecs = (x) => (Math.max(0, Number(x && x.ms) || 0) / 1000).toFixed(1);
+const revokedTail = (said) => (String(said || '').trim().endsWith(' (access was removed while it ran)') ? ' ' + t('(access was removed while it ran)') : '');
 function machineRunWords(msg) {
   const x = msg && msg.exitRun;
   if (!x || typeof x !== 'object' || typeof x.cmd !== 'string' || !x.cmd) return null;
@@ -580,8 +584,8 @@ function machineRunWords(msg) {
   if (!mc || mc.verb !== 'run' || !mc.machine) return null;
   const b0 = Array.isArray(msg.content) ? msg.content.find((b) => b && b.type === 'text') : null;
   const said = String((b0 && b0.text) || '').trim(), machine = mc.machine;
-  const secs = `${(Math.max(0, Number(x.ms) || 0) / 1000).toFixed(1)} s`;   // the hub's own spelling (exit-reach cardText)
-  const revoked = said.endsWith(' (access was removed while it ran)') ? ' ' + t('(access was removed while it ran)') : '';
+  const secs = `${runSecs(x)} s`;   // the hub's own spelling (exit-reach cardText)
+  const revoked = revokedTail(said);
   if (said.startsWith('ran ')) return (mc.outcome === 'timed_out' ? t('Ran a command on {machine} — timed out after {secs}', { machine, secs })
     : t('Ran a command on {machine} — exit {code} · {secs}', { machine, code: mc.code == null ? '?' : mc.code, secs })) + revoked;
   const nostart = /^could not start `[^`]*` on .*? — ([\s\S]+)$/.exec(said);   // the reason stays the hub's (spawnFailureText)
@@ -591,13 +595,15 @@ function machineRunWords(msg) {
 /** lane phone-run-box (主开发's look, 2026-11-18 02:34Z: «退出码 0» in the group's head, «退出 0» on the card, an English «exit 0» on
  *  each row — one word for one thing): a RUN's compact line says its outcome in the page's words, through the keys the head
  *  and the Commands list already use («exit {code}», «timed out after {s} s»); the hub's sentence stays the record. null =
- *  not a run that ran (a copy, a call that never started): its line keeps the words as said. */
+ *  not a run that ran: a COPY, and every call whose outcome is 'failed' — denied, expired, offline, run_failed, could not
+ *  start, could not finish (the link was lost while it ran). Their line keeps the hub's words, English on a zh / ja page:
+ *  old behaviour and a DEBT the ui-language census no longer sees as a raw field (the row went with this helper). */
 function runOutcomeWords(msg) {
   const x = msg && msg.exitRun, mc = machineCardOf(msg);
   if (!x || typeof x !== 'object' || !mc || mc.verb !== 'run' || mc.outcome === 'failed') return null;
-  const s = (Math.max(0, Number(x.ms) || 0) / 1000).toFixed(1);
+  const s = runSecs(x);
   const b0 = Array.isArray(msg.content) ? msg.content.find((b) => b && b.type === 'text') : null;
-  const revoked = String((b0 && b0.text) || '').trim().endsWith(' (access was removed while it ran)') ? ' ' + t('(access was removed while it ran)') : '';
+  const revoked = revokedTail(b0 && b0.text);
   return (mc.outcome === 'timed_out' ? t('timed out after {s} s', { s }) : `${t('exit {code}', { code: mc.code == null ? '?' : mc.code })} · ${s} s`) + revoked;
 }
 
@@ -1184,7 +1190,7 @@ class ChatRenderers {
     const arrow = document.createElement('span'); arrow.className = 'chat-mline-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '▸';
     const what = document.createElement('span'); what.className = 'chat-mline-what'; what.textContent = ml.what;
     line.append(arrow, what);
-    const outcome = runOutcomeWords(msg) ?? ml.outcome;   // + lane phone-run-box: a run's outcome in the page's words
+    const outcome = runOutcomeWords(msg) ?? ml.outcome;   // + lane phone-run-box: a run's outcome in the page's words; a copy's and a failed call's stay the hub's (runOutcomeWords' note)
     if (outcome) { const out = document.createElement('span'); out.className = 'chat-mline-out'; out.textContent = '· ' + outcome; line.appendChild(out); }
     const head = el.querySelector(':scope > .chat-vs-notice-head');
     el.insertBefore(line, head ? head.nextSibling : el.firstChild);
