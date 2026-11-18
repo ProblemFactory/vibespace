@@ -135,7 +135,7 @@ function create(engineCtx) {
   /** lane bl-msg B-da74: «THE REST» of a SENT proposal — the attachment parts that did not land (the vendor refused a file, the
    *  chain stopped), each aligned with its stored file by position; a file the owner approved WITHOUT (`left-out`: the account
    *  carries none) is not the rest. → [{ n, name }] */
-  const REST_NEVER = new Set(['left-out', 'too-large', 'forbidden', 'unsupported', 'blocked']);
+  const REST_NEVER = new Set(['left-out', 'too-large']);   // r3: a refused scope or permission can land once granted — only an account that carries no file, or a file over its limit, is no rest
   function restOf(p) {
     if (!p || p.state !== 'sent' || p.kind) return [];
     const parts = (p.result && Array.isArray(p.result.parts) ? p.result.parts : []).filter((x) => x && x.part === 'attachment');
@@ -1311,14 +1311,14 @@ function create(engineCtx) {
     const agent = !!(ctx && ctx.kind === 'agent');
     if (!p || (agent && !(p.draftedBy && p.draftedBy.kind === 'agent' && p.draftedBy.id === ctx.id))) return { ok: false, code: 'not-found', error: 'no such proposal of yours' };
     if (agent && !stillSees(ctx, p.adapterId, scopeConvOf(p))) return ACL.notFound();   // r2: reach first, before any answer about it
-    if (p.state !== 'sent') return { ok: false, code: 'not-sent', error: `proposal ${p.id} is ${p.state} — only a sent one has a rest to send`, state: p.state };
-    if (p.restSentAs) return { ok: false, code: 'already', error: `the rest of ${p.id} is on its way already — proposal ${p.restSentAs}`, proposalId: p.restSentAs };
+    if (p.state !== 'sent') return { ok: false, code: 'rest-not-sent', error: `proposal ${p.id} is ${p.state} — only a sent one has a rest to send`, state: p.state };
+    if (p.restSentAs) return { ok: false, code: 'rest-already', error: `the rest of ${p.id} is on its way already — proposal ${p.restSentAs}`, proposalId: p.restSentAs };
     const rest = restOf(p);
-    if (!rest.length) return { ok: false, code: 'nothing-left', error: `nothing of proposal ${p.id} is left to send (it landed whole, or what did not land cannot be sent again)` };
-    if (p.attachmentsGoneAt) return { ok: false, code: 'files-gone', error: `the files of ${p.id} are no longer kept — attach them again in a new reply` };
+    if (!rest.length) return { ok: false, code: 'rest-nothing-left', error: `nothing of proposal ${p.id} is left to send (it landed whole, or what did not land cannot be sent again)` };
+    if (p.attachmentsGoneAt) return { ok: false, code: 'rest-files-gone', error: `the files of ${p.id} are no longer kept — attach them again in a new reply` };
     const metas = rest.map((r) => ({ ...(p.attachments[r.n] || {}), n: Number.isInteger((p.attachments[r.n] || {}).n) ? p.attachments[r.n].n : r.n }));
     const vr = await OF.verify(store.dir, p.id, metas);   // r2: the bytes that leave are the bytes the person saw (sha256 + size), read off the loop
-    if (!vr || !vr.ok) return { ok: false, code: 'files-gone', error: `${(vr && vr.why) || 'a file is no longer stored'} — attach it again in a new reply` };
+    if (!vr || !vr.ok) return { ok: false, code: 'rest-files-gone', error: `${(vr && vr.why) || 'a file is no longer stored'} — attach it again in a new reply` };
     const files = (vr.files || []).map((f) => ({ name: f.name, data: Buffer.from(f.data).toString('base64') }));
     const input = { text: '', attachments: files, ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.placement && p.placement !== 'chat' ? { placement: p.placement } : {}), ...(p.why ? { why: p.why } : {}), ...(!agent ? { direct: true, ...(pressed ? { pressed } : {}) } : {}) };
     const r = await propose(agent ? ctx : { kind: 'user' }, p.adapterId, p.convId, input, { ...guards, restOf: p.id, ...(agent ? { forceReview: true } : {}) });   // r2: the agent's rest is always the user's to approve

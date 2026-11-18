@@ -314,9 +314,9 @@ async function restJudge(ENGm) {
     const v1 = (eng.outboxView().proposals || []).find((x) => x.id === id) || {};
     if (!(q0b.restSentAs === (q1 && q1.id) && !v1.restLeft)) out.push(`the first card still offers the rest (${JSON.stringify({ restSentAs: q0b.restSentAs, restLeft: v1.restLeft })})`);
     const again = await eng.resendRest(id, { ctx: { kind: 'user' } });
-    if (!(again && again.ok === false && again.code === 'already')) out.push(`a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 120)})`);
+    if (!(again && again.ok === false && again.code === 'rest-already')) out.push(`a second «Send the rest» was not refused by name (${JSON.stringify(again).slice(0, 120)})`);
     const whole = q1 ? await eng.resendRest(q1.id, { ctx: { kind: 'user' } }) : null;
-    if (!(whole && whole.ok === false && whole.code === 'nothing-left')) out.push(`a proposal that landed whole offered a rest (${JSON.stringify(whole).slice(0, 120)})`);
+    if (!(whole && whole.ok === false && whole.code === 'rest-nothing-left')) out.push(`a proposal that landed whole offered a rest (${JSON.stringify(whole).slice(0, 120)})`);
   } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
   return out;
 }
@@ -370,7 +370,7 @@ console.log('⑨ the owner\'s own send (POST …/send) carries files through the
 // once, from the owner's door; another agent cannot ask; a whole one has no rest; RED CONTROL = the rest never found
 const rest = await restJudge(ENG);
 ok(rest.length === 0, `«Send the rest»: a partly sent proposal (b.pdf refused) is offered the rest, the owner's press sends ONLY b.pdf as one new message, the image is not uploaded again, the first card stops offering it, a second press and a whole one are refused by name${rest.length ? ' — ' + rest.join(' · ') : ''}`);
-const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && x.code !== 'left-out'", "parts.forEach((x, k) => { if (false && !x.ok && x.code !== 'left-out'", restJudge, 'no-rest');
+const restRed = await mutantEngine("parts.forEach((x, k) => { if (!x.ok && !x.lost && !REST_NEVER.has(x.code)", "parts.forEach((x, k) => { if (false && !x.ok && !x.lost && !REST_NEVER.has(x.code)", restJudge, 'no-rest');
 ok(Array.isArray(restRed) && restRed.length > 0, `RED CONTROL (the rest never found): the leg goes red (${restRed ? restRed.length : 'the control missed its line'})`);
 const own = await ownerJudge(ENG);
 ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);

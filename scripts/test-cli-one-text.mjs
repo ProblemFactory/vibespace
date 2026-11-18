@@ -152,7 +152,7 @@ const VERDICTS = {
   'channels withdraw': ['guard', 'channels', ['withdraw', 'pr-1', '--why', 'because', 'vs'], 'its --why (a word after the id)'],
   // lane channels-proposals-recall: the list takes no text; a recall's --why is guarded like withdraw's (a word after the id)
   'channels proposals': ['no-text', 'none (--all is a flag)'],
-  'channels resend': ['guard', 'channels', ['resend', 'pr-1', 'vs'], 'a word after the id'],   // lane bl-msg B-da74: takes no text — a stray word is refused
+  'channels resend': ['no-text', 'none (the proposal id is a lookup)'],   // lane bl-msg B-da74
   'channels recall': ['guard', 'channels', ['recall', 'lark/oc_1', 'om_1', '--why', 'because', 'vs'], 'its --why (a word after the message id)'],
   'channels search': ['guard', 'channels', ['search', 'two', 'words'], 'the query — never a narrower search than the one typed'],
   'channels list': ['no-text', 'conversations'], 'channels read': ['no-text', 'a conversation + flags'], 'channels attachment': ['no-text', 'a message id + an attachment id'], 'channels refresh': ['no-text', 'a conversation'],

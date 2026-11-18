@@ -57,7 +57,7 @@ if (statusExpr) for (const part of statusExpr[1].split(' : ')) { const m = /^(.*
 const RETRYABLE = new Set([429, 409, 503]);
 // R4 (B-6acc): `compose-not-available` belongs to the COMPOSE verb alone, the same way;
 // 2026-09-27: `not-withdrawable` belongs to WITHDRAW (and reply/compose --replaces) alone
-const REPLY_ONLY = ['send-not-available', 'rate-floor', 'compose-not-available', 'not-withdrawable'];
+const REPLY_ONLY = ['send-not-available', 'rate-floor', 'compose-not-available', 'not-withdrawable', 'rest-not-sent', 'rest-already', 'rest-nothing-left', 'rest-files-gone'];   // lane bl-msg B-da74: «Send the rest» refusals — a proposal's, never a refresh's
 // lane held-except-doors r2: a grant row's refusals by the ONE writer (409 by name — they were a 500) belong to the WATCH verb
 // alone (an agent's own watch / unwatch writes the grain's watch row) — proven like the reply ones: the request-set region
 // never spells them
