@@ -863,10 +863,18 @@ console.log('\n§8 wiring');
   const sibs = [...ci.matchAll(/^import [^\n]* from '\.\/([^']+)';$/gm)].map((m) => m[1]).sort();
   const stubbers = ['ci-gate-kit.mjs', 'test-ci-heavy-launch.mjs'] /* lane fast-tier-ratchet: test-ci-gate's stub builder moved to its parts' kit */.map((f) => [f, fnBody(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'), 'function stubGateRepo(')]);
   const copies = (b, s) => b.includes(`'${s}'`) || b.includes(`'scripts/${s}'`); // a builder names a sibling bare or by its repo path (B-60d2's loop)
-  // B-e381: a LAZY `createRequire(import.meta.url)('../src/x.js')` is a sibling too (launchPath's mount table) — a stub without it
-  // throws at --heavy-launch, after the pid file and before the spawn
-  for (const m of ci.matchAll(/createRequire\(import\.meta\.url\)\(\s*'\.\.\/([^']+)'\s*\)/g)) sibs.push(m[1]);
-  ok(sibs.includes('src/mount-path-class.js') && sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s) || b.includes(`'${s}'`))), `both stub builders copy every sibling ci.mjs imports or requires (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
+  // B-e381: a LAZY `createRequire(import.meta.url)('../src/…')` load is a sibling too (launchPath's mount table) — a stub without it
+  // throws at --heavy-launch, after the pid file and before the spawn. Read off the CODE only: a comment that spells such a call (ci.mjs's
+  // specsOf essay names one for a module it resolves) is no load — the train's hosted run 44305395894 went red on that comment's
+  // 'src/x.js' when the scan read the raw text.
+  // line by line (a regex over /* … */ would pair a «/*» inside a string with a far «*/» and swallow code): a line that OPENS as a
+  // comment (//, /*, or a block's * line) is no load
+  const lazyLoads = (text) => text.split('\n').filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l))
+    .flatMap((l) => [...l.matchAll(/createRequire\(import\.meta\.url\)\(\s*'\.\.\/([^']+)'\s*\)/g)].map((m) => m[1]));
+  ok(JSON.stringify(lazyLoads("  // and createRequire(import.meta.url)('../src/x.js')\n/* createRequire(import.meta.url)('../src/y.js') */\n * createRequire(import.meta.url)('../src/w.js')\nconst re = /\\/\\*/; // a «/*» in code\nconst M = createRequire(import.meta.url)('../src/z.js');\n")) === JSON.stringify(['src/z.js']),
+    'CONTROL: a lazy load is read off code lines only — a `//` line, a `/* */` line and a block\'s `*` line that spell one are no load; a code line after a «/*» inside a regex still is');
+  for (const s of lazyLoads(ci)) sibs.push(s);
+  ok(sibs.includes('src/mount-path-class.js') && !sibs.includes('src/x.js') && sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s))), `both stub builders copy every sibling ci.mjs imports or requires (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
   ok(/^\.vs-run\.json$/m.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8')), '.vs-run.json is gitignored (the isolated worktree\'s record is never a change)');
   // verify r2 (R6): the launcher's pre-launch sweep SAYS a refused seam (r1 K7 replaced a bare `catch { }`) — nothing gated
   // that print (the revert table found it uncaught); a launcher's stderr is the one place a pusher sees the refusal before the tier
