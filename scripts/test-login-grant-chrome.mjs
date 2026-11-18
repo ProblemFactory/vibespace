@@ -76,7 +76,7 @@ const doors = { held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySi
 const rowOf = (e) => { const w = document.createElement('div'); w.className = 'vw-row'; w.style.margin = '12px'; w.dataset.login = e.name; const n = document.createElement('div'); n.className = 'vw-row-name'; n.textContent = e.user + ' · ' + e.origin.replace('https://', ''); const x = loginExtras({ entry: e.name }, DATA, { refresh: () => {}, doors }); w.append(n, x.box, ...x.doors); return w; };
 if (mode === 'login') showLoginGrantPicker(DATA.entries[0], DATA, { refresh: () => {} });
 else if (mode === 'head') { const h = document.createElement('div'); h.className = 'vw-group'; h.style.margin = '12px'; const n = document.createElement('span'); n.className = 'vw-group-name'; n.textContent = '网站登录'; h.append(n, wideHeaderDoors(() => DATA, { refresh: () => {} }).el); document.body.appendChild(h); }
-else if (mode === 'row') { const list = document.createElement('div'); list.className = 'vw-rows'; list.append(rowOf(DATA.entries[0]), rowOf(DATA.entries[1])); document.body.appendChild(list); }
+else if (mode === 'row') { const list = document.createElement('div'); list.className = 'vw-rows'; list.style.containerType = 'inline-size'; list.style.containerName = 'vw';   /* the Vault window's own container: its rows narrow by «@container vw» */ list.append(rowOf(DATA.entries[0]), rowOf(DATA.entries[1])); document.body.appendChild(list); }
 window.__ready = true;`;
 await esbuild.build({ stdin: { contents: entry, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(dir, 'ui.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 const posted = [];
@@ -218,7 +218,8 @@ for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { v
   ok(r.through.length === 2 && r.through.every((x) => /经由/.test(x)) && r.throughX === 0 && r.throughDoors === 2 && r.ownX === 1,
     `${tag}: the wider grants show «经由» with NO ✕ and their door; this login's own grant keeps its ✕`, r);
   const inRow = await p.ev(`[...document.querySelectorAll('.vw-row')].every((row) => { const rr = row.getBoundingClientRect(); return [...row.querySelectorAll('.vw-ak-chip')].every((c) => { const b = c.getBoundingClientRect(); return b.left >= rr.left - 0.5 && b.right <= rr.right + 0.5; }); })`);
-  ok(inRow, `${tag}: every chip stays inside its row — a long «经由» chip wraps inside itself, never past the row (the 390 picture showed one running off)`);
+  const inView = await p.ev(`[...document.querySelectorAll('.vw-row')].every((row) => row.getBoundingClientRect().right <= innerWidth + 0.5)`);
+  ok(inRow && inView, `${tag}: every row fits the window inside the Vault window's container, and every chip stays inside its row — a long «经由» chip wraps inside itself`);
   await p.shot('.vw-rows', `rows-${tag}-zh.png`);
   p.close();
 }
