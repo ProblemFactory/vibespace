@@ -138,7 +138,9 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage
 // has no rclone, so the Remote column drew its set-up card this box never drew; and both draw the integration's refusal with the
 // checkout's path — the suite's server runs from a git worktree — but this box's path is short and breaks at a hyphen, the runner's
 // is 37 characters with no break of its own). Every machine now draws both: /api/mounts answers «no rclone», /api/agent-hooks the
-// worktree refusal with the runner's own path — the page's answers only, the hub untouched.
+// worktree refusal with a path of the runner's drawing shape — its checkout path with the account's name one letter longer (38
+// characters, no hyphen, no break of its own), never a real account's home (test-architecture §68: on the hosted runner «runner» IS
+// an account under /home) — the page's answers only, the hub untouched.
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const F = window.fetch;
   window.fetch = async function (input, init) {
     const r = await F.apply(this, arguments);
@@ -146,7 +148,7 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const F =
       const u = new URL(typeof input === 'string' ? input : input.url, location.href), m = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
       if (m !== 'GET' || (u.pathname !== '/api/mounts' && u.pathname !== '/api/agent-hooks') || !r.ok) return r;
       const j = await r.clone().json();
-      if (u.pathname === '/api/mounts') j.rcloneAvailable = false; else j.refused = { kind: 'worktree', checkout: '/home/runner/work/vibespace/vibespace' };
+      if (u.pathname === '/api/mounts') j.rcloneAvailable = false; else j.refused = { kind: 'worktree', checkout: '/home/runners/work/vibespace/vibespace' };
       return new Response(JSON.stringify(j), { status: r.status, statusText: r.statusText, headers: r.headers });
     } catch { return r; }
   }; })();` });

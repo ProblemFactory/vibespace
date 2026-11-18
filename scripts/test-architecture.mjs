@@ -3708,6 +3708,7 @@ await section(async () => {
   const imageAcct = (read('deploy/docker/Dockerfile').match(/\buseradd\b[^\n;]*?\s([a-z_][a-z0-9_-]*);/) || [])[1];
   ok(!!imageAcct, `§68 the fleet image's build account is read from deploy/docker/Dockerfile (${imageAcct || 'no useradd found'}) and judged as a real account`);
   if (imageAcct) locals.add(imageAcct);
+  locals.add('runner');   // THE HOSTED RUNNER'S ACCOUNT counts as real everywhere too: the hosted build runs this census where «runner» IS an account under /home
   const judge = (src, accounts = locals) => { const hits = []; const code = src.split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n'); for (const m of code.matchAll(/userInfo\(\)\s*\.\s*homedir/g)) hits.push(`${code.slice(0, m.index).split('\n').length}: userInfo().homedir`); for (const m of code.matchAll(/['"`]\/home\/([^/'"`\s]+)/g)) if (accounts.has(m[1])) hits.push(`${code.slice(0, m.index).split('\n').length}: /home/${m[1]}`); return hits; };
   const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
   const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, h]) => h.length);
