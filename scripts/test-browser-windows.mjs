@@ -1020,8 +1020,9 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   }
 
   // ── ⑥ verify r3: THE WINDOW-ID READER CENSUS (grep-derived): no `.windowId` is read through Number()/isFinite() anywhere ──
+  //    (HOTFIX cure r4, 主开发 00:05Z: + src/browser-picture.js — the follow verdict's own read of the tab's CDP window)
   {
-    const files = ['src/server/browser-keeper.js', 'src/server/browser-viewport.js', 'src/server/browser-stream.js', 'src/routes/browser.js', 'src/browser-tabs.js', 'src/browser-windows.js', 'src/browser-profiles.js', 'src/lib/browser-live-window.js', 'data/bin/vibespace-browser'];
+    const files = ['src/server/browser-keeper.js', 'src/server/browser-viewport.js', 'src/server/browser-stream.js', 'src/routes/browser.js', 'src/browser-tabs.js', 'src/browser-windows.js', 'src/browser-profiles.js', 'src/browser-picture.js', 'src/lib/browser-live-window.js', 'data/bin/vibespace-browser'];
     const raw = []; let sites = 0;
     for (const f of files) { const lines = read(f).split('\n'); lines.forEach((ln, i) => { const t = ln.trim(); if (/^(\*|\/\/|\/\*\*)/.test(t)) return; if (!/\bwindowId\b/.test(ln)) return; if (/windowIdOf\(/.test(ln)) sites++; if (/(Number|isFinite)\([^)]*windowId/.test(ln) && !/function windowIdOf/.test(ln)) raw.push(`${f}:${i + 1}: ${t.slice(0, 120)}`); }); }
     ok(!raw.length && sites >= 9, `⑥ THE WINDOW-ID READER CENSUS: ${sites} windowIdOf sites over ${files.length} files, ${raw.length} raw Number()/isFinite() read(s) of a window id (the Number(null)=0 class)`, raw.join('\n    '));

@@ -1437,10 +1437,10 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     dropXTickets(relay, viewer, { quiet: true }); // ONE ticket per viewer: a new ask replaces its old one
     const ticket = 'xt-' + crypto.randomBytes(18).toString('hex');
     if (xTickets.size > 256) { const oldest = xTickets.keys().next().value; xTickets.delete(oldest); }
-    const cdpWin = x.windowId != null ? Number(x.windowId) : null;
+    const cdpWin = WIN.windowIdOf(x.windowId); // HOTFIX cure r4: THE ONE reader — '' or no number = no window, never window 0 or NaN
     if (cdpWin != null) { // per run: the current run's map, the older runs' dropped (one map per run, two at most)
       if (!relay.xCdpOfWid.has(inst)) { relay.xCdpOfWid.set(inst, new Map()); while (relay.xCdpOfWid.size > 2) relay.xCdpOfWid.delete(relay.xCdpOfWid.keys().next().value); }
-      const m = relay.xCdpOfWid.get(inst); m.set(Number(x.wid), cdpWin); if (m.size > 64) m.delete(m.keys().next().value);
+      const m = relay.xCdpOfWid.get(inst); m.set(WIN.windowIdOf(x.wid), cdpWin); if (m.size > 64) m.delete(m.keys().next().value);
     }
     xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), wid: x.wid, cdpWin, inst, targetId: tid, foreign: foreignOf(relay, viewer, tid), at: now() });
     say({ ok: true, ticket, displaySession: src.displaySession, wid: x.wid, source: src, seat: xSeatFor(relay, viewer.id) });

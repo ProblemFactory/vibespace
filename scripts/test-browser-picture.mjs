@@ -387,6 +387,21 @@ console.log("§8c the follow judges «moved» by the tab's CDP window, says its 
   };
   ok(vrows.sameCdp === 'same' && vrows.staleRow === 'wait' && vrows.noRow === 'wait' && vrows.told === 'mint' && vrows.first === 'mint' && vrows.untoldCdpOther === 'wait' && vrows.untoldCdpSame === 'same',
     'PURE xFollowVerdict — «moved» by the tab\'s CDP window: the same CDP window ⇒ same (silently); a new CDP window answered with ANOTHER CDP window\'s row, or with no row ⇒ wait; its own row ⇒ mint; the CDP window untold ⇒ the ticket\'s own tab is the same, another tab\'s «same window» is never proof', vrows);
+  // HOTFIX cure r4 (主开发 00:05Z, the hosted census red): a window id — the X one or the CDP one — goes through THE ONE reader. An EMPTY
+  // TEXT and a text that is NO NUMBER are «no window»: the verdict of an untold id in every scene, never window 0 (`Number('')`) and never
+  // a NaN carried into the verdict. RED CONTROL: today's three reads compiled back in
+  const PIC0 = compileAt('src/browser-picture.js', "  const wid = answer ? windowIdOf(answer.wid) : null;\n  const cdp = answer ? windowIdOf(answer.windowId) : null;\n  const eq = (a, b) => { const x = windowIdOf(a); return x != null && x === windowIdOf(b); };\n", "  const wid = answer && answer.wid != null ? Number(answer.wid) : null;\n  const cdp = answer && answer.windowId != null ? Number(answer.windowId) : null;\n  const eq = (a, b) => a != null && b != null && Number(a) === Number(b);\n");
+  const noWindow = (P) => {
+    const out = []; let n = 0;
+    for (const t of [tk, { wid: W1, cdpWin: null, targetId: T1 }, null]) for (const a of [{ wid: W1, windowId: 1 }, { wid: W2, windowId: 2 }, { wid: W1, windowId: 2 }]) for (const tid of [T1, T2]) for (const f of ['wid', 'windowId']) {
+      const want = P.xFollowVerdict({ ticket: t, answer: { ...a, [f]: null }, tid, known });
+      for (const v of ['', 'abc']) { n++; const got = P.xFollowVerdict({ ticket: t, answer: { ...a, [f]: v }, tid, known }); if (got !== want) out.push(`${f}=${JSON.stringify(v)} (ticket ${t ? (t.cdpWin == null ? 'cdp untold' : 'told') : 'none'}, ${tid === T1 ? "the ticket's tab" : 'another tab'}, ${JSON.stringify(a)}): ${got}, «no window» is ${want}`); }
+    }
+    return { n, out };
+  };
+  const nw = noWindow(PIC), nw0 = noWindow(PIC0);
+  ok(nw.n === 72 && !nw.out.length, `PURE xFollowVerdict, cure r4: an empty text and a text that is no number, as the X window or as the CDP window, are «no window» — the verdict of an untold id in all ${nw.n} scenes (never window 0, never NaN)`, nw.out.slice(0, 6).join('\n    '));
+  ok(nw0.out.some((s) => s.startsWith('wid=""')) && nw0.out.some((s) => s.startsWith('windowId=""')), `CONTROL (RED): today's reads (Number(answer.wid) / Number(answer.windowId)) judge ${nw0.out.length} of ${nw0.n} scenes otherwise — an empty text read as window 0`, nw0.out.slice(0, 4).join('\n    '));
   /** the real bridge over a keeper whose answers the leg scripts: answer(targetId, fresh, n, sinceTabsMs) → wid (its CDP window is C[t]) */
   async function rig(B, answer, { owners = null, delayMs = 0, waitBoundMs = 400, instance = null } = {}) {
     const upPort = await freePort();

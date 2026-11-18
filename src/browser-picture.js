@@ -1,6 +1,6 @@
 'use strict';
 /**
- * THE PICTURE SWITCH — PURE (imports nothing; CJS so the keeper, the live view's relay and the client bundle carry ONE rule).
+ * THE PICTURE SWITCH — PURE (imports only browser-windows' window-id reader, at the call; CJS so the keeper, the live view's relay and the client bundle carry ONE rule).
  * Lane browser-x-in-window (design q-026 r1 §2.1 / §3 row B2, 2026-10-23; the owner: 「目前 chrome 还是没有被放进 browser 窗口里面」).
  * B1 put a headed Google Chrome on a `display-for-browser` xpra session nobody looked at: the live view still drew the CDP
  * SCREENCAST — the page compositor's frames, which never carry Chrome's own UI (M0: no bubble, no passkey panel, not even
@@ -219,6 +219,9 @@ function xWindowLookups({ targetId = null, own = null, holderTabs = [] } = {}) {
   for (const t of holderTabs || []) if (t && String(t) !== String(targetId || '')) out.push({ targetId: String(t) });
   return out;
 }
+/** HOTFIX cure r4 (主开发 00:05Z, the hosted census red): a window id — the X one or the CDP one — is read through THE ONE reader,
+ *  browser-windows' windowIdOf (PURE). Asked at the call, so this module still loads alone (§2's control copies run from a scratch dir). */
+const WIN = () => require('./browser-windows.js');
 function xTicketMoved({ ticketWid = null, wid = null } = {}) { return wid != null && Number(wid) !== Number(ticketWid); }
 /** HOTFIX cure r2 (主开发 22:13Z, after step seven went red on real xpra): «MOVED» IS JUDGED BY THE TAB'S OWN CDP WINDOW. The keeper
  *  FINDS a tab's X row by its CDP window's bounds; on a real display a new window's row can be missing for seconds (xpra maps it
@@ -231,15 +234,16 @@ function xTicketMoved({ ticketWid = null, wid = null } = {}) { return wid != nul
  *    untold — another tab answered with the ticket's own window (never proof);
  *  · 'mint' — told: a ticket for that window. */
 function xFollowVerdict({ ticket = null, answer = null, tid = null, known = null } = {}) {
-  const wid = answer && answer.wid != null ? Number(answer.wid) : null;
-  const cdp = answer && answer.windowId != null ? Number(answer.windowId) : null;
-  const eq = (a, b) => a != null && b != null && Number(a) === Number(b);
+  const { windowIdOf } = WIN(); // HOTFIX cure r4: both ids through THE ONE reader — '' or no number = no window, never 0 or NaN
+  const wid = answer ? windowIdOf(answer.wid) : null;
+  const cdp = answer ? windowIdOf(answer.windowId) : null;
+  const eq = (a, b) => { const x = windowIdOf(a); return x != null && x === windowIdOf(b); };
   const sameTab = !!ticket && String(ticket.targetId || '') === String(tid || '');
   if (ticket && cdp != null && eq(ticket.cdpWin, cdp)) return 'same';
   if (ticket && cdp == null && sameTab && (wid == null || eq(ticket.wid, wid))) return 'same';
   if (wid == null) return 'wait';
-  const owner = known && typeof known.get === 'function' ? known.get(wid) : null;
-  if (cdp != null && owner != null && Number(owner) !== cdp) return 'wait';
+  const owner = known && typeof known.get === 'function' ? windowIdOf(known.get(wid)) : null;
+  if (cdp != null && owner != null && owner !== cdp) return 'wait';
   if (cdp == null && ticket && eq(ticket.wid, wid) && !sameTab) return 'wait';
   if (ticket && eq(ticket.wid, wid)) return 'same';
   return 'mint';
