@@ -78,7 +78,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import Module, { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -568,7 +568,7 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   const jsdAbs = path.join(REPO, 'src/server/job-secrets-door.js'), jsdSrc = fs.readFileSync(jsdAbs, 'utf8'), ctPlant = 'now0.ctimeMs !== lst.ctimeMs';
   ok(jsdSrc.split(ctPlant).length === 2, 'the RED control\'s plant is where it claims: the door\'s ctime comparison, once', jsdSrc.split(ctPlant).length - 1);
   const mtCopy = new Module(jsdAbs, null); mtCopy.filename = jsdAbs; mtCopy.paths = Module._nodeModulePaths(path.dirname(jsdAbs));
-  mtCopy._compile(jsdSrc.replace(ctPlant, 'now0.mtimeMs !== lst.mtimeMs'), jsdAbs);   // stale-pins: kept — a RED control: the batch's mtime comparison restored on purpose
+  mtCopy._compile(anchored(jsdSrc, ctPlant, 'now0.mtimeMs !== lst.mtimeMs', 'job-secrets ctime compared as the mtime'), jsdAbs);   // stale-pins: kept — a RED control: the batch's mtime comparison restored on purpose
   const ssRed = await sameSize(mtCopy.exports);
   ok(ssRed.ctMoved === true && ssRed.code !== 'job_secrets_changed' && !ssRed.kept, 'RED control: the modification time compared (the batch\'s shape) ⇒ the edited file passes as the one read and is deleted', ssRed);
   // r13 «also» (the readers of batch 53: these guards had no leg) — each over the REAL door and the suite's vault
@@ -576,7 +576,8 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   const freshSince = (before) => freeNames(W).filter((x) => !before.has(x.name));
   const dropFresh = (before) => { for (const x of freshSince(before)) { try { W.paste.dropEntry(x.name.slice('secret:'.length), { by: 'suite' }); } catch { } } };
   const JSD_REAL = require(jsdAbs);
-  const jsdCopy = (from, to) => { const n = jsdSrc.split(from).length - 1; if (n !== 1) return { n, mod: null }; const m = new Module(jsdAbs, null); m.filename = jsdAbs; m.paths = Module._nodeModulePaths(path.dirname(jsdAbs)); m._compile(jsdSrc.replace(from, to), jsdAbs); return { n, mod: m.exports }; };
+  // a RED control's copy of the door, built through scratch.mjs anchored() (B-0d3e: a moved or doubled anchor THROWS BY NAME, never a null copy)
+  const jsdCopy = (from, to, name) => { const m = new Module(jsdAbs, null); m.filename = jsdAbs; m.paths = Module._nodeModulePaths(path.dirname(jsdAbs)); m._compile(anchored(jsdSrc, from, to, name), jsdAbs); return { n: 1, mod: m.exports }; };
   // (1) ONE press at a time: a second press while a move runs ⇒ job_secrets_busy (the move ends as it would alone)
   const busyRoad = async (mod) => {
     plantJS(W, { FIRST_ONE: jsVals[0] }); const before = new Set(freeNames(W).map((x) => x.name));
@@ -587,7 +588,7 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   };
   const bz = await busyRoad(JSD_REAL);
   ok(bz.first === 'move' && bz.second === 'job_secrets_busy' && bz.sealed === 1, 'r13: a second press while the move runs ⇒ job_secrets_busy — the move itself ends whole (one value sealed, the file gone)', bz);
-  const bzc = jsdCopy("    if (busy) return named('job_secrets_busy');\n", '');
+  const bzc = jsdCopy("    if (busy) return named('job_secrets_busy');\n", '', 'job-secrets busy guard removed');
   ok(bzc.n === 1, 'the RED control\'s plant is where it claims: the door\'s busy guard, once', bzc.n);
   const bzr = bzc.mod ? await busyRoad(bzc.mod) : null;
   ok(!!(bzr && bzr.second === 'delete'), 'RED control: the door without its busy guard ⇒ the second press RUNS beside the move (its delete answers)', bzr);
@@ -601,7 +602,7 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   };
   const hl = await hardRoad(JSD_REAL);
   ok(hl.code === 'job_secrets_not_a_file' && hl.sealed === 0 && hl.both, 'r13: a hard-linked file by that name ⇒ job_secrets_not_a_file on MOVE — nothing sealed, both names kept', hl);
-  const hlc = jsdCopy("    if (!lst.isFile() || lst.nlink > 1) return named('job_secrets_not_a_file');   // a symlink", "    if (!lst.isFile()) return named('job_secrets_not_a_file');   // a symlink");
+  const hlc = jsdCopy("    if (!lst.isFile() || lst.nlink > 1) return named('job_secrets_not_a_file');   // a symlink", "    if (!lst.isFile()) return named('job_secrets_not_a_file');   // a symlink", 'job-secrets second-name check removed');
   ok(hlc.n === 1, 'the RED control\'s plant is where it claims: the move\'s second-name check, once', hlc.n);
   const hlr = hlc.mod ? await hardRoad(hlc.mod) : null;
   ok(!!(hlr && hlr.code === 'move' && hlr.sealed === 1 && hlr.otherKept && !hlr.both), 'RED control: the move without the second-name check ⇒ it seals and deletes ONE name — the bytes stay under the other', hlr);
