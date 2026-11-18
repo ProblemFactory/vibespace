@@ -2837,7 +2837,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   }
   const selfActs = ['progress', 'ask', 'announce'];
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask, or announce' });
-  const needsControl = ['stop', 'start', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
+  const needsControl = ['stop', 'start', 'restart', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
@@ -2847,6 +2847,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     let r;
     if (act === 'stop') r = a.jm.stop(job, { force: !!req.body?.force });
     else if (act === 'start') r = a.jm.start(job);
+    else if (act === 'restart') r = a.jm.restart(job);   // B-cac2: stop, wait, start — one answer
     else if (act === 'rm') r = a.jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
     else if (act === 'progress') r = a.jm.progress(job, req.body?.text || '');
     else if (act === 'ask') r = a.jm.ask(job, req.body?.panel);

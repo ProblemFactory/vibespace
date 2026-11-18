@@ -2641,6 +2641,11 @@ class JobManager {
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
     if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
+    // B-cac2: a start asked while this run's stop ran (or a restart) is done now that the run has ended — once
+    if (job._startAfterStop) {
+      delete job._startAfterStop;
+      setImmediate(() => { const r = this.start(job); this.d.log(`[jobs] ${job.id}: the start asked during its stop — ${r && r.error ? `refused: ${r.error}` : 'started'}`); });
+    }
   }
   /** round 10: A CUT WALK OF THE PARK'S OR THE STOP'S OWN CLEAR IS SAID AT ONCE — never only when someone presses start (round 9
    *  stamped it silently; the base said it): a parked service by the doubt's door (its journal line, ONE For-you notice — a later
@@ -3210,6 +3215,18 @@ class JobManager {
     if (vaultWait) return { job: this.snapshot(job, { author: true }), renamed, vaultWait };
     return { job: this.snapshot(job, { author: true }), renamed };   // the creator IS the author (r4: the record's own name — r7: belted at create)
   }
+  /** B-cac2: STOP, WAIT, START — ONE answer. A live run is stopped and the start is remembered (_finalizeRun does it when the stop
+   *  ends); nothing running, or nothing the stop could reach, starts now */
+  restart(job) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const run = job.runs && job.runs[job.runs.length - 1];
+    if (!this._runLive(job, run)) return this.start(job);
+    const s = this.stop(job);
+    if (s && s.error) return s;
+    if (!s.hadProc && !s.already) return this.start(job);
+    job._startAfterStop = true;
+    return { ok: true, pending: true, words: 'stopping — it starts again when the stop ends' };
+  }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
@@ -3241,6 +3258,14 @@ class JobManager {
   }
   start(job) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    // B-cac2 (fb-f4a0c70a84): a START while a STOP's grace runs is no «already running» (the service then ended down and a second
+    // start was needed) — it is REMEMBERED and done when the stop ends (_finalizeRun), said with the grace left
+    const run0 = job.runs && job.runs[job.runs.length - 1];
+    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {
+      job._startAfterStop = true;
+      this.d.log(`[jobs] ${job.id}: a start asked while its stop runs — it starts when the stop ends`);
+      return { ok: true, pending: true, words: `still stopping (${Math.max(0, Math.ceil(((job._termAt || now()) + this._killStepMs() - now()) / 1000))} s left) — it starts when the stop ends` };
+    }
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh

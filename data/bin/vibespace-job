@@ -183,7 +183,7 @@ read:    vibespace-job list [--mine|--subscribed|--archived] · vibespace-job po
             poll/show/logs of an archived id still answer, marked archived; list --archived shows them)
          vibespace-job show <id>  (FULL params: cmd/schedule/access/notify/subscribers/your subscription)
          vibespace-job logs <id> [--tail 200]
-control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
+control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job restart <id> · vibespace-job rm <id> [--stop]
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
          vibespace-job memory <id> 8G|512M|inherit  (owner only — its memory bound from its next run; 0 is the user's call)
@@ -377,7 +377,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (verb === 'stop') console.log('stopped (services stay down until an explicit start)');
       else if (r.state === 'waiting') console.log(`waiting: NOT started — ${r.after || 'poll it for what it waits on'}`);
       else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
+      else if (r.pending) console.log(`not started yet: ${r.words || 'it starts when its stop ends'}`);   // B-cac2: a start during a stop
       else console.log('started');
+      break;
+    }
+    case 'restart': {   // B-cac2: stop, wait, start — ONE answer (the hub starts it again when the stop ends)
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1] || JOBID)}/restart`, {});
+      console.log(r.pending ? `restarting: ${r.words || 'it starts again when the stop ends'}` : r.state === 'waiting' ? `waiting: NOT started — ${r.after || 'poll it for what it waits on'}` : 'restarted');
       break;
     }
     case 'rm': {

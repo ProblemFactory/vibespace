@@ -330,5 +330,44 @@ console.log('§5 THE CONVERSATION DOOR — wiring (read before the first signal;
   ok(/live = !!\(st && this\._verifyAlive\(st\)\), tree = live \? PI\.treeOf\(\[Number\(st\.pid\)\]/.test(js) && /\.\.\.\(rows\.length \? \{ tree: rows \} : \{\}\)/.test(js) && /if \(sig === 'SIGKILL'\) this\._killTree\(job, stamp\);/.test(js) && !/treeOfAsync|_termRunTree/.test(js) && /if \(!k\) \{ const st = this\._readStamp\(job\); if \(this\._verifyAlive\(st\)\) this\._killTree\(job, st\); \}/.test(js) && !/_stopTree|PI\.endTree/.test(js), 'jobs: the engine sends NO stop SIGTERM of its own to the tree (the wrapper\'s one table does); its SIGKILLs (a force stop, the kill step) end the tree first');
 }
 
+console.log('§9 B-cac2 (batch 8): a START during a stop is remembered and done when the stop ends; restart = stop, wait, start');
+const restartScene = async (Mod, tag, how) => {
+  const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
+  const J = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: () => { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
+  J.init();
+  const caller = { conversationId: 'conv-st', sessionId: 'sess-st', sessionCreatedAt: 1, groups: new Set() };
+  const owner = { conversation: { backend: 'claude', id: 'conv-st' }, sessionId: 'sess-st', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
+  // a service whose stop takes a moment (its own cleanup on SIGTERM): the window a second press lands in
+  const r = J.create({ kind: 'service', name: 'svc-' + how, cmd: { argv: ['sh', '-c', 'trap "sleep 0.6; exit 0" TERM; while :; do sleep 0.1; done'] }, owner }, caller);
+  const job = J.jobs.get(r.job.id);
+  const live = () => { const st = J._readStamp(job); return !!st && J._verifyAlive(st); };
+  await until(async () => { await J._sweep(); return live(); }, 8000);
+  const first = job.runs.length;
+  let answer;
+  if (how === 'restart') answer = J.restart(job);
+  else { J.stop(job); answer = J.start(job); }   // the second press, inside the stop's grace
+  const restarted = await until(async () => { await J._sweep(); return job.runs.length === first + 1 && live(); }, 8000);
+  const st = J._readStamp(job); if (st) mine.push(st, ...PI.treeOf([Number(st.pid)]));
+  const out = { answer, restarted, runs: job.runs.length, state: job.state };
+  try { J.stop(job, { force: true }); } catch { }
+  await until(async () => { await J._sweep(); return !live(); }, 4000);
+  J.shutdown(); return out;
+};
+{
+  const sd = await restartScene(require(path.join(ROOT, 'src/jobs.js')), 'job-start-during-stop', 'start');
+  ok(sd.answer && sd.answer.pending === true && /^still stopping \(\d+ s left\) — it starts when the stop ends$/.test(sd.answer.words || '') && sd.restarted, 'B-cac2: a START pressed while the stop\'s grace runs answers «still stopping (k s left) — it starts when the stop ends» and DOES start when it ends (a new run, live)', sd);
+  const rs = await restartScene(require(path.join(ROOT, 'src/jobs.js')), 'job-restart', 'restart');
+  ok(rs.answer && rs.answer.pending === true && /it starts again when the stop ends/.test(rs.answer.words || '') && rs.restarted, 'B-cac2: restart = stop, wait, start — ONE answer, and a new live run after the stop ends', rs);
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {';
+  ok(JSRC.split(PEND).length === 2, 'B-cac2 control setup: the remembered start is one line in jobs.js (the plant the control cuts)');
+  const MJ9 = mutantCopies('stop-tree-cac2', ROOT);
+  const rx = await restartScene(MJ9.load('src/jobs.js', JSRC.replace(PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {'), 'release'), 'job-start-during-stop-mut', 'start');
+  ok(rx.answer && /is already running/.test(rx.answer.error || '') && !rx.restarted, 'B-cac2 CONTROL (the release, in a copy): the start answers «already running» and the service ends DOWN — a second start was needed', rx);
+  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 1, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
+  ok(/const needsControl = \['stop', 'start', 'restart', 'rm', 'announce'\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
