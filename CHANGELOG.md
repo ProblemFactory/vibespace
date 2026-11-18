@@ -123,6 +123,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
 - A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
 - A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
+- Channels: opening the panel, and a refresh of its whole list, no longer reads every conversation of every account.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
