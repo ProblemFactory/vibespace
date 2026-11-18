@@ -263,5 +263,55 @@ console.log('⑥ what Create sends — the v3 choices give the v2 form\'s bytes 
   ok(caught === want && want === 1536, `CONTROL: a plan that drops the terminal-UI tick differs on exactly the harness × terminal choices (${caught} of ${want})`);
 }
 
+// B-a858: an OPEN form's right column is live — the setup's live block (sliced from src/lib/new-session-form.js) run over stubs with
+// a MANUAL clock: grant landings coalesce into ONE re-read; a Task Group delta re-reads only when its meta moved (metaChanged), a
+// channel account connected / removed too; typing or a press in the column defers it to the release (anywhere on the page) / the
+// blur, a picked select does not; the profiles' admission is asked again with its own key (the old answer kept meanwhile); a
+// closed form re-reads nothing
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/lib/new-session-form.js'), 'utf8');
+  const at = src.indexOf('    { const shown = () =>'), end = at > 0 ? src.indexOf('\n    }\n', at) : -1;
+  const blk = at > 0 && end > at ? src.slice(at, end + 6) : '';
+  const TD = require(path.join(REPO, 'src/task-delta.js'));
+  const run = (code) => {
+    const h = {}, doc = {}, ws = [], loads = [], asks = []; let hidden = false; const timers = [];
+    const mkEl = (tag, type) => ({ tagName: tag, type });
+    const TEXT = mkEl('INPUT', 'text'), SEL = mkEl('SELECT'), OUT = mkEl('BUTTON');
+    const right = { contains: (x) => x === TEXT || x === SEL, addEventListener: (k, fn) => { h['right:' + k] = fn; } };
+    const els = { 'dialog-new-session': { classList: { contains: () => hidden } }, 'ns-right': right };
+    const document = { activeElement: OUT, addEventListener: (k, fn) => { doc[k] = fn; } };
+    const self = { _ns: {}, ws: { onGlobal: (fn) => ws.push(fn) }, _nsLoadAccounts() { loads.push(1); }, _nsAdmits: { key: 'tg-1,tg-2', sig: 'p1:"only"', profiles: [{ id: 'p1', ok: true }] }, _nsAdmitsAsk: 'tg-1,tg-2\u0000p1:"only"', _loadNsAdmits(ids, sig) { asks.push([ids.join(','), sig, this._nsAdmitsAsk]); } };
+    const sync = { init() {}, on: (n, k, fn) => { if (n === 'grants') h.sync = fn; } };
+    try { new Function('$', 'document', 'getStateSync', 'metaChanged', 'setTimeout', 'clearTimeout', code).call(self, (id) => els[id], document, () => sync, TD.metaChanged, (fn) => { timers.push(fn); return timers.length; }, (id) => { if (id) timers[id - 1] = null; }); } catch (e) { return { err: String(e && e.message) }; }
+    const flush = () => { while (timers.some(Boolean)) { const i = timers.findIndex(Boolean); const fn = timers[i]; timers[i] = null; fn(); } };
+    const fire = (k, ...x) => { if (typeof h[k] === 'function') h[k](...x); };
+    const out = {};
+    fire('sync'); fire('sync'); fire('sync'); flush(); out.coalesced = loads.length;
+    out.keptAnswer = !!self._nsAdmits && self._nsAdmits.profiles.length === 1; out.asked = asks.length ? asks[0] : null;
+    ws[0]({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { progress: [] } }] }); flush(); out.logOnly = loads.length;
+    ws[0]({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { name: 'renamed' } }] }); flush(); out.meta = loads.length;
+    ws[0]({ type: 'channels-updated' }); flush(); out.channels = loads.length;
+    document.activeElement = SEL; fire('sync'); flush(); out.afterSelect = loads.length;
+    document.activeElement = TEXT; fire('sync'); flush(); out.whileTyping = loads.length;
+    document.activeElement = OUT; fire('right:focusout'); flush(); out.afterBlur = loads.length;
+    fire('right:pointerdown'); fire('sync'); flush(); out.whilePressed = loads.length;
+    if (doc.pointerup) doc.pointerup(); flush(); out.afterRelease = loads.length;
+    hidden = true; fire('sync'); flush(); out.closed = loads.length;
+    return out;
+  };
+  const R = run(blk);
+  const metaMoves = TD.metaChanged({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { name: 'renamed' } }] }) && !TD.metaChanged({ type: 'tasks-updated', changed: [{ id: 'tg-1', patch: { progress: [] } }] });
+  ok(!!blk && R.coalesced === 1 && R.keptAnswer && R.asked && R.asked[0] === 'tg-1,tg-2' && R.asked[1] === 'p1:"only"' && R.asked[2] === null
+    && metaMoves && R.logOnly === 1 && R.meta === 2 && R.channels === R.meta + 1 && R.afterSelect === R.channels + 1 && R.whileTyping === R.afterSelect && R.afterBlur === R.whileTyping + 1
+    && R.whilePressed === R.afterBlur && R.afterRelease === R.whilePressed + 1 && R.closed === R.afterRelease,
+    'B-a858: three grant landings ⇒ ONE re-read; the admission asked again with its own key (the old answer kept); a log-only Task Group delta re-reads nothing, a meta one does; a channel account change does; a picked select does not hold it, typing does until the blur, a press does until its release anywhere; a closed form re-reads nothing', { R, metaMoves });
+  const noSync = blk.replace("sync.on('grants', '*', reread);", '');
+  ok(blk.includes("sync.on('grants', '*', reread);") && run(noSync).coalesced === 0, 'CONTROL (B-a858): without the grants subscription a landed grant re-reads nothing — the base\'s stale words (RED)', run(noSync));
+  const noMeta = blk.replace("(msg.type === 'tasks-updated' && metaChanged(msg))", "msg.type === 'tasks-updated'");
+  ok((blk.includes("(msg.type === 'tasks-updated' && metaChanged(msg))") && run(noMeta).logOnly === 2), 'CONTROL (B-a858): an unfiltered Task Group delta re-reads on a log line (the reader\'s must-fix) — RED', run(noMeta));
+  const noAsk = blk.replace("this._nsAdmitsAsk = null; this._loadNsAdmits(", "this._nsAdmits = null; (() => {})(");
+  ok(blk.includes("this._nsAdmitsAsk = null; this._loadNsAdmits(") && !run(noAsk).keptAnswer, 'CONTROL (B-a858): a re-read that drops the admission answer without asking again (the first cut) loses the profiles open to the picked group — RED', run(noAsk));
+}
+
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);

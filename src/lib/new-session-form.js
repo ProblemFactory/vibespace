@@ -30,7 +30,8 @@
 // The right column writes only EXISTING stores through their EXISTING verdicts: a ticked account becomes ONE access row
 // {principal: this conversation, authority: draft} through PUT /api/channels/adapters/:id/access once the conversation's
 // id exists (src/new-session-spec.js withCreateAccess); the profile list is the server's mayAttach (GET /api/browser/admits).
-import { escHtml, fetchJson, showToast } from './utils.js';
+import { escHtml, fetchJson, showToast, getStateSync } from './utils.js';
+import { metaChanged } from '../task-delta.js'; // B-a858: a Task Group delta that moves only an Activity line re-reads nothing
 import { t, tc, resolveLang } from './i18n.js';
 import { sessionDisplayName } from '../session-name.js';
 import { UI_ICONS } from './icons.js';
@@ -62,6 +63,27 @@ export function installNewSessionForm(App) {
     const dlg = $('dialog-new-session');
     if (!dlg || this._nsWired) return;
     this._nsWired = true;
+    // B-a858: THE RIGHT COLUMN IS LIVE while the form is open — a grant landed anywhere (the grants store's StateSync mirror, every
+    // landed write), a Task Group's update that moves its META (metaChanged — never a log line; session-props' rule) or a channel
+    // account connected / removed (channels-updated) re-reads what it may use, coalesced; the profiles' admission is asked again
+    // with ITS key (the old answer stands until the new one lands). The repaint waits while the person types in the column or
+    // presses in it, and runs at the release / the blur
+    { const shown = () => !!this._ns && !$('dialog-new-session')?.classList.contains('hidden');
+      const typing = () => { const r = $('ns-right'), a = document.activeElement; return !!(r && a && r.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|)$/i.test(String(a.type || ''))))); };
+      const busy = () => this._nsPressing === true || typing();
+      const reread = () => { if (!shown()) return; clearTimeout(this._nsLiveT); this._nsLiveT = setTimeout(() => {
+        if (!shown()) return; if (busy()) { this._nsLiveOwed = true; return; } this._nsLiveOwed = false;
+        const adm = this._nsAdmits; if (adm && typeof this._loadNsAdmits === 'function') { this._nsAdmitsAsk = null; this._loadNsAdmits(adm.key ? String(adm.key).split(',') : [], adm.sig); }
+        this._nsLoadAccounts(); }, 150); };
+      this._nsLiveReread = reread;
+      const sync = getStateSync(); if (sync) { try { sync.init('grants'); sync.on('grants', '*', reread); } catch { /* no mirror: the open and the interactions still paint */ } }
+      this.ws?.onGlobal?.((msg) => { if (msg && ((msg.type === 'tasks-updated' && metaChanged(msg)) || msg.type === 'channels-updated')) reread(); });
+      const right = $('ns-right');
+      if (right) right.addEventListener('pointerdown', () => { this._nsPressing = true; });
+      const settle = () => { if (this._nsPressing !== true && !this._nsLiveOwed) return; this._nsPressing = false; if (this._nsLiveOwed) setTimeout(() => { if (!busy() && this._nsLiveOwed) reread(); }, 0); };
+      document.addEventListener('pointerup', settle, true); document.addEventListener('pointercancel', settle, true); right?.addEventListener('focusout', settle);
+    }
+
     this._ns = { taskIds: [], ticks: {}, tools: {}, adapters: null, grains: {}, excepts: {}, open: {}, harness: null, isGit: false, gitFor: '', cwd: null, folder: null };
     for (const k of FOLD_ROWS) { const row = $(FOLD_IDS[k]); if (row && !row.__nsHome) { const a = document.createComment('ns-home:' + k); row.before(a); row.__nsHome = a; } }
     $('ns-more-toggle')?.addEventListener('click', () => {
@@ -116,6 +138,7 @@ export function installNewSessionForm(App) {
     const known = new Set((this.sidebar?._tasks || []).map((g) => g.id));
     this._ns = { ...this._ns, taskIds: (Array.isArray(taskIds) ? taskIds : []).filter((id) => known.has(id)), ticks: {}, tools: {}, adapters: null, grains: {}, excepts: {}, open: {}, harness: null, isGit: false, gitFor: '', cwd: null, folder: null };
     this._nsAdmits = null; this._nsAdmitsAsk = null; // the profiles' admission is asked again on every open (their lists may have changed since)
+    this._nsLiveOwed = false; this._nsPressing = false; // B-a858: nothing owed or held from an earlier open
     const more = $('ns-more-toggle');
     let open = false; try { open = localStorage.getItem(FOLD_KEY) === '1'; } catch { }
     more?.setAttribute('aria-expanded', String(open));
