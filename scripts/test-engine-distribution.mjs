@@ -1598,13 +1598,14 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
     const L = light(snapC, { EDM, io, opts: { landWaitMs: BOUND } }); S.L = L;
     const A = L.ED.landNext(EID);
     const inCleanup = !!(await until(() => rmIn, 2000));
-    const t0 = Date.now();
-    const m = await Promise.race([L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code, ms: Date.now() - t0 }), (e) => ({ threw: e && e.code })), sleep(LAND_WAIT_MS / 30).then(() => ({ hung: true }))]);
+    const m = await Promise.race([L.ED.measure(EID, { force: true }).then((r) => ({ ok: r && r.ok, code: r && r.code }), (e) => ({ threw: e && e.code })), sleep(LAND_WAIT_MS / 30).then(() => ({ hung: true }))]);
     rmGo(); const a = await A;
     return { inCleanup, m, a, said: L.journal.filter((l) => /is still being put back after/.test(l)).length };
   };
   const [lm, lmBad] = await Promise.all([lateMeasure(undefined), lateMeasure(load(cut(lookAnchor, '    if (ask.late) return false;\n', 'a late ask only looks'), 'b4d35-late-refused'))]);
-  ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && lm.m.ms < 1000 && !lm.said && lm.a === true,
+  // (the restack onto 2.369.410: «never a second bound» is judged by the journal — a bound waited out says «is still being put back
+  // after» — and by the answer, never by a literal wall-clock bound: the release's ratchet of those is at 0)
+  ok(lm.inCleanup && lm.m && lm.m.ok === true && !lm.m.code && !lm.said && lm.a === true,
     'B-4d35 round 3: a forced measure whose ONE bound passed while the landing only deleted the previous kernel goes on and MEASURES — its put-back only looked (a kernel in its place) — never «being put back», never a second bound', lm);
   ok(lmBad.m && lmBad.m.code === 'engine_kernel_landing', 'CONTROL (B-4d35 round 3, a late ask refused at once): that measure is answered «being put back» though nothing was aside', lmBad.m);
   // the keeper's first-use road reads the step-aside by its name (never «kernel missing» + a For-you item)
