@@ -367,7 +367,7 @@ export function installSidebarMounts(Sidebar) {
         }
         root.appendChild(hlist);
         this._mountsHostList = hlist; // B-a31a cure (a): the dots' timer re-probes THIS list's stale rows
-        this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);
+        // (the render's own probe runs at its END, through the on-screen gate, once the list is on the page — _mountsDotsNow)
       }
       // Orphan mounts: mounts whose machine was removed (or none listed).
       // Without this they'd be invisible AND unmanageable (review finding).
@@ -927,9 +927,10 @@ export function installSidebarMounts(Sidebar) {
         if (st && now - (st.at || 0) < 120000) continue;
         if (this._hostTesting?.has(h.id)) continue;
         (this._hostTesting = this._hostTesting || new Set()).add(h.id);
-        // B-a31a cure 2: the row is PATCHED IN PLACE, never rebuilt. A FIRST probe says «checking» (the dot and its words:
-        // a grey never-tested dot looked like a dead machine); a re-probe keeps what the row shows until its answer DIFFERS —
-        // an equal answer touches no node (a focused button or an open control in the row is never torn away)
+        // B-a31a cure 2: the row is PATCHED IN PLACE, never rebuilt. A FIRST probe says «checking» on the row that is on the
+        // page (the probe starts once the render's list is attached — a grey never-tested dot looked like a dead machine); a
+        // re-probe keeps what the row shows until its answer DIFFERS — an equal answer touches no node (a focused button or an
+        // open control in the row is never torn away); the answer patches the list on the page NOW (_patchHostFace)
         if (!st) this._patchHostFace(h, hlist);
         api(`/api/hosts/${h.id}/test`, { method: 'POST' })
           .then((r) => { this._hostStatus[h.id] = { ...r, at: Date.now() }; })
@@ -957,8 +958,10 @@ export function installSidebarMounts(Sidebar) {
     },
     /** B-a31a cure 2: the row's status face patched IN PLACE (mounts-live.js patchHostFace) → 'same' | 'patched' | 'none' */
     _patchHostFace(h, hlist) {
-      if (!hlist || !hlist.isConnected) return 'none';
-      const row = [...hlist.children].find((el) => el._hostId === h.id);
+      // the list on the page NOW — a refresh during a probe replaced the one the probe captured (its row would keep «testing…»)
+      const list = this._mountsHostList && this._mountsHostList.isConnected ? this._mountsHostList : hlist;
+      if (!list || !list.isConnected) return 'none';
+      const row = [...list.children].find((el) => el._hostId === h.id);
       if (!row) return 'none';
       const face = this._hostFace(h);
       const did = patchHostFace(row, row._face, face, {
@@ -967,13 +970,6 @@ export function installSidebarMounts(Sidebar) {
       });
       row._face = face;
       return did;
-    },
-
-    // Rebuild ONE machine row in place (no full re-render → no flicker).
-    _swapHostRow(h, hlist) {
-      if (!hlist.isConnected) return; // panel re-rendered meanwhile
-      const old = [...hlist.children].find(el => el._hostId === h.id);
-      if (old) hlist.replaceChild(this._buildHostRow(h), old);
     },
 
     // This machine as machine #0 (B-f3e8 ⑤): the local device is the same

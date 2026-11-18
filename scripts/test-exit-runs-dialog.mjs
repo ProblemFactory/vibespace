@@ -401,6 +401,8 @@ const wiring = (src) => ({
   dots: /_mountsDotsTick\(\) \{[\s\S]{0,200}if \(!this\._mountsOnScreen\(\)\) return;[\s\S]{0,200}this\._mountsProbeStale\(\);[\s\S]{0,80}\}, 60000\);/.test(src) && /this\._mountsDotsNow\(\); \/\/ B-a31a cure \(a\) \+ cure 2/.test(src)
     && /return r\.width > 0 && r\.height > 0 && r\.right > 0 && r\.bottom > 0 && r\.left < \(window\.innerWidth \|\| 0\) && r\.top < \(window\.innerHeight \|\| 0\);/.test(src)
     && /new IntersectionObserver\(\(es\) => \{ if \(es\.some\(\(e\) => e\.isIntersecting\)\) this\._mountsDotsNow\(\); \}\)\.observe\(this\.listEl\)/.test(src),
+  renderNoProbe: !/this\._autoTestHosts\(hd\.hosts/.test(src) && /this\._mountsDotsNow\(\); \/\/ B-a31a cure \(a\) \+ cure 2: on screen only\n    \},/.test(src), // stale-pins: kept — the deliberate absence check: the render probes on its own no more
+  patchNow: /const list = this\._mountsHostList && this\._mountsHostList\.isConnected \? this\._mountsHostList : hlist;/.test(src) && !/_swapHostRow\(h, hlist\) \{/.test(src), // stale-pins: kept — the deliberate absence check: the swap function is gone
   inPlace: (() => { const m = /\n    _autoTestHosts\(hosts, hlist\) \{[\s\S]*?\n    \},/.exec(src); return !!m && (m[0].match(/this\._patchHostFace\(h, hlist\)/g) || []).length === 2 && !/_swapHostRow/.test(m[0]); })()
     && /const face = isDial \? null : this\._hostFace\(h\);[^\n]*\n      row\._face = face;/.test(src),
   nullForgets: /else if \(this\._lastRunSeen\) this\._lastRunSeen\.delete\(hostId\);/.test(src),
@@ -475,23 +477,30 @@ const pq2 = (() => { const src0 = fs.readFileSync(path.join(REPO, 'src/lib/mount
 ok(pq2.applies && faceCase(await bundle('src/lib/mounts-live.js', pq2)).replaced1 > 0, 'CONTROL (p): a probe that rebuilds what it shows (the tip as it stood replaced the whole row twice) — the zero-replaced leg goes red');
 const tipProbe = SM.replace(/(\n    _autoTestHosts\(hosts, hlist\) \{[\s\S]*?)this\._patchHostFace\(h, hlist\)/, '$1this._swapHostRow(h, hlist)');
 ok(tipProbe !== SM && !wiring(tipProbe).inPlace, 'CONTROL (q): _autoTestHosts swapping the row (the tip as it stood) — the in-place wiring goes red');
+const renderProbe = SM.replace("        // (the render's own probe runs at its END, through the on-screen gate, once the list is on the page — _mountsDotsNow)", "        this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);"); // stale-pins: kept — control (u) BUILDS the old line
+ok(renderProbe !== SM && !wiring(renderProbe).renderNoProbe, 'CONTROL (u): the render path probing on its own (the tip before this: off screen, before its list is on the page) — the wiring goes red');
 const noteCase = (M) => {
   const root = el('div', 'mounts-list'); root._root = true; const panel = el('div', 'mounts-panel'); root.appendChild(panel);
   const timers = []; let selfRetries = 0;
   const o = { words: 'slow', retry: 'Retry', retrying: 'Retrying…', onRetry: () => {}, onSelfRetry: () => { selfRetries++; }, setTimer: (f, ms) => timers.push({ f, ms }) };
-  const a = M.slowNote(panel, o), b = M.slowNote(panel, o);           // a refresh that failed, then failed AGAIN
+  const a = M.slowNote(panel, o);                                     // a refresh that failed
+  const note = panel.children[0];
+  const ask1 = M.noteAskOnce(note), ask2 = M.noteAskOnce(note);       // two re-renders over that one failure
+  const b = M.slowNote(panel, o);                                     // the next refresh failed AGAIN
+  const ask3 = M.noteAskOnce(note);                                   // the hub's recovery edge after it
   const notes = panel.children.filter((k) => k._cls.includes('mounts-slow')).length;
   timers.forEach((t) => t.f());
-  const note = panel.children[0];
-  return { made: [a && a.made, b && b.made], timers: timers.length, ms: timers[0] && timers[0].ms, notes, selfRetries, asks: [M.noteAskOnce(note), M.noteAskOnce(note), M.noteAskOnce(null)] };
+  return { made: [a && a.made, b && b.made], timers: timers.length, ms: timers[0] && timers[0].ms, notes, selfRetries, asks: [ask1, ask2, ask3, M.noteAskOnce(null)] };
 };
 const nc = noteCase(ML);
 ok(nc.made[0] === true && nc.made[1] === false && nc.notes === 1 && nc.timers === 1 && nc.ms === 15000 && nc.selfRetries === 1, 'the slow note: TWO FAILURES ⇒ ONE note and ONE 15-s self-retry timer (never a second, never a loop)', nc);
-ok(JSON.stringify(nc.asks) === '[true,false,false]', 'a re-render asks the note\'s refresh ONCE: two re-renders over one note ⇒ one ask', nc.asks);
+ok(JSON.stringify(nc.asks) === '[true,false,true,false]', 'a re-render asks the note\'s refresh ONCE PER FAILURE: two re-renders over one failure ⇒ one ask; the failure said again ⇒ one more (the hub back after a second failure is asked)', nc.asks);
 const pr2 = patched('src/lib/mounts-live.js', '  const had = kid(panel, \'mounts-slow\');\n  if (had) {', '  const had = kid(panel, \'mounts-slow\');\n  if (false) { // CONTROL: no «met again»');
 ok(pr2.applies && noteCase(await bundle('src/lib/mounts-live.js', pr2)).timers === 2, 'CONTROL (r): a note made again at each failure — two timers: the retry leg goes red');
 const ps2 = patched('src/lib/mounts-live.js', '  if (!note || note._asked) return false;', '  if (!note) return false; // CONTROL');
 ok(ps2.applies && noteCase(await bundle('src/lib/mounts-live.js', ps2)).asks[1] === true, 'CONTROL (s): a re-render that asks at every pass — the once-per-note leg goes red');
+const pt2 = patched('src/lib/mounts-live.js', '    had._asked = false;', '    /* CONTROL: once per note */');
+ok(pt2.applies && noteCase(await bundle('src/lib/mounts-live.js', pt2)).asks[2] === false, 'CONTROL (t): «once per note» (the tip before this) — after a second failure the recovery edge asks nothing: the once-per-failure leg goes red');
 ok((coalesceCase(await bundle('src/lib/mounts-live.js', a6PI))).set1 === 60, 'CONTROL (i): a coalescer with no window — 60 frames, 60 paints: §6 goes red');
 ok(!patchCase(await bundle('src/lib/mounts-live.js', a6PJ)).replaced, 'CONTROL (j): the row rebuilt whole (new nodes) — §6\'s in-place leg goes red');
 ok((await flightCase(await bundle('src/lib/mounts-live.js', a6PK))).most > 1, 'CONTROL (k): no single-flight guard — refreshes overlap: §6 goes red');

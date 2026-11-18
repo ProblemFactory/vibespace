@@ -85,7 +85,8 @@ export function rerenderVerdict({ tab, shown, slow } = {}) {
   if (!shown) return 'paint';
   return slow ? 'refresh' : 'keep';
 }
-/** A re-render asks a slow note's refresh ONCE (B-a31a cure 2: «once per note», however many digest changes follow). */
+/** A re-render asks a slow note's refresh ONCE per failure (B-a31a cure 2; once per FAILURE since 09:20Z: slowNote re-arms it
+ *  when a refresh fails again), however many digest changes follow. */
 export function noteAskOnce(note) {
   if (!note || note._asked) return false;
   note._asked = true;
@@ -98,6 +99,7 @@ export function slowNote(panel, { words, retry, retrying, onRetry, onSelfRetry, 
   if (!panel) return null;
   const had = kid(panel, 'mounts-slow');
   if (had) {
+    had._asked = false;   // ONCE PER FAILURE (主开发 09:20Z): a failure said again re-arms the re-render's one ask (noteAskOnce) — the hub's recovery edge then asks again; the 15-s self-retry stays once per note
     const w = kid(had, 'mounts-slow-words'), b = kid(had, 'mounts-slow-retry');
     if (w) w.textContent = words;
     if (b) b.disabled = false;
