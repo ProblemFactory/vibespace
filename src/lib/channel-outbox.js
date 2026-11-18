@@ -100,7 +100,7 @@ import * as P from '../channel-policy.js';
 import { routeErrorText } from './channel-words.js';
 import { apiOutboxSection, outboxSecHead, paintSecHead } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
 import { fateOf as apiFate } from '../channel-api-card.js';
-import { outboxCensus, outboxView } from '../outbox-census.js';
+import { outboxCensus, outboxView } from '../outbox-census.js';   // lane outbox-window-scroll-filter: ONE count, ONE filter
 import { draftBehindSearch } from '../channel-touch.js';   // B-0f26: a row whose press shows the search results says where its draft waits   // lane outbox-window-scroll-filter: ONE count, ONE filter
 import { outboxRowsOf, outboxFilterOf, conversationKeys, partlySent, proposalFaceOf } from '../outbox-chip.js';   // lane outbox-session-chip: «drafted by <conversation>» — the rows the chip counts
 import { noteOutbox, currentOutbox, onOutbox, conversationOutbox, wireOutboxFeed } from './outbox-feed.js';   // lane outbox-session-chip: the client's Outbox rows (the window follows them; its read feeds them) + the chip's ONE verdict
@@ -1232,8 +1232,11 @@ function paintChips(box) {
     if (!p) { if (chip) chip.remove(); row.classList.remove('has-prop'); continue; }
     if (!chip) { chip = el('span', 'cct-prop'); row.insertBefore(chip, row.querySelector(':scope > .cct-time')); }
     // B-0f26: on a row whose press shows the search results, the chip says the draft waits in the Outbox
-    const text = row._row && draftBehindSearch(row._row, (id) => (String(id) === String(p.id) ? p : null)) ? `${proposalChipText(p)} · ${t('in the Outbox — this row shows the search results')}` : proposalChipText(p);
+    // r1: the words FIRST (a narrow card cuts the chip's end), the whole in its title; the card itself is drawn below this row
+    const behind = row._row && draftBehindSearch(row._row, (id) => (String(id) === String(p.id) ? p : null));
+    const text = behind ? `${t('Proposal')} · ${t('its card is below — this row shows the search results')} · ${chipWhat(p)} · ${chipState(p)}` : proposalChipText(p);
     if (chip.textContent !== text) chip.textContent = text;
+    if (chip.title !== text) chip.title = text;
     chip.dataset.proposal = p.id;
     chip.dataset.state = partlySent(p) ? 'partly' : p.state;
     row.classList.add('has-prop');

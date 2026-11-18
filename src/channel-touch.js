@@ -588,12 +588,16 @@ function openVerdict(row, { filter = null, recordOf = null } = {}) {
 }
 /** B-0f26 (the outbox-chip-door follow-up, decided «keep the door, fix the wording»): a row whose press opens the SEARCH
  *  results (its newest op is a search — J1) while it names a proposal (law 3: it says that proposal's state) promised an
- *  approval its door does not hold. True for such a row: its words then say the draft waits in the Outbox and what the
- *  press shows. `recordOf` as rowProposalOf's (a held proposal); PURE. */
+ *  approval its door does not hold. True for such a row while its picked draft still WAITS: its words then say where
+ *  the draft is and what the press shows. `recordOf` as rowProposalOf's (a held proposal); PURE. */
+const DRAFT_WAITS = Object.freeze(['awaiting-approval', 'proposed', 'sending']);   // the Outbox's own «waits» (channel-outbox waitsOn)
 function draftBehindSearch(row, recordOf = null) {
-  if (!row || !row.convId) return false;
+  if (!row || !row.convId || typeof recordOf !== 'function') return false;
   const v = openVerdict(row, { recordOf });
-  return !!v && v.open === 'search' && !!rowProposalOf(row, recordOf);
+  if (!v || v.open !== 'search') return false;
+  // r1 (the lane's adversarial read): only a draft that still WAITS — a sent / rejected / expired one promises nothing
+  const id = rowProposalOf(row, recordOf), p = id ? recordOf(id) : null;
+  return !!p && DRAFT_WAITS.includes(p.state);
 }
 /** WHAT THE FOLD'S TAIL ("+N more") OPENS: every hidden row a search of ONE query ⇒ that search UNSCOPED (every
  *  conversation, grouped by conversation) over the accounts its rows name; anything else ⇒ the fold expands. */

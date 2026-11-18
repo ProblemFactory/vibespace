@@ -3626,11 +3626,12 @@ async function chatReadLegs(ENGmod, name) {
               const none = [rowOf({ op: 'read', convId: 'oc', count: 1 }), rowOf({ op: 'api', id: 'c1', proposalId: 'pa', title: 'x' }), rowOf({ op: 'compose', proposalId: 'p-gone' })].map((r) => W.rowProposalWords(r).length);
               return [J(three) === J(['awaiting your approval', 'sent ×2']) && J(none) === J([0, 0, 0]), { three, none }];
             }],
-            ['B-0f26 a reply-then-search row (its press shows the search results) says its draft waits in the Outbox; a reply row alone does not', async () => {
-              W.noteOutbox({ ...OBX, proposals: [{ id: 'pb', state: 'awaiting-approval', at: 1 }], at: (stamp += 1000) });
+            ['B-0f26 a reply-then-search row (its press shows the search results) says FIRST that its waiting draft is in the Outbox; a reply row alone does not; r1: a SENT draft\'s row says nothing more', async () => {
+              W.noteOutbox({ ...OBX, proposals: [{ id: 'pb', state: 'awaiting-approval', at: 1 }, { id: 'ps', state: 'sent', at: 2, result: { at: 2 } }], at: (stamp += 1000) });
               const behind = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pb' }, { op: 'search', convId: 'oc', query: 'budget', hits: [], count: 1 })).map((w) => w.text);
               const plain = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'pb' })).map((w) => w.text);
-              return [J(behind) === J(['awaiting your approval', 'in the Outbox — this row shows the search results']) && J(plain) === J(['awaiting your approval']), { behind, plain }];
+              const sentRow = W.rowProposalWords(rowOf({ op: 'reply', convId: 'oc', proposalId: 'ps' }, { op: 'search', convId: 'oc', query: 'budget', hits: [], count: 1 })).map((w) => w.text);
+              return [J(behind) === J(['in the Outbox — this row shows the search results', 'awaiting your approval']) && J(plain) === J(['awaiting your approval']) && sentRow.length > 0 && !sentRow.includes('in the Outbox — this row shows the search results'), { behind, plain, sentRow }];
             }],
           ];
         };
