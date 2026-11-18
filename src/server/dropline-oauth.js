@@ -97,12 +97,19 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
   const key = crypto.randomBytes(32);   // this boot's state key: a state from another boot (or another kind) is refused
   const sign = (clear) => crypto.createHmac('sha256', key).update(clear).digest('base64url');
   const store = () => { try { return integrations() || null; } catch { return null; } };
-  /** the deployment's client: the row's own clientId/relayUrl, else the cluster preset's (presetsFor) */
+  /** the deployment's client: the row's own clientId/relayUrl, else the cluster preset's. B-e0d1: presetsFor answers the
+   *  WIRE shape (key + label, never a value), so `presetsFor(KIND)[0].values` was always {}, and «own» was the EFFECTIVE values
+   *  (the preset folded in) — `preset` never said true. Now the store's OWN resolution is read by its source: its pick (a
+   *  saved preset key, the one default, the user's values outranking it — never a pair mixed across sources) is `preset`
+   *  when it came from the cluster, `own` when it is the user's. */
   function clientCfg() {
     const st = store();
     let own = {}, preset = {};
-    try { const r = st && st.resolveIntegration(KIND); own = (r && r.values) || {}; } catch { }
-    try { const ps = st && typeof st.presetsFor === 'function' ? st.presetsFor(KIND) : []; preset = (Array.isArray(ps) && ps[0] && ps[0].values) || {}; } catch { }
+    try {
+      const r = st && st.resolveIntegration(KIND);
+      if (r && r.source === 'cluster') preset = r.values || {};
+      else if (r && r.source === 'user') own = r.values || {};
+    } catch { }
     const clientId = String(own.clientId || preset.clientId || '').trim();
     const relayUrl = String(own.relayUrl || preset.relayUrl || '').trim();
     return { clientId, relayUrl, preset: !!preset.clientId && !own.clientId };
