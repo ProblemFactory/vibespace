@@ -5,15 +5,27 @@
  * again and again inside one synchronous run).
  *
  * THE LAW: within one synchronous run (one pool pass, one stdout record, one session-list broadcast) each file under the
- * watched folders (the usage readings, the subscription folders, the pool links) is asked of the mount AT MOST ONCE, and
- * every reader in that run shares the answer — an error included (a missing file and the mount's own error alike are the
- * run's answer). Nothing is a moment staler than today:
- *   - the memo lives exactly as long as the synchronous run (dropped at its microtask checkpoint — an ask after an `await`
- *     is a new ask of the mount);
+ * watched folders (the usage readings, the subscription folders, the pool links, the estimator's anchors) is asked of the
+ * mount AT MOST ONCE, and every reader in that run shares the answer — an error included (a missing file and the mount's
+ * own error alike are the run's answer). Nothing is a moment staler than today:
+ *   - the memo lives exactly as long as the synchronous run: it is dropped by a microtask queued at the run's FIRST ask.
+ *     What runs before that microtask shares the answers. For a run begun in a macrotask — a timer, an I/O callback: where
+ *     the pool pass, a record and a broadcast run — that is a process.nextTick callback the run queued (ticks drain before
+ *     microtasks) and a promise continuation that was ALREADY queued when the run began (it is ahead in the queue); no
+ *     input or output event can be handled in between, so nothing outside this process can have been heard. (A run begun
+ *     inside a microtask ends at that checkpoint: its ticks run after it, as new asks.) An ask in a later timer or I/O
+ *     callback, or after an await that yields to the event loop, is a new ask of the mount. test-pool-pass-reads pins it;
  *   - A READ AFTER A WRITE OF THIS PROCESS IN THE SAME RUN SEES THE WRITE, BY CONSTRUCTION: the memo is dropped WHOLE at
- *     any synchronous fs write this process makes under the watched folders, whoever makes it (the write functions of `fs`
- *     are wrapped once, here — no writer has to be listed or call anything). A write by another process or thread (the
- *     statusline, the device agent, the store writer's worker) is concurrent with the run exactly as it is today.
+ *     any synchronous fs write this process makes under the watched folders, whoever makes it. Every path-writing Sync
+ *     function of `fs` (WRITES — test-pool-pass-reads classes every Sync function of the RUNNING runtime as a read, a path
+ *     write or a descriptor call, and an unclassed one is red) is wrapped ONCE PER PROCESS: the wrapper is found by a
+ *     process-wide key (never by a mark on a function — the loop witness copies a wrapped function's own properties onto
+ *     its own wrapper), and it drops the memo of EVERY copy of this module loaded in the process. A wrapper another module
+ *     puts around it later (the loop witness re-installing) keeps it inside. No module of the tree holds an fs write
+ *     function from before the wrap (a census derived by search in the suite). A write by another process or thread (the
+ *     statusline, the device agent, the store writer's worker) is concurrent with the run exactly as it is today; this
+ *     process writes nothing under the watched folders through a synchronous child or a descriptor kept open across runs
+ *     (searched at the unit; a descriptor write is seen at its write-flagged open in the run).
  *
  * Only paths under a watched folder are memoized; any other path is asked as it always was. `watch(dir)` is called by the
  * owners of those folders (accounts: subs + pool-links; the pool engine: the usage readings).
@@ -82,28 +94,36 @@ function facts(p) {
 }
 
 // ── BY CONSTRUCTION: any synchronous write under a watched folder drops the run's memo whole ──
-// (path arguments by position; an fd-based write names no path — its open, with write flags, is where it is seen)
-const WRITES = {
+// THE PATH WRITES of fs's Sync functions, with their path positions (an fd-based write names no path — its open, with write
+// flags, is where it is seen). The suite's ratchet classes every Sync function of the running runtime against this table.
+const WRITES = Object.freeze({
   writeFileSync: [0], appendFileSync: [0], renameSync: [0, 1], copyFileSync: [1], cpSync: [1], symlinkSync: [1], linkSync: [1],
-  unlinkSync: [0], rmSync: [0], rmdirSync: [0], mkdirSync: [0], truncateSync: [0], utimesSync: [0], lutimesSync: [0], chmodSync: [0],
-  openSync: [0],
-};
+  unlinkSync: [0], rmSync: [0], rmdirSync: [0], mkdirSync: [0], mkdtempSync: [0], mkdtempDisposableSync: [0], truncateSync: [0],
+  utimesSync: [0], lutimesSync: [0], chmodSync: [0], chownSync: [0], lchownSync: [0], openSync: [0],
+});
 const C = fs.constants || {};
 const WRITE_BITS = (C.O_WRONLY || 0) | (C.O_RDWR || 0) | (C.O_CREAT || 0) | (C.O_TRUNC || 0) | (C.O_APPEND || 0);
 const openWrites = (flags) => (flags == null ? false : typeof flags === 'number' ? (flags & WRITE_BITS) !== 0 : /[wa+]/.test(String(flags)));
-function wrote(args, idx) {
+const pathOf = (p) => (typeof p === 'string' ? p : Buffer.isBuffer(p) ? p.toString() : p instanceof URL ? p.pathname : null);
+/** THIS copy's drop: a write under one of ITS watched folders in its run */
+function dropIfWritten(name, args) {
   if (!run) return;
-  for (const i of idx) { const p = args[i]; if ((typeof p === 'string' || p instanceof URL || Buffer.isBuffer(p)) && under(String(p instanceof URL ? p.pathname : p))) { run.clear(); return; } }
+  if (name === 'openSync' && !openWrites(args[1])) return;
+  for (const i of WRITES[name] || []) { const p = pathOf(args[i]); if (p && under(p)) { run.clear(); return; } }
 }
-for (const [name, idx] of Object.entries(WRITES)) {
+// ONE wrapper per write function per PROCESS, found by a process-wide key; it calls the drop of every copy of this module
+const KEY = Symbol.for('vibespace.run-reads.writes');
+const G = globalThis[KEY] || (globalThis[KEY] = { drops: new Set(), installed: new Map() });
+G.drops.add(dropIfWritten);
+for (const name of Object.keys(WRITES)) {
+  if (G.installed.has(name)) continue;
   const orig = fs[name];
-  if (typeof orig !== 'function' || orig.__runReadsWrite) continue;
-  const wrapped = name === 'openSync'
-    ? function (...a) { if (run && openWrites(a[1])) wrote(a, idx); return orig.apply(this, a); }
-    : function (...a) { if (run) wrote(a, idx); return orig.apply(this, a); };
-  wrapped.__runReadsWrite = true;
+  if (typeof orig !== 'function') continue;
+  const wrapped = function (...a) { for (const d of G.drops) { try { d(name, a); } catch { } } return orig.apply(this, a); };
+  for (const k of Reflect.ownKeys(orig)) if (!Object.prototype.hasOwnProperty.call(wrapped, k)) { try { Object.defineProperty(wrapped, k, Object.getOwnPropertyDescriptor(orig, k)); } catch { } }
   fs[name] = wrapped;
+  G.installed.set(name, wrapped);
 }
 try { require('module').syncBuiltinESMExports(); } catch { }   // an ESM `import { writeFileSync } from 'fs'` sees the wrapper too
 
-module.exports = { watch, readText, readlink, entryExists, readdir, facts, stat, _inRun: () => !!run, _roots: () => [...roots] };
+module.exports = { watch, readText, readlink, entryExists, readdir, facts, stat, WRITES, _inRun: () => !!run, _roots: () => [...roots] };

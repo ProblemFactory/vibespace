@@ -38,6 +38,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // lane reset-path: the helper's codex command — default the one src/codex-thread-read.js is configured
   // with (server.js / cli-env, re-resolved with the CLI); a SUITE hands a stub app-server here
   resetCreditHelper = null}) {
+  RR.watch(USAGE_CACHE_DIR);   // B-403e: the readings folder — each reading asked once per synchronous run (a pass, a record, a broadcast)
   // the model facts' broadcaster (lane fable-52-cli-321): a verdict reached on either feed (a refusal) is told at once
   try { const MA = require('./model-ask.js'); MA.useBroadcast((s) => MA.broadcastFacts(s, s._webuiId, broadcastToSession)); } catch { }
   // late-bound singletons: created after this module in boot order, used only

@@ -50,7 +50,7 @@ function countRun(root, fn) {
   const asks = [...by.values()].reduce((x, y) => x + y, 0);
   const max = Math.max(0, ...by.values());
   const worst = [...by].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([p, n]) => `${path.relative(root, p)} ×${n}`);
-  return { asks, files: by.size, max, worst };
+  return { asks, files: by.size, max, worst, by };
 }
 
 // ── THE STAND-IN POOL: S conversations with their own links over M members (invented names, fake tokens built here) ──
@@ -88,18 +88,22 @@ function world({ S, M, mods = { AccountManager, engMod } }) {
   }
   return { root, dataDir, am, eng, P, ids, sessions, cacheDir };
 }
-/** the three runs the law names */
-function runs(w) {
+/** the three runs the law names — each its OWN synchronous run (a macrotask between: a record or a broadcast never rides a
+ *  pass's answers) */
+const turn = () => new Promise((r) => setImmediate(r));
+async function runs(w) {
   const first = [...w.sessions.values()][0];
-  return {
-    pass: countRun(w.root, () => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true })),
-    record: countRun(w.root, () => { w.eng.resolveUsageKey(first); w.eng.cacheFactsOf(first); }),
-    broadcast: countRun(w.root, () => { for (const [sid, s] of w.sessions) { try { w.am.poolMemberOfSession(w.P, s, sid); } catch { } } }),
-  };
+  await turn();
+  const pass = countRun(w.root, () => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+  await turn();
+  const record = countRun(w.root, () => { w.eng.resolveUsageKey(first); w.eng.cacheFactsOf(first); });
+  await turn();
+  const broadcast = countRun(w.root, () => { for (const [sid, s] of w.sessions) { try { w.am.poolMemberOfSession(w.P, s, sid); } catch { } } });
+  return { pass, record, broadcast };
 }
 /** TODAY'S ASKS: each routed site asking the mount directly — a copy of src/run-reads.js whose ask is the call itself,
  *  swapped onto the module every routed site reads through (`RR.readText(…)` is looked up at each call) */
-function withPassThrough(fn) {
+async function withPassThrough(fn) {
   const src = fs.readFileSync(RRpath, 'utf8');
   const needle = 'function ask(kind, p, fn) {\n';
   if (src.split(needle).length !== 2) return { err: 'the ask needle moved' };
@@ -107,7 +111,7 @@ function withPassThrough(fn) {
   const today = require(f);
   const saved = {};
   for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat']) { saved[k] = RR[k]; RR[k] = today[k]; }
-  try { return { out: fn() }; } finally { Object.assign(RR, saved); }
+  try { return { out: await fn() }; } finally { Object.assign(RR, saved); }
 }
 
 console.log('① THE COUNTING LEG — one pass, one record, one broadcast over a stand-in pool (sizes are parameters)');
@@ -117,8 +121,8 @@ for (const { S, M } of SIZES) {
   const w = world({ S, M });
   if (!w) { ok(true, 'pools unsupported on ' + process.platform + ' — SKIPPED (said as a skip, never a pass)'); continue; }
   const wt = world({ S, M });
-  const memo = runs(w);
-  const t = withPassThrough(() => runs(wt));
+  const memo = await runs(w);
+  const t = await withPassThrough(() => runs(wt));
   if (t.err) { ok(false, 'the pass-through copy of run-reads could be built', t.err); continue; }
   const today = t.out;
   for (const k of ['pass', 'record', 'broadcast']) {
@@ -182,6 +186,107 @@ const afterWrites = (rr) => {
     try { rb = afterWrites(blind); } finally { Object.assign(RR, saved); }
     ok(!rb.sawWrite && !rb.linkMoved, 'RED CONTROL: with the write hook doing nothing, the run serves the STALE answer after its own write — the reading and the link both', rb);
   }
+}
+
+console.log('⑤ THE RATCHET — every Sync function of the RUNNING runtime is classed exactly once');
+const READS = new Set(['accessSync', 'existsSync', 'globSync', 'lstatSync', 'opendirSync', 'readdirSync', 'readFileSync', 'readlinkSync', 'realpathSync', 'statSync', 'statfsSync']);
+const FD = new Set(['closeSync', 'fchownSync', 'fchmodSync', 'fdatasyncSync', 'fstatSync', 'fsyncSync', 'ftruncateSync', 'futimesSync', 'readSync', 'readvSync', 'writeSync', 'writevSync']);
+const SYNCS = Object.keys(fs).filter((k) => /^[a-z][A-Za-z]*Sync$/.test(k) && typeof fs[k] === 'function');
+const unclassed = SYNCS.filter((k) => [READS.has(k), FD.has(k), Object.prototype.hasOwnProperty.call(RR.WRITES, k)].filter(Boolean).length !== 1);
+ok(SYNCS.length > 30 && !unclassed.length, `every Sync function of node ${process.version} (${SYNCS.length}) is a read, a path write (run-reads WRITES) or a descriptor call — an unclassed one (a new runtime's) is RED until classed`, unclassed);
+
+console.log('⑥ EVERY PATH WRITE between two asks in one run is seen by the second (table-driven over WRITES)');
+{
+  const w = world({ S: 1, M: 1 });
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0, gid = typeof process.getgid === 'function' ? process.getgid() : 0;
+  const t = new Date();
+  const ARGS = {
+    writeFileSync: (d) => [path.join(d, 'f'), 'x'], appendFileSync: (d) => [path.join(d, 'f'), 'x'], renameSync: (d) => [path.join(d, 'f'), path.join(d, 'g')],
+    copyFileSync: (d) => [path.join(d, 'f'), path.join(d, 'c')], cpSync: (d) => [path.join(d, 'f'), path.join(d, 'c2')], symlinkSync: (d) => ['f', path.join(d, 's')],
+    linkSync: (d) => [path.join(d, 'f'), path.join(d, 'h')], unlinkSync: (d) => [path.join(d, 'f')], rmSync: (d) => [path.join(d, 'f')], rmdirSync: (d) => [path.join(d, 'sub')],
+    mkdirSync: (d) => [path.join(d, 'n')], mkdtempSync: (d) => [path.join(d, 't-')], mkdtempDisposableSync: (d) => [path.join(d, 'u-')], truncateSync: (d) => [path.join(d, 'f'), 0],
+    utimesSync: (d) => [path.join(d, 'f'), t, t], lutimesSync: (d) => [path.join(d, 'f'), t, t], chmodSync: (d) => [path.join(d, 'f'), 0o600],
+    chownSync: (d) => [path.join(d, 'f'), uid, gid], lchownSync: (d) => [path.join(d, 'f'), uid, gid], openSync: (d) => [path.join(d, 'o'), 'w'],
+  };
+  const unseen = [], noArgs = [];
+  for (const name of Object.keys(RR.WRITES)) {
+    if (typeof fs[name] !== 'function') continue;   // not in this runtime
+    if (!ARGS[name]) { noArgs.push(name); continue; }
+    const d = path.join(w.cacheDir, 'w-' + name); fs.mkdirSync(path.join(d, 'sub'), { recursive: true }); fs.writeFileSync(path.join(d, 'f'), 'y');
+    const r = countRun(w.root, () => {
+      RR.readdir(d);
+      const out = fs[name](...ARGS[name](d));
+      if (name === 'openSync' && typeof out === 'number') fs.closeSync(out);
+      RR.readdir(d);
+    });
+    if ((r.by.get(path.resolve(d)) || 0) !== 2) unseen.push(name);   // the folder's own asks: the second is a new one
+  }
+  ok(!unseen.length && !noArgs.length, `every path write of this runtime (${Object.keys(RR.WRITES).filter((n) => typeof fs[n] === 'function').length}) between two asks of a watched folder in ONE run makes the second a new ask`, { unseen, noArgs });
+}
+
+console.log('⑦ ONE WRAPPER PER PROCESS — a second copy of the module, one write, both memos gone');
+{
+  const w = world({ S: 1, M: 1 });
+  const p = path.join(w.cacheDir, w.ids[0] + '.json');
+  const src = fs.readFileSync(RRpath, 'utf8');
+  const B = require(MU.write('src/run-reads.js', src, 'second'));
+  B.watch(w.cacheDir);
+  const G = globalThis[Symbol.for('vibespace.run-reads.writes')];
+  const r = countRun(w.root, () => {
+    RR.readText(p); B.readText(p); RR.readText(p); B.readText(p);   // each copy's own memo: two asks
+    fs.writeFileSync(p, JSON.stringify({ fetchedAt: 2 }));           // ONE write …
+    RR.readText(p); B.readText(p);                                   // … drops BOTH: two more asks
+  });
+  ok(r.asks === 4 && G && G.drops.size >= 2 && G.installed.get('writeFileSync') && fs.writeFileSync === G.installed.get('writeFileSync'), `two copies in one process: one wrapper (found by the process-wide key, not a mark on a function), and one write drops every copy's memo (${r.asks} asks; ${G ? G.drops.size : 0} drops)`, { asks: r.asks });
+}
+
+console.log('⑧ A TICK CALLBACK AND AN ALREADY-QUEUED CONTINUATION SHARE THE RUN\'S ANSWERS (nothing outside the process can have been heard)');
+{
+  const w = world({ S: 1, M: 1 });
+  const p = path.join(w.cacheDir, w.ids[0] + '.json');
+  let seenBy = [];
+  // a run begun in a MACROTASK — where the pool pass (a timer), a record (an I/O callback) and a broadcast run
+  await new Promise((done) => setImmediate(() => {
+    counting = { root: w.root, by: new Map() };
+    Promise.resolve().then(() => { RR.readText(p); seenBy.push('continuation'); });   // queued BEFORE the run's first ask
+    RR.readText(p);                                                                     // the run's first ask: its drop queued after
+    process.nextTick(() => { RR.readText(p); seenBy.push('tick'); });
+    setImmediate(done);
+  }));
+  const n = counting.by.get(path.resolve(p)) || 0; counting = null;
+  ok(n === 1 && seenBy.length === 2, `a nextTick callback of the run and a promise continuation queued before it began read from the run's answers — ONE ask (${n}; ${seenBy.join(', ')})`);
+}
+
+console.log('⑨ NO MODULE HOLDS AN fs WRITE FUNCTION FROM BEFORE THE WRAP — a census derived by search over src and server.js');
+{
+  const { execFileSync } = await import('node:child_process');
+  const files = execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js'], { encoding: 'utf8' }).split('\0').filter((f) => /\.(c|m)?js$/.test(f));
+  const W = Object.keys(RR.WRITES).join('|');
+  const DESTR = /\{([^{}]*)\}\s*=\s*(?:require\(\s*['"](?:node:)?fs['"]\s*\)|fs)\b/g;
+  const ALIAS = new RegExp(`=\\s*(?:require\\(\\s*['"](?:node:)?fs['"]\\s*\\)|fs)\\.(?:${W})\\b(?!\\s*\\()`, 'g');
+  // the two modules that wrap fs's functions by design hold the function they wrap inside their wrapper
+  const BY_DESIGN = new Set(['src/run-reads.js', 'src/server/loop-blame.js']);
+  const hits = [];
+  for (const f of files) {
+    if (BY_DESIGN.has(f)) continue;
+    let text = ''; try { text = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { continue; }
+    for (const m of text.matchAll(DESTR)) if (new RegExp(`\\b(?:${W})\\b`).test(m[1])) hits.push(`${f}: { ${m[1].trim().slice(0, 60)} }`);
+    for (const m of text.matchAll(ALIAS)) hits.push(`${f}: ${m[0].slice(0, 60)}`);
+  }
+  ok(files.length > 300 && !hits.length, `no module destructures or aliases an fs write function (${files.length} files searched; by design: ${[...BY_DESIGN].join(', ')})`, hits);
+  const planted = 'const { writeFileSync } = require(\'fs\');\nconst w2 = fs.renameSync;\n';
+  const ph = [...planted.matchAll(DESTR)].filter((m) => new RegExp(`\\b(?:${W})\\b`).test(m[1])).length + [...planted.matchAll(ALIAS)].length;
+  ok(ph === 2, `CONTROL: a planted destructured write and a planted alias are both found by the census (${ph})`);
+}
+
+console.log('⑩ THE LOOP WITNESS INSTALLED AFTER THIS MODULE KEEPS ITS WRAPPER INSIDE');
+{
+  const w = world({ S: 1, M: 1 });
+  const p = path.join(w.cacheDir, w.ids[0] + '.json');
+  const LB = require(path.join(REPO, 'src/server/loop-blame.js'));
+  LB.install({ fsMod: fs });
+  const r = countRun(w.root, () => { RR.readText(p); fs.writeFileSync(p, JSON.stringify({ fetchedAt: 3 })); RR.readText(p); });
+  ok(LB.isWrapped(fs.writeFileSync) && r.asks === 2, `with the witness wrapped around it, a write still drops the memo (${r.asks} asks)`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
