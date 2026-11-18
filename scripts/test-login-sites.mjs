@@ -476,11 +476,13 @@ console.log('④ THE STORE over a REAL vault engine — the add, the fill on the
   // of an added site's row names that site (chipSiteOf), and the site-words route hands the hub the pickers' subjects (every principal
   // named) — a source pin each, and patched copies that turn each one red
   {
-    const pins = (row, routes) => [/const rowOf = \(s\) => ownRowOf\(entry, s\);/.test(row), /chipSiteOf\(entry, g\)/.test(row), /siteWordsFor\([^\n]*subjects: subjects\(\)/.test(routes)];
+    const pins = (row, routes) => [/const g = ownRowOf\(\{ origin: ownLogin\.origin, user: ownLogin\.user, grants: loginRows \}, sc\);/.test(GRANTS), /chipSiteOf\(entry, g\)/.test(row), /siteWordsFor\([^\n]*subjects: subjects\(\)/.test(routes)];   // the picker's own row: the grant dialog (src/lib/vault-login-grants.js — the release moved the picker there)
     const ROW = read('src/lib/vault-login-row.js'), RT = read('src/routes/vault.js'), WIRE = read('src/server/mounts-plugins-wiring.js');
+    let GRANTS = read('src/lib/vault-login-grants.js');
     const real = pins(ROW, RT);
     const red = [
-      pins(ROW.replace('const rowOf = (s) => ownRowOf(entry, s);', 'const rowOf = (s) => (entry.grants || []).find((g) => g.scope === s && !g.unknown);'), RT)[0],
+      (() => { const was = GRANTS, from = 'const g = ownRowOf({ origin: ownLogin.origin, user: ownLogin.user, grants: loginRows }, sc);'; if (!was.includes(from)) throw new Error('mutant anchor missing: the dialog\'s own-row read');
+        GRANTS = was.replace(from, 'const g = loginRows.find((x) => x && !x.unknown && x.scope === sc);'); try { return pins(ROW, RT)[0]; } finally { GRANTS = was; } })(),   // stale-pins: kept — the release's first-scope read, rebuilt on purpose
       pins(ROW.replace(/chipSiteOf\(entry, g\)/g, 'null'), RT)[1],
       pins(ROW, RT.replace("{ user: String(req.query.user || ''), subjects: subjects() })", "{ user: String(req.query.user || '') })"))[2],   // stale-pins: kept — a red control that rebuilds the pre-cure route (no roster) on purpose
     ];

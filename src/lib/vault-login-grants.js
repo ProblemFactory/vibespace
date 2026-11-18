@@ -64,10 +64,11 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   // this scope and wider only (a narrower row is another dialog's); no fallback to other logins' rows (another site's origin#* row).
   const at = SCOPES.indexOf(scope);
   const rowsBy = {};
+  const loginRows = (((data && data.entries) || []).find((e) => e.name === name) || {}).grants || [];
   // one login, several sites (lane login-request-card): the list carries the rows of EVERY site of a login — a wider row is read at
   // the login's FIRST site (ownRowOf: `<origin>#*`, `*`), never an added site's row of the same scope
-  const loginEntry = ((data && data.entries) || []).find((e) => e.name === name) || {};
-  for (const sc of SCOPES) if (SCOPES.indexOf(sc) > at) { const g = ownRowOf(loginEntry, sc); rowsBy[sc] = g ? { to: g.to || [], except: g.except || [] } : null; }
+  const ownLogin = ((data && data.entries) || []).find((e) => e.name === name) || {};
+  for (const sc of SCOPES) if (SCOPES.indexOf(sc) > at) { const g = ownRowOf({ origin: ownLogin.origin, user: ownLogin.user, grants: loginRows }, sc); rowsBy[sc] = g ? { to: g.to || [], except: g.except || [] } : null; }
   rowsBy[scope] = stored;
   // the subjects: Everyone, the Task Groups, the running conversations — and a stopped one a row names (in its «to» or its «除了»)
   const subjects = [{ key: 'everyone', groupIds: [] }, ...roster.map((r) => ({ key: r.kind === 'group' ? `group:${r.id}` : `conversation:${r.id}`, groupIds: r.kind === 'group' ? [] : (r.groupIds || []) }))];
