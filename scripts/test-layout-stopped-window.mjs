@@ -963,11 +963,38 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
   const t2 = await twice(fresh);
   ok(t2.boots === 2 && J(t2.firstIds) === J(P_BEFORE().map((w) => w.winId)), '§9 …a SECOND restart after a bad one keeps the point from before the FIRST (个人\'s eleven), both named in the dialog (the newest three boot points are pinned)', t2);
   const t2red = await twice(() => mutantModule('src/routes/persistence.js', PIN, 'const keep = ringKeep(files, { pinned: boots.slice(-1) });'));
-  const metaRed = await ringBurst(mutantModule('src/routes/persistence.js', "const boots = ringSort(files.filter((f) => f.endsWith('.restart.json')));", 'const boots = listLayoutHistory().filter((e) => e.wasRestart).map((e) => e.id).reverse();'));
+  const metaRed = await ringBurst(mutantModule('src/routes/persistence.js', "const boots = ringSort(files.filter((f) => f.endsWith('.restart.json'))); // the restarts' points, by NAME — no meta read here", 'const boots = listLayoutHistory().filter((e) => e.restart).map((e) => e.id).reverse();'));
   ok(metaRed.metaReads > 0, `§9 CONTROL: the first cut's road (the restarts' points read off the metas) ⇒ the prunes read meta files (${metaRed.metaReads}) — the no-meta leg goes RED`);
   const syncRed = await ringBurst(mutantModule('src/routes/persistence.js', 'try { names = await fs.promises.readdir(HISTORY_DIR); } catch { return; }', 'try { names = fs.readdirSync(HISTORY_DIR); } catch { return; }'));
   ok(syncRed.syncRing > 0, `§9 CONTROL: the release's synchronous listing in the prune ⇒ sync ring calls on the loop (${syncRed.syncRing}) — the off-the-loop leg goes RED`);
   ok(t2red.boots === 1 && J(t2red.firstIds) !== J(P_BEFORE().map((w) => w.winId)), '§9 CONTROL: one pin only ⇒ the point before the first restart is pushed out by the second burst (the leg above goes RED)', t2red);
+  // THE DIALOG'S LABEL IS THE PIN'S OWN RULE (B-b05e cure 3 — the cure-2 verdict: the label read the meta too and took the list's
+  // NAME order): four restart points inside one millisecond (seq x, y, z, «10» — base 36: «10» is the newest) and the NEWEST point
+  // of all a plain name whose META alone says «restart» (the first form's mark, never on a hub — .409 carried none; newest, so a rule
+  // that reads the meta again names it) ⇒ exactly the three the prune pins
+  const labels = (load) => {
+    const dd = scratchDir('lsw-label'), H = path.join(dd, 'layout-history');
+    try {
+      fs.mkdirSync(H, { recursive: true });
+      const ms = Date.UTC(2026, 10, 17, 9, 0, 0, 0), meta = { at: ms, summary: { 个人: 3 }, totalWindows: 3, change: null };
+      const boots = [33, 34, 35, 36].map((q) => ringName(ms, q).replace(/\.json$/, '.restart.json')), legacy = ringName(ms + 1, 7);
+      for (const f of [...boots, legacy]) {
+        fs.writeFileSync(path.join(dd, 'layout-history', f), J({ ...meta, layouts: DOC(P_BEFORE().slice(0, 3)) }));
+        fs.writeFileSync(path.join(dd, 'layout-history', f.replace(/\.json$/, '.meta.json')), J(f === legacy ? { ...meta, restart: true } : meta));
+      }
+      fs.writeFileSync(path.join(dd, 'layouts.json'), J(DOC(P_BEFORE())));
+      const P = load(); P.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+      const said = P.router.listLayoutHistory().filter((e) => e.restart).map((e) => e.id).sort();
+      return { said, pinned: P.ringSort(boots).slice(-P.RING_KEEP.boots).sort(), legacy, oldest: boots[0] };
+    } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+  };
+  const lb = labels(fresh);
+  ok(J(lb.said) === J(lb.pinned) && lb.said.length === 3 && !lb.said.includes(lb.oldest) && !lb.said.includes(lb.legacy), '§9 …the dialog says «before the server restarted» of EXACTLY the points the prune pins — the newest three `.restart.json` NAMES in ring order (seq «10» after «z»); a point only its meta marks is not said to be one (B-b05e cure 3)', lb);
+  ok(/const boots = ringSort\(files\.filter\(\(f\) => f\.endsWith\('\.restart\.json'\)\)\);\n\s*const named = new Set\(boots\.slice\(-RING_KEEP\.boots\)\);/.test(read('src/routes/persistence.js')) && read('src/routes/persistence.js').includes("const keep = ringKeep(files, { pinned: boots.slice(-RING_KEEP.boots) });"), '§9 …the label and the pin are one expression (ringSort over the `.restart.json` names, the newest RING_KEEP.boots)');
+  const lbName = labels(() => mutantModule('src/routes/persistence.js', 'const named = new Set(boots.slice(-RING_KEEP.boots));', "const named = new Set(files.filter((f) => f.endsWith('.restart.json')).sort().reverse().slice(0, RING_KEEP.boots));"));
+  ok(lbName.said.includes(lb.oldest) && J(lbName.said) !== J(lbName.pinned), '§9 CONTROL: the label in the NAME order (the cure-2 list order) says «restart» of a point the prune lets go (seq x) and not of the newest (the label leg goes RED)', lbName);
+  const lbMeta = labels(() => mutantModule('src/routes/persistence.js', '{ refused: m.refused } : {}), ...(named.has(f) ? { restart: true } : {}) };', '{ refused: m.refused } : {}), ...(named.has(f) || m.restart ? { restart: true } : {}) };'));
+  ok(lbMeta.said.includes(lbMeta.legacy), '§9 CONTROL: the meta\'s mark read too (the cure-2 label) ⇒ an unpinned point is said to be a restart\'s (the label leg goes RED)', lbMeta);
 });
 
 await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL LayoutManager: a window opened, the page hidden or left while its save still waits', async () => {

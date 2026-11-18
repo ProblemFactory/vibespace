@@ -269,7 +269,6 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           const stamp = new Date().toISOString().replace(/[:.]/g, '-') + '-' + (_histSeq++).toString(36);
           const total = Object.values(before).reduce((a, b) => a + b, 0);
           const at = Date.now();
-          if (restart) seen.restart = true;
           const file = `layout-${stamp}${restart ? '.restart' : ''}.json`; // the restart's point is named so (the prune reads no meta)
           // atomic like layouts.json next door — a torn rollback point fails
           // exactly when it is finally needed
@@ -352,22 +351,24 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
   function listLayoutHistory() {
     try {
-      return fs.readdirSync(HISTORY_DIR)
-        .filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort().reverse()
+      const files = fs.readdirSync(HISTORY_DIR).filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json'));
+      // the dialog says «before a restart» by the PIN's own rule (B-b05e cure 3): the newest RING_KEEP.boots `.restart.json`
+      // NAMES in ring order (stamp, then sequence) — the very points pruneHistory keeps; no meta speaks for it
+      const boots = ringSort(files.filter((f) => f.endsWith('.restart.json')));
+      const named = new Set(boots.slice(-RING_KEEP.boots));
+      return files.sort().reverse()
         .map((f) => {
           // header from the tiny sidecar; the full snapshot (a whole
           // layouts.json each) is read only when actually restoring
           try {
             const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
-            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(m.restart || f.endsWith('.restart.json') ? { wasRestart: true } : {}) };
+            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}), ...(named.has(f) ? { restart: true } : {}) };
           } catch {}
           try {
             const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
-            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null, ...(j.restart || f.endsWith('.restart.json') ? { wasRestart: true } : {}) };
+            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows, change: j.change || null, ...(named.has(f) ? { restart: true } : {}) };
           } catch { return null; } // unparseable → omit, never a 1970/0-window row
-        }).filter(Boolean)
-        // the dialog names the PINNED «before a restart» points (the newest RING_KEEP.boots — B-b05e), not every older one
-        .map((e, _i, list) => (e.wasRestart && list.filter((x) => x.wasRestart).indexOf(e) < RING_KEEP.boots ? { ...e, restart: true } : e));
+        }).filter(Boolean);
     } catch { return []; }
   }
 
