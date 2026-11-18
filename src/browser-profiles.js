@@ -828,7 +828,7 @@ function pinFenceConflict({ userConfig = {}, pinnedDir = null }) {
  * watched browser (measured). `userConfig` alone (no `projectConfig`) is the
  * pre-r3 call shape and composes the same way.
  */
-function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, keptDir = null, headed = null, mark = null, holdDialogs = false, automationFlag = false }) {
+function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, keptDir = null, headed = null, mark = null, holdDialogs = false, automationFlag = false, quietLog = true }) {
   const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });
   const out = r.config;
   // OUR value is ours to coerce; the user's rides across verbatim.
@@ -846,8 +846,9 @@ function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir
   const flag = automationFlagVerdict(out.args, { on: !!automationFlag });
   if (flag.add) out.args = withAutomationFlag(out.args, { on: true });
   // lane H verify r4: the keeper's launch MARK (the browser key this config's browser runs for) — how its Chrome is
-  // proven VibeSpace's by its command line after its daemon is gone (a user/project file's own mark was dropped above)
-  if (mark) out.args = withKeeperMark(out.args, mark);
+  // proven VibeSpace's by its command line after its daemon is gone (a user/project file's own mark was dropped above);
+  // B-1789 cure: it rides THE LAUNCH TAIL, Chrome's logging off before it (quietLog: false only for a record launched without)
+  if (mark || quietLog) out.args = launchTail(out.args, mark, { quiet: quietLog });
   return { config: out, dropped: r.dropped, automationFlag: flag.why };
 }
 function generatedConfig(args) { return generatedConfigParts(args).config; }
@@ -2448,6 +2449,19 @@ function withKeeperMark(args, value) {
   const kept = args.split(/[,\n]/).map((x) => x.trim()).filter((x) => x && !isMark(x));
   return [...kept, mark].join(sep);
 }
+/** B-1789 cure (主开发 11:12Z: «the switches live where every launch road passes»): THE LAUNCH TAIL — every args list a
+ *  VibeSpace launch hands Chrome (a driver config's `args`, an engine's AGENT_BROWSER_ARGS, a provider's own list, a
+ *  helper's copy) ENDS with it, composed here and nowhere else: Chrome's logging off (VERBS.QUIET_LOG_ARGS, the PURE rule
+ *  src/browser-stderr.js re-exports — a user's own logging switch wins) and then the keeper's launch MARK, last. `quiet: false` only for a record LAUNCHED without the
+ *  switches (its stamp — the automationFlag precedent: a different launch view relaunches Chrome, so a browser running at
+ *  the update keeps its view until its next launch). No mark (a provider's own list) ⇒ the switches alone. PURE.
+ *  test-browser-stderr-pipe's census finds every launch road by what it calls and refuses one that marks a launch, or
+ *  quiets one, any other way. (The keeper's own argv road — attachArgv, Chrome started without the driver — composes a
+ *  whole argv under its own census and carries QUIET_LOG_ARGS itself.) */
+function launchTail(args, mark, { quiet = true } = {}) {
+  const a = quiet ? VERBS.withQuietLogging(args) : args;
+  return mark ? withKeeperMark(a, mark) : a;
+}
 /**
  * LANE BROWSER-PROPOSE (step 1, userW's fleet pod 2026-09-30: a FRESH Google sign-in refused with "This browser or app
  * may not be secure"): THE ONE LAUNCH FLAG that stops Chromium announcing automation. A CDP-launched Chromium turns the
@@ -3509,7 +3523,7 @@ module.exports = {
   rememberDirHosts, dirHostsOf, DIR_HOSTS_MAX, dirHostsEvicted, rekeyDirHosts, LINEAGE_MARKER, isLineageToken, // verify r4 (S26b): the lineage per DIRECTORY, outliving a retired record; r5: keyed by identity, the evictions handed back; r6: the directory's own marker is the witness (the inode is an r5-era fallback)
   lineageVerdict, legacyLockWitness, dedupeDirHostsByToken, dirHostsDeduped, // verify r7: one token ⇒ ONE directory (the bearer tells a restore from a copy), the .199 record's own browser pid as the upgrade's witness, one token ⇒ one entry at load
   parseDevToolsActivePort, cdpEndpointOf, // verify r8: the second legacy witness — the record's cdpUrl vs the directory's DevToolsActivePort (what a .199 boot on the new pod leaves)
-  keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
+  keeperMarksOf, keeperMarkArg, withKeeperMark, launchTail, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
   AUTOMATION_FLAG, automationFlagVerdict, withAutomationFlag, // lane browser-propose: the one launch flag that stops Chromium announcing automation
   HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_DAY_BUDGET, HEAL_DAY_MS, HEAL_RETRY_MS, HEAL_FRESH_AT, healLedger, healBudgetVerdict, rejudgeVerdict, freshDaemonDue, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
   HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap

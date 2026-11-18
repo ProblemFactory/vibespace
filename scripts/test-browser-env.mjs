@@ -69,13 +69,15 @@ console.log('— ① the flag rule (PURE)');
     ok(v.why === why && v.add === (why === 'added') && JSON.stringify(got) === JSON.stringify(want), `${JSON.stringify(args)} (${o.on ? 'on' : 'off'}) ⇒ ${why}: ${JSON.stringify(want)}`, { v, got });
   }
   const g = B.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-0000beef', automationFlag: true });
-  ok(argList(g.config.args).join(' ') === `--no-sandbox ${FLAG} --vibespace-keeper=bk-0000beef` && g.automationFlag === 'added', 'generatedConfigParts: the flag composes BEFORE the keeper mark — the mark rides LAST (its rule unchanged) — and the answer says it was added', g);
+  ok(argList(g.config.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=bk-0000beef` && g.automationFlag === 'added', 'generatedConfigParts: the flag composes BEFORE the launch tail (B-1789 cure: the quiet log switches, then the keeper mark — it rides LAST, its rule unchanged) — and the answer says it was added', g);
+  const gS = B.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-0000beef', quietLog: false });
+  ok(argList(gS.config.args).join(' ') === '--no-sandbox --vibespace-keeper=bk-0000beef', 'B-1789 cure: quietLog false (the keeper\'s file for a record launched before the switches — its stamp) ⇒ the mark alone, still last', gS.config.args);
   const g0 = B.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-0000beef' });
   ok(!argList(g0.config.args).includes(FLAG) && g0.automationFlag === 'off', 'generatedConfigParts without the setting passed adds nothing (every caller passes the setting — the default lives in the setting, never in the composer)', g0);
   const gT = B.generatedConfigParts({ userConfig: { args: '--enable-blink-features=AutomationControlled' }, mark: 'bk-0000beef', automationFlag: true });
-  ok(argList(gT.config.args).join(' ') === '--enable-blink-features=AutomationControlled --vibespace-keeper=bk-0000beef' && gT.automationFlag === 'theirs', 'the user\'s own AutomationControlled value wins (even one pointing the other way) and the mark still rides last', gT);
+  ok(argList(gT.config.args).join(' ') === '--enable-blink-features=AutomationControlled --disable-logging --log-level=3 --vibespace-keeper=bk-0000beef' && gT.automationFlag === 'theirs', 'the user\'s own AutomationControlled value wins (even one pointing the other way) and the mark still rides last', gT);
   const forged = B.generatedConfigParts({ userConfig: { args: `--vibespace-keeper=bk-evil,${FLAG}` }, mark: 'bk-0000beef', automationFlag: true });
-  ok(argList(forged.config.args).join(' ') === `${FLAG} --vibespace-keeper=bk-0000beef`, 'a forged mark in the user file is still dropped (sanctionedConfig) — the flag rule changes nothing about the mark', forged.config.args);
+  ok(argList(forged.config.args).join(' ') === `${FLAG} --disable-logging --log-level=3 --vibespace-keeper=bk-0000beef`, 'a forged mark in the user file is still dropped (sanctionedConfig) — the flag rule changes nothing about the mark', forged.config.args);
 }
 
 // ═══ ② browser-env (the REAL module) ═══════════════════════════════════════════
@@ -87,7 +89,7 @@ function mkEnv(settings, userCfg) {
   if (userCfg) fs.writeFileSync(path.join(h, '.agent-browser', 'config.json'), JSON.stringify(userCfg));
   const lines = [];
   const be = BE.create({ dataDir: path.join(d, 'data'), homeDir: h, serverSetting: (k) => settings[k], log: { log() {}, warn: (l) => lines.push(String(l)), error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } });
-  return { be, lines };
+  return { be, lines, d };
 }
 {
   const K1 = 'bk-00000e01';
@@ -110,27 +112,47 @@ function mkEnv(settings, userCfg) {
   ok(argList(cT.args).join(' ') === '--no-sandbox --disable-blink-features=Foo --disable-logging --log-level=3 --vibespace-keeper=bk-00000e03' && said.length === 1 && /drop yours/.test(said[0]), 'a --disable-blink-features switch of the user\'s is theirs: never overridden, and the journal says why ONCE (two spawns, one line)', { cT, said });
 }
 // B-1789 (a sub-agent's child browser stopped answering ~20–25 s after its start): the spawn file — and the helper's copy — carry
-// lane browser-stderr-pipe's quiet log switches (the keeper's own quietLogFor never reached the ephemeral road); a user's own
-// logging switch wins. CONTROL: a browser-env whose spawn file lacks them
+// lane browser-stderr-pipe's quiet log switches, by THE LAUNCH TAIL every launch road passes (B.launchTail; the census of roads
+// is test-browser-stderr-pipe's); a user's own logging switch wins. CONTROLS: the tail without the switches; the helper's
+// line put back to the release's
 {
   const quietOf = (args) => argList(args).filter((x) => x === '--disable-logging' || x === '--log-level=3').length;
   const { be: beQ } = mkEnv({}, { args: '--no-sandbox,--v=1' });
   const rQ = beQ.envFor({ browserKey: 'bk-00000e05' });
   const cQ = JSON.parse(fs.readFileSync(rQ.configPath, 'utf8'));
   ok(quietOf(cQ.args) === 0 && argList(cQ.args).includes('--v=1'), 'B-1789: a user\'s own logging switch (--v=1) is theirs — the spawn file adds no quiet switch beside it', cQ.args);
-  const esrc = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
-  const ANCH = '      cfg.args = B.withKeeperMark(BSTD.withQuietLogging(cfg.args), key);';
-  if (!esrc.includes(ANCH)) ok(false, 'the anchor of the control «B-1789 quiet spawn file» is not in the source (src/server/browser-env.js)');
+  // B-1789 cure (its readers: «the second fix has no leg» — a parent file written BEFORE the switches): a helper's copy of such a
+  // parent still starts a quiet Chrome, its own mark last
+  const KP = 'bk-00000e07';
+  const { be: beP, d: dP } = mkEnv({}, { args: '--no-sandbox' });
+  const rP = beP.envFor({ browserKey: KP });
+  const old = { ...JSON.parse(fs.readFileSync(rP.configPath, 'utf8')), args: `--no-sandbox,${FLAG},--vibespace-keeper=${KP}` }; // the release's spawn file
+  fs.writeFileSync(rP.configPath, JSON.stringify(old, null, 2));
+  const childOf = (be0) => { const c = be0.childConfigFor(KP + '.1'); return c.path ? JSON.parse(fs.readFileSync(c.path, 'utf8')) : null; };
+  const cP = childOf(beP);
+  ok(cP && argList(cP.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${KP}.1`, 'B-1789 cure: a helper of a conversation whose spawn file was written BEFORE the switches gets them in its own copy (its mark last)', cP && cP.args);
+  // CONTROLS — the composer's tail without the switches (every road reads it: the spawn file is then loud), and the helper's
+  // line put back to the release's (a mark only: the old parent's helper is then loud)
+  const MQ = mutantCopies('b1789-env', REPO);
+  const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+  const TANCH = '  const a = quiet ? VERBS.withQuietLogging(args) : args;';
+  if (!bsrc.includes(TANCH)) ok(false, 'the anchor of the control «B-1789 the launch tail» is not in the source (src/browser-profiles.js)');
   else {
-    const MQ = mutantCopies('b1789-env', REPO);
-    const BEc = MQ.load('src/server/browser-env.js', esrc.replace(ANCH, '      // (no quiet switches)'), 'b1789-no-quiet');
-    const d = fs.mkdtempSync(path.join(ROOT, 'env-')); const h = path.join(d, 'home'); fs.mkdirSync(path.join(h, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(h, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
-    const bc = BEc.create({ dataDir: path.join(d, 'data'), homeDir: h, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } });
-    const rc = bc.envFor({ browserKey: 'bk-00000e06' });
-    const cc0 = JSON.parse(fs.readFileSync(rc.configPath, 'utf8'));
-    ok(quietOf(cc0.args) === 0, 'CONTROL (B-1789, the release\'s spawn file): no quiet switch on the ephemeral road — the spawn-file legs above are RED on it', cc0.args);
-    for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { label: 'B-1789 CONTROL: ' })) ok(r.pass, r.name, r.detail);
+    const Bc = MQ.load('src/browser-profiles.js', bsrc.replace(TANCH, '  const a = args;'), 'b1789-tail-no-quiet');
+    const cg = Bc.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-00000e06', holdDialogs: true, automationFlag: true }).config;
+    ok(quietOf(cg.args) === 0 && quietOf(B.generatedConfigParts({ userConfig: { args: '--no-sandbox' }, mark: 'bk-00000e06', holdDialogs: true, automationFlag: true }).config.args) === 2,
+      'CONTROL (B-1789 cure, a launch tail without the switches): the composer browser-env\'s spawn file is made by (the call above, as envFor makes it) carries none — the spawn-file legs above are RED on it', cg.args);
   }
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+  const CANCH = '    out.args = B.launchTail(out.args, childKey);';
+  if (!esrc.includes(CANCH)) ok(false, 'the anchor of the control «B-1789 the helper\'s copy» is not in the source (src/server/browser-env.js)');
+  else {
+    const BEc = MQ.load('src/server/browser-env.js', esrc.replace(CANCH, '    out.args = B.withKeeperMark(out.args, childKey);'), 'b1789-child-mark-only'); // stale-pins: kept — the release's helper line
+    const bc = BEc.create({ dataDir: path.join(dP, 'data'), homeDir: path.join(dP, 'home'), serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(dP, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } }); // the SAME data dir: it reads the old parent file above
+    const cc0 = childOf(bc);
+    ok(cc0 && quietOf(cc0.args) === 0, 'CONTROL (B-1789 cure, the release\'s helper line): the old parent\'s helper launches with Chrome\'s logging on — the leg above is RED on it', cc0 && cc0.args);
+  }
+  for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { label: 'B-1789 CONTROL: ' })) ok(r.pass, r.name, r.detail);
 }
 
 console.log('— ②b lane hooks-create H5: the window preference on a machine with no desktop (resolved at the LAUNCH, never baked at the spawn)');

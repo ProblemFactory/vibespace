@@ -64,12 +64,14 @@ import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 /** lane H verify r4: every generated config carries the keeper's launch MARK for its browser key as its LAST `args`
- *  switch — the config minus that mark (a missing / misplaced mark leaves a '<NO MARK …>' args that fails every pin). */
+ *  switch — B-1789 cure: after Chrome's logging off, THE LAUNCH TAIL (B.launchTail) — the config minus that tail (a
+ *  missing / misplaced mark or switch leaves a '<NO TAIL …>' args that fails every pin). Written out here, never asked of
+ *  the composer: a tail that lost its switches must fail these pins. */
 const unmark = (cfg, key) => {
-  const m = B.keeperMarkArg(key); const a = cfg && cfg.args;
-  if (typeof a === 'string' && a.endsWith(',' + m) && a.split(m).length === 2) return { ...cfg, args: a.slice(0, -(m.length + 1)) };
-  if (a === m) { const { args: _a, ...rest } = cfg; return rest; }
-  return { ...cfg, args: `<NO MARK ${m}> ${a}` };
+  const t = '--disable-logging,--log-level=3,' + B.keeperMarkArg(key); const a = cfg && cfg.args;
+  if (typeof a === 'string' && a.endsWith(',' + t) && a.split(B.keeperMarkArg(key)).length === 2) return { ...cfg, args: a.slice(0, -(t.length + 1)) };
+  if (a === t) { const { args: _a, ...rest } = cfg; return rest; }
+  return { ...cfg, args: `<NO TAIL ${t}> ${a}` };
 };
 const BE = require('../src/server/browser-env.js');
 const { createBrowserFacts, sanitizeProbeEnv } = require('../src/browser-facts.js');

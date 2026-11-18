@@ -1013,10 +1013,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** lane browser-stderr-pipe: does the file for (kind, mark) carry the quiet log switches (BE.QUIET_LOG_ARGS)? Only a
    *  record LAUNCHED with them (`rec.quietLog`, the automationFlag precedent: a different launch config relaunches Chrome,
-   *  so a browser running at the update keeps its file until its next launch). No mark ⇒ no. */
+   *  so a browser running at the update keeps its file until its next launch). No mark ⇒ no. B-1789 cure: an EPHEMERAL's
+   *  file too (named: the profile id; ephemeral: its browser key) — its launch is stamped since the cure. */
   function quietLogFor(kind, mark) {
-    if (!mark || kind === 'ephemeral') return false;
-    try { return !!(reg.browsers[mark] && reg.browsers[mark].quietLog); } catch { return false; }
+    if (!mark) return false;
+    try {
+      if (kind === 'ephemeral') { const p = reg.profiles.find((x) => isEph(x) && x.owner.id === mark); return !!(p && reg.browsers[p.id] && reg.browsers[p.id].quietLog); }
+      return !!(reg.browsers[mark] && reg.browsers[mark].quietLog);
+    } catch { return false; }
   }
   const automationFlagOn = () => setting('browser.automationFlag', true) !== false;
   function machineConfigFile(kind = 'machine', mark = null) {
@@ -1038,9 +1042,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const hold = holdsDialogs(kind, markOk);
     const flag = automationFlagFor(kind, markOk); // lane browser-propose: the chromium launch stops announcing automation
     let cfg;
-    if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h, mark: markOk, holdDialogs: hold, automationFlag: flag });
-    else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (flag) cfg.args = B.withAutomationFlag(cfg.args, { on: true }); if (markOk) cfg.args = B.withKeeperMark(cfg.args, markOk); if (hold) cfg.noAutoDialog = true; }
-    if (quietLogFor(kind, markOk)) cfg.args = B.withKeeperMark(BE.withQuietLogging(cfg.args), markOk); // lane browser-stderr-pipe: the mark rides last
+    // B-1789 cure: both files end their args with THE LAUNCH TAIL (B.launchTail — the quiet log switches, then the mark), the
+    // switches only for a record launched with them (quietLogFor: its stamp)
+    if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h, mark: markOk, holdDialogs: hold, automationFlag: flag, quietLog: quietLogFor(kind, markOk) });
+    else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (flag) cfg.args = B.withAutomationFlag(cfg.args, { on: true }); if (markOk) cfg.args = B.launchTail(cfg.args, markOk, { quiet: quietLogFor(kind, markOk) }); if (hold) cfg.noAutoDialog = true; }
     { const a = VERBS.driverArgsText(cfg.args); if (!a.ok) { configSay(`args:${file}`, `the keeper's ${kind} browser config could not be written at ${file}: ${a.error} — its calls keep the CLI's own config search`); return null; } if (a.args !== cfg.args) cfg.args = a.args; } // lane engine-args-string: THE one writer of the driver's `args` (a list leaves as its one line)
     const text = JSON.stringify(cfg);
     const memoKey = kind + '|' + (markOk || '');
@@ -1247,14 +1252,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function engineEnvOf(p, prow, be, kept, quietLog) {
     // lane engine-spi-egress L1b r6: on a WRAPPED launch the person's own list keeps switches only (a bare -- there would end the
     // switches before the keeper's proxy pair) — what is dropped is SAID (their config is theirs: dropped by name, never refused)
-    const w = be.egress ? ENG.wrappedOwnArgs(kept || engineBaseArgs(p, prow)) : null;
+    const w = be.egress ? ENG.wrappedOwnArgs(kept || engineBaseArgs(p, prow, quietLog)) : null;
     if (w && w.dropped.length) log.warn?.(`[browser] ${p.id} "${p.label}": its browser config names ${w.dropped.slice(0, 3).map((a) => `«${String(a).slice(0, 40)}»`).join(', ')} — not a switch, so it is left out of this wrapped launch (a bare -- would put VibeSpace's proxy switches after the end of the browser's switches)`);
-    const b0 = w ? w.args : kept || engineBaseArgs(p, prow);
-    return ENG.engineLaunchEnv(be, { base: quietLog ? B.withKeeperMark(BE.withQuietLogging(b0), p.id) : b0, always: !!be.egress });
+    const b0 = w ? w.args : kept || engineBaseArgs(p, prow, quietLog);
+    return ENG.engineLaunchEnv(be, { base: quietLog ? B.launchTail(b0, p.id) : b0, always: !!be.egress }); // B-1789 cure: the launch tail
   }
   /** The arguments a launch carries anyway, riding an engine's env list (AGENT_BROWSER_ARGS REPLACES the config's list):
    *  the automation flag where the row stamps it, the keeper's mark LAST. */
-  const engineBaseArgs = (p, prow) => B.withKeeperMark(B.withAutomationFlag([], { on: automationFlagOn() && !!(prow && prow.automationFlag) }), p.id);
+  const engineBaseArgs = (p, prow, quietLog) => B.launchTail(B.withAutomationFlag([], { on: automationFlagOn() && !!(prow && prow.automationFlag) }), p.id, { quiet: quietLog });
   /** lane engine-args-string r2 — THE WRAPPER ROAD: the program the browser driver starts on an ENGINE launch (both driver
    *  roads: a profile's env, a conversation's derived config) — `exec '<kernel>' "$@" <the engine's part of the split>`, the
    *  engine's env as exports (browser-display-config engineWrapperFor: `engine-<profile id>.sh`, 0700, atomic, re-written only
@@ -3069,6 +3074,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // are set again at the launch below).
       if (prev && prev.mark) rec.mark = prev.mark;
       if (prev && prev.tailnet !== undefined) rec.tailnet = prev.tailnet; // lane tailnet-names: an ADOPTED daemon runs with its launch's view (a fresh launch below decides again)
+      if (prev && prev.quietLog) rec.quietLog = true; // B-1789 cure: …and with its launch's quiet log switches — a server restart ADOPTS it with the keeper's file it launched under (no stamp ⇒ none: a daemon from before the cure); a fresh launch below stamps it
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
       rec.egress = engineLaunch && engineLaunch.egress ? egressRecordOf(profileId) : null; // lane engine-spi-egress r2: the port the launch view names
       if (engineLaunch) { const ew = engineProgramOf(p, engineLaunch); rec.engineView = { executablePath: ew.program, args: ew.args, ...(engineLaunch.egress ? { wrapped: true } : {}) }; rec.browserChoice = recordedChoice(p, engineLaunch); } // lane engine-args-string r2: the program = the keeper's wrapper (the engine's switches ride it whole); lane engine-spi-egress r2: a WRAPPED launch's proxy switches ride it too, last — `wrapped` = its config keeps no proxy switch of the base file
@@ -3094,6 +3100,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // lane browser-propose: the same rule for the automation flag — rung D's spawn file carries it (browser-env); pairs
         // naming none keep the keeper's file as it was (an escaped bare command must see the same launch view)
         rec.automationFlag = pairsAutomationFlag(pairs);
+        // B-1789 cure: …and the quiet log switches — the keeper's file for this launch composes them (B.launchTail; rung D's
+        // spawn file carries them by the same composer). An ADOPTED daemon carries its previous record's stamp (above): one from
+        // before the cure has none, so its view is kept
+        rec.quietLog = true;
         rec.tailnet = await tailnetFor(p, { engine: !!engineLaunch, env: { ...rtEnv, ...pairsEnv(pairs) } }); // lane tailnet-names: the tailnet road (its PAC rides the launch's derived config; the pairs' env proxy wins too)
         // r4 LOW 5 (lane H) = lane P verify r2 F2 (the same measured finding, reached by both lanes; measured on
         // 0.38.1): the launch passes the idle the PAIRS name — every other client of this daemon (the agent's verbs, a
@@ -4187,7 +4197,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane browser-stderr-pipe: a local launch that starts a Chrome carries the quiet log switches — in its config (a record
     // stamped `quietLog`, quietLogFor) and in a provider's own AGENT_BROWSER_ARGS (an env list replaces the config's)
     const quietLog = !p.host && !!prow.starts && !argvPrefix.length;
-    if (quietLog && providerEnv.AGENT_BROWSER_ARGS) providerEnv = { ...providerEnv, AGENT_BROWSER_ARGS: BE.withQuietLogging(String(providerEnv.AGENT_BROWSER_ARGS)) };
+    if (quietLog && providerEnv.AGENT_BROWSER_ARGS) providerEnv = { ...providerEnv, AGENT_BROWSER_ARGS: B.launchTail(String(providerEnv.AGENT_BROWSER_ARGS), null) }; // B-1789 cure: the launch tail (no mark: an env list of the provider's own)
     const p0 = (async () => {
       // lane engine-plugin: an ENGINE choice is judged HERE — its probe + launch options are I/O, asked inside the in-flight
       // start (a second start of this profile waits on this one) and before any record exists (a refusal leaves none). Its

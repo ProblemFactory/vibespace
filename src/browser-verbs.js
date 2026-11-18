@@ -1130,6 +1130,27 @@ const RAW_CONFIG_KEYS = Object.freeze(['cdp', 'autoConnect']);
  *  keeper's own — never the directory it sits in (a human may open that) — so no user or project file may carry it:
  *  it is in RAW_ARG_RE (dropped from both, said like every raw switch) and only the keeper writes it. */
 const KEEPER_MARK = '--vibespace-keeper';
+/** lane browser-stderr-pipe's QUIET SWITCHES (src/browser-stderr.js names the cause and re-exports these) — B-1789 cure: the
+ *  rule lives HERE, PURE, because THE LAUNCH TAIL (browser-profiles launchTail, a PURE module the client bundle reaches)
+ *  composes it: Chromium's logging off (`--disable-logging`) and nothing below FATAL (`--log-level=3` — LOG(ERROR) reaches
+ *  stderr even with logging "off", base/logging.cc ShouldLogToStderr). */
+const QUIET_LOG_ARGS = Object.freeze(['--disable-logging', '--log-level=3']);
+const LOG_SWITCH_RE = /^--(enable-logging|disable-logging|log-level|log-file|v|vmodule)(=|$)/;
+const quietArgListOf = (args) => (Array.isArray(args) ? args.map(String) : (typeof args === 'string' ? args.split(/[,\n]/) : [])).map((x) => x.trim()).filter(Boolean);
+/** Should `args` gain QUIET_LOG_ARGS? `{add, why}` — `theirs` (the user's own args spell a logging switch: theirs wins,
+ *  untouched — the automationFlag precedent) or `added`. PURE. */
+function quietLogVerdict(args) {
+  return quietArgListOf(args).some((x) => LOG_SWITCH_RE.test(x)) ? { add: false, why: 'theirs' } : { add: true, why: 'added' };
+}
+/** `args` WITH the quiet switches when the verdict adds them — a string stays a string (joined as it is separated), a
+ *  list a list; nothing ⇒ the switches alone. PURE. */
+function withQuietLogging(args) {
+  if (!quietLogVerdict(args).add) return args;
+  if (Array.isArray(args)) return [...args, ...QUIET_LOG_ARGS];
+  if (typeof args !== 'string' || !args.trim()) return QUIET_LOG_ARGS.join(',');
+  const sep = args.includes('\n') ? '\n' : ',';
+  return [...quietArgListOf(args), ...QUIET_LOG_ARGS].join(sep);
+}
 const RAW_ARG_RE = /^--(?:remote-debugging-[a-z-]+|remote-allow-origins|user-data-dir|profile-directory|vibespace-keeper)(?:=|$)/;
 /** lane engine-spi-egress r2: names only the KEEPER sets on an engine launch (never an engine's): the display platform (the
  *  keeper's display plan pins it — an engine naming wayland must not undo the hidden window's x11) and every proxy switch (the
@@ -1496,6 +1517,7 @@ module.exports = {
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,
   driverArgsList, driverArgsText, splitLaunchArgs, mergeLaunchArgs, KEEPER_ONLY_RE, // lane engine-args-string: the driver's `args` — its reading, THE one writer, the keeper | engine split
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
+  QUIET_LOG_ARGS, quietLogVerdict, withQuietLogging, // lane browser-stderr-pipe's quiet switches (B-1789 cure: PURE here, for THE LAUNCH TAIL)
   // r4
   AGENT_BROWSER_CLI, TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
   CLI_PACKAGE, CLI_PIN_RECORD, CHROME_BUILDS_RECORD, cliChoiceOf, cliInstallDirName, cliNativeName, cliInstallVerdict, cliPinVerdict, // lane browser-admin 2b: the pinned browser CLI

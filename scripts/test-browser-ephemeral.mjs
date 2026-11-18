@@ -354,8 +354,8 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     const ry = await post('/api/agent/browser/resolve', { argv: ['snapshot'] }, sy.agentToken);
     ok(ry.status === 200 && ry.json.kind === 'ephemeral' && ry.json.config === EPH_CFG, 'r3: /resolve names that file (`config`) — the one the keeper launched with', ry.json);
     const ec = (() => { try { return JSON.parse(fs.readFileSync(EPH_CFG, 'utf8')); } catch { return {}; } })(); // a pre-r4 tree goes RED here, never crashes
-    ok(ec.args === '--no-sandbox,' + B.keeperMarkArg(KEY_Y) && ec.proxy === 'http://127.0.0.1:3128' && JSON.stringify(ec.allowedDomains) === '["example.com"]' && !('profile' in ec) && !('cdp' in ec) && ((() => { try { return fs.statSync(EPH_CFG).mode; } catch { return 0; } })() & 0o777) === 0o600,
-      'r3/r4: its content is the user file by the one rule — the machine\'s own args / proxy / fence carried, the raw debugging port, `cdp` and the ephemeral-denied `profile` gone, THIS conversation\'s launch mark appended; 0600', ec);
+    ok(ec.args === '--no-sandbox,--disable-logging,--log-level=3,' + B.keeperMarkArg(KEY_Y) && ec.proxy === 'http://127.0.0.1:3128' && JSON.stringify(ec.allowedDomains) === '["example.com"]' && !('profile' in ec) && !('cdp' in ec) && ((() => { try { return fs.statSync(EPH_CFG).mode; } catch { return 0; } })() & 0o777) === 0o600,
+      'r3/r4: its content is the user file by the one rule — the machine\'s own args / proxy / fence carried, the raw debugging port, `cdp` and the ephemeral-denied `profile` gone, THIS conversation\'s launch tail appended (B-1789 cure: the quiet log switches, then its mark); 0600', ec);
     ok(!/42945|dumpchrome|R3-UA-LAYERED/.test(JSON.stringify(ec)), 'r3: nothing of the agent directory\'s agent-browser.json reached it');
     // an attachment: the profile browser's file (the machine's own `profile` stays — AGENT_BROWSER_PROFILE names the dir anyway;
     // the fence goes first: a persistent profile is refused under one, §6.3)
