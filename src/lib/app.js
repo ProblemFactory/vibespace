@@ -430,6 +430,7 @@ class App {
 
     this._setupToolbar();
     this._setupDialogs();
+    this._homeFacts = new Promise((r) => { this._homeFactsSeen = r; }); // B-7959: the answer the tour's first screen counts its steps from
     this._setupWelcome();
     this._setupGlobalSettings();
     this._setupChromeContextMenus();
@@ -563,6 +564,7 @@ class App {
       setPageZone(pageZone(this)); setStampFormatter(when);   // lane ui-language: every time a surface prints, in the page's zone
       this._authEnabled = !!d.authEnabled;
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
+      this._homeFactsSeen?.(true); // B-7959: whether this workspace is protected is known now
       initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
@@ -588,7 +590,7 @@ class App {
           }
         }
       }
-    }).catch(()=>{});
+    }).catch(() => { this._homeFactsSeen?.(false); }); // B-7959 r2: a failed answer ends the tour's wait at once (never the whole bound)
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
     initStateSync(this.ws);
@@ -951,7 +953,15 @@ class App {
       hasSessions = (d.sessions || []).length > 0;
     } catch {}
     if (hasSessions) { localStorage.setItem('vs-onboarded', '1'); maybeNagVault(); return; }
+    // B-7959 (the day-one half): the tour's first screen counts its steps from whether this workspace is protected — a fact
+    // only /api/home's answer carries. Drawn before it (/api/sessions answering first, a loaded hub), a protected pod showed
+    // FOUR dots, then three at the next press: a flash on the first screen a new person sees. The first draw waits for that
+    // answer, BOUNDED: a hub that has not answered in 3 s gets the screen with what is known, drawn again ONCE when it answers
+    const known = await Promise.race([this._homeFacts, new Promise((r) => setTimeout(() => r(false), 3000))]);
+    // r2: finished or opened meanwhile (⚙ → Welcome tour, another tab) — never opened a second time over it
+    if (localStorage.getItem('vs-onboarded') || document.getElementById('welcome')?.classList.contains('onboarding')) return;
     this._showOnboarding();
+    if (!known) this._homeFacts.then(() => this._obRedraw?.());
   }
 
   // ── Shared modal shell for the config/password dialogs ──

@@ -19,6 +19,9 @@
 //     「work（23 个文件）」
 //   ⑨ RED CONTROL: a bundle rebuilt from THIS source with the base's two rules back (the vault asks while not set up; the
 //     dialog keeps the last folder) — the page asks the second password on day one and the field keeps the other area's path
+//   ⑪ B-7959 THE FIRST SCREEN WAITS FOR THE FACT IT COUNTS: /api/home (whether the pod is protected) held 1 s past
+//     /api/sessions ⇒ the tour's dots show ONE count, three; RED CONTROL (today's order: a bundle with the wait taken out,
+//     held 2.5 s) ⇒ four first, the flash a person saw; held 5 s, past the 3 s bound ⇒ four, corrected ONCE in place: three
 // Run: node scripts/test-day-one-chrome.mjs [--shots <dir>]   (SKIPs without chrome / dtach)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -33,9 +36,9 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let DTACH = true; try { execSync('command -v dtach', { stdio: 'ignore' }); } catch { DTACH = false; }
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('day-one-chrome-wt'), PROFILE = scratch('day-one-chrome-chrome'), HOME = scratch('day-one-chrome-home'), MUT = scratch('day-one-chrome-mut');
+const wt = scratch('day-one-chrome-wt'), PROFILE = scratch('day-one-chrome-chrome'), HOME = scratch('day-one-chrome-home'), MUT = scratch('day-one-chrome-mut'), MUT2 = scratch('day-one-chrome-mut2');
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : scratch('day-one-chrome-shots');
-for (const d of [HOME, MUT]) fs.rmSync(d, { recursive: true, force: true });
+for (const d of [HOME, MUT, MUT2]) fs.rmSync(d, { recursive: true, force: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
@@ -63,6 +66,17 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
 }
 const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
+// ⑪'s red control — THIS source with ONE change taken back: the tour's first draw no longer waits for /api/home (today's order)
+{
+  fs.mkdirSync(MUT2, { recursive: true });
+  execSync(`cp -r ${repo}/src ${MUT2}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT2, 'node_modules'));
+  const f = path.join(MUT2, 'src/lib/app.js'), s = fs.readFileSync(f, 'utf8'), from = "const known = await Promise.race([this._homeFacts, new Promise((r) => setTimeout(() => r(false), 3000))]);";
+  if (s.split(from).length !== 2) throw new Error('⑪ mutant anchor gone: ' + from.slice(0, 60));
+  fs.writeFileSync(f, s.replace(from, 'const known = true;'));
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut2.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
+}
+const MUT2_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut2.js'));
 
 let srv = null;
 const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
@@ -75,7 +89,7 @@ const cleanup = () => {
   try { srv && srv.kill('SIGKILL'); } catch { }
   for (const root of [wt, HOME]) { try { endRootedProcesses(root); } catch { } }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [PROFILE, HOME, MUT]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  for (const d of [PROFILE, HOME, MUT, MUT2]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -87,12 +101,15 @@ if (!target) { console.error('  ✗ boot: no chrome page'); process.exit(1); }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
-let mutantOn = false;
+let mutantOn = false, mutant2On = false, homeHoldMs = 0;   // ⑪: the second mutant, and how long /api/home is held
 ws.on('message', (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
   if (m.method === 'Fetch.requestPaused') {   // ⑨: the page's /bundle.js answered with the mutant while the control runs
     const p = m.params;
+    const pu = new URL(p.request.url);
+    if (pu.pathname === '/api/home' && homeHoldMs > 0) { const hold = homeHoldMs; setTimeout(() => ws.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId } })), hold); return; }   // ⑪
+    if (mutant2On && /\/bundle\.js(\?|$)/.test(pu.pathname + pu.search)) { ws.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: MUT2_BUNDLE.toString('base64') } })); return; }   // ⑪
     if (mutantOn && /\/bundle\.js(\?|$)/.test(new URL(p.request.url).pathname + new URL(p.request.url).search)) {
       ws.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: MUT_BUNDLE.toString('base64') } }));
     } else ws.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId } }));
@@ -112,7 +129,7 @@ const h1 = `(document.querySelector('#welcome .welcome-content h1')?.textContent
 
 try {
   await cdp('Page.enable'); await cdp('Runtime.enable');
-  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }, { urlPattern: '*/api/home*', requestStage: 'Request' }] });   // ⑪: /api/home held (every other route under it continues at once)
   startServer();
   check('the pod-shaped hub is up (a sign-in password, HOME = the person’s home)', await ready());
   await cdp('Page.navigate', { url: URL_ + 'login' });
@@ -284,6 +301,31 @@ try {
   const zh = await until(`(() => { const c = document.querySelector('#ob-chips .cwd-recent-chip'); return c ? { h1: document.querySelector('#welcome .welcome-content h1')?.textContent, chip: c.textContent } : null; })()`, { timeout: 8000 });
   check('中文: 「开始第一个对话」 · 「work（23 个文件）」', !!zh && zh.h1 === '开始第一个对话' && zh.chip === 'work（23 个文件）', zh);
   await shot('day-one-6-zh.png');
+
+  console.log('⑪ B-7959: the tour’s first screen waits for the answer that says the pod is protected — its dots drawn once');
+  {
+    // the dot counts the first screen SHOWED, in order (a new count is pushed when it differs from the last — a render that
+    // replaces the screen, or the late answer correcting the dots in place), from the document's start
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `window.__dots11 = []; new MutationObserver(() => { const d = document.querySelector('#welcome .ob-dots'); if (!d) return; const n = d.querySelectorAll('.ob-dot').length, a = window.__dots11; if (a[a.length - 1] !== n) a.push(n); }).observe(document, { childList: true, subtree: true });` });
+    const firstVisit = async (holdMs, mutant) => {
+      homeHoldMs = holdMs; mutant2On = mutant;
+      await evalJs(`localStorage.removeItem('vs-onboarded'); window.__old11 = 1; true`);   // the outgoing page, marked: never read as the new one
+      await cdp('Page.reload', { ignoreCache: true });
+      const fresh = await until(`!window.__old11 && document.readyState !== 'loading'`, { timeout: 20000 });
+      await loaded();
+      const open = await until(`!window.__old11 && !!document.getElementById('ob-next')`, { timeout: 20000 });
+      await sleep(holdMs + 2000);   // past the held answer, counted from the NEW tour's open: a correction it brings is shown by now
+      const dots = await evalJs(`window.__old11 ? null : (window.__dots11 || []).slice()`);
+      homeHoldMs = 0; mutant2On = false;
+      return { fresh: !!fresh, open: !!open, holdMs, dots };
+    };
+    const held = await firstVisit(1000, false);
+    check('⑪ /api/home held 1 s past /api/sessions: the first screen WAITED for it — it showed ONE count of dots, three (a protected pod: no «Protect this workspace»)', held.open && JSON.stringify(held.dots) === '[3]', held);
+    const ctl = await firstVisit(2500, true);
+    check('⑪ RED CONTROL (today’s order — a bundle with the wait taken out, the answer held 2.5 s): the first screen shows FOUR dots first, the flash a person saw', ctl.open && !!ctl.dots && ctl.dots[0] === 4, ctl);
+    const slow = await firstVisit(5000, false);
+    check('⑪ a hub slower than the 3 s bound (held 5 s): the screen shows what is known, and its dots are corrected ONCE in place when the answer comes — four, then three', slow.open && JSON.stringify(slow.dots) === '[4,3]', slow);
+  }
 } catch (e) {
   failed++; console.error('  ✗ the suite threw: ' + (e && e.stack || e));
 }
