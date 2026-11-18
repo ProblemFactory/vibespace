@@ -604,19 +604,26 @@ leg('§3 IN-PROCESS ㊲ UNKNOWN BLOCKS A SPAWN — a service whose last run\'s w
   const A = E.jobs.get(a.id), B = E.jobs.get(b.id);
   const notices = (j) => said.filter((n) => n.jobId === j.id && /cannot prove the previous run is gone/.test(n.text || ''));
   const words = (j, re) => E.events.filter((e) => e.jobId === j.id && re.test(e.what || '')).length;
-  await until(() => notices(A).length && notices(B).length, 600, 5);
+  // B-d24c (the .404 readings unit's hosted run, both tries): every wait of this leg is on the STATE it names, never a window
+  // (400 / 600 ms read nothing on a runner ×1.15 slower); the guard only ends a wait that never comes
+  await until(() => notices(A).length && notices(B).length, 8000, 5);
   const WA = /^cannot prove the previous run is gone \(pid\.json unreadable\) — not restarted; if it is gone: systemctl --user kill --signal=KILL jobs-memory-bound-fast-doubt-\d+\.scope \(or vibespace-job stop jb-doubt001\), then start it again; if it runs: it keeps running$/;
   const WB = /^cannot prove the previous run is gone \(pid\.json incomplete\) — not restarted; if it is gone: vibespace-job stop jb-doubt002, then start it again; if it runs: it keeps running$/;
   ok(!E.spawned.length && S.procs().length === 1 && words(A, WA) === 1 && words(B, WB) === 1 && notices(A).length === 1 && notices(B).length === 1 && A.runs[0].doubtNoticed > 0 && notices(A)[0].i18n && /^\{name\}: cannot prove/.test(notices(A)[0].i18n.text.key) && !E.events.some((e) => [A.id, B.id].includes(e.jobId) && /did not answer/.test(e.what || '')),
     `the boot's replay starts NEITHER — said once each, ONE For-you notice each: «${(E.events.find((e) => e.jobId === A.id && /cannot prove the previous/.test(e.what || '')) || {}).what}» (e7147b71: «did not answer in … — starts anyway», a second run beside the live one)`, { spawned: E.spawned, procs: S.procs(), notices: notices(A).length + notices(B).length });
   const r1 = E.start(A);
-  await until(() => !A._starting, 400, 5);
+  await until(() => !A._starting, 8000, 5);
   ok(r1.ok && /cannot be proven gone \(pid\.json unreadable\)/.test(r1.after || '') && !E.spawned.length && notices(A).length === 1 && words(A, WA) === 1, `a person's start never starts beside it either — «${r1.after}»; still ONE notice, said once`, { r1, spawned: E.spawned });
   fs.writeFileSync(path.join(S.dir, 'cgroup.procs'), ''); // the person's `systemctl --user kill …` — its scope now empty
-  E.start(A); await until(() => E.spawned.length, 400, 5);
+  // B-d24c (the adversarial read: on the hosted run A was NEVER spawned — its start decides inside the leg's 15 ms grace on a scope
+  // read bounded at 5 ms, and one loop stall refused it for good): THIS start gets bounds no stall reaches (the boot's part above keeps
+  // the leg's 15 ms / 5 ms); a read still in flight from r1 answers the old scope, the loop asks again and reads it empty
+  E.d.memorySample = { stopMs: 8000 }; E.d.reapReadMs = 8000;
+  E.start(A); await until(() => E.spawned.length, 9000, 5);
+  delete E.d.memorySample; delete E.d.reapReadMs;
   ok(E.spawned.length === 1 && E.spawned[0].id === A.id && journal(E, A, /^its scope is empty — nothing of its last run runs \(its wrapper is still not proven gone: pid\.json unreadable\)$/), 'its scope read EMPTY ends the doubt — the next start goes, said', E.spawned);
-  E.stop(B); await until(() => B.runs[0].doubtOver, 400, 5); // the person's stop: what can be named of it is stopped, the doubt ended
-  E.start(B); await until(() => E.spawned.length === 2, 400, 5);
+  E.stop(B); await until(() => B.runs[0].doubtOver, 8000, 5); // the person's stop: what can be named of it is stopped, the doubt ended
+  E.start(B); await until(() => E.spawned.length === 2, 8000, 5);
   ok(!!B.runs[0].doubtOver && B.runs[0].doubtOver.by === 'stop' && journal(E, B, /^stopped by its owner — the previous run was not proven gone: 0 processes carrying its mark stopped; it may start again$/) && E.spawned.length === 2 && E.spawned[1].id === B.id,
     'a person\'s stop ends the doubt (its mark found nowhere in a FINISHED scan) — then its start goes; a start time of 0 on a live pid proves nothing', { over: B.runs[0].doubtOver, spawned: E.spawned });
   MEMBERS.delete('jb-doubt002');
