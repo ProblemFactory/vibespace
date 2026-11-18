@@ -7619,6 +7619,9 @@ label.chan-cap-row { cursor: default; }
 .pp-chip-door:hover, .pp-chip-door:focus-visible { text-decoration: underline; outline: none; }
 .pp-locked { cursor: default; }
 .pp-locked .pp-lock-why { color: var(--text-dim); }
+/* a locked row: its «through» note stands in for the row's own hint, and its name is never crushed («Ev…») by the note and the door */
+.pp-row.pp-locked > .pp-hint:not(.pp-lock-why) { display: none; }
+.pp-row.pp-locked .pp-name { flex: 0 0 auto; max-width: 45%; }
 .pp-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
 .pp-input:focus { outline: none; border-color: var(--accent); }
 .pp-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px; }
