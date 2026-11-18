@@ -248,7 +248,7 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
     clock += 2000;
     await eng.approve(r.proposal.id, {});
     const sent = v.state.posted[v.state.posted.length - 1];
-    return { sent: sent && sent.text, notifies: (q.prepared && q.prepared.notifies) || [], plain: (q.prepared && q.prepared.plain) || [] };
+    return { sent: sent && sent.text, notifies: (q.prepared && q.prepared.notifies) || [], plain: (q.prepared && q.prepared.plain) || [], over: (q.prepared && q.prepared.over) || [] };
   };
   R.two = await sendOf('@Alice Chen can you check?');
   R.raw = await sendOf('<@U0BOB0001> and <@U0OUTSIDE1> see the note');
@@ -288,13 +288,14 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   ok(R.three.sent === '<@U0ANN0001> the draft is ready', `B-a0ae r1 a THREE-word name («@Ann Marie Smith», two Anns in the channel): the longest name that answers one person decides (${JSON.stringify(R.three)})`);
   ok(R.adaPark.refused === 'mention-ambiguous', `B-a0ae follow-up AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED: «@Ada Park» answers two members ⇒ refused by name — never the third member whose handle is ada (${JSON.stringify(R.adaPark)})`);
   ok(R.label.sent === '<@U0BOB0001> see this' && R.label.notifies.join() === 'Bob', `B-a0ae follow-up a name inside a typed token's label is the token's: «<@U0BOB0001| @Alice Chen>» notifies Bob alone — shown equals sent (${JSON.stringify(R.label)})`);
-  ok(R.many.notifies.length === 50 && R.many.plain.join() === 'Alice Chen' && /and @Alice Chen$/.test(R.many.sent || ''), `B-a0ae follow-up ONE bound of 50 marks: 50 typed tokens and one name — the 51st mark (the name) goes as words, said on the card («not notified») — never dropped unseen (${JSON.stringify({ notifies: R.many.notifies.length, plain: R.many.plain })})`);
+  ok(R.many.notifies.length === 50 && R.many.over.join() === 'Alice Chen' && !R.many.plain.length && /and @Alice Chen$/.test(R.many.sent || ''), `B-a0ae follow-up ONE bound of 50 marks: 50 typed tokens and one name — the 51st mark (the name) goes as words under its OWN label (over the limit — the cure: never «not a member here» for a member), never dropped unseen (${JSON.stringify({ notifies: R.many.notifies.length, plain: R.many.plain })})`);
   const RL = await mentionLeg('mentions-limited', undefined, { limited: true });
   ok(RL.late.sent === '@Zed Late the numbers are in' && !RL.late.refused, `B-a0ae r1 the directory read is BEST EFFORT: users.list rate-limited ⇒ the proposal is still made, the unmatched name goes as words (${JSON.stringify(RL.late)})`);
   // CONTROLS: a copy of slack.js without each part turns its own leg red
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
-  const cut = (from, to, tag) => { if (ssrc.split(from).length !== 2) return null; const reg = CH.createChannelRegistry(); reg.register(require(MC.write('src/channels/slack.js', ssrc.replace(from, to), tag)).adapter); return reg; };
-  const noTwo = cut("        for (const l of longer) { const d = match(l); if (d.length === 1) { hit = [l, d]; break; } }", '', 'a0ae-two');
+  // the cure (verdict 06:13Z): a control whose anchor is not in slack.js (once) FAILS BY NAME — never a silent null
+  const cut = (from, to, tag) => { if (ssrc.split(from).length !== 2) { ok(false, `CONTROL anchor missing: ${tag} — the line this control patches is not in slack.js once (rewritten?)`); return null; } const reg = CH.createChannelRegistry(); reg.register(require(MC.write('src/channels/slack.js', ssrc.replace(from, to), tag)).adapter); return reg; };
+  const noTwo = cut('        for (const l of [...longer, one]) {', '        for (const l of [one]) {', 'a0ae-two');   // the cure: the follow-up rewrote the walk — the same meaning at the new site
   const noRaw = cut('        if (ids.includes(r.id) && !(p && p.deleted)) {', '        if (false) {', 'a0ae-raw');
   const noDir = cut("      if (ids.some((id) => !people.has(id))) { try { await listPeople({ until: now() + DIRECTORY_PROPOSE_MS }); } catch { /* best effort: the lookups' names stand */ } }", '', 'a0ae-dir');
   // the follow-up's RED controls: the longest-answering reading (the old fallback to one word) and the catch around the read

@@ -589,10 +589,10 @@ function create(record = {}, deps = {}) {
     let cursor = null;
     for (let i = 0; i < PEOPLE_LIST_PAGES; i++) {
       // the follow-up: `until` — a propose's read ends at its deadline (the names it could not match stay words)
-      if (until !== null && now() >= until) return;
+      if (until !== null && now() >= until) { peopleListedAt = was; return; }   // the cure: a read the deadline cut short never stamps its 6 h
       let d;
       try { d = await api('users.list', { limit: 200, ...(cursor ? { cursor } : {}) }, until !== null ? { windowOf: () => Math.max(1000, until - now()) } : {}); }
-      catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') peopleListedAt = was; rateOrNull(e); return; }   // follow-up: a read refused for rate never stamps its 6 h
+      catch (e) { peopleListedAt = was; rateOrNull(e); return; }   // follow-up + the cure: a read refused for rate, or cut by a transport error, never stamps its 6 h
       for (const u of Array.isArray(d.members) ? d.members.slice(0, 1000) : []) rememberPerson(u, now());
       cursor = d.response_metadata && d.response_metadata.next_cursor ? String(d.response_metadata.next_cursor).slice(0, 2048) : null;
       if (!cursor) break;
@@ -716,7 +716,7 @@ function create(record = {}, deps = {}) {
     const tooLong = [...t].length > Text.SEND_MAX;
     const names = Text.atNamePairs(Text.withoutTypedMentions(t)).filter((n) => !Text.BROADCAST_WORDS.includes(n.one.toLowerCase()));   // follow-up: a name inside a typed token's label is the token's, never a mention of its own
     const raws = Text.rawMentions(t);   // B-a0ae: a typed `<@U…>`
-    const out = { notifies: [], unresolved: [], plain: [], mentions: [], tooLong, sendMax: Text.SEND_MAX, at: now() };
+    const out = { notifies: [], unresolved: [], plain: [], over: [], mentions: [], tooLong, sendMax: Text.SEND_MAX, at: now() };
     if (names.length || raws.length) {
       const ids = await membersOf(convId);
       await namePeople(ids.filter((id) => !people.has(id)).slice(0, 20));
@@ -754,7 +754,7 @@ function create(record = {}, deps = {}) {
     }
     // the follow-up: the registry keeps MENTIONS_MAX marks — typed tokens and names counted together; past it they go as
     // plain words, SAID on the card («not notified»), never dropped unseen
-    if (out.mentions.length > MENTIONS_MAX) { for (const m of out.mentions.splice(MENTIONS_MAX)) out.plain.push(m.name); out.notifies.splice(MENTIONS_MAX); }
+    if (out.mentions.length > MENTIONS_MAX) { out.over = out.mentions.splice(MENTIONS_MAX).map((m) => m.name); out.notifies.splice(MENTIONS_MAX); }   // the cure: its own list (a member past the bound is no «not a member»)
     out.text = Text.toMrkdwn(t, out.mentions);
     return out;
   }

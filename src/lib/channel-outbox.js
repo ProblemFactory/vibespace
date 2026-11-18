@@ -243,7 +243,7 @@ function appendAttachments(card, p, app = null) {
     box.appendChild(row);
   }
   if (blocked) {
-    const w = el('div', 'chan-prop-file-note chan-warn', p.filesBlocked.why === 'with-files' ? t('Files cannot go with a reply in a thread that is also shown in the chat here — send it without the file, or reject it.') : t('This account’s sign-in ({account}) cannot send files — re-authorize it, or send without the file.', { account: p.adapterLabel || p.adapterId }));   // B-09d2 follow-up: a stored proposal the placement rule refuses
+    const w = el('div', 'chan-prop-file-note chan-warn', p.filesBlocked.why === 'with-files' ? t('Files cannot go with this kind of reply here — send it without the file, or reject it') : t('This account’s sign-in ({account}) cannot send files — re-authorize it, or send without the file.', { account: p.adapterLabel || p.adapterId }));   // B-09d2 follow-up: a stored proposal the placement rule refuses
     w.dataset.filesBlocked = (p.filesBlocked.requiredScopes || []).join(' ');
     if (w.dataset.filesBlocked) w.title = t('Needs one of: {scopes}', { scopes: (p.filesBlocked.requiredScopes || []).join(', ') });
     box.appendChild(w);
@@ -301,6 +301,8 @@ function appendReplyTarget(card, p) {
     card.appendChild(envRow('chan-prop-notifies', t('Notifies'), Array.isArray(pr.notifies) && pr.notifies.length ? pr.notifies.join(', ') : t('nobody (no @name here was resolved)')));
     // B-a0ae: a typed <@U…> that matched no member is shown as typed (never «@<@U…>»)
     if (Array.isArray(pr.plain) && pr.plain.length) card.appendChild(envRow('chan-prop-plain', t('Not a member here'), t('{names} — sent as plain words, nobody is notified', { names: pr.plain.map((n) => (String(n).startsWith('<@') ? n : '@' + n)).join(', ') })));
+    // the cure (verdict 06:13Z): marks past the bound have their OWN label — a member past it is no «not a member here»
+    if (Array.isArray(pr.over) && pr.over.length) card.appendChild(envRow('chan-prop-over', t('Past the mark limit'), t('{names} — past the 50 mentions a message carries: sent as plain words, nobody is notified', { names: pr.over.map((n) => (String(n).startsWith('<@') ? n : '@' + n)).join(', ') })));
   }
 }
 /** design 012 D20: the audience in words — a DM, a private conversation's members, the whole workspace, or a

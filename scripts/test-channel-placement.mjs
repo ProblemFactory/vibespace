@@ -388,6 +388,12 @@ console.log('⑥ the words: the card, the refusal, the touch row — zh / ja / e
     console.log(`    ${lang} card:  ${W.card.map(([pl, a]) => `${pl}: ${a}`).join(' | ')}`);
     console.log(`    ${lang} touch: ${W.touch.join(' | ')}`);
   }
+  // the cure (verdict 06:13Z): the with-files toast names only the doors the card draws — pinned in en / zh / ja
+  const WF = { why: 'with-files', placement: 'thread+chat' };
+  const wf = [P.placementRefusalText(WF, { t: tFor(null, keys) }), P.placementRefusalText(WF, { t: tFor(zh, keys) }), P.placementRefusalText(WF, { t: tFor(ja, keys) })];
+  ok(wf[0] === 'Files cannot go with this kind of reply here — send it without the file, or reject it' && wf[1] !== wf[0] && wf[2] !== wf[0] && P.placementRefusalText({ why: 'with-files', placement: 'quote' }, { t: tFor(null, keys) }) === wf[0]
+    && read('src/lib/channel-outbox.js').includes("p.filesBlocked.why === 'with-files' ? t('Files cannot go with this kind of reply here — send it without the file, or reject it') :"),
+    'B-09d2 the cure THE WORDS: the with-files toast and the old card\'s note say the same true words for ANY placement, naming only the doors the card draws («send it without the file, or reject it») — translated in zh and ja', wf);
   const missing = [...keys].filter((k) => !zh.has(k) || !ja.has(k));
   ok(missing.length === 0 && keys.size >= 16, `every word the placement surfaces draw is in BOTH dictionaries (${keys.size} keys: the card line with and without a quote, the refusal toast per why, the touch row per placement)`, missing.join(' | '));
   ok(en.card[0][1] === null && en.card[0][2] === null && /^Quoted reply — to Ada: "周会改到几点？"$/.test(en.card[1][1]) && /^Reply in thread — under Ada/.test(en.card[2][1]) && /^Reply in thread, also shown in the chat — under Ada/.test(en.card[3][1]) && en.card[1][2] === 'Quoted reply, shown in the chat', 'the CARD line (en): a quote / a thread / a thread + the chat, each with the answered message; a plain message draws NO line', J(en.card));

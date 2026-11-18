@@ -671,7 +671,7 @@ function create(engineCtx) {
           id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: OF.metaOf(att.files),
           replyAnchor: ra.anchor, replyEnvelope: ra.envelope,
-          ...(prepared ? { prepared: { mentions: prepared.mentions, notifies: prepared.notifies, plain: prepared.plain, at: prepared.at } } : {}), ...(audience ? { audience } : {}),
+          ...(prepared ? { prepared: { mentions: prepared.mentions, notifies: prepared.notifies, plain: prepared.plain, ...(prepared.over && prepared.over.length ? { over: prepared.over } : {}), at: prepared.at } } : {}), ...(audience ? { audience } : {}),
           placement, ...(placement !== 'chat' ? { replyQuote } : {}), ...(pv.defaulted && placement !== 'chat' ? { placementDefaulted: pv.rule } : {}),
           ...(intoThread ? { inThread: true, threadKey, threadQuote: replyQuote } : {}),
           draftedBy: drafter, ...drafterGroupsOf(ctx), authority, at: t, updatedAt: t, state: 'proposed',
@@ -1025,6 +1025,7 @@ function create(engineCtx) {
     fresh.mentions.forEach((m, i) => { if (old.has(m.name)) keep(m.name); else { out.mentions.push(m); out.notifies.push(fresh.notifies[i] || m.name); } });
     for (const n of fresh.unresolved) keep(n);
     for (const n of fresh.plain) { if (old.has(n)) keep(n); else out.plain.push(n); }
+    if (Array.isArray(fresh.over) && fresh.over.length) out.over = fresh.over.slice();   // the cure: the overflow past the bound keeps its own label
     return { ok: true, prepared: out };
   }
   async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null, withoutFiles = false, pressed = null } = {}) {
