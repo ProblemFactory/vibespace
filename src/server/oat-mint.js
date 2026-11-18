@@ -55,7 +55,7 @@ const MINT_TTL_MS = 10 * 60e3;
 const SCRATCH_PREFIX = 'vs-oat-mint-';
 
 function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spawnPty = null, env = process.env,
-  tmpRoot = os.tmpdir(), ttlMs = MINT_TTL_MS, now = () => Date.now(), log = (...a) => console.log(...a),
+  tmpRoot = os.tmpdir(), ttlMs = MINT_TTL_MS, ttlTimer = setTimeout, now = () => Date.now(), log = (...a) => console.log(...a),
   probePanel = null, windows = () => ({}), journal = () => { }, exitHook = false, sweepAgeMs = MINT_TTL_MS + 5 * 60e3, rawAfterMs = RAW_AFTER_MS } = {}) {
   const mints = new Map(); // id → { id, accountId, phase, url, localUrl, error, verdict, signedInAs, other, choices, startedAt, endedAt, mintedAt, pty, dir, parse, lastLine, timer } — publicMint whitelists what leaves
   // a token waiting for the person's pick (F1 `confirm`): hub memory only, keyed
@@ -220,11 +220,12 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
       feed(m, '', { final: true });
       if (live(m)) end(m, 'failed', m.lastLine || ('the sign-in command ended (exit ' + exitCode + ') without a token'));
     });
-    m.timer = setTimeout(() => {
+    // ttlTimer: the TTL's one timer (B-fe02 — test-oat-mint fires it when its pick is left unanswered instead of waiting a real TTL out)
+    m.timer = ttlTimer(() => {
       if (live(m)) end(m, 'failed', 'the sign-in was not finished within 10 minutes');
       const t2 = setTimeout(() => mints.delete(id), 60e3); if (t2.unref) t2.unref();
     }, ttlMs);
-    if (m.timer.unref) m.timer.unref();
+    if (m.timer && m.timer.unref) m.timer.unref();
     log(`[oat-mint] ${id} ${accountId} started`);
     emit(m);
     return { ok: true, mint: publicMint(m) };

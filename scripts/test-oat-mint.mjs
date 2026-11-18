@@ -458,9 +458,27 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   r = await runMint(O, sub, { ident: null });
   const n1 = r.mint.confirm(r.id, { save: false });
   ok(n1.mint.phase === 'cancelled' && r.mint._held.size === 0 && !am.getOat(sub) && r.js.some((j) => j.outcome === 'owner-declined'), '不保存 ⇒ cancelled, the held token dropped, nothing saved');
-  r = await runMint(O, sub, { ident: null, ttlMs: 2500 });
-  ok(r.m.phase === 'confirm', '(a pick left unanswered…)');
-  await until(() => r.mint.get(r.id)?.phase === 'failed', 5000);
+  // the TTL's one timer, fired by the suite (B-fe02: this leg waited a REAL 2.5 s TTL out, then up to 5 s for «failed» — 3.8 s of the run).
+  // The recorder hands back a handle and the leg watches every clearTimeout: the TTL must still be ARMED while the pick waits (the
+  // real wait proved that by the phase staying «confirm»; a mint that cleared its TTL on reaching the pick would hold the token forever)
+  const ttlPick = async (Orch) => {
+    const ttl = [], cleared = [], clr0 = globalThis.clearTimeout;
+    globalThis.clearTimeout = function (h) { if (ttl.some((t) => t.h === h)) cleared.push(h); return clr0.apply(this, arguments); };
+    try {
+      const rr = await runMint(Orch, sub, { ident: null, ttlTimer: (fn, ms) => { const h = { ttl: ttl.length + 1, unref() { } }; ttl.push({ fn, ms, h }); return h; } });
+      const armed = rr.m.phase === 'confirm' && ttl.length === 1 && cleared.length === 0;
+      if (ttl[0]) ttl[0].fn();
+      return { rr, armed, ttl, cleared };
+    } finally { globalThis.clearTimeout = clr0; }
+  };
+  const tp = await ttlPick(O); r = tp.rr;
+  ok(tp.armed && tp.ttl[0].ms === O.MINT_TTL_MS, '(a pick left unanswered… its TTL armed ONCE, at the product\'s 10 minutes, and STILL ARMED while the pick waits)', { phase: tp.rr.m.phase, ttl: tp.ttl.map((t) => t.ms), cleared: tp.cleared.length });
+  // RED control: a mint that clears its TTL when it reaches the pick (the token would wait in hub memory with no end)
+  const PICK = "    m.phase = 'confirm'; m.verdict = 'unproven';\n";
+  const srcO = fs.readFileSync(ORCH, 'utf8');
+  if (srcO.includes(PICK)) { const tc = await ttlPick(loadOrch(srcO.replace(PICK, PICK + "    clearTimeout(m.timer);\n"))); tc.rr.mint.cancel(tc.rr.id);
+    ok(!tc.armed && tc.cleared.length === 1, 'RED control: a mint that clears its TTL on reaching the pick is caught — the timer is cleared while the pick waits', { cleared: tc.cleared.length }); }
+  else ok(false, 'the RED control\'s anchor (the pick\'s phase line) is where the leg expects it');
   ok(r.mint.get(r.id).phase === 'failed' && r.mint._held.size === 0 && !am.getOat(sub), '… the TTL drops the held token: failed, nothing saved');
   r = await runMint(O, sub, { ident: null }); r.mint.cancel(r.id);
   ok(r.mint._held.size === 0 && r.mint.get(r.id).phase === 'cancelled', 'cancel during the pick drops the held token');
