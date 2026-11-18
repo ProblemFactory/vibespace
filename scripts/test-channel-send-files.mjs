@@ -835,11 +835,11 @@ async function holdAfterWaitJudge(L) {
 /** F3 through a REAL engine (its clock = the rig's): two files, a.png lands, b.pdf's every 504 answered 13 s after it
  *  left. `lane`: 'collect' (an agent's direct reply read inline), 'cli' (an agent's direct reply, no inline read),
  *  'approved' (the owner's Approve). → { q, r, took, posts } */
-async function budgetLane(ENGm, S, lane) {
+async function budgetLane(ENGm, S, lane, { slowMs = SLOW } = {}) {   // r3: `slowMs` — how long each failing POST takes
   const fake = require(path.join(REPO, 'src/channels/fake.js'));
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-budget-'));
   let posts = 0;
-  const rig = retryRig(S, 'slack', (c, k) => { if (isPost(c) && ++posts > 1) { k.t += SLOW; return jsonRes(504, GATEWAY); } return okSlack(c); }, { random: half });
+  const rig = retryRig(S, 'slack', (c, k) => { if (isPost(c) && ++posts > 1) { k.t += slowMs; return jsonRes(504, GATEWAY); } return okSlack(c); }, { random: half });
   const mod = { kind: 'slack-budget', caps: { ...fake.fakePoll.caps, idempotency: S.caps.idempotency, sendAttachments: S.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
     create(record, deps) { const base = fake.fakePoll.create(record, { ...deps }); return Object.assign(Object.create(base), { send: (c, o) => (o && Array.isArray(o.attachments) && o.attachments.length ? rig.a.send(c, o) : base.send(c, o)) }); } };
   const registry = CH.createChannelRegistry(); registry.register(mod);
@@ -876,16 +876,19 @@ async function budgetJudge(S, L, ENGm) {
   const out = {};
   const fail = (pin, m) => { (out[pin] = out[pin] || []).push(m); };
   const slowSlack = (c, k) => { if (isPost(c)) { k.t += SLOW; return jsonRes(504, GATEWAY); } return okSlack(c); };
-  // a 30 s budget, each 504 answered 13 s after it left: attempt 2 fits (window 11 s — r4: the bytes leave the completing call 5 s), attempt 3 does not ⇒ said at 27 s
-  { const { a, calls, clock } = retryRig(S, 'slack', slowSlack, { random: half });
+  // a 30 s budget, the first 504 answered 13 s after it left, the retry's 10 s (r3, the lane's adversarial read: INSIDE its
+  // window — the rig moves its clock whatever the window): attempt 2 fits (window 11 s — r4: the bytes leave the completing
+  // call 5 s), attempt 3 does not ⇒ said at 24 s
+  const slowThenInside = () => { let n = 0; return (c, k) => { if (isPost(c)) { k.t += ++n === 1 ? SLOW : 10000; return jsonRes(504, GATEWAY); } return okSlack(c); }; };
+  { const { a, calls, clock } = retryRig(S, 'slack', slowThenInside(), { random: half });
     const { e } = await sendB(a, 'C0FIXTURE', files().slice(0, 1), 'x', 30000);
     const Ps = calls.filter(isPost);
-    if (!(e && e.code === 'transport' && e.retryable === true && e.message === 'slack files.upload: HTTP 504 (after 2 attempts (budget))' && e.detail.stopped === 'budget' && e.detail.attempts === 2 && Ps.length === 2 && Ps[0].win === 60000 && Ps[1].win === 11000 && clock.t - T0 === 27000)) fail('F3·adapter', `slack, a 30 s budget: ${Ps.length} POSTs (windows ${Ps.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2 POSTs, windows 60000 / 11000, «(after 2 attempts (budget))» at 27000)`);
+    if (!(e && e.code === 'transport' && e.retryable === true && e.message === 'slack files.upload: HTTP 504 (after 2 attempts (budget))' && e.detail.stopped === 'budget' && e.detail.attempts === 2 && Ps.length === 2 && Ps[0].win === 60000 && Ps[1].win === 11000 && clock.t - T0 === 24000)) fail('F3·adapter', `slack, a 30 s budget: ${Ps.length} POSTs (windows ${Ps.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2 POSTs, windows 60000 / 11000, «(after 2 attempts (budget))» at 24000)`);
   }
-  { const { a, calls, clock } = retryRig(L, 'lark', (c, k) => { if (isUp(c)) { k.t += SLOW; return jsonRes(504, GATEWAY); } return okLark(c); }, { random: half });
+  { let un = 0; const { a, calls, clock } = retryRig(L, 'lark', (c, k) => { if (isUp(c)) { k.t += ++un === 1 ? SLOW : 10000; return jsonRes(504, GATEWAY); } return okLark(c); }, { random: half });
     const { e } = await sendB(a, 'oc_fixture', files().slice(1), '', 30000);
     const U = calls.filter(isUp);
-    if (!(e && e.message === 'lark upload file: HTTP 504 (504) (after 2 attempts (budget))' && e.detail.stopped === 'budget' && U.length === 2 && U[0].win === 60000 && U[1].win === 11000 && clock.t - T0 === 27000)) fail('F3·adapter', `lark, a 30 s budget: ${U.length} uploads (windows ${U.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2, 60000 / 16000, at 27000)`);
+    if (!(e && e.message === 'lark upload file: HTTP 504 (504) (after 2 attempts (budget))' && e.detail.stopped === 'budget' && U.length === 2 && U[0].win === 60000 && U[1].win === 11000 && clock.t - T0 === 24000)) fail('F3·adapter', `lark, a 30 s budget: ${U.length} uploads (windows ${U.map((c) => c.win).join(' / ')} ms), said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 2, 60000 / 11000, at 24000)`);
   }
   // the outbox's own budget (120 s) ⇒ 3 attempts as R⑨, «(after 3 attempts)» at 43 s
   { const { a, calls, clock } = retryRig(S, 'slack', slowSlack, { random: half });
@@ -893,17 +896,23 @@ async function budgetJudge(S, L, ENGm) {
     if (!(e && e.message === 'slack files.upload: HTTP 504 (after 3 attempts)' && e.detail.stopped === 'count' && calls.filter(isPost).length === 3 && clock.t - T0 === 43000)) fail('F3·adapter', `slack, the outbox's 120 s: ${calls.filter(isPost).length} POSTs, said at ${clock.t - T0} ms, ${e ? `"${e.message}"` : 'no throw'} (want 3, «(after 3 attempts)» at 43000)`);
   }
   // THE LANES (a real engine): an agent's direct reply read inline (collect: the 20 s window − 2 s) ⇒ ONE attempt, the
-  // receipt inline at 13 s as the base answered; the CLI's own 30 s (− 2 s): r4 — the 504 at 13 s leaves 14 s after the
-  // wait, under the 15 s a Slack retry's three requests need ⇒ ONE attempt «(after 1 attempt (budget))» at 13 s, as inline;
+  // receipt inline at 13 s as the base answered; the CLI's own 30 s (− 2 s): r3 (the lane's adversarial read — at 13 s every
+  // budget under 29 s gave ONE attempt, so the leg could not tell the CLI's 28 s from a broken one): the 504 answered at 8 s ⇒
+  // the CLI's 28 s RETRIES (8 + 1 + 15 s fit; the retry's bytes in min(60, 28 − 9 − 5) = 14 s, the second 504 at 17 s, a
+  // third does not fit) while an inline 18 s does NOT (8 + 1 + 15 > 18);
   // the owner's Approve (the outbox's 120 s) ⇒ 3 attempts, 43 s
   const reasonOf = (q) => String((q && q.reason) || '');
   { const v = await budgetLane(ENGm, S, 'collect');
     const ok1 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('NOT landed: "b.pdf" (transport: slack files.upload: HTTP 504 (after 1 attempt (budget)))') && v.r.receiptPending === false && /after 1 attempt \(budget\)/.test(v.r.receiptText || '') && v.took === 13000 && v.posts.length === 2;
     if (!ok1) fail('F3·engine', `an agent's direct reply read inline: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, inline ${v.r.receiptPending === false ? 'yes' : 'no'}, answered at ${v.took} ms, ${v.posts.length} POSTs`} (want partly sent «(after 1 attempt (budget))», the receipt inline at 13000, 2 POSTs)`);
   }
-  { const v = await budgetLane(ENGm, S, 'cli');
-    const ok2 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 1 attempt (budget)))') && v.took === 13000 && v.took < CLI_MS && v.posts.length === 2;
-    if (!ok2) fail('F3·engine', `an agent's direct reply, the CLI's 30 s: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, answered at ${v.took} ms, ${v.posts.length} POSTs (windows ${v.posts.map((c) => c.win).join(' / ')})`} (want r4's «(after 1 attempt (budget))» at 13000 — 14 s left after the wait, a retry needs 15 s —, 2 POSTs)`);
+  { const v = await budgetLane(ENGm, S, 'cli', { slowMs: 8000 });
+    const ok2 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 2 attempts (budget)))') && v.took === 17000 && v.took < CLI_MS && v.posts.length === 3 && v.posts[2].win === 14000;
+    if (!ok2) fail('F3·engine', `an agent's direct reply, the CLI's 30 s, the 504 at 8 s: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, answered at ${v.took} ms, ${v.posts.length} POSTs (windows ${v.posts.map((c) => c.win).join(' / ')})`} (want «(after 2 attempts (budget))» at 17000, 3 POSTs, the retry's window 14000)`);
+  }
+  { const v = await budgetLane(ENGm, S, 'collect', { slowMs: 8000 });
+    const ok2b = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 1 attempt (budget)))') && v.took === 8000 && v.posts.length === 2;
+    if (!ok2b) fail('F3·engine', `an agent's direct reply read inline, the 504 at 8 s: ${v.err || `${v.q.state} ${JSON.stringify(reasonOf(v.q))}, answered at ${v.took} ms, ${v.posts.length} POSTs`} (want ONE attempt «(after 1 attempt (budget))» at 8000 — its 18 s cannot hold a retry's 15 s after the wait)`);
   }
   { const v = await budgetLane(ENGm, S, 'approved');
     const ok3 = !v.err && v.q.state === 'sent' && reasonOf(v.q).endsWith('(transport: slack files.upload: HTTP 504 (after 3 attempts))') && v.took === 43000 && v.posts.length === 4;
@@ -933,8 +942,8 @@ ok(!vwj['F1·slack'], `F1 slack: a files.slack.com 503 + Retry-After 2 ⇒ the f
 const haw = await holdAfterWaitJudge(lark);
 ok(!haw.F2, `F2 lark: send A's upload 504s, send B's text gets 429 + reset 30 during A's wait ⇒ uploads that left: 1, send A rate-limited held: true (no request inside the hold another send armed)${haw.F2 ? ` — ${haw.F2.join('; ')}` : ''}`);
 const bj = await budgetJudge(slack, lark, ENG);
-ok(!bj['F3·adapter'], `F3 the adapters on a handed budget: 30 s with each 504 at 13 s ⇒ attempt 2 in a 16 s window, attempt 3 not made, «(after 2 attempts (budget))» at 27 s — Slack and Lark; the outbox's 120 s ⇒ 3 attempts «(after 3 attempts)» at 43 s${bj['F3·adapter'] ? ` — ${bj['F3·adapter'].join('; ')}` : ''}`);
-ok(!bj['F3·engine'], `F3 the lanes through a real engine: an agent's direct reply read inline ⇒ ONE attempt, the partly-sent receipt inline at 13 s «(after 1 attempt (budget))» (as the base answered); the CLI's 30 s ⇒ «(after 2 attempts (budget))» at 27 s; the owner's Approve ⇒ «(after 3 attempts)» at 43 s${bj['F3·engine'] ? ` — ${bj['F3·engine'].join('; ')}` : ''}`);
+ok(!bj['F3·adapter'], `F3 the adapters on a handed budget: 30 s, the first 504 at 13 s, the retry's at 10 s (inside its window) ⇒ attempt 2 in an 11 s window (r4: the completing call's 5 s left), attempt 3 not made, «(after 2 attempts (budget))» at 24 s — Slack and Lark; the outbox's 120 s ⇒ 3 attempts «(after 3 attempts)» at 43 s${bj['F3·adapter'] ? ` — ${bj['F3·adapter'].join('; ')}` : ''}`);
+ok(!bj['F3·engine'], `F3 the lanes through a real engine: an agent's direct reply read inline ⇒ ONE attempt, the partly-sent receipt inline at 13 s «(after 1 attempt (budget))» (as the base answered); the CLI's 30 s with the 504 at 8 s ⇒ «(after 2 attempts (budget))» at 17 s while the inline 18 s ⇒ ONE attempt at 8 s (r3: the pair tells the CLI's budget apart); the owner's Approve ⇒ «(after 3 attempts)» at 43 s${bj['F3·engine'] ? ` — ${bj['F3·engine'].join('; ')}` : ''}`);
 // ⑫b PATCHED-COPY CONTROLS: a copy of the PLAN loaded by copies of BOTH adapters (one law, red on both by name); a copy of lark.js
 {
   const keepR = setInterval(() => {}, 1000);
