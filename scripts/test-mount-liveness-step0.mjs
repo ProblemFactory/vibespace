@@ -45,8 +45,11 @@ process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 const ROOT = scratch('mount-step0');
 const SRC = path.join(ROOT, 'src'), CACHE = path.join(ROOT, 'cache'), LOGS = path.join(ROOT, 'logs'), CFG = path.join(ROOT, 'rclone.conf');
+// a HOME inside the root for both rclone children (a reader's should): --config and --cache-dir are pinned already; this makes
+// «nothing lands in the person's home» true by construction
+const HOME_IN = path.join(ROOT, 'home'), HOME_ENV = { HOME: HOME_IN, XDG_CACHE_HOME: path.join(HOME_IN, '.cache'), XDG_CONFIG_HOME: path.join(HOME_IN, '.config') };
 MNT = path.join(ROOT, 'mp');
-for (const d of [SRC, path.join(SRC, 'sub'), MNT, CACHE, LOGS]) fs.mkdirSync(d, { recursive: true });
+for (const d of [SRC, path.join(SRC, 'sub'), MNT, CACHE, LOGS, HOME_IN]) fs.mkdirSync(d, { recursive: true });
 for (let i = 1; i <= 109; i++) fs.writeFileSync(path.join(SRC, `file-${i}.txt`), `f${i}\n`);
 fs.writeFileSync(CFG, '');
 
@@ -61,7 +64,7 @@ const probe = (cmd, args, limitMs) => new Promise((res) => {
 
 // the backend: a local webdav over SRC
 const PORT = await freePort();
-serve = spawn(RCLONE, ['serve', 'webdav', SRC, '--addr', `127.0.0.1:${PORT}`, '--config', CFG], { stdio: ['ignore', fs.openSync(path.join(LOGS, 'serve.log'), 'a'), fs.openSync(path.join(LOGS, 'serve.log'), 'a')] });
+serve = spawn(RCLONE, ['serve', 'webdav', SRC, '--addr', `127.0.0.1:${PORT}`, '--config', CFG], { env: { ...process.env, ...HOME_ENV }, stdio: ['ignore', fs.openSync(path.join(LOGS, 'serve.log'), 'a'), fs.openSync(path.join(LOGS, 'serve.log'), 'a')] });
 const portOpen = () => new Promise((res) => { const so = net.connect(PORT, '127.0.0.1'); so.on('connect', () => { so.destroy(); res(true); }); so.on('error', () => res(false)); });
 for (let i = 0; i < 50 && !(await portOpen()); i++) await sleep(100);
 // the hub's OWN mount argv (its cached-mount row) over that backend
@@ -71,7 +74,7 @@ const MA = require(path.join(repo, 'src/mount-argv.js'));
 const FLAGS = spawnSync(RCLONE, ['help', 'flags'], { encoding: 'utf8', timeout: 20000 }).stdout || '';
 const hasFlag = (name) => new RegExp(`(^|\\s)--${name.replace(/[-]/g, '\\-')}(\\s|=|$)`, 'm').test(FLAGS);
 const argv = MA.rcloneMountArgs({ row: null, remote: 'dav:', mountpoint: MNT, cacheDir: CACHE, hasFlag });
-const env = { ...process.env, RCLONE_CONFIG_DAV_TYPE: 'webdav', RCLONE_CONFIG_DAV_URL: `http://127.0.0.1:${PORT}`, RCLONE_CONFIG_DAV_VENDOR: 'other' };
+const env = { ...process.env, ...HOME_ENV, RCLONE_CONFIG_DAV_TYPE: 'webdav', RCLONE_CONFIG_DAV_URL: `http://127.0.0.1:${PORT}`, RCLONE_CONFIG_DAV_VENDOR: 'other' };
 mount = spawn(RCLONE, [...argv, '--config', CFG], { env, stdio: ['ignore', fs.openSync(path.join(LOGS, 'mount.log'), 'a'), fs.openSync(path.join(LOGS, 'mount.log'), 'a')] });
 for (let i = 0; i < 100 && !(mounted = isMounted()); i++) await sleep(100);
 // every tool is here: a mount that does not come up is RED, never a skip — an rclone that refuses a flag of the hub's argv is the

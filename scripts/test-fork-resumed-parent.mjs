@@ -58,7 +58,6 @@ setTimeout(() => {
   const st = fs.readFileSync('/proc/self/stat', 'utf8'); const procStart = st.slice(st.lastIndexOf(')') + 2).split(' ')[19];
   fs.mkdirSync(lockDir, { recursive: true });
   fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, sessionId: sid, cwd, startedAt: Date.now(), procStart }));
-  fs.writeFileSync(path.join(cwd, '.sid-' + process.pid), sid);
   process.stdout.write('FAKE-CLAUDE ' + sid + '\\r\\n');
   if (betray) setTimeout(() => { fs.appendFileSync(betray, JSON.stringify({ type: 'user', sessionId: sid, uuid: crypto.randomUUID(), message: { role: 'user', content: 'the fork wrote into its parent' } }) + '\\n'); fs.writeFileSync(path.join(cwd, '.wrote'), ''); }, 20000);
 }, 200);
