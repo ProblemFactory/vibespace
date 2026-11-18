@@ -1026,6 +1026,10 @@ const CODE_FORBIDDEN = new Set([99991672, 99991679, 230002, 230006, 230011, 2300
 const CODE_NOT_FOUND = new Set([230001, 230003, 230026]);
 /** lane channel-record-revisions: a message read by id answered with one of these WAS recalled / deleted by its sender. */
 const RECALL_CODES = new Set([230011, 230110]);
+/** B-fbac: Lark's «File not in message» — the resource key does not belong to the message asked (the doc's 234003). */
+const RESOURCE_NOT_IN_MESSAGE = 234003;
+/** B-fbac: Lark's «Action unavailable as the message has been deleted» (230110 — a recall too) on the resource route. */
+const MESSAGE_DELETED = 230110;
 function typedFailure(status, body, what, retryAfterSec = null) {
   const code = body && Number(body.code);
   const msg = (body && (body.msg || body.error_description || body.error)) || `HTTP ${status}`;
@@ -1244,6 +1248,7 @@ function create(record = {}, deps = {}) {
 
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: one unit per request SENT
   const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};   // lane R5: awaited BEFORE every request (drain rule 18's bucket)
+  const findStored = typeof deps.findRecord === 'function' ? deps.findRecord : () => null;   // B-fbac: a stored record (its replyTo / root) by its vendor id
   // lane lark-send-hold (B-efa0): THE ACCOUNT'S SEND HOLD. A 429 on any send request (the text, a reply, an upload, a
   // file's message) holds EVERY later send of this account until the vendor's reset (`x-ogw-ratelimit-reset`, else
   // SEND_HOLD_DEFAULT_SEC; at most vendor-hold's 15 min); a held send is refused BEFORE any request with the typed
@@ -2813,22 +2818,49 @@ function create(record = {}, deps = {}) {
       if (!r.ok) throw typedFailure(r.status || 500, null, 'lark avatar', retryAfterSeconds(r.headers));
       return { data: await readAvatarBytes(r, 'lark avatar'), mime: null };
     },
-    async fetchAttachment(convId, { messageId, attachmentId, mime = null } = {}) {
+    async fetchAttachment(convId, { messageId, attachmentId, mime = null, answers = null } = {}) {
       if (!messageId || !attachmentId) throw new ChannelError('not-found', 'lark: an attachment needs its message id and key', { retryable: false });
       let at = await accessToken();
       const type = /^image\//.test(String(mime || '')) ? 'image' : 'file';
-      await pace(1);
-      meter(1);
-      if (bearerExpired()) at = await accessToken();   // verify r5: an expired bearer is refreshed before the send
-      let r;
-      try {
-        r = await fetchFn(`${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(messageId))}/resources/${encodeURIComponent(String(attachmentId))}?type=${type}`, { headers: { Authorization: `Bearer ${bearerNow(at)}` }, signal: AbortSignal.timeout(60000) });   // gated-inline: resource
-      } catch (e) { throw new ChannelError('transport', `lark resource: ${(e && e.message) || e}`, { retryable: true }); }
-      const ct = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
-      if (!r.ok || /application\/json/.test(ct)) {
+      // ONE ask of a message's resource — paced, metered, the bearer re-read; a JSON answer is the vendor's refusal, typed
+      const ask = async (mid) => {
+        await pace(1);
+        meter(1);
+        if (bearerExpired()) at = await accessToken();   // verify r5: an expired bearer is refreshed before the send
+        let r;
+        try {
+          r = await fetchFn(`${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(mid))}/resources/${encodeURIComponent(String(attachmentId))}?type=${type}`, { headers: { Authorization: `Bearer ${bearerNow(at)}` }, signal: AbortSignal.timeout(60000) });   // gated-inline: resource
+        } catch (e) { throw new ChannelError('transport', `lark resource: ${(e && e.message) || e}`, { retryable: true }); }
+        const ct = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
+        if (r.ok && !/application\/json/.test(ct)) return { r, ct };   // the type rides the answer: the read below names the file's mime by it
         let body = null; try { body = await r.json(); } catch { body = null; }
-        throw typedFailure(r.status || 500, body, 'lark resource', retryAfterSeconds(r.headers));
+        return { refused: typedFailure(r.status || 500, body, 'lark resource', retryAfterSeconds(r.headers)), code: body ? Number(body.code) : null };
+      };
+      let got = await ask(messageId);
+      // B-fbac: Lark's own word for a deleted / recalled message (the doc's 230110) — said as such, never «vendor error»
+      if (got.refused && got.code === MESSAGE_DELETED) throw new ChannelError('not-found', `lark resource: Lark says message ${messageId} was deleted or recalled (230110) — its attachment cannot be fetched any more`, { retryable: false, detail: { code: MESSAGE_DELETED, status: 400, recalled: true } });
+      // B-fbac (userW 2026-11-09: a quote-reply's picture, listed with its fetch command, answered «File not in msg.
+      // (234003)» while the message existed): Lark's 234003 = the key is not THIS message's (the doc: the two must match).
+      // A reply's picture may be the message's it answers — ONE ask of each message it answers (its parent, its thread
+      // root; the stored record names them), the same key (a key only answers its own message: never another picture).
+      // None ⇒ refused in words that say where it was listed and what was tried.
+      if (got.refused && got.code === RESOURCE_NOT_IN_MESSAGE) {
+        // what it answers: the engine's own record (a message only a vendor read showed too), else the stored one
+        let rel = Array.isArray(answers) ? answers : null;
+        if (!rel) { let rec0 = null; try { rec0 = findStored(convId, String(messageId)); } catch { rec0 = null; } rel = [rec0 && rec0.replyTo, rec0 && rec0.root]; }
+        const alts = [...new Set(rel.filter((x) => typeof x === 'string' && x && x !== String(messageId)))].slice(0, 2);
+        const tried = [];
+        for (const alt of alts) {
+          const g = await ask(alt);
+          tried.push(alt);
+          if (!g.refused) { got = g; log.log && log.log(`[channels] lark: the attachment ${String(attachmentId).slice(0, 80)} listed on ${messageId} is its answered message ${alt}'s — fetched from there`); break; }
+          // another refusal on the way is THAT message's — named, never passed off as the asked message's own
+          if (g.code !== RESOURCE_NOT_IN_MESSAGE) { const x = g.refused; throw new ChannelError(x.code, `lark resource: asking ${alt} (the message ${messageId} answers) for this attachment — ${x.message}`, { retryable: !!x.retryable, detail: { ...(x.detail || {}), askedAnswered: alt, notInMessage: true } }); }
+        }
+        if (got.refused && got.code === RESOURCE_NOT_IN_MESSAGE) throw new ChannelError('vendor-error', `lark resource: Lark says this attachment is not part of message ${messageId}${tried.length ? `, nor of the message${tried.length > 1 ? 's' : ''} it answers (${tried.join(', ')})` : ''} (234003: File not in message) — it was listed there from the message's own content; read the message again, or ask the sender to send it again`, { retryable: false, detail: { code: RESOURCE_NOT_IN_MESSAGE, status: 400, notInMessage: true, tried } });
       }
+      if (got.refused) throw got.refused;
+      const r = got.r;
       const len = Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0);
       if (len > 100 * 1024 * 1024) throw new ChannelError('too-large', `lark resource: ${len} bytes is over the 100 MB bound`, { retryable: false });
       // verify r1 (lane channel-attach-read): the declared length is the vendor's word — the READ is bounded too (a chunked
@@ -2848,7 +2880,7 @@ function create(record = {}, deps = {}) {
       } else data = Buffer.from(await r.arrayBuffer());
       const cd = String((r.headers && r.headers.get && r.headers.get('content-disposition')) || '');
       const nm = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
-      return { data, mime: ct.split(';')[0].trim() || null, name: nm ? decodeURIComponent(nm[1]) : null };
+      return { data, mime: String(got.ct || '').split(';')[0].trim() || null, name: nm ? decodeURIComponent(nm[1]) : null };
     },
   };
 }

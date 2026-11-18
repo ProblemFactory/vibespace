@@ -127,7 +127,11 @@ saved /tmp/vibespace-channels/lark-main/3f9a1c0d2b4e.png (image/png, 48213 bytes
   no message there carries that id — for a message older than the saved
   copy, until `read <conv> --around <msg id>` showed it, or when the vendor
   no longer has it (the sentence says which); `not-supported` = the channel
-  lists attachments but cannot fetch them; `too-large` = past the vendor's bound.
+  lists attachments but cannot fetch them; `too-large` = past the vendor's bound;
+  `recalled` = the sender recalled the message (a copy fetched before is still
+  served; `read` then marks its attachment line «recalled» and prints no fetch
+  command). A Lark picture whose key the vendor says is not the message's own
+  is also asked of the message it answers; still none ⇒ the sentence says so.
 - A file on a message `search --full` found: `read <conv> --around <msg id>`
   prints its `attachment:` line, and that line's command fetches it from the
   vendor by its ids (the same budget and cache; the message stays unsaved —

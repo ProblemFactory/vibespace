@@ -167,6 +167,7 @@ function worldModule(kind, W, { budgetDefault = 100 } = {}) {
           if (W.gate) await W.gate;
           if (s === 'forbidden') throw new CH.ChannelError('forbidden', `vendor refuses ${attachmentId}`);
           if (s === 'rate-limited') throw new CH.ChannelError('rate-limited', 'HTTP 429', { retryable: true, detail: { retryAfterSec: 9 } });
+          if (s === 'recalled') throw new CH.ChannelError('not-found', 'vendor: the message was deleted or recalled', { retryable: false, detail: { recalled: true } });   // B-fbac
           if (W.byMsg && W.byMsg[messageId]) return W.byMsg[messageId];
           return { data: fake.fixturePng(attachmentId), mime: 'image/png', name: 'image' };
         },
@@ -597,6 +598,35 @@ console.log('⑤ wiring pins');
   ok(/img\.src = `\$\{url\}&inline=1/.test(W) && /img\.onclick = \(\) => showImageOverlay\(img\.src\);/.test(W) && !/innerHTML/.test(W.replace(/^\s*(\/\/|\*).*$/gm, '')), 'PIN: a thumbnail loads through OUR route as a property (img.src), opens THE shared overlay, and the window writes no innerHTML');
   ok(/attachmentReasonText\(code\)/.test(W) && /t\('Retry'\)/.test(W) && /track\('event', 'chan-attachment-failed'/.test(W), 'PIN: the refused chip names its reason, offers Retry, and the failure is reported (telemetry) — never a silent chip');
   ok(/retry: String\(req\.query\.retry \|\| ''\) === '1'/.test(R) && /res\.setHeader\('Cache-Control', 'no-store'\); return readerAnswer\(res, r\);/.test(R), 'PIN: the route passes the person\'s Retry and never lets a browser cache a refusal');
+}
+
+// ── B-fbac (the law: an attachment the read lists is fetchable by the command it prints, or says why not; a RECALLED
+//    message's attachment says recalled and offers no fetch): the vendor's own «deleted / recalled» answer (the adapter's
+//    `detail.recalled`) is answered `recalled` by name AND recorded — the revisions' fx recall line, so the read says
+//    «recalled» from now on; a copy fetched before is served; the engine hands the adapter what the message answers.
+//    CONTROL: the release's engine (the vendor's line only, nothing recorded).
+console.log('\nB-fbac: a recalled message\'s attachment is said by name and the recall recorded; a copy fetched before is served');
+{
+  const REV = require(path.join(REPO, 'src/channel-revisions.js'));
+  const recalledOf = (R, msg) => REV.recalledAtOf(R.eng.store.readSide('pics', 'room', { msgs: new Set([msg]) }).filter((x) => x && x.k === 'fx'));
+  const R = await rig('recalled');
+  const before = await R.eng.attachment('pics', 'room', 'pic-6', { msg: 'm6' });
+  R.W.script['pic-6'] = 'recalled'; R.W.script['pic-5'] = 'recalled';
+  const r1 = await R.eng.attachment('pics', 'room', 'pic-5', { msg: 'm5' });
+  ok(r1 && r1.ok === false && r1.code === 'recalled' && /deleted or recalled/.test(r1.error) && recalledOf(R, 'm5') > 0, 'the vendor says the message was recalled: answered `recalled` BY NAME, and the recall is RECORDED (the read says recalled from now on)', JSON.stringify({ r1, recalledAt: recalledOf(R, 'm5') }));
+  const after = await R.eng.attachment('pics', 'room', 'pic-6', { msg: 'm6' });
+  ok(before.ok && after.ok && after.cached === true, 'a copy fetched BEFORE the recall is still served', JSON.stringify({ before: before.ok, after: after.ok, cached: after.cached }));
+  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const LINE = "        if (err && err.detail && err.detail.recalled === true) {";
+  ok(ESRC.split(LINE).length === 2 && ESRC.includes("answers: [owner.replyTo, owner.root].filter((x) => typeof x === 'string' && x) })"), 'control setup: the recall branch is present once; the engine hands the adapter what the message answers (its replyTo / root)');
+  const Pre = MUT.load('src/server/channels-engine.js', ESRC.replace(LINE, '        if (false) {'), 'b-fbac-pre');
+  const P = await rig('recalled-pre', { engineMod: Pre });
+  P.W.script['pic-5'] = 'recalled';
+  const pr = await P.eng.attachment('pics', 'room', 'pic-5', { msg: 'm5' });
+  ok(pr && pr.ok === false && pr.code !== 'recalled' && !recalledOf(P, 'm5'), 'RED CONTROL: the release\'s engine passes the vendor\'s line and records nothing — the read would keep offering the fetch', JSON.stringify({ code: pr && pr.code, recalledAt: recalledOf(P, 'm5') }));
+  const CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
+  ok(CLI.includes("const gone = !!m.recalledAt;") && CLI.includes("${gone ? ' — the message was recalled; its attachment is not fetched' : a.id && m.vendorId ? ` — id ${a.id}; fetch: vibespace-channels attachment"), 'the read command\'s line for a recalled message says so and prints NO fetch command');
+  for (const x of [R, P]) { x.server.close(); try { x.eng.stop(); } catch {} }
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

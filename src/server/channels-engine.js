@@ -5136,12 +5136,21 @@ function create(deps = {}) {
       let r;
       // verify r2: the OWNER's fetch names its spender too — `e.chargeBy` is the pass's, and an agent's own refresh in flight
       // (`chargeTo: 'agent'`) put the owner's opened picture on the agents' share
-      try { r = await spendAs(agent ? 'agent' : 'owner', () => vendor(rec, e, () => e.adapter.fetchAttachment(convId, { messageId: owner.vendorId, attachmentId: attId, mime: att.mime || null, name: att.name || null }))); }
+      try { r = await spendAs(agent ? 'agent' : 'owner', () => vendor(rec, e, () => e.adapter.fetchAttachment(convId, { messageId: owner.vendorId, attachmentId: attId, mime: att.mime || null, name: att.name || null, answers: [owner.replyTo, owner.root].filter((x) => typeof x === 'string' && x) }))); }
       catch (err) {
         const code = err instanceof ChannelError ? err.code : 'vendor-error';
         const retryAfterSec = Number(err && err.detail && err.detail.retryAfterSec) || null;
         const ttl = Att.negativeTtlMs(code, { retryAfterSec });
-        const error = owner.shown && code === 'not-found' ? VENDOR_HAS_NONE : String((err && err.message) || err);
+        // B-fbac: an adapter that NAMED why (its words carry the message and what it tried) keeps them over «no such message»
+        const named = !!(err && err.detail && (err.detail.notInMessage || err.detail.recalled));
+        const error = owner.shown && code === 'not-found' && !named ? VENDOR_HAS_NONE : String((err && err.message) || err);
+        // B-fbac: the vendor says the message was deleted / recalled — said by name, and the recall is RECORDED (the revisions'
+        // own fact speller), so the read says «recalled» and offers no fetch from now on
+        if (err && err.detail && err.detail.recalled === true) {
+          try { appendSides(rec, convId, [{ k: 'fx', msg: String(owner.vendorId), at: now(), src: 'recheck', facts: Rev.recallFacts() }]); } catch (e2) { log.warn(`[channels] ${rec.id}/${convId}: the recall could not be recorded: ${(e2 && e2.message) || e2}`); }
+          attRefused.set(k, { code: 'recalled', error, retryAfterSec: null, until: now() + Att.negativeTtlMs('not-found') });
+          return { ok: false, code: 'recalled', error };
+        }
         // integration 2.369.192 (R3 × R5): a call the account's END aborted (R5's dropLive — a disable, a disconnect, a new
         // sign-in: "the account changed") is NOT the vendor's refusal — an answer that outlived its entry keeps nothing, the
         // negative cache included (else the next ask read a remembered `transport` before the account's own `disabled`)

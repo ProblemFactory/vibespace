@@ -510,7 +510,9 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       if (m.heldText) console.log(`    ${m.heldText}`);
       if (m.reactionsText) console.log(`    ${m.reactionsText}`);
       // lane channel-attach-read: the id and the command that fetches it (each piece one shell word)
-      for (const a of (m.attachments || [])) console.log(`    attachment: ${a.name || a.id}${a.mime ? ` (${a.mime})` : ''}${Number(a.bytes) > 0 ? `, ${a.bytes} bytes` : ''}${a.id && m.vendorId ? ` — id ${a.id}; fetch: vibespace-channels attachment ${shellWord(r.conversation.key)} ${shellWord(m.vendorId)} ${shellWord(a.id)}` : ''}`);
+      // B-fbac: a RECALLED message's attachment says so and offers no fetch (its vendor no longer serves it)
+      const gone = !!m.recalledAt;
+      for (const a of (m.attachments || [])) console.log(`    attachment: ${a.name || a.id}${a.mime ? ` (${a.mime})` : ''}${Number(a.bytes) > 0 ? `, ${a.bytes} bytes` : ''}${gone ? ' — the message was recalled; its attachment is not fetched' : a.id && m.vendorId ? ` — id ${a.id}; fetch: vibespace-channels attachment ${shellWord(r.conversation.key)} ${shellWord(m.vendorId)} ${shellWord(a.id)}` : ''}`);
     }
     return;
   }

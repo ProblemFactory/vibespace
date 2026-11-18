@@ -5368,6 +5368,7 @@ export default {
   "budget spent": "额度已用完",
   "not cached": "未缓存",
   "account disabled": "账号已停用",
+  "recalled by the sender": "已被发送者撤回",
   "no preview": "无法预览",
   "retrying in {s} s": "{s} 秒后重试",
   "Loading the image — retrying in {s} s": "正在加载图片 —— {s} 秒后重试",

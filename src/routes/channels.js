@@ -961,7 +961,8 @@ function readerAnswer(res, r) {
   const code = (r && r.code) || 'error';
   // r5: `refresh-queue-full` (the request set's cap) is a 429 with its wait; `account-changed` (the account rebuilt / removed while the refresh waited) a 409 like `disabled`; `stopped` (the engine stopping) a 503
   // R3: a vendor's own rate limit on an attachment is a 429 with its wait too (the thumbnail retries after it)
-  const status = code === 'not-found' ? 404 : code === 'rate-limited' || code === 'refresh-queue-full' || code === 'vendor-budget' || code === 'refresh-floor' || code === 'backoff' ? 429 : code === 'not-supported' ? 501 : code === 'too-large' ? 413 : code === 'bad-request' ? 400 : code === 'disabled' || code === 'account-changed' ? 409 : code === 'stopped' ? 503 : 502;
+  // B-fbac: an attachment of a RECALLED message is gone, by name (410)
+  const status = code === 'not-found' ? 404 : code === 'recalled' ? 410 : code === 'rate-limited' || code === 'refresh-queue-full' || code === 'vendor-budget' || code === 'refresh-floor' || code === 'backoff' ? 429 : code === 'not-supported' ? 501 : code === 'too-large' ? 413 : code === 'bad-request' ? 400 : code === 'disabled' || code === 'account-changed' ? 409 : code === 'stopped' ? 503 : 502;
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
 }

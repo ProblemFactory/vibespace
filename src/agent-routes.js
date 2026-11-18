@@ -2156,7 +2156,7 @@ app.get('/api/agent/channels/read', async (req, res) => {
 // and the vendor's type ride ONE header, every piece through the belt (the engine's agentAttachmentAnswer). A job token
 // is refused like every verb but withdraw (agentSession takes a session token only). Its own status table: chanAnswer's
 // is the refresh census's source (test-channels-agent-cli), and these codes are not the refresh's.
-const ATT_STATUS = Object.freeze({ 'not-found': 404, 'not-supported': 409, disabled: 409, 'account-changed': 409, 'too-large': 413, 'vendor-budget': 429, backoff: 429, 'rate-limited': 429, stopped: 503 });
+const ATT_STATUS = Object.freeze({ recalled: 410, 'not-found': 404, 'not-supported': 409, disabled: 409, 'account-changed': 409, 'too-large': 413, 'vendor-budget': 429, backoff: 429, 'rate-limited': 429, stopped: 503 });
 const attAnswer = (res, r) => {
   const code = (r && r.code) || 'error';
   res.setHeader('Cache-Control', 'no-store');

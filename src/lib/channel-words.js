@@ -584,6 +584,7 @@ export function attachmentReasonText(code, { t = tDevice } = {}) {
     case 'disabled': return t('account disabled');
     case 'no-preview': return t('no preview');
     case 'unreachable': return t('server unreachable');
+    case 'recalled': return t('recalled by the sender');   // B-fbac
     default: return chanCaps.errorCodeText(code || 'vendor-error', { t });
   }
 }

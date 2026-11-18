@@ -5367,6 +5367,7 @@ export default {
   "budget spent": "予算切れ",
   "not cached": "未キャッシュ",
   "account disabled": "アカウント無効",
+  "recalled by the sender": "送信者が取り消しました",
   "no preview": "プレビュー不可",
   "retrying in {s} s": "{s} 秒後に再試行",
   "Loading the image — retrying in {s} s": "画像を読み込み中 —— {s} 秒後に再試行",

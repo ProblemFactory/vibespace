@@ -933,6 +933,74 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const e5 = await threw(() => a.fetchAttachment(C, { messageId: 'om_liar', attachmentId: 'file_liar', mime: null }));
   ok(e5 && e5.code === 'too-large' && liar.pulled <= 102, `a resource that SAYS 4 bytes and streams 120 MB is cancelled at the 100 MB bound (a bounded read, not the header's word; the stream reads one chunk ahead): ${e5 ? e5.code : 'returned'}, ${liar.pulled} MB pulled`);
 }
+// ── B-fbac (userW 2026-11-09: a QUOTE-REPLY's picture, listed with its fetch command, answered «File not in msg.
+//    (234003)» while the message existed): Lark's 234003 = the key is not THIS message's (the doc: the two must match). A
+//    reply's picture may be the message's it answers: ONE more ask of each message it answers (its parent, its thread root —
+//    the stored record names them), the same key; none ⇒ refused in words that say where it was listed and what was
+//    tried; another refusal is never retried. CONTROL: the release's fetch (one ask, the vendor's words only).
+{
+  const JF = JSON.stringify;
+  const reg = CH.createChannelRegistry(); reg.register(lark.adapter);
+  const v = mkVendor(); const tokens = mkTokens();
+  tokens.st.token = { access_token: 'u-access-0001', expiresAt: now() + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: now() + 2592000e3, scopes: ['im:message'], openId: 'ou_member_a' };
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
+  const OWNS = { img_quoted: 'om_parent', img_root: 'om_root', img_own: 'om_reply', img_nowhere: null, img_forbidden: 'om_reply', img_gone: 'om_gone' };
+  const STORED = { om_reply: { vendorId: 'om_reply', replyTo: 'om_parent', root: 'om_root' }, om_plain: { vendorId: 'om_plain' } };
+  const binRes = (buf, headers, status = 200) => ({ ok: status >= 200 && status < 300, status, headers: { get: (k) => (headers[String(k).toLowerCase()] ?? null) }, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length), json: async () => JSON.parse(buf.toString()) });
+  const jsonRes = (o, status) => binRes(Buffer.from(JSON.stringify(o)), { 'content-type': 'application/json; charset=utf-8' }, status);
+  const mk = (mod) => {
+    const got = [], metered = [];
+    const fetchFn = async (url, init = {}) => {
+      const u = new URL(String(url));
+      const m = /^\/open-apis\/im\/v1\/messages\/([^/]+)\/resources\/([^/]+)$/.exec(u.pathname);
+      if (!m) return v.fetchFn(url, init);
+      const mid = decodeURIComponent(m[1]), key = decodeURIComponent(m[2]);
+      got.push(mid);
+      if (key === 'img_forbidden' && mid === 'om_parent') return jsonRes({ code: 230002, msg: 'the bot is not in the chat' }, 400);
+      if (key === 'img_gone') return jsonRes({ code: 230110, msg: 'Action unavailable as the message has been deleted.' }, 400);
+      if (OWNS[key] === mid && key !== 'img_forbidden') return binRes(JPEG, { 'content-type': 'image/jpeg', 'content-length': String(JPEG.length) });
+      return jsonRes({ code: 234003, msg: 'File not in message.' }, 400);
+    };
+    const r2 = CH.createChannelRegistry(); r2.register(mod.adapter);
+    const a = r2.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, meter: (n) => metered.push(n), log: { warn() {}, log() {} }, findRecord: (cid, vid) => STORED[vid] || null });
+    return { a, got, metered };
+  };
+  const C = 'oc_ops_room_0001';
+  const X = mk(lark);
+  const p1 = await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_quoted', mime: 'image/*' });
+  ok(JF(X.got) === JF(['om_reply', 'om_parent']) && Buffer.isBuffer(p1.data) && p1.data.equals(JPEG) && X.metered.reduce((x, y) => x + y, 0) === 2, 'a reply\'s picture Lark says is not the reply\'s (234003) is fetched from the message it ANSWERS — one more ask (paced, metered), the same key', JF({ asked: X.got, metered: X.metered }));
+  X.got.length = 0;
+  await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_root', mime: 'image/*' });
+  ok(JF(X.got) === JF(['om_reply', 'om_parent', 'om_root']), '…else from its thread ROOT (at most the two it answers)', JF(X.got));
+  X.got.length = 0;
+  await X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_own', mime: 'image/*' });
+  ok(JF(X.got) === JF(['om_reply']), 'a picture that IS the reply\'s is one ask, as before', JF(X.got));
+  X.got.length = 0;
+  const e1 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_nowhere', mime: 'image/*' }));
+  ok(e1 && e1.code === 'vendor-error' && /not part of message om_reply, nor of the messages it answers \(om_parent, om_root\) \(234003: File not in message\)/.test(e1.message) && e1.detail && e1.detail.notInMessage === true && JF(X.got) === JF(['om_reply', 'om_parent', 'om_root']), 'owned by none: refused in WORDS — where it was listed, what was tried, Lark\'s code (never a bare vendor line)', e1 && e1.message);
+  X.got.length = 0;
+  const e2 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_plain', attachmentId: 'img_nowhere', mime: 'image/*' }));
+  ok(e2 && e2.code === 'vendor-error' && /not part of message om_plain \(234003/.test(e2.message) && !/nor of/.test(e2.message) && JF(X.got) === JF(['om_plain']), 'a message that answers nothing: one ask, the words without «nor»', e2 && e2.message);
+  X.got.length = 0;
+  const e3 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_forbidden', mime: 'image/*' }));
+  ok(e3 && e3.code === 'forbidden' && /asking om_parent \(the message om_reply answers\) for this attachment — .*230002/.test(e3.message) && JF(X.got) === JF(['om_reply', 'om_parent']), 'another refusal on the way (230002) ends the walk NAMED as the answered message\'s — never passed off as the reply\'s own', e3 && `${e3.code} ${e3.message}`);
+  X.got.length = 0;
+  const e4 = await threw(() => X.a.fetchAttachment(C, { messageId: 'om_gone', attachmentId: 'img_gone', mime: 'image/*' }));
+  ok(e4 && e4.code === 'not-found' && e4.detail && e4.detail.recalled === true && /was deleted or recalled \(230110\)/.test(e4.message) && JF(X.got) === JF(['om_gone']), 'Lark\'s 230110 (deleted / recalled) is said as such, flagged `recalled` (the engine records the recall) — no walk', e4 && e4.message);
+  X.got.length = 0;
+  await X.a.fetchAttachment(C, { messageId: 'om_unstored', attachmentId: 'img_quoted', mime: 'image/*', answers: ['om_parent'] });
+  ok(JF(X.got) === JF(['om_unstored', 'om_parent']), 'a message the store does not hold (only a vendor read showed it): the ENGINE\'s answers name what it answers', JF(X.got));
+  // CONTROL: the release's fetch — one ask, the vendor's line only
+  const LSRC = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+  const WALK = '      if (got.refused && got.code === RESOURCE_NOT_IN_MESSAGE) {\n';
+  ok(LSRC.split(WALK).length === 2, 'control setup: the 234003 walk is present once');
+  const MF = mutantCopies('lark-fbac', REPO);
+  const Pre = mk(MF.load('src/channels/lark.js', LSRC.replace(WALK, '      if (false) {\n'), 'release-fetch'));
+  const ep = await threw(() => Pre.a.fetchAttachment(C, { messageId: 'om_reply', attachmentId: 'img_quoted', mime: 'image/*' }));
+  ok(ep && /File not in message\. \(234003\)/.test(ep.message) && JF(Pre.got) === JF(['om_reply']), 'RED CONTROL: the release\'s fetch asks the reply alone and fails with the vendor\'s line — the incident; the first leg is red on it', ep && ep.message);
+  for (const x of copiesCensus(MF.files, MF.dir, REPO, { minCopies: 1, label: 'B-fbac ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
 
 // ── ⑨ WHAT WE SENT NEVER COMES BACK IN OUR WORDS (client-from-mount verify r4; the Gmail suite's ⑧, on the JSON-bodied vendor) ──
 // The Lark exchange and refresh carry `client_secret` in a JSON body; a vendor / gateway echoing it (or the refresh
