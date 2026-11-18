@@ -7,7 +7,7 @@
 // readers is scripts/mount-reader-census.mjs (test-architecture §86). Imports nothing.
 'use strict';
 
-const SENTENCE = 'This storage is connecting or not responding — try again in a moment.';   // = src/routes/files.js's 503
+const SENTENCE = 'This storage is connecting or not responding — try again in a moment.';   // the one spelling: every door asks sentenceFor
 // B-5ce7 cure (主开发's must): a PARKED mount is no «try again in a moment» — nothing reconnects it by itself; its refusal
 // names it and its doors (the row's Connect, For you's Reconnect). The one spelling; src/routes/files.js reads it too.
 const PARKED = '“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.';

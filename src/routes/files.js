@@ -119,7 +119,7 @@ router.use((req, res, next) => {
     // B-5ce7 cure: a PARKED mount says so and names its doors (nothing reconnects it by itself — «try again» would be false)
     const pk = mounts.parkedAt?.(p);
     if (pk) return res.status(503).json({ error: require('../mount-door.js').parkedSentence(pk.name), code: 'storage_parked', params: { name: pk.name } });
-    return res.status(503).json({ error: 'This storage is connecting or not responding — try again in a moment.' });
+    return res.status(503).json({ error: require('../mount-door.js').sentenceFor(p) });   // the door's own words (one spelling)
   }
   // A registered storage that is NOT mounted: its mount point is a bare local
   // directory — anything written there is stranded (and blocks the next

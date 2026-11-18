@@ -215,7 +215,7 @@ const H = (backend, now = 0) => ({ ...W('ok', 'hung', backend, 0, now), list: { 
 const heldSeq = (Lx) => run(Lx, [W('ok', 'hung', 'ok'), H('skipped'), H('skipped'), H('ok')]);
 // ⑦'s mounts.js controls share ONE patched copy (one compile, not three): each edit is guarded by its own switch, set only
 // while its control runs — A: the park removed (the backoff instead), B: the auto-remount's park check removed, K: the alive
-// branch's resolve of the stopped-process notice removed. Each anchor must exist or its control is red by name.
+// branch's resolve of the stopped-process notice removed, F: Reconnect's freshness rule removed. Each anchor must exist or its control is red by name.
 const MUT7 = { A: ["        if (v.park) this._park(live, v, w);\n", "        if (v.park && !globalThis.__vsMut7.A) this._park(live, v, w);\n"],
   B: ["    if (m.parked) return;   // B-5ce7: a parked mount waits", "    if (m.parked && !globalThis.__vsMut7.B) return;   // B-5ce7: a parked mount waits"],
   K: ["      if (first || this._killedSaid?.has(m.id)) {", "      if (!globalThis.__vsMut7.K && (first || this._killedSaid?.has(m.id))) {"],
@@ -460,12 +460,16 @@ async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stop
   // parked mount's words reach it; the 503 catches keep the door's own words
   const { execFileSync } = require('node:child_process');
   const srcFiles = execFileSync('git', ['ls-files', 'src'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((f) => f.endsWith('.js'));
-  const spells = srcFiles.filter((f) => f !== 'src/mount-door.js' && fs.readFileSync(path.join(REPO, f), 'utf8').includes('DOOR.SENTENCE'));
+  const SENT = require(path.join(REPO, 'src/mount-door.js')).SENTENCE;
+  const spellsIt = (t) => t.includes('DOOR.SENTENCE') || t.includes(SENT);   // the name or the words themselves (the cure's readers: files.js wrote the words)
+  const spells = srcFiles.filter((f) => f !== 'src/mount-door.js' && spellsIt(fs.readFileSync(path.join(REPO, f), 'utf8')));
   const DOORS = ['src/design-fs.js', 'src/server/agent-tool-generators.js', 'src/server/frame-host.js', 'src/server/published-pages.js', 'src/server/vault-run-door.js', 'src/webdav.js'];
   const asks = DOORS.filter((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes('DOOR.sentenceFor('));
   const FH = fs.readFileSync(path.join(REPO, 'src/server/frame-host.js'), 'utf8'), FR = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
   const keeps = FH.includes("e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.'") && (FR.match(/e\.code === 'storage-blocked' && e\.message \? e\.message : 'Storage not responding — try again in a moment\.'/g) || []).length === 2;
-  ok(spells.length === 0 && asks.length === DOORS.length && keeps, `⑦ the door census: no src file but mount-door.js spells the blocked sentence (${spells.join(', ') || 'none'}); the ${DOORS.length} doors ask DOOR.sentenceFor; the 503 catches of frame-host and files keep the door's own words`, JSON.stringify({ spells, asks }));
+  const filesAsks = FR.includes("return res.status(503).json({ error: require('../mount-door.js').sentenceFor(p) });");
+  ok(spells.length === 0 && asks.length === DOORS.length && keeps && filesAsks, `⑦ the door census: no src file but mount-door.js spells the blocked sentence, by name or by its words (${spells.join(', ') || 'none'}); the ${DOORS.length} doors ask DOOR.sentenceFor, the files route's 503 sentenceFor; the 503 catches of frame-host and files keep the door's own words`, JSON.stringify({ spells, asks, filesAsks }));
+  ok(spellsIt(FR.replace("require('../mount-door.js').sentenceFor(p)", JSON.stringify(SENT).replace(/"/g, "'"))), '⑦ CONTROL: the files route writing the words itself again (the release\'s 503) ⇒ the census names it (red)');
 }
 { // ⑦ controls
   const PA = await withMut7('A', () => parkLegs(mut7().MountManager, 'nopark', { upTo: 'noRemount' }));
