@@ -28,7 +28,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
-const ok = (c, m, detail) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 400) : '')); } };
+const ok = (c, m, detail) => { if (typeof m !== 'string') throw new Error(`ok: the condition goes FIRST, the name second (got a ${typeof m} for the name)`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 400) : '')); } };
 
 // ── A SMALL FAKE DOM (test-card-grammar's): elements, text, innerHTML parsed, a small selector engine ──
 const cls = (n) => String(n.className || '').split(/\s+/);

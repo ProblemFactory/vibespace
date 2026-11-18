@@ -38,7 +38,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SRC = path.join(REPO, 'src/phone-split.js');
 const S = require(SRC);
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error(`ok: the condition goes FIRST, the name second (got a ${typeof n} for the name)`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const HEAD_SRC = path.join(REPO, 'src/phone-head.js');
 /** A patched copy of a module (a RED control; src/phone-split.js unless named): `from` must occur exactly once. */

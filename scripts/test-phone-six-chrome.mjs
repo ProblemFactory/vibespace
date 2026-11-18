@@ -73,7 +73,7 @@ for (const d of [stubDir, CWD, SHOTS, fontsDir]) fs.mkdirSync(d, { recursive: tr
 const FONT_ENV = FONT === 'dejavu' ? runnerFontEnv(fontsDir) : {};
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
-const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new Error(`check: the name goes FIRST (got a ${typeof n})`); if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 console.log(`tree: ${TREE === repo ? 'this tree' : TREE} · font leg: ${FONT}${FONT === 'dejavu' ? " (the hosted runner's sans-serif)" : ''} · CPU ×4`);
 
