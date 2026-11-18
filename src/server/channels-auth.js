@@ -23,6 +23,7 @@ const F = require('../channel-filter.js');
 const P = require('../channel-policy.js');
 const ACL = require('../channel-acl.js');
 const OF = require('../channel-outbox-files.js');
+const HC = require('../hidden-chars.js');   // B-8edd cure2: a sign-in's name in a For-you row shows its hidden / direction characters
 
 /** THE FAMILY'S FACTORY — `engineCtx` is the engine's ONE context object (channels-engine.js, the composition root): every
  *  field this family reads is named in the destructure below (test-architecture §79 pins the list), and what it answers
@@ -476,7 +477,9 @@ function create(engineCtx) {
   function askLanded(p) {
     if (engineCtx.stopped || !p.ok || p.targetId || pendingFlows.get(p.flowId) !== p || !(userTodos && typeof userTodos.add === 'function')) return;
     if (landedAfter(p).length) return;   // a NEWER landed sign-in of its type owns the item (the one the person made last)
-    const kind = cleanLabel(p.rec.label || p.kind), user = p.user ? cleanLabel(p.user) : '';
+    // cure2 (verify): the name is the VENDOR's (a Gmail address, a Lark display name) — a hidden or direction character in it
+    // is SHOWN (⟦U+202E⟧), never left to reorder the row a person reads
+    const kind = cleanLabel(p.rec.label || p.kind), user = p.user ? HC.revealHidden(cleanLabel(p.user)) : '';
     const text = user ? `${kind}: signed in as ${user} — finish connecting` : `${kind}: signed in — finish connecting`;
     const until = p.startedAt + PENDING_FLOW_TTL_MS;
     try {

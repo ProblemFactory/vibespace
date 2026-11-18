@@ -63,6 +63,7 @@ const PRODUCERS = {
   'src/server/groups-engine.js': { origin: 'channels', scope: 'group', types: ['open-channel'], why: 'int388 seam (.388): lane paced-wake-retry\'s owner item for a held group wake that fell (sign-in off). ' + 'Scope group because of two fields read at its one add() (groups-engine.js, userTodos.add(\'channels\', {…})): the first argument is the hub\'s «channels» GROUP key, not a conversation key, and the item object carries NO `about` field (this census reads `about:` at the site). ' + 'The lane added test-user-todos-layout\'s fast row only; a For-you producer owes a row in BOTH censuses' },
   'src/server/channels-outbound.js': { origin: 'channels', scope: 'group', types: ['open-channel'], why: 'a reply / reaction / recall proposal is its own card in the chat (channel-touch-view chatProposalCards)' },
   'src/server/channel-api-cards.js': { origin: 'channels', scope: 'group', types: ['channel-api-proposal'] },
+  'src/server/channels-auth.js': { origin: 'channels', scope: 'group', types: ['channel-connect'] },   // lane bl-mail (B-8edd): a landed sign-in nobody connected — «finish connecting», under the channels group key
   'src/server/browser-handback.js': { origin: 'browser', scope: 'conversation', types: ['browser-takeover'] },
   'src/server/browser-builds-keeper.js': { origin: 'browser', scope: 'group', types: [] },
   'src/server/browser-disk-run.js': { origin: 'browser', scope: 'group', types: [] },

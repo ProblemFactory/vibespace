@@ -2023,9 +2023,10 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   const realST = globalThis.setTimeout;
   const fastAsk = (on, to = 5) => { globalThis.setTimeout = on ? ((fn, ms, ...a) => realST(fn, ms === 60e3 && /askLanded/.test(String(fn)) ? to : ms, ...a)) : realST; };
   const CRIGS = [];
-  async function landedRig(tag, E = ENG) {
+  async function landedRig(tag, E = ENG, { email = null } = {}) {
     const dir = path.join(ROOT, `landed-${tag}`); fs.mkdirSync(dir, { recursive: true });
     const v2 = mkVendor();
+    if (email) { const f0 = v2.fetchFn; v2.fetchFn = async (url, init) => (/\/profile$/.test(new URL(String(url)).pathname) ? jsonRes({ emailAddress: email, historyId: '100' }) : f0(url, init)); }
     const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now });
     const e2 = E.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v2.fetchFn, log: quiet, userTodos: todos, ...FAST_PACE });
     CRIGS.push(e2);
@@ -2051,6 +2052,14 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   ok(until && until.at === s1.startedAt + ENG.PENDING_FLOW_TTL_MS && until.key === 'the sign-in waits until {time}' && until.gone === 'the sign-in has run out — sign in again' && dl.key === 'The sign-in landed but the account was not connected — open Connect an account to finish; {until}.',
     'cure2: the detail\'s END rides as an INSTANT CLAUSE {at, key, gone} — the page words it in its own clock («waits until …», «has run out» once passed)', J(dl));
   ok(/waits 30 minutes from its start\.$/.test(it.detail || '') && !/\d{1,2}:\d{2}|UTC|\d{4}-\d{2}-\d{2}/.test(it.detail || ''), 'the store\'s English fallback (a reader with no page) says a DURATION — no clock, no zone, no date', it.detail);
+  {
+    // cure2 (verify: nothing rendered the filed detail): THE ONE RENDERER the tray uses words the very clause filed
+    const LY = await import(path.join(REPO, 'src/lib/user-todos-layout.js'));
+    const tt = (k, p0) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p0 && p0[x] !== undefined ? String(p0[x]) : m));
+    const ahead = until ? LY.saidLine(dl, tt, { now: until.at - 60e3 }) : '', gone = until ? LY.saidLine(dl, tt, { now: until.at + 1 }) : '';
+    ok(/; the sign-in waits until \S.*\d/.test(ahead) && !/[{}]|\d{4}-\d{2}-\d{2}/.test(ahead) && /; the sign-in has run out — sign in again\.$/.test(gone) && !/[{}]/.test(gone),
+      'cure2: the tray\'s renderer (saidLine) words the filed detail — a clock in the viewer\'s own zone while the sign-in waits, «has run out» once it passed; no placeholder and no ISO date left', { ahead, gone });
+  }
   const st1 = L.e2.oauthStatus(null, { kind: 'gmail' });
   ok(st1.done && st1.ok && st1.flowId === s1.flowId && st1.token === s1.flowId, 'the Connect dialog the verb opens finds this sign-in by its type (what the dialog\'s attach reads)', J(st1));
   // a newer landing of the same type: ONE item, the newest
@@ -2093,6 +2102,18 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   clock = s4.startedAt + ENG.PENDING_FLOW_TTL_MS + 1;
   X.todos.expireDue(clock);
   ok(id4 && X.todos.get(id4).status !== 'open' && X.todos.get(id4).resolvedBy === 'expired', 'past the sign-in\'s own end the store ends the item as expired — never an open item for a sign-in that is gone', J(id4 && X.todos.get(id4)));
+  // verify (cure2): the vendor's name for the sign-in may carry a direction character — the row SHOWS it, never reorders by it
+  {
+    const RLO = String.fromCharCode(0x202e);
+    const Hd = await landedRig('hidden', ENG, { email: `eve${RLO}moc.elpmaxe@example.com` });
+    await Hd.signIn();
+    const hd = Hd.asks()[0] || {};
+    const said = [hd.text, hd.i18n && hd.i18n.text && hd.i18n.text.params && hd.i18n.text.params.user].map((x) => String(x || ''));
+    ok(said.every((x) => !x.includes(RLO) && x.includes('⟦U+202E⟧')), 'a sign-in whose vendor name carries a direction character: the item\'s words SHOW it (⟦U+202E⟧) — the row a person reads is never reordered by it', said);
+  }
+  // verify (cure2): the item's door is Connect an account — a Connect pressed on that sign-in past its 30 minutes makes nothing
+  const late4 = await X.e2.connect('gmail', { flowId: s4.flowId }).then(() => null, (e) => e);
+  ok(late4 && late4.status === 404 && late4.code === 'no-flow', 'a Connect on the sign-in past its own 30 minutes is refused 404 no-flow — the late press makes no account', late4 && { status: late4.status, code: late4.code, message: late4.message });
   // CONTROL: the arming line removed — the old silence
   const ASRC2 = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf-8');
   const ARM = "    if (p.ok) { for (const q of landedBefore(p)) endLandedAsk(q, 'a newer sign-in of its type landed'); landedAskLater(p); }   // B-8edd: the newest landing is the one asked about\n";
