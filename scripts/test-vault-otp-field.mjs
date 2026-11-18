@@ -37,7 +37,7 @@ const VAULT = { ok: true, state: 'unlocked', entries: [
 /** the legs ①–⑤ over a model `X` → the names of the legs that failed (the RED controls run the same legs over a copy) */
 function legs(X, say = ok) {
   const bad = [];
-  const leg = (c, name, d) => { if (!c) bad.push(name); say(c, name, d); };
+  const leg = (c, name, d) => { if (typeof name !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (!c) bad.push(name); say(c, name, d); };
   const E = X.entriesOf(VAULT);
   leg(E.join() === 'shop-two-step,wiki-two-step,bank-login' && X.entriesOf(null).length === 0 && X.entriesOf({ entries: 'x' }).length === 0,
     '① the vault\'s answer → its three names: a repeated name, an element without a name and a non-string name dropped; no answer ⇒ none', E);
@@ -100,6 +100,26 @@ const card = box.slice(box.indexOf('function loginBoxEl('), box.indexOf('functio
 ok(/body\.append\(\.\.\.f\.fields, f\.otpList, f\.hint, err\)/.test(add) && /loginFields\(\{ addCode: \(\) => showTotpAddDialog\(/.test(add) && /f\.otpPick\.added\(r\.name\)/.test(add)
   && /otpRow, f\.otpList, f\.hint/.test(card) && /loginFields\(\{ site, fixed: true, addCode: \(\) => addCode\.click\(\) \}\)/.test(card) && /f\.otpPick\.added\(n\)/.test(card) && !/otpNames/.test(box + row),
   'the three places draw it: the Vault\'s add dialog (its door opens THE 两步验证… dialog, the saved name fills the field) and the card in the tray / its own window (its door is the card\'s «Two-step code…», which moves the box first)');
+// THE PICKED LOGIN HIDES THE TWO-STEP FIELD (the meeting with login-request-card's saved-login door, 2.369.411): the card hands
+// useSavedLoginEl the elements a picked login hides — the old datalist's name there was skipped in SILENCE (`if (n)`), so a leg
+// reads the REAL call: exactly these four, each a name loginFields returns (or the card's own otpRow). Its RED control first.
+const typedOf = (src) => { const m = /useSavedLoginEl\(\{[^}]*?typed: \[((?:[^\[\]]|\[[^\]]*\])*)\]/.exec(src); return m ? m[1].split(',').map((x) => x.trim()) : null; };
+const retLine = (/\n  return \{ site: s, [^\n]*\};/.exec(fieldsFn) || [''])[0].replace(/fields: \[[^\n]*\]/, 'fields');
+const RETURNS = [...retLine.matchAll(/(?:\{ |, )([A-Za-z]+)(?=[:,]| \})/g)].map((m) => m[1]);   // the KEYS (a value after «:» is not one)
+const typedJudge = (cardSrc) => {
+  const t = typedOf(cardSrc) || [];
+  const unknown = t.filter((x) => (x.startsWith('f.') ? !RETURNS.includes(x.slice(2).replace(/\[\d+\]$/, '')) : !new RegExp(`const ${x} = `).test(cardSrc)));
+  return { same: JSON.stringify(t) === JSON.stringify(['f.fields[2]', 'otpRow', 'f.otpList', 'f.hint']), unknown, t };
+};
+{
+  const oldCopy = card.replace('typed: [f.fields[2], otpRow, f.otpList, f.hint]', 'typed: [f.fields[2], otpRow, f.otpNames, f.hint]');   // stale-pins: kept — the RED control's deliberate copy with the OLD name
+  ok(oldCopy !== card && /typed: \[f\.fields\[2\], otpRow, f\.otpNames, f\.hint\]/.test(oldCopy), 'RED control, its plant first: the copy carries the OLD name (f.otpNames) in the saved-login door\'s typed list');   // stale-pins: kept — the plant's own check names the OLD name
+  const rv = typedJudge(oldCopy);
+  ok(!rv.same && rv.unknown.includes('f.otpNames'), 'RED control: the old name is caught — f.otpNames is no name loginFields returns', rv);
+  const v = typedJudge(card);
+  ok(RETURNS.includes('otpList') && RETURNS.includes('fields') && RETURNS.includes('hint') && v.same && !v.unknown.length,
+    'a picked saved login hides EXACTLY the password row, the two-step row, the two-step list\'s box (f.otpList) and the hint — each a name loginFields returns or the card\'s own otpRow', { v, RETURNS });
+}
 const css = read('public/style.css');
 ok(/if \(!panel\.isConnected\) wrap\.append\(panel\);/.test(fld) && /open = false; active = -1; panel\.remove\(\);/.test(fld) && /\.vault-otp-list \{ position: absolute; left: 0; right: 0; top: calc\(100% \+ 3px\);/.test(css) && !/panel\.hidden = (?:true|false)/.test(fld),
   'THE CURE (主开发 00:02Z): the open list takes NO room in the flow — absolutely placed in the field\'s own box, attached when it opens and removed when it closes — so a press on Save never moves under the pointer (and the follower re-places on the child list)');

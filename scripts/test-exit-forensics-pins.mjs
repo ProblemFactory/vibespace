@@ -103,11 +103,12 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/server/bridge-watch.js': [2, "attach: shutdown's endAttachPtys + orphaned dtach -a clients (alias)"],
     'src/pty-duck.js': [1, "attach: a device handle's pty duck"],
     'src/server/boot-restore.js': [1, 'unregistered: a duplicate husk retired at boot before adoption'],
+    'src/server/provider-test.js': [3, 'not a conversation: the provider Test\'s own probe child (B-d578 U4) — its group on a timeout or after its exit, the child alone when its group cannot be signalled'],
     'src/agentd/agentd.js': [6, "device: the daemon's own pipe / pty sessions + the posixShells probe's 3 s stop of a shell that never answered (windows-device-fs r2)"],
     'src/server/cli-cmd.js': [2, "the CLI location ask (lane cli-shell-truth, B-fb02; declared by int378): runShell's OWN probe shell — the child by its pid, then its own session's group (detached ⇒ setsid ⇒ pgid = its pid), at the answer or the 10 s bound; never a session, its exit never judged"],
     'src/agentd/attach-cli.js': [1, 'device: an attach client'],
     'src/agentd/client.js': [1, 'device: an attach client'],
-    'src/dial-session-bridge.js': [4, 'device: dial bridge handles'],
+    'src/dial-session-bridge.js': [5, 'device: dial bridge handles (+ dial-bridge-credit: a pty opened for an attach that went away is ended at the open)'],
     'src/server/dial-pairing.js': [1, 'device: a pairing handle'],
     'src/hosts.js': [1, 'device: an install child on a timeout'],
     'src/server/cli-usage-door.js': [1, "not respawned: the Re-check usage read's OWN `agy -p /usage` child (lane antigravity-card-fixes; int332 seam — the lane forked before this census's row set), SIGKILL at the read's timeout — a bounded one-shot a person pressed for; its exit is the read's answer (a named refusal), never a session's"],
@@ -116,7 +117,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/desktop-serve.js': [3, 'not a conversation: desktop apps'],
     'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],
     'src/machine-mounts.js': [1, 'not a conversation: mount probes'],
-    'src/mounts.js': [7, 'not a conversation: mounts (2.369.213: + a hung/over-ceiling starting daemon, + the bounded cache-count child)'],
+    'src/mounts.js': [4, 'not a conversation: mounts — the bounded cache-count child, a hung health probe, the token reader, a pending start\'s child (B-e783: the daemons\' own kills go through PI.signalIdentity, src/proc-identity.js — a recycled pid is never signalled)'],
     'src/proc-identity.js': [2, 'not a conversation: the identity-proven signal (background jobs\' group kill, B-1cc6) — moved from src/jobs.js'],
     'src/plugins/frp.js': [1, 'not a conversation: plugins (the frpc daemon it started)'],
     'src/plugins/tailscale.js': [1, 'not a conversation: plugins (the tailscaled it started)'],
@@ -218,6 +219,15 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'control: one more kill call in a declared file is red');
   ok(killDoorCensus(mut('src/ws-handler.js', (s) => s.replace("session._exitAsked = { by: 'terminate', at: Date.now() };", '')), files).some((b) => /actor mark does not precede/.test(b)),
     'control: the ws kill case without its actor mark is red');
+  // control: a mark FARTHER than the window from its kill is red — the census reads the distance, not only the presence (the 23:42Z
+  // verdict on restack-411 moved2: the window stays 2500, bl-jobs' own cure e3f4b93b5 brought the kills back inside it)
+  {
+    const MARK = "session._exitAsked = { by: 'terminate', at: Date.now() };";
+    const far = (s) => s.replace(MARK, MARK + '\n      // ' + 'x'.repeat(2600));
+    const farWs = far(read('src/ws-handler.js')), gap = farWs.indexOf("process.kill(dpid, 'SIGTERM')", farWs.indexOf(MARK)) - farWs.indexOf(MARK);
+    ok(farWs.includes(MARK) && gap > 2500, `control, its plant first: the copy holds the ws kill case's mark ${gap} chars before its kill (past the 2500 window)`);
+    ok(killDoorCensus(mut('src/ws-handler.js', far), files).some((b) => /actor mark does not precede/.test(b)), 'control: a mark farther than the window from its kill is red');
+  }
   ok(killDoorCensus(mut('src/lib/chat-view.js', (s) => s + "\nfunction stopIt(ws, id) { ws.send({ type: 'kill', sessionId: id }); }\n"), files).some((b) => b.startsWith('client:')),
     'control: a client kill sent around App.killSession is red');
   // the actors the census names are each an asked exit, never a respawn — even mid-turn with a crash code

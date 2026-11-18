@@ -173,7 +173,7 @@ function loginBoxEl(item) {
   allow.addEventListener('change', sayAllow); sayAllow();
   row.append(save, deny);
   const note = mk('div', 'ut-secret-note', t('Wrong site? Refuse — the agent can ask again with the right one.'));
-  const use = useSavedLoginEl({ box, site, who, origin: String(item.action.hosts || ''), user: f.user, typed: [f.fields[2], otpRow, f.otpNames, f.hint], allowText, sayAllow });
+  const use = useSavedLoginEl({ box, site, who, origin: String(item.action.hosts || ''), user: f.user, typed: [f.fields[2], otpRow, f.otpList, f.hint], allowText, sayAllow });
   box.append(f.fields[0], use.button, use.pane, f.fields[1], kept, f.fields[2], otpRow, f.otpList, f.hint, allowLab, allowSays, allowFence, row, note, stateEl());
   applySecretBox(box);
   return box;

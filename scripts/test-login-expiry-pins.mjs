@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ck = (n, c) => { if (typeof n !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
 // ── §5 wiring pins (2.355.0: an unstaged call site keeps unit tests green) ──
 console.log('— §5 wiring');

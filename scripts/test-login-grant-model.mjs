@@ -170,7 +170,10 @@ console.log('⑤ WHAT THE LOGIN HOLDS — its two-step code bound or unbound by 
   const imports = ROW.split('\n').filter((l) => /^import /.test(l)).map((l) => (/from '([^']+)'/.exec(l) || [])[1]).sort();
   // + ./use-login-words.js (lane login-request-card, one login several sites — a chip's site, chipSiteOf): PURE, it imports nothing, so
   //   the stubbed bundles of the paste box and the login card carry it as they are (test-vault-paste ⑬b / ⑬c bundle it)
-  ok(JSON.stringify(imports) === JSON.stringify(['./i18n.js', './use-login-words.js', './utils.js', './vault-totp-row.js']) && !/agoText/.test(ROW.split('\n').filter((l) => /^import /.test(l)).join('\n'))
+  // + ./vault-otp-field.js (lane vault-2fa-pick, the two-step field's OWN list): no dialog — a field; its imports are the stubbed
+  //   utils.js / vault-unlock.js / i18n.js, PURE vault-otp-field-model.js and blur-commit.js (which imports only chat-enter-keys.js,
+  //   PURE), so the stubbed bundles carry it (test-vault-paste ⑬b / ⑬c green with it)
+  ok(JSON.stringify(imports) === JSON.stringify(['./i18n.js', './use-login-words.js', './utils.js', './vault-otp-field.js', './vault-totp-row.js']) && !/agoText/.test(ROW.split('\n').filter((l) => /^import /.test(l)).join('\n'))
     && !/^import /m.test(fs.readFileSync(path.join(REPO, 'src/lib/use-login-words.js'), 'utf8')),
     'the row module imports no dialog and nothing new (the paste box and the login card bundle it with a stubbed utils.js) — the window hands it `held` and the openers', imports);
 }
