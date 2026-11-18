@@ -293,7 +293,8 @@ console.log('② the row\'s pick vs the account\'s own');
   const store0 = STORE.create({ dataDir: path.join(ROOT, 'store0'), env: {}, now, broadcast: () => {}, drivePresets: () => holder0.list, log: quiet });
   const v0 = mkVendor();
   const d0 = path.join(ROOT, 'eng0'); fs.mkdirSync(d0, { recursive: true });
-  const eng0 = ENG0.create({ dataDir: d0, env: {}, now, broadcast: () => {}, integrations: store0, fetch: v0.fetchFn, log: quiet , ...FAST_PACE });
+  const warns0 = [];   // the copy's own log: B-166e's adapter says the swap it rides here
+  const eng0 = ENG0.create({ dataDir: d0, env: {}, now, broadcast: () => {}, integrations: store0, fetch: v0.fetchFn, log: { ...quiet, warn: (...a) => warns0.push(a.join(' ')) }, ...FAST_PACE });
   engines.push(eng0);
   const A0 = await consent(eng0, 'gmail', { credentialKey: 'cluster:org1' }, 'c-a');
   ok(A0.clientId === 'org1.apps.googleusercontent.com', 'CONTROL: the copy consents A under org1 like the real engine');
@@ -302,7 +303,17 @@ console.log('② the row\'s pick vs the account\'s own');
   v0.calls.length = 0;
   await eng0.pass(A0.id, { force: true });
   const t0 = v0.tokenCalls().find((c) => c.form.refresh_token === '1//ra');
-  ok(t0 && t0.form.client_id === 'ch.apps.googleusercontent.com', 'CONTROL: the copy refreshes A\'s org1 token with the CHANNELS client once the pick moved — the silent swap the model forbids', JSON.stringify(t0 && t0.form));
+  // RESTATED to the law since B-166e (the train's hosted red, 2026-11-18): a token now names the client it was minted under
+  // and refreshes with THAT client once the client under its key is another — a second, independent road that keeps the
+  // vendor call on org1 even in this copy. What the removed hand-down still changes is the ACCOUNT'S OWN KEY: the copy's
+  // record carries none (the real engine's A: cluster:org1, the leg above), so A follows the row's pick and stands on the
+  // swap road — its adapter says so (the one-time «refreshes with the client it signed in with … is now ch…»). Without
+  // B-166e this copy's refresh WOULD go to the channels client (the release's control, which held at 2.369.409).
+  const rec0 = diskOf(d0).find((r) => r.id === A0.id), row0 = rowOf(eng0, A0.id);
+  const swapSaid = warns0.filter((w) => /refreshes with the client it signed in with \(org1\.apps\.googleusercontent\.com\)/.test(w) && w.includes('ch.apps.googleusercontent.com'));
+  ok(rec0 && !rec0.credentialKey && row0 && !row0.credentialKey && swapSaid.length === 1 && t0 && t0.form.client_id === 'org1.apps.googleusercontent.com',
+    'CONTROL: the copy without the key hand-down and the record stamp keeps NO key for A (record and row) — A follows the row\'s moved pick and rides the swap road, said once (org1 minted, the channels client under the pick); only B-166e\'s minted-client law keeps its refresh on org1 (the leg above: the real engine keeps A under cluster:org1)',
+    JSON.stringify({ recKey: rec0 && rec0.credentialKey, rowKey: row0 && row0.credentialKey, swapSaid, form: t0 && t0.form }));
   eng0.oauth.stopAll(); eng0.stop();
 }
 
