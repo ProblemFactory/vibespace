@@ -62,25 +62,57 @@ export function lockedFor(byWhat = {}, scope = 'this-account', everyoneKey = EVE
   return out;
 }
 
-/** WHAT THE DIALOG FOR `scope` DRAWS from «by what» (主开发 22:41Z, shoulds a and d; 23:25Z follow-up) → { locked, also, covered }:
- *  · `also` — a subject THIS row holds ITSELF (`held` = the stored row's principal keys — never «by what», which also admits a member
- *    through its Task Group) and a wider one admits too: ticked and REMOVABLE here, the «through» note beside it;
- *  · `locked` — a subject only a WIDER row admits: ticked and locked «through» it, with its door;
- *  · with Everyone admitted by a wider row — whether or not it also holds this row — ONE line for Everyone: the subjects it covers
- *    through that same row are not drawn one by one (`covered` = how many); a subject through a narrower wider row keeps its line. */
-export function lockedPlan(byWhat = {}, scope = 'this-account', everyoneKey = EVERYONE_KEY, { held = [] } = {}) {
-  const own = new Set((Array.isArray(held) ? held : []).map(String));
-  const all = lockedFor(byWhat, scope, everyoneKey);
-  const also = all.filter((l) => own.has(l.principal)), wide = all.filter((l) => !own.has(l.principal));
-  const ev = all.find((l) => l.principal === 'everyone');
-  const locked = ev ? wide.filter((l) => l.principal === 'everyone' || l.through !== ev.through) : wide;
-  return { locked, also, covered: wide.length - locked.length, everyone: ev || null };
+/** THE ONE DRAWING of a grant dialog (主开发 00:28Z — after three rounds: ONE record per subject, drawn and nothing else). From the
+ *  hub's «by what» (the fill's own verdict per subject) and the rows themselves (`rows` = { 'this-account', 'any-account', 'any-site' }
+ *  → { to, except } in the grant model's spelling, null = none), for the dialog of `scope`:
+ *  · `selected` — this row's OWN principals (ticked, removable); `also[k]` — the narrowest WIDER row that admits one of them too;
+ *  · `exceptChips` — this row's own «除了»;
+ *  · `locked` — a subject only a WIDER row admits: ticked and locked «through» it, with its door; `still` when THIS row leaves it out
+ *    (a person who leaves D out here must see that D can still be filled — the owner's own confusion);
+ *  · `everyone` — Everyone admitted by a wider row: ONE line, its row's exceptions named; the subjects it covers through that same
+ *    row are not drawn one by one — never one this row leaves out (it stays a locked «still» line);
+ *  · `leftOut[k]` — a subject NO row admits that a row holding Everyone leaves out (itself or its Task Group): marked with that row.
+ *  `subjects` = [{ key: principal key, groupIds }]. PURE. */
+export function drawPlan({ byWhat = {}, scope = 'this-account', rows = {}, subjects = [] } = {}) {
+  const at = SCOPES.indexOf(scope);
+  const keys = (list) => (Array.isArray(list) ? list : []).map(principalKeyOf).filter(Boolean);
+  const here = rows[scope] || { to: [], except: [] };
+  const held = new Set(keys(here.to)), exceptHere = new Set(keys(here.except));
+  const ordered = (k) => SCOPES.filter((sc) => (Array.isArray(byWhat[k]) ? byWhat[k] : []).includes(sc));
+  const wider = (k) => ordered(k).filter((sc) => SCOPES.indexOf(sc) > at);
+  const exOf = (sc) => { const r = rows[sc]; return r && (r.to || []).some((p) => p && p.kind === 'everyone') ? keys(r.except) : []; };
+  const outOf = (ex, k, groups) => ex.includes(k) || groups.some((g) => ex.includes(`group:${g}`));
+  const evWide = wider('everyone')[0] || null;
+  const plan = { scope, selected: [...held], exceptChips: [...exceptHere], locked: [], also: {}, leftOut: {}, everyone: evWide ? { through: evWide, except: exOf(evWide), own: held.has('everyone') } : null };
+  for (const s of Array.isArray(subjects) ? subjects : []) {
+    const k = String(s.key), groups = (s.groupIds || []).map(String), w = wider(k);
+    if (held.has(k)) { if (w.length) plan.also[k] = w[0]; continue; }
+    if (ordered(k).includes(scope)) continue;   // admitted HERE through a held Task Group or Everyone — that chip says it
+    const outHere = outOf([...exceptHere], k, groups);
+    if (w.length) {
+      if (k !== 'everyone' && !outHere && plan.everyone && w[0] === plan.everyone.through && !outOf(plan.everyone.except, k, groups)) continue;   // under the Everyone line
+      plan.locked.push({ key: k, through: w[0], still: outHere });
+      continue;
+    }
+    const by = SCOPES.find((sc) => outOf(exOf(sc), k, groups));
+    if (by) plan.leftOut[k] = by;
+  }
+  return plan;
 }
-/** The principals a WIDER row that holds Everyone leaves out (`through` = its scope; `grants` = the login's reaching rows) — the
- *  Everyone line says them, and their list rows are marked left out (主开发 23:25Z: a left-out conversation looked covered). */
-export function everyoneLeftOut(grants = [], through = 'any-site') {
-  const g = (Array.isArray(grants) ? grants : []).find((x) => x && !x.unknown && x.scope === through && (x.to || []).some((p) => p && p.kind === 'everyone'));
-  return g && Array.isArray(g.except) ? g.except.filter((p) => p && (p.kind === 'conversation' || p.kind === 'group')) : [];
+/** WHAT A PERSON READS on the page drawn from `plan` about subject `s` — from the drawing alone: a locked line, a ticked chip, a
+ *  «除了» chip, a held Task Group / Everyone, the Everyone line, a mark. → { admitted, through?, also?, leftOut? }. The walk in
+ *  scripts/test-login-grant-model.mjs holds it equal to the fill's verdict for every small case. */
+export function pageSays(plan, s) {
+  const k = String(s.key), groups = (s.groupIds || []).map(String);
+  const has = (list, x) => (list || []).includes(x);
+  const lk = plan.locked.find((l) => l.key === k);
+  if (lk) return { admitted: true, through: lk.through };
+  if (has(plan.selected, k)) return { admitted: true, through: plan.scope, also: plan.also[k] || null };
+  if (has(plan.exceptChips, k) || groups.some((g) => has(plan.exceptChips, `group:${g}`))) return { admitted: false, leftOut: plan.leftOut[k] || null };
+  if (k !== 'everyone' && (has(plan.selected, 'everyone') || groups.some((g) => has(plan.selected, `group:${g}`)))) return { admitted: true, through: plan.scope };
+  const evLine = plan.locked.find((l) => l.key === 'everyone');
+  if (evLine && k !== 'everyone' && !has(plan.everyone.except, k) && !groups.some((g) => has(plan.everyone.except, `group:${g}`))) return { admitted: true, through: evLine.through };
+  return { admitted: false, leftOut: plan.leftOut[k] || null };
 }
 
 /** The stored row of one resource among a login's reaching grants (`entry.grants`: {resource, scope, to, except}) → {to, except}. */

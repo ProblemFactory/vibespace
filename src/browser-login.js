@@ -985,11 +985,11 @@ function noticeWords(state, { origin = '', username = '', conversation = '', tar
 function byWhatOf({ rows = {}, subjects = [] } = {}) {
   const order = [['this-account', rows.thisAccount], ['any-account', rows.anyAccount], ['any-site', rows.anySite]];
   const out = {};
-  // a conversation a row NAMES that is not running (not among the subjects) is a subject too — the dialog draws it «not running
-  // now», ticked by the row that holds it (its Task Groups are not known here: it is probed by its own key)
+  // a conversation a row NAMES (in its «to» or its «除了») that is not running (not among the subjects) is a subject too — the dialog
+  // draws it «not running now» (its Task Groups are not known here: it is probed by its own key)
   const all = Array.isArray(subjects) ? [...subjects] : [];
   const have = new Set(all.map((s) => s && s.key));
-  for (const [, rs] of order) for (const r of Array.isArray(rs) ? rs : []) for (const e of (r && Array.isArray(r.to) ? r.to : [])) {
+  for (const [, rs] of order) for (const r of Array.isArray(rs) ? rs : []) for (const e of [...(r && Array.isArray(r.to) ? r.to : []), ...(r && Array.isArray(r.except) ? r.except : [])]) {   // a row's «除了» too: left out here, maybe admitted by another row
     const k = e && e.kind === 'conversation' && e.key ? `conversation:${e.key}` : null;
     if (k && !have.has(k)) { have.add(k); all.push({ key: k, facts: { conversationKey: String(e.key) } }); }
   }

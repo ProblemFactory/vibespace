@@ -19,6 +19,8 @@
 //   ⑧ EVERYONE ON THE STAR ROW, ONE CONVERSATION LEFT OUT (MUST 1 + should d; 主开发 23:25Z): a login's dialog draws ONE locked line
 //      «全部 · 经由：任何网站 · 除了 新对话» with its door — not a chip per conversation; the left-out conversation's row says it is left out
 //      (never drawn like a covered one); a conversation that ALSO holds this login's own row stays ticked and removable, «也经由» beside it.
+//   ⑨ EVERYONE ON BOTH ROWS (主开发 00:28Z): the Everyone row's own text says «也经由：任何网站 · 除了 新对话», its chip keeps ✕, D (admitted
+//      by this row's Everyone) carries no mark.
 // LGD_SHOTS_DIR=<dir> also writes the pictures (360 and 960) for the owner's look.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -63,10 +65,13 @@ const DATA = {
 // by this login's own row)
 const STAR_ALL = { resource: '*', scope: 'any-site', to: [{ kind: 'everyone' }], except: [conv('conv-d')] };   // D left out
 const DATA_ALL = { ...DATA, entries: [alice([OWN, STAR_ALL], { everyone: ['any-site'], 'group:g1': ['any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['any-site'] }), ...DATA.entries.slice(1)] };
+// EVERYONE ON BOTH ROWS (主开发 00:28Z): this login's own row holds Everyone, the star row holds Everyone except D — this row admits D
+const OWN_ALL = { resource: `${ORIGIN}#alice`, scope: 'this-account', to: [{ kind: 'everyone' }], except: [] };
+const DATA_BOTH = { ...DATA, entries: [alice([OWN_ALL, STAR_ALL], { everyone: ['this-account', 'any-site'], 'group:g1': ['this-account', 'any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['this-account', 'any-site'], 'conversation:conv-d': ['this-account'] }), ...DATA.entries.slice(1)] };
 const entry = `import { showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog, wideHeaderDoors, loginHeld } from ${J('src/lib/vault-login-grants.js')};
 import { loginExtras } from ${J('src/lib/vault-login-row.js')};
 const q = new URLSearchParams(location.search), mode = q.get('mode') || 'login';
-const DATA = q.get('star') === 'everyone' ? ${JSON.stringify(DATA_ALL)} : ${JSON.stringify(DATA)};
+const DATA = q.get('star') === 'everyone' ? ${JSON.stringify(DATA_ALL)} : q.get('star') === 'both' ? ${JSON.stringify(DATA_BOTH)} : ${JSON.stringify(DATA)};
 const doors = { held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog };
 const rowOf = (e) => { const w = document.createElement('div'); w.className = 'vw-row'; w.style.margin = '12px'; w.dataset.login = e.name; const n = document.createElement('div'); n.className = 'vw-row-name'; n.textContent = e.user + ' · ' + e.origin.replace('https://', ''); const x = loginExtras({ entry: e.name }, DATA, { refresh: () => {}, doors }); w.append(n, x.box, ...x.doors); return w; };
 if (mode === 'login') showLoginGrantPicker(DATA.entries[0], DATA, { refresh: () => {} });
@@ -243,13 +248,23 @@ for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { v
     return { locked: locked.map((c) => c.textContent), lockedDoors: locked.filter((c) => c.querySelector('.pp-chip-door')).length, ownAx: ownA ? ownA.querySelectorAll('.pp-chip-x').length : -1, rowAhint: rowA ? rowA.textContent : '', rowAlocked: rowA ? rowA.classList.contains('pp-locked') : null, rowBlocked: rowB ? rowB.classList.contains('pp-locked') : null, rowB: rowB ? rowB.textContent : '', rowD: rowD ? rowD.textContent : '', nameE: nmE ? { text: nmE.textContent, whole: nmE.scrollWidth <= nmE.clientWidth + 1 } : null, hintE: rowE ? [...rowE.querySelectorAll(':scope > .pp-hint:not(.pp-lock-why)')].filter((h) => getComputedStyle(h).display !== 'none').length : -1 }; })()`);
   ok(r.locked.length === 1 && /全部/.test(r.locked[0]) && /经由：任何网站/.test(r.locked[0]) && /除了 新对话/.test(r.locked[0]) && r.lockedDoors === 1 && r.rowBlocked === false,
     `${tag}: ONE locked line «全部 · 经由：任何网站 · 除了 新对话» with its door — not a chip per conversation (B, covered by it, has no chip of its own)`, r);
-  ok(/不在「全部」里——经由：任何网站/.test(r.rowD) && !/不在「全部」里/.test(r.rowB),
+  ok(/不在「全部」里——任何网站/.test(r.rowD) && !/不在「全部」里/.test(r.rowB),
     `${tag}: D, which the star row leaves out, is marked «不在「全部」里» — B, which it covers, is not: the two never look alike`, { rowB: r.rowB, rowD: r.rowD });
   ok(r.nameE && r.nameE.text === '全部' && r.nameE.whole && r.hintE === 0, `${tag}: the locked Everyone row shows its name WHOLE — its «through» note stands in for the row's own hint (it was crushed to «Ev…» by the hint, the note and the door)`, { nameE: r.nameE, hintE: r.hintE });
   ok(r.ownAx === 1 && r.rowAlocked === false && /也经由：任何网站/.test(r.rowAhint),
     `${tag}: A holds this login's own row too — its chip keeps its ✕, its row is removable, «也经由：任何网站» beside it`, r);
   ok(fits(await p.fit(LOGIN)) && await p.noRefusal(), `${tag}: it fits inside and draws no refusal before one`);
   await p.shot(LOGIN, `login-everyone-${tag}-zh.png`);
+  p.close();
+}
+console.log('⑨ Everyone on BOTH rows, D left out by the star row — the Everyone row\'s own text says «也经由 · 除了», its chip keeps ✕');
+for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
+  const p = await page({ ...o, query: 'mode=login&star=both', sel: LOGIN + ' .pp-row[data-key="everyone:*"]' });
+  const r = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const chipE = [...d.querySelectorAll('.pp-chip')].find((c) => c.dataset.key === 'everyone:*'); const rowE = d.querySelector('.pp-row[data-key="everyone:*"]'); const rowD = d.querySelector('.pp-row[data-key="agent:conv-d"]');
+    return { chipX: chipE ? chipE.querySelectorAll('.pp-chip-x').length : -1, chipLocked: chipE ? chipE.classList.contains('pp-chip-locked') : null, rowE: rowE ? rowE.textContent : '', locked: d.querySelectorAll('.pp-chip-locked').length, rowD: rowD ? rowD.textContent : '' }; })()`);
+  ok(r.chipX === 1 && r.chipLocked === false && /也经由：任何网站/.test(r.rowE) && /除了 新对话/.test(r.rowE) && r.locked === 0,
+    `${tag}: Everyone held HERE and on the star row: its chip keeps its ✕, its own row says «也经由：任何网站 · 除了 新对话», and no conversation gets a locked chip`, r);
+  ok(!/不在「全部」里/.test(r.rowD), `${tag}: D — left out by the star row but admitted by THIS row's Everyone — carries no «left out» mark`, r.rowD);
   p.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);

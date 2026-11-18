@@ -15,13 +15,16 @@ import { principalPicker } from './principal-picker.js';
 import { rowToPick, pickToRow } from './principal-picker-model.js';
 import { showUnlock } from './vault-unlock.js';
 import { loadTotp } from './vault-totp-row.js';
-import { EVERYONE_KEY, rosterFromSubjects, lockedPlan, everyoneLeftOut, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, pickKeyOf, heldFacts } from './login-grant-model.js';
+import { SCOPES, EVERYONE_KEY, rosterFromSubjects, drawPlan, rowAt, savePlan, sitesOf, wideSummary, principalKeyOf, pickKeyOf, heldFacts } from './login-grant-model.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const siteOf = (origin) => String(origin || '').replace(/^https:\/\//, '');
 const throughWords = (scope) => (scope === 'any-site' ? t('through: any site') : t('through: any account on this site'));
 const doorWords = (scope) => (scope === 'any-site' ? t('Any site…') : t('Any account on this site…'));
+const stillWords = (scope) => (scope === 'any-site' ? t('still through: any site') : t('still through: any account on this site'));   // left out HERE, still admitted wider
+const alsoWords = (scope) => (scope === 'any-site' ? t('also through: any site') : t('also through: any account on this site'));
+const leftOutWords = (scope) => (scope === 'any-site' ? t('left out of Everyone — any site') : scope === 'any-account' ? t('left out of Everyone — any account on this site') : t('left out of Everyone — this account'));
 const FENCE = () => t('VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.');
 /** A refusal in the page's words, with its door (the vault locked ⇒ Unlock…). */
 function refusalOf(r) {
@@ -56,26 +59,34 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   if (raised) return null;
   if (head) body.append(head);
   body.append(el('div', 'vw-ak-hint vw-login-consequence', consequence));
-  // what «by what» says, drawn (主开发 22:41Z): a subject only a wider row admits — locked «through» it, with its door; one that also
-  // holds THIS row — ticked and removable, «also through» beside it; Everyone held wider — ONE line, not one chip per conversation
-  const plan = lockedPlan(byWhat || {}, scope, EVERYONE_KEY, { held: (stored.to || []).map(principalKeyOf).filter(Boolean) });
-  // Everyone held wider: its line says whom that row LEAVES OUT, and their rows are marked so (a left-out row must not look covered)
-  const loginRows = (((data && data.entries) || []).find((e) => e.name === name) || {}).grants || grants;
-  const leftOut = plan.everyone ? everyoneLeftOut(loginRows, plan.everyone.through) : [];
-  const nameOf = (p) => { const k = pickKeyOf(principalKeyOf(p) || '', EVERYONE_KEY); const r = roster.find((x) => x.key === k); return r ? r.name : String(p.name || p.key || p.id || '').slice(0, 12); };
-  const leftWhy = leftOut.length ? ` · ${t('except {names}', { names: leftOut.map(nameOf).join(', ') })}` : '';
-  const locked = plan.locked.map((l) => ({ key: l.key, why: throughWords(l.through) + (l.principal === 'everyone' ? leftWhy : ''), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
-  const alsoHint = new Map(plan.also.map((l) => [l.key, (l.through === 'any-site' ? t('also through: any site') : t('also through: any account on this site')) + (l.principal === 'everyone' ? leftWhy : '')]));
-  for (const p of leftOut) { const k = pickKeyOf(principalKeyOf(p) || '', EVERYONE_KEY); if (k && !alsoHint.has(k)) alsoHint.set(k, t('left out of Everyone — {through}', { through: throughWords(plan.everyone.through) })); }
-  // a conversation a wider row holds that is not running has its row too — «not running now» (its name as the row stored it)
-  const nameIn = (pk) => { for (const g of grants) for (const p of g.to || []) if (p && p.kind === 'conversation' && `conversation:${p.key}` === pk && p.name) return String(p.name); return null; };
+  // THE ONE DRAWING (主开发 00:28Z — login-grant-model drawPlan): from «by what» and THIS login's own rows, nothing else. The rows at
+  // this scope and wider only (a narrower row is another dialog's); no fallback to other logins' rows (another site's origin#* row).
+  const loginRows = (((data && data.entries) || []).find((e) => e.name === name) || {}).grants || [];
+  const at = SCOPES.indexOf(scope);
+  const rowsBy = {};
+  for (const sc of SCOPES) if (SCOPES.indexOf(sc) > at) { const g = loginRows.find((x) => x && !x.unknown && x.scope === sc); rowsBy[sc] = g ? { to: g.to || [], except: g.except || [] } : null; }
+  rowsBy[scope] = stored;
+  // the subjects: Everyone, the Task Groups, the running conversations — and a stopped one a row names (in its «to» or its «除了»)
+  const subjects = [{ key: 'everyone', groupIds: [] }, ...roster.map((r) => ({ key: r.kind === 'group' ? `group:${r.id}` : `conversation:${r.id}`, groupIds: r.kind === 'group' ? [] : (r.groupIds || []) }))];
+  const named = new Map();
+  for (const r of Object.values(rowsBy)) for (const p of [...((r && r.to) || []), ...((r && r.except) || [])]) if (p && p.kind === 'conversation' && p.key != null && !subjects.some((x) => x.key === `conversation:${p.key}`)) { subjects.push({ key: `conversation:${p.key}`, groupIds: [] }); named.set(`conversation:${p.key}`, p.name || null); }
+  const plan = drawPlan({ byWhat: byWhat || {}, scope, rows: rowsBy, subjects });
+  const pk = (k) => pickKeyOf(k, EVERYONE_KEY);
+  const nameOfKey = (k) => { const r = roster.find((x) => x.key === pk(k)); return r ? r.name : String(named.get(k) || k.replace(/^(conversation|group):/, '')).slice(0, 12); };
+  const evWords = plan.everyone && plan.everyone.except.length ? ` · ${t('except {names}', { names: plan.everyone.except.map(nameOfKey).join(', ') })}` : '';
+  const locked = plan.locked.map((l) => ({ key: pk(l.key), why: (l.still ? stillWords(l.through) : throughWords(l.through)) + (l.key === 'everyone' ? evWords : ''), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
+  const hintOf = new Map();
+  for (const [k, sc] of Object.entries(plan.also)) hintOf.set(pk(k), alsoWords(sc) + (k === 'everyone' ? evWords : ''));
+  for (const [k, sc] of Object.entries(plan.leftOut)) hintOf.set(pk(k), leftOutWords(sc));
+  // a stopped conversation the plan speaks of has its row too — «not running now» (its name as the row stored it)
   const own = [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))];
-  const stopped = [...plan.locked, ...plan.also].filter((l) => l.principal.startsWith('conversation:') && !own.some((r) => r.key === l.key))
-    .map((l) => { const id = l.principal.slice(13); return { key: l.key, kind: 'agent', id, name: nameIn(l.principal) || id.slice(0, 8), hint: words.notRunning, groupIds: [], groupNames: [] }; });
-  const items = [...own, ...stopped].map((r) => (alsoHint.has(r.key) ? { ...r, hint: [r.hint, alsoHint.get(r.key)].filter(Boolean).join(' · ') } : r));
+  const spoken = [...plan.locked.map((l) => l.key), ...Object.keys(plan.also), ...Object.keys(plan.leftOut)];
+  const stopped = [...new Set(spoken)].filter((k) => k.startsWith('conversation:') && !own.some((r) => r.key === pk(k)))
+    .map((k) => ({ key: pk(k), kind: 'agent', id: k.slice(13), name: nameOfKey(k), hint: words.notRunning, groupIds: [], groupNames: [] }));
+  const items = [...own, ...stopped].map((r) => (hintOf.has(r.key) ? { ...r, hint: [r.hint, hintOf.get(r.key)].filter(Boolean).join(' · ') } : r));
   picker = principalPicker({ items: () => items, multi: true, selected: drawn.selected,
     placeholder: t('Search conversations and groups…'), label: t('Who may have it filled'), emptyText: t('No conversation is running'),
-    everyone: { key: EVERYONE_KEY, name: t('Everyone'), hint: t('every conversation on this instance, now and later') }, except: { selected: held, extra }, locked });
+    everyone: { key: EVERYONE_KEY, name: t('Everyone'), hint: hintOf.get(EVERYONE_KEY) || t('every conversation on this instance, now and later') }, except: { selected: held, extra }, locked });   // the Everyone row's own text: «also through» + its wider row's exceptions
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   if (locked.length) body.append(el('div', 'vw-ak-hint vw-login-locked-note', t('Ticked and locked: a wider grant already lets them — change it at its own door.')));
   const refusal = el('div', 'vw-ak-hint vw-login-refusal'); refusal.hidden = true;
@@ -241,9 +252,7 @@ export function showAnyAccountDialog(data, { refresh, site = null } = {}) {
   const openFor = (origin) => {
     const of = entries.filter((e) => e.origin === origin);
     if (!of.length) return null;
-    // who the star row admits — locked here too, through «any site» (the «by what» of any login of the site carries it)
-    const byWhat = {};
-    for (const [k, scopes] of Object.entries(of[0].byWhat || {})) if ((scopes || []).includes('any-site')) byWhat[k] = ['any-site'];
+    const byWhat = of[0].byWhat || {};   // the login's whole «by what»: drawPlan reads this row's scope and the wider one
     return grantDialog({ id: 'vault-login-grant-any-account', scope: 'any-account', resource: `${origin}#*`, name: of[0].name,
       title: t('Who may have any account of {site} filled', { site: siteOf(origin) }),
       consequence: t('Any login this vault holds for {site} — the ones added later too — and an agent may register a NEW account there through the vault.', { site: siteOf(origin) }) + ' ' + FENCE(),
