@@ -427,12 +427,12 @@ const SPAWN_AT = require.resolve(path.join(REPO, 'src/spawn/index.js'));
 const realSpawn = require(SPAWN_AT);
 /** a copy of a create whose paired-machine ladder answers a spawn line (the remote CLI's argv as the create built it) — a resume
  *  that asks `_adoptHere` is ADOPTED by it (a live keeper holds the conversation, as src/spawn/ssh.js finds one) */
-function withLadder(src, tag) {
+function withLadder(src, tag, { same = false } = {}) {
   const saved = require.cache[SPAWN_AT];
   // (as src/spawn/ssh.js does on its roads: the session is the machine's — host = its id, hostName = its name)
   const chat = async (lc) => { if (lc.data._adoptHere) { lc.data.keeperSid = `k-${lc.id}`; lc.data.keeperKind = 'agentd'; } lc.session.host = lc.h.id; lc.session.hostName = lc.h.name; return { spawnCmd: '/stub/ssh', spawnArgs: ['h-2', lc.rcmd, ...lc.rargs], spawnEnvPairs: [], spawnCwd: lc.cwd }; };
   require.cache[SPAWN_AT] = { id: SPAWN_AT, filename: SPAWN_AT, loaded: true, children: [], paths: [], exports: { ...realSpawn, spawnFor: (h) => (h ? { id: 'ssh', chat } : realSpawn.spawnFor(h)) } };
-  try { return M.load('src/ws-create.js', src, tag); } finally { require.cache[SPAWN_AT] = saved; }
+  try { return M.load('src/ws-create.js', src, tag, { same }); } finally { require.cache[SPAWN_AT] = saved; }
 }
 /** the paired machine «build-box» (id h-2): its device answers the CLI probe (`helper` = its Claude settings name one), or nothing
  *  answers (`answer` false: the device link and the ssh probe both fail) — or the ssh probe answers `sshOut` */
@@ -451,7 +451,7 @@ function hostsStub({ helper = true, answer = true, sshOut = null, hang = false, 
   me.backendStatus = async (id) => { me.asked.push(id); try { return await HostManager.prototype.backendStatus.call(me, id); } finally { me._onFact(); } };
   return new Proxy(me, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && k !== 'then' && /^[a-z]/.test(k) ? async () => null : undefined)) });
 }
-const remoteCreate = withLadder(SRC, 'remote-road');
+const remoteCreate = withLadder(SRC, 'remote-road', { same: true }); // the real module behind the ssh ladder, on purpose (B-0d3e)
 const R = (data) => ({ hostId: 'h-2', cwd: '/home/u/proj', ...data });
 const helperSaid = (x) => x.notices.filter((n) => n.key.startsWith('billing-pick-helper-'));
 {

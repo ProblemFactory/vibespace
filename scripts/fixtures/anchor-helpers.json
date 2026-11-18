@@ -20,7 +20,8 @@
   "test-user-state-echo.mjs": 2,
   "test-vault-job-model.mjs": 1,
   "test-vault-run-model.mjs": 1,
-  "test-vault-run.mjs": 1,
+  "test-vault-run.mjs": 2,
+  "test-vault-standing-request.mjs": 1,
   "test-voice-proxy.mjs": 1
  },
  "why": {

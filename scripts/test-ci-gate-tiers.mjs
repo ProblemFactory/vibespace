@@ -862,7 +862,7 @@ console.log('\n§8g a version-only bump is no global input; --rules names the on
     'WIRING: --list-affected --tier=fast lists the FAST rows; --rules prints the report (the count on stderr); without it the comma-joined names as before');
 }
 
-// ── §8g A SKIP IS NOT A GREEN (B-4829) ──
+// ── §8h A SKIP IS NOT A GREEN (B-4829) ──
 // 2026-11-18: on a test machine with no sshd two heavy suites skipped their real road and ended rc 0 — and the green row
 // kept only the LAST stdout line (80 characters), so a skip said mid-output read as a green and only a SKIP on the last
 // line could be named. Planted suites through the REAL runSuiteAsync + runFastLanes: one says two SKIPs in the MIDDLE and
@@ -870,7 +870,7 @@ console.log('\n§8g a version-only bump is no global input; --rules names the on
 // a SKIP on its retry; one is a plain green whose lines carry SKIP inside a word or a sentence. The shapes are the tree's:
 // a walk of every printed literal in scripts/ (a fixed-string scan of the tracked files) — every SKIP line counted, the
 // sentences ABOUT a skip a one-way fixture. The control is a copy of ci.mjs whose green row is today's last-line rule.
-console.log('\n§8g a green suite\'s SKIP lines are counted on its row and named at the close — a skip is never a green (B-4829)');
+console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named at the close — a skip is never a green (B-4829)');
 {
   const ci = await import('./ci.mjs');
   const { anchored } = await import('./scratch.mjs');

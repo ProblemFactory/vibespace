@@ -1862,7 +1862,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
   const spyProc = () => { const rd = fs.readdirSync; const box = { n: 0 }; fs.readdirSync = function (q, ...r) { if (String(q) === '/proc') box.n++; return rd.call(this, q, ...r); }; return { box, undo: () => { fs.readdirSync = rd; } }; };
   const procWalks = (fn) => { const s0 = spyProc(); try { return { out: fn(), n: s0.box.n }; } finally { s0.undo(); } };
   const procWalksAsync = async (fn) => { const s0 = spyProc(); try { const out = await fn(); return { out, n: s0.box.n }; } finally { s0.undo(); } };
-  const fresh = MCi.load('src/codex-session-store.js', csSrc, 'fresh-cache');
+  const fresh = MCi.load('src/codex-session-store.js', csSrc, 'fresh-cache', { same: true }); // a fresh instance of the real module on purpose (B-0d3e)
   const said = (rows) => [...new Set(rows.map((t) => t.status + (t.liveness ? '/' + t.liveness : '')))].join();
   const s1 = procWalks(() => fresh.listCodexThreads({ activeSessions: new Map() }));
   const sw = await procWalksAsync(() => fresh.listOpenCodexThreadIdsAsync());
@@ -1927,7 +1927,7 @@ console.log('⑦ the zst cache and the ssh control folder are judged before use 
     // the zst cache
     const cxSrc = read('src/adapters/codex.js');
     const CXA = '  const v = SOCK.ensureSocketDir(dir);\n';
-    const NEW = M.load('src/adapters/codex.js', cxSrc, 'own');
+    const NEW = M.load('src/adapters/codex.js', cxSrc, 'own', { same: true }); // a fresh real module under this TMPDIR, on purpose (B-0d3e)
     let err = null; try { NEW.plainJsonlPath(zstPath); } catch (e) { err = e; }
     const awayAfterNew = fs.readdirSync(away).length;
     ok(cxSrc.includes(CXA) && !!err && err.code === 'EZSTCACHE' && err.message.includes(path.join(T, `vibespace-zst-${uid}`)) && /SYMLINK/.test(err.message) && /the way out/.test(err.message) && awayAfterNew === 0,
@@ -1942,7 +1942,7 @@ console.log('⑦ the zst cache and the ssh control folder are judged before use 
     const HA = '    const cm = SOCK.ensureSocketDir(this._cmDir);\n';
     const h = { id: 'host-own', host: 'example.invalid', user: 'u', port: 22 };
     const dataA = path.join(T, 'data-a'); fs.mkdirSync(dataA);
-    const HM1 = M.load('src/hosts.js', hostsSrc, 'own').HostManager;
+    const HM1 = M.load('src/hosts.js', hostsSrc, 'own', { same: true }).HostManager; // a fresh real module under this TMPDIR, on purpose (B-0d3e)
     const refused = new HM1({ dataDir: dataA });
     const argsRefused = refused.sshArgs(h, { multiplex: true }).join(' ');
     const warnOnce = warned.filter((w) => /ssh connection sharing is off/.test(w));
