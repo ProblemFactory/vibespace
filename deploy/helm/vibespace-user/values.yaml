@@ -189,6 +189,21 @@ networkPolicy:
   # Everything else internal (node net, management/BMC, k8s API) is blocked;
   # public internet (minus RFC1918) is allowed for the agent's own API calls.
   allowedInternalCidrs: []     # e.g. ["10.x.y.z/32"]
+  # INGRESS (q-042 D7a — its OWN NetworkPolicy, <release>-ingress, switched apart from the egress one above): the pod's
+  # app port (3456) is reached ONLY through the ingress controller — the owner's page and every device dial-in arrive
+  # through it — and from the pod itself; a neighbour pod in the namespace no longer reaches the login page, /hook or
+  # /api/device-dial. The metrics port (metrics.port) stays open in-cluster for the prometheus.io scrape, that port only.
+  # OFF until measured on a test cluster: a wrong rule is a 502 for every user of the fleet. Turn it on there first,
+  # check the owner's page AND a device dial-in, then on the fleet.
+  ingress:
+    enabled: false
+    controllerNamespace: ingress-nginx   # the namespace the ingress controller runs in (its kubernetes.io/metadata.name label)
+    extraNamespaces: []                  # other namespaces let reach the app port — each one a hole, by name (a whole namespace:
+                                         # a caller in the users' own namespace cannot be let in alone this way)
+    # An ingress controller on the HOST network (bare-metal ingress-nginx with hostNetwork: true, some k3s / Cilium setups)
+    # reaches the pod from the NODES' addresses, which no namespace rule matches — name the node network here, or every
+    # request it proxies from another node is dropped (a 502):
+    extraCidrs: []                       # e.g. ["10.x.0.0/16"] — the node network, only for a host-network controller
 
 # Direct CephFS subtree sharing (optional). When url+token are set, "Share a
 # folder" on a CephFS My-storage row mints a path-scoped cephx key via the

@@ -488,3 +488,44 @@ spec:
             cidr: 0.0.0.0/0
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
 {{- end }}
+{{- $ing := (.Values.networkPolicy).ingress }}
+{{- if and $ing $ing.enabled }}
+---
+# q-042 D7a: the app port only through the ingress controller (the owner's page, every device dial-in) and from the pod
+# itself — never from a neighbour pod; the metrics port alone stays open in-cluster for the prometheus.io scrape.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-ingress
+  labels: {{- include "vs.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vibespace
+      app.kubernetes.io/instance: {{ .Values.user }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:                                  # the ingress controller: the owner's page and every device dial-in
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $ing.controllerNamespace | default "ingress-nginx" | quote }} }
+        {{- range $ing.extraNamespaces }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ . | quote }} }
+        {{- end }}
+        {{- range $ing.extraCidrs }}
+        - ipBlock: { cidr: {{ . | quote }} }   # a host-network ingress controller's node network
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 3456 }
+    - from:                                  # the pod itself
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vibespace
+              app.kubernetes.io/instance: {{ .Values.user }}
+    {{- if and .Values.metrics .Values.metrics.enabled }}
+    - from:                                  # the in-cluster prometheus.io scrape — the metrics port only
+        - namespaceSelector: {}
+      ports:
+        - { protocol: TCP, port: {{ .Values.metrics.port | default 3457 }} }
+    {{- end }}
+{{- end }}
