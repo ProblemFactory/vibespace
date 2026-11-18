@@ -457,14 +457,14 @@ let month30Prep = null, month30Run = null, readingOnly30 = null;
   // the cap binds under a parent --max-old-space-size (execArgv []) — the two children run at once (each its own process
   // READING r3; spawnSync held the loop for both in turn — lane fast-debt-clear)
   const child = (src) => new Promise((resolve) => execFile(process.execPath, ['--max-old-space-size=4096', '--input-type=module', '-e', src], { encoding: 'utf8', timeout: 60000 }, (_e, stdout, stderr) => resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') })));
-  const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 4; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
+  const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 1; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
   const wSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-worker.js'), 'utf8');
   const noSoft = M.write('src/usage-cold-worker.js', wSrc.replace("if (capBytes && ++n % 2000 === 0 && (over = overCap(capBytes, rule, judge))) throw", "if (false) throw"), 'nosoftcap');
   // §30b's control (B-f35e): the READING judged wherever the limit is — what the collector has not taken yet counted as held
   readingOnly30 = M.write('src/usage-cold-worker.js', wSrc.replace("const rule = CB.foldCapRule(", "const rule = 'reading' || CB.foldCapRule("), 'readingonly');
   ok(readingOnly30 !== noSoft && fs.readFileSync(readingOnly30, 'utf8').includes("const rule = 'reading' || CB.foldCapRule("), '§30b the reading-only copy is a copy (its needle found)');
   const [withCap, without] = await Promise.all([child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', 'null')), child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', JSON.stringify(noSoft)))]);
-  ok(/REFUSED .*memory/.test(withCap.stdout), `§14 under a parent --max-old-space-size=4096 the fold's 4 MB cap still binds (the soft cap) (${(withCap.stdout || withCap.stderr).trim().slice(0, 80)})`);
+  ok(/REFUSED .*memory/.test(withCap.stdout), `§14 under a parent --max-old-space-size=4096 the fold's 1 MB cap still binds (the soft cap — under any worker's own baseline heap) (${(withCap.stdout || withCap.stderr).trim().slice(0, 80)})`);
   ok(/ANSWERED/.test(without.stdout), `control (resourceLimits alone, no soft cap): the parent's flag lifts the cap, the fold answers (${(without.stdout || without.stderr).trim().slice(0, 60)}) ⇒ RED`);
   month30Prep = prep30();
   const raced = await racer;
@@ -723,7 +723,10 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
  *  --single-threaded-gc: 8 of 10). 46 MB sits between: 13 MB over the chunks' largest reading, 12 MB under what the whole
  *  group holds, each more than a quarter of the cap; the month (50 MB) is still larger than the cap. */
 function prep30() {
-  const SOFT30 = 46;   // (a const in the function: prep30 runs inside §15's block, before this line of the module is reached)
+  // B-f35e (the batch 69 cure, the suite back under the fast line): 20 MB — between what a 5 000-row chunk HOLDS (<= 9.6 MB)
+  // and what it READS (28-33 MB) under the 64 MB floor: the held rule answers the chunks, the whole group (58 MB held) is
+  // still refused; ONE fold proves both §30 and §30b (the reading-only control stops at its first crossing)
+  const SOFT30 = 20;   // (a const in the function: prep30 runs inside §15's block, before this line of the module is reached)
   const t5 = mkUh('r4big', 40 * DAY, 60 * 1024);
   fs.mkdirSync(t5.dir, { recursive: true });
   const base5 = Date.UTC(new Date(NOW - 120 * DAY).getUTCFullYear(), new Date(NOW - 120 * DAY).getUTCMonth(), 2);
@@ -735,23 +738,18 @@ function prep30() {
 async function fold30({ t5, base5 }) {
   t5.coldRowBudget = 5000; const ok5 = await t5.aggregateAsync({ to: NOW - 100 * DAY }).then((x) => x.totals.requests, (e) => e.message);
   t5.coldRowBudget = 1e9; const bad5 = await t5.aggregateAsync({ to: NOW - 101 * DAY }).then(() => 'answered', (e) => e);
-  // §30b (B-f35e): the same chunks under a cap BETWEEN what they hold (<= 9.5 MB) and what they read (27.9-32.9 MB) — the
-  // worker's old space is _spawnJob's 64 MB floor, so the collector lets the reading run past the cap: the shape a parent
-  // --max-old-space-size makes at the hub's size (52 % of the cap read over it, 11-12)
-  const HELD30 = 20;   // 10 MB over what a chunk holds, 8 MB under the least reading it showed (a const in the function, as SOFT30)
-  const cap = t5.coldWorkerHeapMb; t5.coldWorkerHeapMb = HELD30; t5.coldRowBudget = 5000;
-  const held5 = await t5.aggregateAsync({ to: NOW - 102 * DAY }).then((x) => x.totals.requests, (e) => e.message);
-  t5.coldWorkerFile = readingOnly30;
+  // §30b's control (B-f35e): the same chunks with the reading judged wherever the limit is — refused at its first crossing
+  t5.coldRowBudget = 5000; t5.coldWorkerFile = readingOnly30;
   const read5 = await t5.aggregateAsync({ to: NOW - 103 * DAY }).then(() => 'answered', (e) => e);
-  t5.coldWorkerFile = null; t5.coldWorkerHeapMb = cap;
-  return { ok5, bad5, held5, read5, cap, held: HELD30, mb: Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576) };
+  t5.coldWorkerFile = null;
+  return { ok5, bad5, read5, cap: t5.coldWorkerHeapMb, mb: Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576) };
 }
 { // §30 (verify #5): a month bigger than the fold's soft cap folds in row-budget chunks (its fold ran beside §26's r3 control)
-  const { ok5, bad5, held5, read5, cap, held, mb } = await month30Run;
+  const { ok5, bad5, read5, cap, mb } = await month30Run;
   ok(mb > cap && ok5 === 120000, `§30 a ${mb} MB month under a ${cap} MB soft cap, 5 000-row chunks: ${ok5}`);
   ok(bad5 && bad5.code === 'FOLD_TOO_BIG' && /retrying will not help/.test(bad5.message) && !/retry$/.test(bad5.message), `control (the whole-group read): "${bad5.message && bad5.message.slice(0, 70)}…" ⇒ RED, and it does not say retry`);
   ok(bad5 && /MB still held after a collection/.test(bad5.message), `§30b the refusal says what is HELD after a collection, not a reading ("${bad5.message && bad5.message.slice(55, 130)}…")`);
-  ok(held5 === 120000, `§30b B-f35e the same 5 000-row chunks under a ${held} MB cap (each holds <= 9.5 MB, reads 28-33): ${held5}`);
+  ok(cap === 20 && ok5 === 120000, `§30b B-f35e those 5 000-row chunks fold under a ${cap} MB cap — each HOLDS <= 9.6 MB and READS 28-33 under the 64 MB floor, the held rule answers: ${ok5}`);
   ok(read5 && read5.code === 'FOLD_TOO_BIG', `control (the reading alone judged): "${read5 && read5.message ? read5.message.slice(55, 110) : read5}…" ⇒ RED`);
 }
 { // §30c (B-f35e, PURE): which judge a fold worker takes — the READING where the cap is the old-space limit V8 kept (the

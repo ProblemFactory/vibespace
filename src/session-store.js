@@ -110,13 +110,49 @@ let _tmuxPathMemo = null;  // { at, path }
  *  spawning `which`/`command -v`. userW's pod has no tmux at all, so every
  *  sweep paid for a doomed spawn AND then paid a `ps` per lock because the
  *  empty pane map still went to the per-lock lookup below. */
+/** B-1425 (cure, batch 69 verdict MUST 1+2): a PATH dir under a STORAGE root is never read (the guard refuses it; a tmux
+ *  there was never found); a dir under any OTHER root (an NFS home, the instance's own mount — a conda or linuxbrew tmux)
+ *  is answered by the last ASYNC stat into it (`_tmuxMountFacts`, landed by landTmuxMounts, which getTmuxPaneMapAsync
+ *  awaits first): never statted from the main thread, still found. One stat in flight per dir, each bounded by
+ *  TMUX_MOUNT_STAT_MS (past it: no fact this round, asked again after the memo's TTL — a hung mount holds one pool
+ *  thread per dir, never one per ask). Before the witness has set its roots (a boot's first moments) rootOf answers null
+ *  and the walk stats as the release did. */
+const TMUX_MOUNT_STAT_MS = 2000;
+const _tmuxMountFacts = new Map();   // dir → { at, yes }
+const _tmuxMountInFlight = new Set();
+function tmuxMountDirs() {
+  return String(process.env.PATH || '').split(path.delimiter).filter((d) => { if (!d) return false; const r = SP.rootOf(d); return !!r && r.kind !== 'storage'; });
+}
+async function landTmuxMounts() {
+  const now = Date.now();
+  const todo = tmuxMountDirs().filter((d) => { const f = _tmuxMountFacts.get(d); return !_tmuxMountInFlight.has(d) && !(f && now - f.at < TMUX_PATH_TTL_MS); });
+  if (!todo.length) return;
+  let moved = false;
+  await Promise.all(todo.map((d) => {
+    _tmuxMountInFlight.add(d);
+    const stat = fs.promises.stat(path.join(d, 'tmux')).then((st) => st.isFile() && !!(st.mode & 0o111), () => false)
+      .finally(() => _tmuxMountInFlight.delete(d));
+    let timer = null;
+    const late = new Promise((r) => { timer = setTimeout(() => r(undefined), TMUX_MOUNT_STAT_MS); if (timer.unref) timer.unref(); });
+    return Promise.race([stat, late]).then((yes) => {
+      clearTimeout(timer);
+      if (yes === undefined) return;   // past the bound: no fact this round
+      const was = _tmuxMountFacts.get(d);
+      if (!was || was.yes !== yes) moved = true;
+      _tmuxMountFacts.set(d, { at: Date.now(), yes });
+    });
+  }));
+  if (moved) _tmuxPathMemo = null;   // the next ask walks again, in PATH order, with the landed facts
+}
 function tmuxOnPath() {
   const now = Date.now();
   if (_tmuxPathMemo && now - _tmuxPathMemo.at < TMUX_PATH_TTL_MS) return _tmuxPathMemo.path;
   let found = null;
   for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
     if (!dir) continue;
-    if (SP.rootOf(dir)) continue;   // B-1425: a PATH dir on a mount (NFS, a storage mount) is never statted from the main thread — tmux there is not seen
+    const r = SP.rootOf(dir);
+    if (r && r.kind === 'storage') continue;   // B-1425: never read from the main thread (the guard refuses it)
+    if (r) { const f = _tmuxMountFacts.get(dir); if (f && f.yes) { found = path.join(dir, 'tmux'); break; } continue; }   // B-1425: an NFS / home dir answers from its async stat
     try {
       const p = path.join(dir, 'tmux');
       const st = fs.statSync(p);
@@ -131,6 +167,7 @@ async function getTmuxPaneMapAsync() {
   const now = Date.now();
   if (_paneMapMemo && now - _paneMapMemo.at < TMUX_MAP_TTL_MS) return _paneMapMemo.map;
   const map = new Map();
+  await landTmuxMounts();   // B-1425: a tmux on an NFS / home PATH dir is seen — off the main thread
   if (!tmuxOnPath()) { _paneMapMemo = { at: now, map }; return map; } // no binary ⇒ no spawn
   const out = await execFileP('tmux', ['list-panes', '-a', '-F', '#{pane_pid}||#{session_name}:#{window_index}.#{pane_index}'], { timeout: 3000 });
   for (const line of String(out || '').trim().split('\n')) {
@@ -1517,6 +1554,7 @@ module.exports = { claudeTranscriptIndex, stuckSaid,
   recoverCwdFromProjDir,
   getTmuxPaneMapAsync,
   tmuxOnPath,
+  landTmuxMounts,   // B-1425 (cure): the async landing of a tmux on an NFS / home PATH dir
   findTmuxTargetAsync,
   isProcessClaudeAsync,
   isLockClaude,

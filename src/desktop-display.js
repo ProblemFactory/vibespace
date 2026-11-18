@@ -149,13 +149,17 @@ const _binMemo = new Map(); // name -> { at, path, pending? }
  *      into it (`_mountFacts`, landed by `landMounts`). A dir not answered yet leaves the walk PENDING: nothing is
  *      remembered, one background walk per (name, dirs) is started, and its landing drops the memo so the next ask walks
  *      again — in PATH order, every dir known. hostFacts awaits that landing (its first answer is exact).
- *  The stats into ONE root run one after another, each bounded by MOUNT_STAT_DEADLINE_MS from its own start (⇒ NO for this
- *  round, re-asked after BIN_RECHECK_MS); while one is past its bound the root is HELD and every ask into it answers NO at
- *  once, queuing nothing — a hung mount holds ONE pool thread, whatever its dirs on PATH. A process with no roots (the
- *  device daemon, a suite) walks every dir as before. */
+ *  EACH MOUNT DIR IS READ ONCE (the cure's total bound): one readdir per dir per BIN_RECHECK_MS answers every name asked of
+ *  it, and only a name the dir holds costs one stat (its exec bit) — thirty probe names cost one listing, not thirty stats.
+ *  The reads into ONE root run one after another, each bounded by MOUNT_STAT_DEADLINE_MS from its own start (past it: no
+ *  answer this round); while one is past its bound the root is HELD and every ask into it answers at once, queuing
+ *  nothing — a hung mount holds ONE pool thread, whatever its dirs on PATH. A process with no roots (the device daemon, a
+ *  suite) walks every dir as before — and so does the hub BEFORE the witness has set its roots (the first moments of a
+ *  boot): until then rootOf answers null and the walk stats as the release did. */
 const MOUNT_STAT_DEADLINE_MS = 2000;
 const _mountFacts = new Map(); // `${dir}\0${name}` -> { at, yes }
-const _mountRoots = new Map(); // root -> { tail: the last stat queued, held: a stat past its bound has not returned }
+const _mountRoots = new Map(); // root -> { tail: the last read queued, held: a read past its bound has not returned }
+const _mountLists = new Map(); // dir -> { at, names: Set | null, inflight: Promise | null } — the dir's listing
 const _landing = new Map();    // `${name}\0${the env's mount dirs}` -> the walk in flight
 const pathDirs = (env) => String((env && env.PATH) || '').split(path.delimiter).filter(Boolean);
 const rootOfDir = (dir) => { try { return SP.rootOf(dir) || null; } catch { return null; } };
@@ -178,21 +182,39 @@ function binOnPath(name, { env = process.env, now = Date.now } = {}) {
   if (pending) landMounts(name, { env, now }).catch(() => { });
   return found;
 }
-/** ONE async stat into a dir under `root` → true | false, never rejects: queued behind the root's previous stat, bounded
- *  from its own start; a held root answers false at once. */
-function statInto(root, dir, name) {
+/** ONE read into `root` → its value | undefined (past its bound, or the root held), never rejects: queued behind the
+ *  root's previous read, bounded from its own start; a held root answers undefined at once. */
+function rootIO(root, work) {
   let r = _mountRoots.get(root);
   if (!r) _mountRoots.set(root, r = { tail: Promise.resolve(), held: false });
-  if (r.held) return Promise.resolve(false);
-  const run = r.tail.then(() => (r.held ? false : new Promise((resolve) => {
+  if (r.held) return Promise.resolve(undefined);
+  const run = r.tail.then(() => (r.held ? undefined : new Promise((resolve) => {
     let over = false;
-    const timer = setTimeout(() => { over = true; r.held = true; resolve(false); }, MOUNT_STAT_DEADLINE_MS);
+    const timer = setTimeout(() => { over = true; r.held = true; resolve(undefined); }, MOUNT_STAT_DEADLINE_MS);
     if (timer.unref) timer.unref();
-    fs.promises.stat(path.join(dir, name)).then((st) => st.isFile() && !!(st.mode & 0o111), () => false)
-      .then((yes) => { clearTimeout(timer); if (over) r.held = false; else resolve(yes); });
+    Promise.resolve().then(work).then((v) => v, () => undefined).then((v) => { clearTimeout(timer); if (over) r.held = false; else resolve(v); });
   })));
   r.tail = run;
   return run;
+}
+/** The dir's names (one readdir per BIN_RECHECK_MS, one in flight) → Set | undefined (no answer this round). */
+function listOf(root, dir, now) {
+  const L = _mountLists.get(dir);
+  if (L && L.names && now() - L.at < BIN_RECHECK_MS) return Promise.resolve(L.names);
+  if (L && L.inflight) return L.inflight;
+  const inflight = rootIO(root, () => fs.promises.readdir(dir).then((xs) => new Set(xs), () => new Set())).then((names) => {
+    if (names === undefined) _mountLists.delete(dir); else _mountLists.set(dir, { at: now(), names, inflight: null });
+    return names;
+  });
+  _mountLists.set(dir, { at: L ? L.at : 0, names: L ? L.names : null, inflight });
+  return inflight;
+}
+/** Is `name` an executable in `dir` (under `root`)? → true | false | undefined (no answer this round). */
+async function factInto(root, dir, name, now) {
+  const names = await listOf(root, dir, now);
+  if (names === undefined) return undefined;
+  if (!names.has(name)) return false;
+  return rootIO(root, () => fs.promises.stat(path.join(dir, name)).then((st) => st.isFile() && !!(st.mode & 0o111), () => false));
 }
 /** Land the facts of the env's non-storage mount dirs for `name` (the ones not known), then drop its memo — one walk in
  *  flight per (name, dirs), shared. */
@@ -202,13 +224,13 @@ function landMounts(name, { env = process.env, now = Date.now } = {}) {
   if (_landing.has(key)) return _landing.get(key);
   const todo = mounts.filter(([d]) => !mountFact(d, name, now));
   if (!todo.length) return Promise.resolve();
-  const walk = Promise.all(todo.map(([d, r]) => statInto(r.root, d, name).then((yes) => { _mountFacts.set(d + '\0' + name, { at: now(), yes }); })))
+  const walk = Promise.all(todo.map(([d, r]) => factInto(r.root, d, name, now).then((yes) => { if (yes !== undefined) _mountFacts.set(d + '\0' + name, { at: now(), yes }); })))
     .then(() => { const m = _binMemo.get(name); if (m && m.pending) _binMemo.delete(name); })
     .finally(() => _landing.delete(key));
   _landing.set(key, walk);
   return walk;
 }
-function resetBinMemo() { _binMemo.clear(); _mountFacts.clear(); }
+function resetBinMemo() { _binMemo.clear(); _mountFacts.clear(); _mountLists.clear(); }
 /** Drop ONE memoised answer (a YES that a re-stat just refuted) — and what the mount dirs said about it. */
 function forgetBin(name) { _binMemo.delete(name); for (const k of [..._mountFacts.keys()]) if (k.endsWith('\0' + name)) _mountFacts.delete(k); }
 /** Re-stat a binary path IMMEDIATELY before spawning it. Throws a named
@@ -287,7 +309,7 @@ async function profileLockFact({ home, dir, hostname = os.hostname() } = {}) {
  *  LibreOffice is re-asked now — an install that just ended must be seen at once, not after BIN_RECHECK_MS. */
 async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, now = Date.now, fresh = false } = {}) {
   assertLocal(hostId, 'hostFacts');
-  if (fresh) { for (const e of OFFICE.OFFICE_EXECS) { const hit = _binMemo.get(e); if (hit && !hit.path) forgetBin(e); } _officeMemo.clear(); }
+  if (fresh) { for (const e of OFFICE.OFFICE_EXECS) { const hit = _binMemo.get(e); if (hit && !hit.path) forgetBin(e); } _officeMemo.clear(); _mountLists.clear(); }   // + the mount dirs' listings (an install just ended)
   const out = {};
   const names = [...new Set([...bins, ...BROWSER_BINS, ...OFFICE.OFFICE_EXECS])];
   await Promise.all(names.map((b) => landMounts(b, { env, now }).catch(() => { }))); // B-1425: a mount dir on PATH answers off the main thread
@@ -1548,7 +1570,7 @@ async function unmountUnder(dir, { env = process.env, mountinfo = '/proc/self/mo
 
 module.exports = {
   appSecretsFacts: (o) => require('./app-secrets').appSecretsFacts(o), appSecretsOf: (o) => require('./app-secrets').appSecretsOf(o), forgetAppSecrets: (o) => require('./app-secrets').forgetAppSecrets(o), // lane app-display-secrets (src/app-secrets.js)
-  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, profileLockFact /* lane app-launch-singleton */, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
+  assertLocal, binOnPath, landMounts, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, profileLockFact /* lane app-launch-singleton */, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES, rdpBuildFacts, rdpTrustRun,

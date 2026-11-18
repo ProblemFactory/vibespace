@@ -36,7 +36,7 @@ function overCap(capBytes, rule, judge) {
   fullCollection();
   const h = v8.getHeapStatistics().used_heap_size;
   if (h > capBytes) return { bytes: h, held: true };
-  judge.nextAt = h + capBytes / 4;
+  judge.nextAt = Math.min(h + capBytes / 4, judge.limit * 0.85);   // never past the worker's own limit: a fold growing there is judged before V8 kills it
   return null;
 }
 
@@ -66,7 +66,7 @@ parentPort.on('message', (msg) => {
     // by the reading where the cap is the worker's own limit, else by what is still HELD after a collection (B-f35e)
     const capBytes = (msg.capMb || 0) * 1048576;
     const rule = CB.foldCapRule({ capMb: msg.capMb, heapLimitMb: v8.getHeapStatistics().heap_size_limit / 1048576, maxOldMb: RL.maxOldGenerationSizeMb, maxYoungMb: RL.maxYoungGenerationSizeMb });
-    const judge = { nextAt: 0 };
+    const judge = { nextAt: 0, limit: v8.getHeapStatistics().heap_size_limit };
     let over = null;
     for (const ev of mergedRows(coldRows({ ...msg.walk, rowBudget: msg.rowBudget }, stats), hotRows({ dir: msg.walk.dir, shards: msg.walk.shards, hot: msg.hot, from: q.from, to: q.to }, stats))) {
       agg._aggRow(st, ev);

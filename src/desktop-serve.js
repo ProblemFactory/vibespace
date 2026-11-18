@@ -351,7 +351,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const H = hooks && typeof hooks === 'object' ? hooks : {};
   // lane apps-dialog-fast: the open never waits for the witness walk — a listing that LANDS is pushed as its result (the
   // registry's own witnessed rows, decorated as an open's answer is) through `hooks.onWitness`
-  if (typeof apps.onWitness === 'function') apps.onWitness((witness) => { facts().then((f) => H.onWitness?.({ witness, rows: registry(f).filter((r) => r.witnessed) })).catch((e) => log.warn?.(`[apps] the witness push failed: ${e.message}`)); });
+  if (typeof apps.onWitness === 'function') apps.onWitness((witness) => { facts().then(async (f) => { await landExecs(); return H.onWitness?.({ witness, rows: registry(f).filter((r) => r.witnessed) }); }).catch((e) => log.warn?.(`[apps] the witness push failed: ${e.message}`)); });
 
   // ── state ──
   let store = { apps: {} }; // (no `runawayParkedUntil` since 2026-09-25 — an old file's map is dropped on read; migration 2026-09-runaway-parks-void clears the disk)
@@ -433,6 +433,17 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   function prefsFor(row, read) { return row && Array.isArray(row.backendPrefs) && row.backendPrefs.length ? row : { backendPrefs: instancePrefs(read) }; }
   function resolve(hostFacts, prefs, read = serverSetting) { return M.resolveBackend(hostFacts, prefsFor(prefs, read), backends); }
 
+  /** B-1425 (cure, batch 69 verdict shoulds): an exec NAME found only in a PATH dir on an NFS / home mount is answered from
+   *  the PATH walk's async stats (src/desktop-display.js landMounts) — the catalog, a launch and the witness push wait for
+   *  that landing for every bare exec name they will ask, so a fresh hub never reads such an app as not installed. */
+  async function landExecs() {
+    if (typeof display.landMounts !== 'function') return;
+    const names = new Set(), add = (r) => { if (r && typeof r.exec === 'string' && r.exec && !r.exec.includes('/')) names.add(r.exec); };
+    registryRows.forEach(add);
+    try { if (apps && typeof apps.catalogRows === 'function') apps.catalogRows().forEach(add); } catch { }
+    try { if (apps && typeof apps.witnessRows === 'function') apps.witnessRows().forEach(add); } catch { }
+    await Promise.all([...names].map((n) => Promise.resolve(display.landMounts(n, { env: env() })).catch(() => { })));
+  }
   function registry(hostFacts) {
     const bins = (hostFacts && hostFacts.bins) || {};
     const binOf = (name) => (bins[name] !== undefined ? bins[name] : display.binOnPath(name, { env: env() }));
@@ -593,6 +604,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     let witness = null; // lane apps-launcher-witness: `opts.witness: 'recheck'` = the group's Check again (else the open rule)
     try { if (typeof apps.refreshWitness === 'function') witness = await apps.refreshWitness({ reason: opts.witness === 'recheck' ? 'recheck' : 'open' }); } catch { /* the last list */ }
     const resolved = resolve(f, undefined, serverSetting0);
+    await landExecs();   // B-1425: an NFS / home PATH dir's programs are known before the catalog is judged
     return { apps: listApps(), registry: await lockFacts(registry(f)), witness, hostName: os.hostname(), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, caps: M.capsOf({ backend: resolved.backend }, backends), fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
   }
 
@@ -641,6 +653,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const f = await facts();
     try { await apps.refreshCatalog(); } catch { /* the last rows */ }
     if (body && typeof body.appId === 'string' && body.appId.startsWith('seen.') && typeof apps.refreshWitness === 'function') { try { await apps.refreshWitness({ reason: 'open' }); } catch { /* the last list */ } } // a witnessed row: its list read (cheap when fresh)
+    await landExecs();   // B-1425: …and before a launch is judged
     const reg = registry(f);
     const v = M.validateLaunchRequest(body || {}, reg);
     if (!v.ok) throw namedError(v.code || 'bad-request', v.error);

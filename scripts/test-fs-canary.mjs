@@ -514,7 +514,7 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     const DD = require(path.join(REPO, 'src/desktop-display.js'));
     const T = 'tool-b1425', TN = 'tool-b1425-nfs', RB = path.join(R, 'bin'), NB = path.join(PROJ, 'bin'), LB10 = path.join(S, 'localbin');
     for (const d of [RB, NB, LB10]) await fs.promises.mkdir(d, { recursive: true });
-    for (const f of [path.join(RB, T), path.join(LB10, T), path.join(NB, TN), path.join(NB, 'tmux'), path.join(LB10, 'tmux')]) { await fs.promises.writeFile(f, '#!/bin/sh\n'); await fs.promises.chmod(f, 0o755); }
+    for (const f of [path.join(RB, T), path.join(LB10, T), path.join(NB, TN), path.join(NB, 'tmux'), path.join(RB, 'tmux')]) { await fs.promises.writeFile(f, '#!/bin/sh\n'); await fs.promises.chmod(f, 0o755); }
     const env10 = { PATH: [RB, NB, LB10].join(path.delimiter) };
     const stats = [], astats = [], realStat = fs.statSync, realAStat = fs.promises.stat;
     const spy = () => { stats.length = 0; astats.length = 0; fs.statSync = function (p, ...a) { stats.push(String(p)); return realStat.call(this, p, ...a); }; fs.promises.stat = function (p, ...a) { astats.push(String(p)); return realAStat.call(this, p, ...a); }; };
@@ -534,10 +534,18 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     ok(again === path.join(NB, TN) && !stats.length, `§10 then the sync ask reads the memo: ${again && again.slice(S.length)}, ${stats.length} stat(s)`);
     const exec = (() => { try { return DD.assertExecutable(again, TN); } catch (e) { return e.code; } })();
     ok(exec === again, `§10 the answer can be spawned: the spawn's own re-stat (assertExecutable) passes on the NFS view (${exec === again ? 'ok' : exec})`);
+    // session-store's tmuxOnPath (batch 69 verdict MUST 1+2): a tmux only on the NFS view (and on the storage dir) — not seen
+    // before the async landing, never statted from the main thread, FOUND once landed; the storage dir never read
     const oldPath = process.env.PATH;
     process.env.PATH = env10.PATH;
-    const tmux = (() => { try { return spied(() => SS.tmuxOnPath()); } finally { process.env.PATH = oldPath; } })();
-    ok(tmux === path.join(LB10, 'tmux') && !intoMounts().length, `§10 session-store's tmuxOnPath stats no mount dir from the main thread either: ${tmux && tmux.slice(S.length)} (${stats.length} stat(s), ${intoMounts().length} under a mount)`);
+    let tmux0, tmux1, sync1 = [], async1 = [];
+    try {
+      tmux0 = spied(() => SS.tmuxOnPath());
+      await spiedAsync(() => SS.landTmuxMounts()); async1 = astats.slice();
+      tmux1 = spied(() => SS.tmuxOnPath()); sync1 = intoMounts();
+    } finally { process.env.PATH = oldPath; }
+    ok(tmux0 === null && tmux1 === path.join(NB, 'tmux') && !sync1.length && async1.some((x) => x === path.join(NB, 'tmux')) && !async1.some((x) => x.startsWith(R + '/')),
+      `§10 session-store's tmuxOnPath: a tmux only on the NFS view is FOUND after the async landing (${tmux1 && tmux1.slice(S.length)}; before it ${tmux0}) — never statted from the main thread (${sync1.length}), the storage dir never read (async into the rclone ${async1.filter((x) => x.startsWith(R + '/')).length})`);
     ok(w.counts.refused === refused0, `§10 the guard refused nothing on the way (${w.counts.refused - refused0})`);
     // CONTROLS: the walk as it was — every dir statSync'd on the main thread; the storage dir answered from the async walk
     const ddSrc = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
@@ -547,10 +555,37 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     ok(oldWalk !== ddSrc && intoMounts().length === 2 && was === path.join(NB, TN) && w.counts.refused === refused0 + 1,
       `CONTROL (the old walk): ${intoMounts().length} statSync(s) into a mount on the main thread (the rclone's refused: ${w.counts.refused - refused0}) ⇒ RED`);
     const answersStorage = ddSrc.replace("    if (r && r.kind === 'storage') continue;\n", '').replace(".filter(([, r]) => r && r.kind !== 'storage');", '.filter(([, r]) => r);');
+    const ssSrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
+    const skipAll = ssSrc.replace("    if (r && r.kind === 'storage') continue;   // B-1425: never read from the main thread (the guard refuses it)\n", '    if (r) continue;\n');
+    const SSo = M.load('src/session-store.js', skipAll, 'b1425-tmuxskip');
+    process.env.PATH = env10.PATH;
+    let tmuxOld; try { await SSo.landTmuxMounts(); tmuxOld = SSo.tmuxOnPath(); } finally { process.env.PATH = oldPath; }
+    ok(skipAll !== ssSrc && tmuxOld === null, `CONTROL (batch 69's line — every root skipped): the NFS view's tmux is never found (${tmuxOld}) ⇒ RED`);
     const DDs = M.load('src/desktop-display.js', answersStorage, 'b1425-storage');
     const hs = await DDs.hostFacts({ env: env10, bins: [T] });
     const spawnS = (() => { try { return DDs.assertExecutable(hs.bins[T], T); } catch (e) { return e.code; } })();
     ok(answersStorage !== ddSrc && hs.bins[T] === path.join(RB, T) && spawnS === 'exec-vanished', `CONTROL (the storage dir answered): hostFacts names ${hs.bins[T] && hs.bins[T].slice(S.length)}, and its spawn's re-stat is refused there (${spawnS}) ⇒ RED`);
+    // the verdict's ask (00:30Z, a must by three readers): a bare program ONLY in the NFS view's dir is found on the FIRST
+    // catalog read (the launch and the witness push await the same landing) — desktop-serve over the REAL desktop-display
+    const DS = require(path.join(REPO, 'src/desktop-serve.js'));
+    const quiet10 = { log() { }, warn() { }, error() { }, info() { } };
+    const firstRead = async (DSm, name, sub) => {
+      DD.resetBinMemo();   // a fresh process's memory: nothing landed, no folder listed (an earlier leg listed the NFS dir before this program was written)
+      await fs.promises.writeFile(path.join(NB, name), '#!/bin/sh\n'); await fs.promises.chmod(path.join(NB, name), 0o755);
+      const apps = { catalogRows: () => [{ id: 'app.' + name, label: 'an NFS-only program', exec: name, args: [], category: 'utility', app: name }], refreshCatalog: async () => { }, witnessRows: () => [] };
+      const ds = DSm.install({ dataDir: path.join(S, sub), env: env10, display: DD, registryRows: [], log: quiet10, tickMs: 3600e3, apps });
+      try { const L0 = await ds.list(); return L0.registry.find((r) => r.id === 'app.' + name) || null; } finally { try { ds.shutdown(); } catch { } }
+    };
+    const firstCat = await firstRead(DS, 'tool-b1425-first', 'ds10');
+    ok(firstCat && firstCat.available === true && firstCat.path === path.join(NB, 'tool-b1425-first'), `§10 the FIRST catalog read finds a program that lives only in the NFS view's dir: ${firstCat ? `available ${firstCat.available}, ${firstCat.path && firstCat.path.slice(S.length)}` : 'no row'}`);
+    const noWait = fs.readFileSync(path.join(REPO, 'src/desktop-serve.js'), 'utf8').replace('  async function landExecs() {\n    if (typeof display.landMounts !== \'function\') return;', '  async function landExecs() {\n    return;');
+    const DSo = M.load('src/desktop-serve.js', noWait, 'b1425-nowait');
+    const firstOld = await firstRead(DSo, 'tool-b1425-first-old', 'ds10o');
+    ok(firstOld && firstOld.available === false, `CONTROL (no wait for the landing): the first catalog read says ${firstOld ? `«${firstOld.reason}»` : 'no row'} for that program ⇒ RED`);
+    const dsSrc = fs.readFileSync(path.join(REPO, 'src/desktop-serve.js'), 'utf8');
+    const awaits = (dsSrc.match(/await landExecs\(\);/g) || []).length;
+    ok(awaits === 3 && /\n {4}await landExecs\(\);[^\n]*\n {4}const reg = registry\(f\);/.test(dsSrc) && /\n {4}await landExecs\(\);[^\n]*\n {4}return \{ apps: listApps\(\), registry: await lockFacts\(registry\(f\)\)/.test(dsSrc) && typeof DD.landMounts === 'function',
+      `§10 desktop-serve (the verdict's shoulds): the catalog, a launch and the witness push await the PATH walk's landing for their bare exec names before judging an app (${awaits} awaits)`);
   }
   w.stop();
   SP.setRoots([]);
