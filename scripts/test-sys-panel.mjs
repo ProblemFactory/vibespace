@@ -67,6 +67,8 @@ await evalJs(`(() => { document.querySelector('.rail-item[data-rail="system"]').
 await sleep(2500);
 check('re-entry renders charts again', await evalJs(`(app.sidebar._railSysCharts || []).length`) === 2);
 const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 330, height: 700, scale: 2 } });
-fs.writeFileSync('/tmp/sys-panel.png', Buffer.from(shot.data, 'base64'));
+// a picture only when one is asked for (SP_SHOT=<path>) — a fixed /tmp name breaks test-ci-gate-tiers' «no gated suite claims a
+// fixed port or /tmp path» now that the suite is in a tier (the EXCLUDED package)
+if (process.env.SP_SHOT) fs.writeFileSync(path.resolve(process.env.SP_SHOT), Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);
