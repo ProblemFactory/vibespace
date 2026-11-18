@@ -76,7 +76,7 @@ console.log('— ①b an engine\'s forbidden switch: dropped and said, never the
   const sf1 = AT.stripForbidden(['-disable-sync', '-disable-sync=1', '-disable-syncx', '---disable-sync']);
   ok(JSON.stringify(sf1) === JSON.stringify({ kept: ['-disable-syncx', '---disable-sync'], dropped: ['-disable-sync', '-disable-sync=1'] }) && AT.argvVerdict(['-disable-sync']).forbidden.join() === '-disable-sync', 'B-0528: a single-dash -disable-sync (bare or =value) is the forbidden switch too — dropped from an engine, red in the census; a longer name or a triple dash is another switch', sf1);
   { const old = "const isForbiddenSwitch = (x) => { const s = /^-[^-]/.test(x) ? '-' + x : x; return ATTACH_FORBIDDEN.some((f) => s === f || s.startsWith(f + '=')); };";
-    const pre = mutant('src/browser-attach.js', old, "const isForbiddenSwitch = (x) => ATTACH_FORBIDDEN.some((f) => x === f || x.startsWith(f + '='));");
+    const pre = mutant('src/browser-attach.js', old, "const isForbiddenSwitch = (x) => ATTACH_FORBIDDEN.some((f) => x === f || x.startsWith(f + '='));"); // stale-pins: kept — the release's own isForbiddenSwitch, planted back as this control's mutant
     ok(pre.stripForbidden(['-disable-sync']).kept.join() === '-disable-sync', 'CONTROL (B-0528, the release\'s rule): an engine\'s -disable-sync is KEPT — it reached Chrome unsaid'); }
   const ae = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x', '--disable-sync'] });
   const want = AT.attachArgv({ profileDir: '/p', mark: B.keeperMarkArg('bp-0000000a'), quiet, extra: ['--vibespace-engine=x'] });

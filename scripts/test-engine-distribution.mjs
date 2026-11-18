@@ -1569,8 +1569,8 @@ await leg('B-4d35 a put-back outside a landing is waited for within each ask\'s 
     putBackOutsideScene(undefined, { first: 'install', afterFirst: true }),
     putBackOutsideScene(load(cut(holdAnchor, '\n', 'hold waits for a put-back'), 'b4d35-no-hold-wait')),
     putBackOutsideScene(load(cut(ownAnchor, '    return p;\n\n', 'own put-back bounded'), 'b4d35-own-unbounded')),
-    putBackOutsideScene(load(cut(bootAnchor, '      try { const back = await restoreAside(id, plan);', 'the boot\'s own put-back bounded'), 'b4d35-boot-unbounded'), { first: 'boot', afterFirst: true }),
-    putBackOutsideScene(load(cut(instAnchor, '      let back0 = null; try { back0 = await restoreAside(sid, plan); } finally { rel0(); }', 'the download\'s own put-back bounded'), 'b4d35-install-unbounded'), { first: 'install', afterFirst: true }),
+    putBackOutsideScene(load(cut(bootAnchor, '      try { const back = await restoreAside(id, plan);', 'the boot\'s own put-back bounded'), 'b4d35-boot-unbounded'), { first: 'boot', afterFirst: true }), // stale-pins: kept — the release's own line, planted back as this control's mutant (the boot's put-back unbounded)
+    putBackOutsideScene(load(cut(instAnchor, '      let back0 = null; try { back0 = await restoreAside(sid, plan); } finally { rel0(); }', 'the download\'s own put-back bounded'), 'b4d35-install-unbounded'), { first: 'install', afterFirst: true }), // stale-pins: kept — the release's own line, planted back as this control's mutant (the download's put-back unbounded)
   ]);
   ok(x.inPutBack && x.stillEmpty && x.s && x.s.threw === 'engine_kernel_landing' && x.s.msg.startsWith('the kernel is being put back in its place') && x.s.ms >= 50,
     'B-4d35: a START beside a put-back outside a landing is refused BY NAME within its bound («the kernel is being put back in its place — try again in a moment») — never spawned beside the emptied place', x.s);
