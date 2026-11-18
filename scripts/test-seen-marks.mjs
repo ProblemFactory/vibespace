@@ -440,8 +440,10 @@ console.log('§5 measurement — 13 sessions × 3 groups, the real shape');
   ok(baseSame.after > 90 * 1024 && nowSame.after < baseSame.after * 0.08, `nothing changed: ${kb(baseSame.after)} (base) → ${kb(nowSame.after)} — the 13 pointer lines only`);
   ok(nowChg.after < baseChg.after * 0.2 && nowChg.after > nowSame.after, `the lanes group moved: ${kb(baseChg.after)} (base) → ${kb(nowChg.after)} — its diff + the pointer`);
   // each group's Context table in the three-group SessionStart (lane task-group-context: one shared room, rows step down)
-  const multi = tasks.renderMultiContext(ids, {});
-  ok(B(multi) <= 9600 && ids.every((id) => multi.includes(`### "${tasks.get(id).title}"\n`)), `the three groups' layered context, every Context table in it, under the cap (${kb(B(multi))})`);
+  // B-52fa: the budget is measured with the scratch dir written as ONE fixed-length stand-in (a default TMPDIR's 24 chars) —
+  // its path rides every Context row, and a verifier's 87-char TMPDIR made this leg red (test-prompt-budget ③b pins the shape)
+  const multi = tasks.renderMultiContext(ids, {}), multiFixed = multi.split(tmp).join('/vs-seenmarks-fixture-00');
+  ok(B(multiFixed) <= 9600 && ids.every((id) => multi.includes(`### "${tasks.get(id).title}"\n`)), `the three groups' layered context, every Context table in it, under the cap (${kb(B(multiFixed))}, its scratch dir as a 24-char stand-in; ${kb(B(multi))} on the real ${tmp.length}-char path)`);
 }
 
 // ════════ §6 THE OWNER'S CONSTRAINT (lane task-group-fanout, 2026-10-24): what the model is told must not change ════════

@@ -15,7 +15,8 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { census, print, updateShapes, INTRO_MAX, FIRST_PROMPT_MAX, ROOM_MIN, UPDATE_MAX } from './measure-prompt-context.mjs';
+import os from 'node:os';
+import { census, print, updateShapes, INTRO_MAX, FIRST_PROMPT_MAX, ROOM_MIN, UPDATE_MAX, FIXTURE_ROOT } from './measure-prompt-context.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,6 +57,25 @@ for (const reach of ['read', 'request']) {
   print(cr, (l) => console.log('    ' + l));
   const crBad = judge(cr);
   ok(crBad.length === 0 && cr.shapes.every((s, i) => s.total > c.shapes[i].total || s.name === 'no Task Group') && cr.reminder.one > 0 && cr.reminder.multi < cr.cap, `channels reach '${reach}': every shape still fits whole with ≥ ${ROOM_MIN} B room (the paragraph rides the group shapes), the reminder ${cr.reminder.one} B${crBad.length ? ' — ' + crBad.join('; ') : ''}`);
+}
+
+console.log('— ③b the budget is the same wherever the scratch dir is (B-52fa)');
+{
+  // a LONG real TMPDIR (a verifier's 87 chars): the measured shapes are byte-identical to the default dir's — the fixture's
+  // dir is written as FIXTURE_ROOT; the raw renders (the real paths, the control) grow by the path's length, row after row
+  const longDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pb-long-' + 'x'.repeat(Math.max(64, 90 - os.tmpdir().length)) + '-')), was = process.env.TMPDIR;
+  let atLong = null, rawLong = null, rawHere = null;
+  try {
+    rawHere = census({ raw: true });
+    process.env.TMPDIR = longDir; atLong = census(); rawLong = census({ raw: true });
+  } finally { if (was === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = was; fs.rmSync(longDir, { recursive: true, force: true }); }
+  const totals = (x) => x.shapes.map((s) => s.total).join(' / ');
+  // a long real path may make the planner step a row down (it budgets on the real head) — the measured shape can then only SHRINK:
+  // the law is «the budget never reds by where the scratch dir is», never «byte-identical»
+  ok(FIXTURE_ROOT.length === 28 && longDir.length > 80 && judge(atLong).length === 0 && atLong.shapes.every((s, i) => s.total <= c.shapes[i].total),
+    `with TMPDIR ${longDir.length} chars long every shape still fits whole and none measures more than the default's (${totals(atLong)} vs ${totals(c)}) — the fixture dir is ONE fixed-length stand-in`);
+  ok(rawLong.shapes[2].total > rawHere.shapes[2].total,
+    `CONTROL: measured on the REAL paths the three groups grow with the scratch dir's length (${rawHere.shapes[2].total} → ${rawLong.shapes[2].total} B) — what made a long TMPDIR red`);
 }
 
 console.log('— ④ every pointer names a served manual; every surface has one');

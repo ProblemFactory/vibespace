@@ -38,9 +38,13 @@ function fourNotices(BP) {
   ];
 }
 
-/** census({ intro, channels }) → { shapes: [{ name, blocks: [[label, bytes]], total, room }], intro, cap, reminder }. `intro(T, facts)`
+/** B-52fa: the groups' folders live under a scratch dir whose PATH rides every Context row — so the budget is measured with
+ *  that dir written as ONE fixed-length stand-in (the length a default TMPDIR gives, 28 chars), never the real dir: a
+ *  verifier's 87-char TMPDIR made the three groups 8226 B > 8064 and a lane look red. `raw: true` measures the real paths. */
+export const FIXTURE_ROOT = '/vs-prompt-budget-fixture-00';
+/** census({ intro, channels, raw }) → { shapes: [{ name, blocks: [[label, bytes]], total, room }], intro, cap, reminder }. `intro(T, facts)`
  *  replaces sessionToolsIntro (the suite's control); every other block is the production renderer's. */
-export function census({ intro = null, repo = REPO, channels = false } = {}) {
+export function census({ intro = null, repo = REPO, channels = false, raw = false } = {}) {
   // lane agent-context-owner-facts (B-7960 a): the times ride in the owner's zone, named — measured in the incident's zone
   // (America/Los_Angeles), never this box's own (PT here, UTC on a runner: the same shape would measure differently)
   require(path.join(repo, 'src/server/owner-facts.js')).configure({ setting: (k) => (k === 'instance.timezone' ? 'America/Los_Angeles' : undefined) });
@@ -64,7 +68,8 @@ export function census({ intro = null, repo = REPO, channels = false } = {}) {
       for (let k = 0; k < 3; k++) tasks.addProgress(g.id, { note: `step ${k + 1} of ${title} done`, detail: 'a sha, a report path, the next step' });
       return g.id;
     });
-    const groupCtx = (n) => tasks.renderMultiContext(ids.slice(0, n), { tools: T, fileTools });
+    const fixed = (t) => (raw ? String(t) : String(t).split(tmp).join(FIXTURE_ROOT));
+    const groupCtx = (n) => fixed(tasks.renderMultiContext(ids.slice(0, n), { tools: T, fileTools }));
     const toolsSection = (n) => tasks._toolsSectionParts(n > 1 ? '--group <id> ' : '', n > 1, T, fileTools).join('\n');
     const shape = (name, head, introLabel, introBytes) => {
       const parts = [head, notices, stash];
