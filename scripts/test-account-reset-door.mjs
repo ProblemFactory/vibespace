@@ -230,7 +230,7 @@ const CACHE_READ_ROWS = {
   'src/server/usage-pool-engine.js': [33, 'THE reading door (poolReadReading; poolReadCache over it) + reads of STAMPS and refusals, never a quota decision (+1, B-403e: the look-again before the api-window sidecar is rewritten — it FORGETS the run\'s answer of that file, so the read that follows asks the mount; no new reader, no decision · +1, lane readings-attribution-2 P3: heldFallOf compares ONE parsed record with the account\'s stored lanes — whether the record is written, never what the pool decides): the anchor sweep (persists readings), the api-window sidecar, readRawUsageCache (overage / credits facts, the spend guard, a held record\'s fetchedAt, the wall\'s lane by the stored number, reset credits, a refusal\'s spent window and untils), the writers\' bases (the banner and its twins, get_usage, the codex push), the freshness gate, ownReading'],
   'src/usage-routes.js': [17, 'the passive ingest (the files as stored — /api/usage views them), the models file, host readings, the remote statusline\'s base, the panel\'s base, the repair, the claim route\'s reading, writers\' bases'],
   'src/reading-repair.js': [13, 'the identity repair (its own reads and replace-writes)'],
-  'src/usage-cache-write.js': [6, 'THE write path (its reader, its file, its sidecars)'],
+  'src/usage-cache-write.js': [7, 'THE write path (its reader, its file, its sidecars) + (lane lg-store-writes U6.5) a sidecar handed to the store writer at the hub (writeSidecar\'s path.join(cacheDir, name) hand-off)'],
   'src/rate-limit-capture.js': [4, 'the event\'s base and its twins\' (a writer)'],
   'src/weekly-lanes-unfold.js': [4, 'the weekly-lanes repair'],
   'src/server/migrations.js': [3, 'the boot migrations over the cache dir'],

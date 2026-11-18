@@ -406,5 +406,100 @@ fs.rmSync(dir, { recursive: true, force: true });
   ok(!tool.includes('seven_day_overage_included') && /rl\.model_scoped/.test(tool), '⑩ the statusline twin never sees the type (2.1.274 ships the bucket NAMED, as rate_limits.model_scoped[]) and reads that list instead');
 }
 
+// ── ⑪ lane lg-store-writes, B-0248 U6.5 (主开发's R1 + R2, 02:59Z; 03:26Z): THE READINGS' WRITE OFF THE MAIN THREAD ─────────
+// The hub (its boot — store-writer bootKeeper) injects its store writer; here a STAND-IN that lands nothing until told.
+console.log('⑪ U6.5 — the readings\' write through an injected store writer: R1 the pending reading first, R2 the re-merge over the file');
+await (async () => {
+  const Module = require('module');
+  const UWF = path.join(REPO, 'src/usage-cache-write.js'), HUBF = path.join(REPO, 'src/server/usage-cache-hub.js');
+  const UW = require(UWF), HUB = require(HUBF), RR = require(path.join(REPO, 'src/run-reads.js'));
+  const d11 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-u65-'));
+  const standIn = () => {
+    const r = { dirties: [], durables: [], owed: new Map(), landed: 0 };
+    r.dirty = (f, o) => { r.dirties.push({ f: path.basename(f), name: o.name, rank: o.rank, paced: o.debounceMs != null }); r.owed.set(f, o); };
+    r.waiting = [];
+    r.durable = (f) => { r.durables.push(path.basename(f)); for (const w of r.waiting.splice(0)) w(); return Promise.resolve(true); };
+    /** a FACT to wait on: the re-merge handed this file as an act (durable asked) — bounded by turns, never by a clock */
+    r.urgent = (base) => Promise.race([new Promise((res) => { const chk = () => (r.durables.includes(base) ? res(true) : r.waiting.push(chk)); chk(); }), turns(4000).then(() => false)]);
+    r.land = () => { for (const [f, o] of [...r.owed]) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, o.produce()); r.owed.delete(f); r.landed++; if (o.onWritten) o.onWritten(true, null); } };
+    return r;
+  };
+  const fileOf = (dir, k) => UW.cacheFileFor(dir, k);
+  const turns = async (n) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
+  const util = (o, kind) => (o && o[kind] && Number.isFinite(o[kind].utilization) ? Math.round(o[kind].utilization * 100) : null);
+  const ev = (type, u, resetsAt) => parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: type, utilization: u, resetsAt } });
+  try {
+    // (1) R1 + THE BURST: two events on one key, each measuring a different limit — nothing on the main thread; the second
+    // merges over the FIRST (pending); every hub reader sees both
+    let drops = 0;
+    const w1 = standIn(); HUB.useStoreWriter(w1, { dropRun: () => { drops++; } });
+    captureRateLimitEvent({ cacheDir: d11, key: 'sub-B', identityIds: ['sub-B'], ev: ev('five_hour', 30, 1786900000), now: 1000 });
+    const onDisk1 = fs.existsSync(fileOf(d11, 'sub-B'));
+    captureRateLimitEvent({ cacheDir: d11, key: 'sub-B', identityIds: ['sub-B'], ev: ev('seven_day', 63, 1787500000), now: 2000 });
+    const seen = UW.readCacheJson(fileOf(d11, 'sub-B'));
+    ok(!onDisk1 && !fs.existsSync(fileOf(d11, 'sub-B')) && w1.dirties.length >= 2 && w1.dirties.every((x) => x.name === 'usage-cache.write' && x.rank === 0) && drops >= 2,
+      '⑪ R1: a captured event is HANDED to the store writer (usage-cache.write, rank 0) — nothing written on the main thread; each hand-off drops the run\'s memo (the injected dropRun)', JSON.stringify({ onDisk1, dirties: w1.dirties, drops }));
+    ok(util(seen, 'fiveHour') === 30 && util(seen, 'sevenDay') === 63, '⑪ THE BURST: the second event merged over the FIRST (pending, not on disk) — both limits in the one reading every hub reader sees', JSON.stringify(seen));
+    ok(UW.listCacheDir(d11).includes('sub-B.json'), '⑪ R1: the folder\'s listing names the reading not on disk yet', JSON.stringify(UW.listCacheDir(d11)));
+    await w1.urgent('sub-B.json');
+    const bytes1 = JSON.parse(w1.owed.get(fileOf(d11, 'sub-B')).produce());
+    ok(util(bytes1, 'fiveHour') === 30 && util(bytes1, 'sevenDay') === 63 && w1.durables.includes('sub-B.json'),
+      '⑪ R2: the re-merge over the file hands BOTH limits in ONE write, as an act (durable asked: the writer\'s next writes)', JSON.stringify({ bytes1, durables: w1.durables }));
+    const drops0 = drops; w1.land();
+    ok(fs.existsSync(fileOf(d11, 'sub-B')) && util(UW.readCacheJson(fileOf(d11, 'sub-B')), 'sevenDay') === 63 && drops > drops0 && !UW.listCacheDir(d11).filter((n) => n === 'sub-B.json').slice(1).length,
+      '⑪ a LANDING: the file holds the reading, the pending copy is gone (the reader reads the file), the run\'s memo dropped again (a synchronous flush inside a run)', JSON.stringify({ drops, drops0 }));
+    // (2) THE PENDING COPY BEFORE THE MEMO: run-reads has the file's OLDER text memoized in this run; the door answers the
+    // pending reading, the memo still holds the old one (a dropRun that does nothing here: the order alone is tested)
+    RR.watch(d11);
+    const w2 = standIn(); HUB.useStoreWriter(w2, { dropRun: () => { } });
+    const f2 = fileOf(d11, 'sub-M');
+    fs.writeFileSync(f2, JSON.stringify({ fetchedAt: 500, source: 'statusline', fiveHour: { utilization: 0.1, resetsAt: 1786900000 } }));
+    const memoOld = JSON.parse(RR.readText(f2));
+    captureRateLimitEvent({ cacheDir: d11, key: 'sub-M', identityIds: ['sub-M'], ev: ev('five_hour', 55, 1786900000), now: 3000 });
+    const viaDoor = UW.readCacheJson(f2, { via: RR }), viaMemo = JSON.parse(RR.readText(f2));
+    ok(util(memoOld, 'fiveHour') === 10 && util(viaMemo, 'fiveHour') === 10 && util(viaDoor, 'fiveHour') === 55,
+      '⑪ the PENDING reading is answered BEFORE run-reads\' memo — a pool pass sees a reading handed to the writer and not landed (the memo still holds the older text)', JSON.stringify({ memo: util(viaMemo, 'fiveHour'), door: util(viaDoor, 'fiveHour') }));
+    await w2.urgent('sub-M.json'); w2.land();
+    // (3) R2 — A STATUSLINE WRITE between the hand-off and the re-merge SURVIVES: the hub's event (a 5h reading; its object
+    // SPREADS the file — the capture's shape — so it carries the file's older 7d) is queued; the shipped statusline then
+    // read-merge-writes the same file with a NEWER 7d. The re-merge replays the call AS MERGED (its carried 7d keeps its own
+    // older stamp) over the file: the statusline's 7d stands, the hub's 5h on top. RED copies: the replay lifting the call's
+    // object again (the carried 7d re-stamped as measured now ⇒ it overwrites the statusline's), and the base taken from memory
+    const scene = async (M, tag) => {
+      const w = standIn(); M.useStoreWriter(w, { dropRun: () => { } });
+      const key = 'sub-S-' + tag, f = UW.cacheFileFor(d11, key);
+      const old = { fetchedAt: 3000, source: 'statusline', fiveHour: { utilization: 0.1, resetsAt: 1786900000 }, sevenDay: { utilization: 0.5, resetsAt: 1787500000 } };
+      fs.writeFileSync(f, JSON.stringify(old));
+      UW.writeCacheObject({ cacheDir: d11, key, obj: { ...old, fetchedAt: 4000, source: 'rate-limit-event', fiveHour: { utilization: 0.3, resetsAt: 1786900000 } }, measuredAt: 4000, source: 'rate-limit-event' });
+      fs.writeFileSync(f, JSON.stringify({ ...old, fetchedAt: 3900, sevenDay: { utilization: 0.77, resetsAt: 1787500000 } }));   // the statusline's write, in the window: its own 7d reading, newer than the file's
+      await w.urgent(path.basename(f));
+      const out = JSON.parse(w.owed.get(f).produce());
+      M.useStoreWriter(null);
+      return out;
+    };
+    const s1 = await scene(HUB, 'cure');
+    ok(util(s1, 'fiveHour') === 30 && util(s1, 'sevenDay') === 77, '⑪ R2: a STATUSLINE write landing while the hub\'s write was queued is the BASE of the hub\'s write — its newer 7d stands (the hub\'s carried 7d keeps its older stamp), the hub\'s 5h on top', JSON.stringify(s1));
+    const src = fs.readFileSync(HUBF, 'utf8');   // the hub module: a mutant copy compiled at its own path (its requires resolve as the real one's)
+    const loadAs = (text) => { const mod = new Module(HUBF, null); mod.filename = HUBF; mod.paths = Module._nodeModulePaths(path.dirname(HUBF)); mod._compile(text, HUBF); return mod.exports; };
+    const aSet = 'set: cloneData(a.set),', aBase = "fs.promises.readFile(file, 'utf-8').then(";
+    ok(src.split(aSet).length === 2 && src.split(aBase).length === 2, '⑪ ANCHORS: the call kept as merged (its typed set) and the re-merge\'s one read of the file');
+    const s2 = await scene(loadAs(src.replace(aSet, 'set: null,')), 'relift');
+    ok(util(s2, 'sevenDay') === 50, '⑪ R2 CONTROL: the replay lifting the call\'s object again (a mutant copy) ⇒ the carried old 7d, re-stamped as measured now, overwrites the statusline\'s newer one', JSON.stringify(s2));
+    const s3 = await scene(loadAs(src.replace(aBase, "Promise.resolve('null').then(")), 'memory');
+    ok(util(s3, 'sevenDay') !== 77, '⑪ R2 CONTROL: the re-merge\'s base taken from memory (a mutant copy) ⇒ the statusline\'s 7d is overwritten', JSON.stringify(s3));
+    // (4) a SIDECAR (the `.window-` stamp) is handed whole; its one reader sees it before it lands
+    const w4 = standIn(); HUB.useStoreWriter(w4, { dropRun: () => { } });
+    UW.writeSidecar(d11, '.window-sub-B', { sevenDay: { resetsAt: 1787500000 }, at: 5000 });
+    const stamp = require(path.join(REPO, 'src/window-stamp.js')).readWindowStamp(d11, 'sub-B');
+    ok(!fs.existsSync(path.join(d11, '.window-sub-B')) && stamp && stamp.at === 5000 && w4.dirties.some((x) => x.f === '.window-sub-B' && x.name === 'usage-cache.write'),
+      '⑪ a SIDECAR is handed to the writer whole (nothing on the main thread); the window stamp\'s one reader sees it before it lands', JSON.stringify({ stamp, dirties: w4.dirties }));
+    w4.land();
+    // (5) NOT INJECTED (the device agent, a script): the write stays synchronous, as before
+    HUB.useStoreWriter(null);
+    captureRateLimitEvent({ cacheDir: d11, key: 'sub-D', identityIds: ['sub-D'], ev: ev('five_hour', 40, 1786900000), now: 6000 });
+    ok(fs.existsSync(fileOf(d11, 'sub-D')) && util(JSON.parse(fs.readFileSync(fileOf(d11, 'sub-D'), 'utf8')), 'fiveHour') === 40, '⑪ NOT INJECTED (the device agent): the write is synchronous, on disk when the capture returns');
+  } finally { HUB.useStoreWriter(null); try { fs.rmSync(d11, { recursive: true, force: true }); } catch { } }
+})();
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

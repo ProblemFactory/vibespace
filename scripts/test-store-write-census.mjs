@@ -510,6 +510,15 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   ok(reshapeLands(bk), 'the browser keeper\'s reshapeStore (migrations only) lands the registry before it returns, else THROWS by name — the boot\'s next migration (grants-unify) reads the FILE; an exit-deferred flush is not «landed»');
   ok(!reshapeLands(bk.replace('commit(); landedOrThrow(); return r; }', 'commit(); return r; }')), 'NEGATIVE CONTROL (lg-store-writes U5b): a reshape left owed when the next migration reads the file is red');   // stale-pins: kept — a negative control
   ok(!reshapeLands(bk.replace('return !r.deferred && !r.left.some(', 'return !r.left.some(')), 'NEGATIVE CONTROL (U5b, the cure): a flush DEFERRED by the exit read as landed is red');   // stale-pins: kept — a negative control
+  // lane lg-store-writes U6.5 (B-0248): THE USAGE READINGS (data/usage-cache) — at the hub the write is HANDED to the store
+  // writer (writeCacheObject and writeSidecar hand off when a writer was injected; the server's boot injects it with run-reads'
+  // dropRun); the synchronous road stays only for a process that injected none (the device agent, a script)
+  const uw = src('src/usage-cache-write.js'), ucHub = src('src/server/usage-cache-hub.js'), swr = src('src/store-writer.js');
+  const ucMoved = (t, h, b) => /  if \(_hub\) _hub\.handOff\(file, \{ at, args: \{ cacheDir, key, obj,/.test(t) && /  if \(_hub\) \{ _hub\.handOff\(path\.join\(cacheDir, name\), null,/.test(t)
+    && /_W\.dirty\(file, \{ name: 'usage-cache\.write', rank: 0, makeDir: true,/.test(h) && /require\('\.\/server\/usage-cache-hub\.js'\)\.useStoreWriter\(w, \{ dropRun: require\('\.\/run-reads\.js'\)\.dropRun \}\)/.test(b);
+  ok(ucMoved(uw, ucHub, swr), 'the usage readings and their sidecars through the store writer at the hub (U6.5: src/server/usage-cache-hub.js, injected at the server\'s boot with run-reads\' dropRun) — the synchronous road only where nothing was injected (the device agent)');
+  ok(!ucMoved(uw.replace('  if (_hub) _hub.handOff(file, { at, args: { cacheDir, key, obj,', '  if (false) _hub.handOff(file, { at, args: { cacheDir, key, obj,'), ucHub, swr), 'NEGATIVE CONTROL (lg-store-writes U6.5): a reading written on the main thread at the hub (the hand-off gone) is red');
+  ok(!ucMoved(uw, ucHub, swr.replace("require('./server/usage-cache-hub.js').useStoreWriter(w,", "void (w,")), 'NEGATIVE CONTROL (lg-store-writes U6.5): the boot\'s injection gone is red');
   const TS = require(path.join(REPO, 'src/timed-sync.js'));
   ok(['channels-index.write', 'session-meta.write', 'usage-cursors.write', 'usage-rates.write', 'jobs-logs-sweep.write', 'decision-memo.write', 'decision-usage.write', 'turn-carry-outstanding.write', 'channels-wake-pace.write', 'channels-dispatch.write', 'jobs.write', 'jobs-notifs.write', 'task-groups.write', 'browser-profiles.write'].every((n) => TS.STORES[n] && TS.STORES[n].kind === 'write'), 'each moved store keeps its store-timing row (the writer records its write\'s own time under it)');
 }

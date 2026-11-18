@@ -36,6 +36,7 @@ const STORES = Object.freeze({
   'task-groups.write': row('write', 'task-groups', 'src/task-groups.js', ['_save']),
   'task-groups.read': row('read', 'task-groups', 'src/task-groups.js'),
   'jobs.write': row('write', 'jobs', 'src/jobs.js', ['_save']),
+  'usage-cache.write': row('write', 'usage-cache', 'src/server/usage-cache-hub.js', ['handTo']),   // through the store writer at the hub (lane lg-store-writes, B-0248 U6.5: the usage readings and their sidecars)
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
   'jobs-logs-sweep.write': row('write', 'jobs-logs-sweep', 'src/jobs.js', ['_logsSave']),   // through the store writer (lane job-logs-sweep: the job-logs catch-up's record — paced, the hub's bookkeeping)
