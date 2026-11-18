@@ -113,7 +113,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             noteMode(msg);
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }
           } else if (msg.kind === 'prompt_start') {
-            session._isStreaming = true; newLabel = 'thinking...'; try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a prompt that starts a turn ends the stop — never a backlog's
+            session._isStreaming = true; newLabel = 'thinking...'; try { if (!recordIsLate?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts })) noteTurnRunning?.(session); } catch { }   /* U1 cure 2: the ACP / agy wrappers stamp a record `ts` (ISO) — the lateness rule reads `timestamp`; judged by its OWN stamp here, the shared reader untouched */ // lane auto-resume-bulk: a prompt that starts a turn ends the stop — never a backlog's
             // lane queued-is-not-woke (law 1): the turn's start is a fact the ladder says («running since») and the edge a queued
             // frame waits for — PROPERTY ACCESS on the lazy ref, never a call
             session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
@@ -125,7 +125,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             session._isStreaming = false; newLabel = '';
             delete session._turnOpenSaidAt;   // the cut (D): the opening said is the turn running NOW — cleared at its end record
             try { if (session.backendSessionId) deliverRef?.noteTurnEnded?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-end note failed: ${e.message}`); }
-            try { noteTurnEnd?.(session); } catch {}
+            try { noteTurnEnd?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts }); } catch {}   // its OWN stamp (U1 cure 2's read): a replayed backlog's turn end settles nothing — it never clears a restored mark
             // ONE usage read after a stretch of work (lane usage-predict, the owner's A): THE arming site — the account's 5-minute
             // quiet wait starts here and nowhere else (src/server/after-turn-read.js)
             try { require('../after-turn-read.js').onTurnEnd(session, msg); } catch (e) { console.warn(`[acp] after-turn read (end) failed: ${e.message}`); }

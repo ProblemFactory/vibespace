@@ -448,7 +448,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         try { state.setSessionConfig?.(s, { ...(state.getSessionConfig?.(s) || {}), autoResume: on }); } catch { } // survives the next resume, like the chat chip
         stopF.autoResume = on;
         const ahead = Number(stopF.resetsAt) - Date.now();   // what the server arms (auto-resume.js setEnabled — a wait within its bound, else a watch); the next list restates it
-        stopF.waiting = !on || !(ahead > 0) ? false : ahead <= 26 * 3600e3 ? 'timed' : (stopF.bucket ? 'early' : false);
+        const bound = Number(stopF.waitBoundMs) || 0;   // the SERVER's waiting bound (statusFor maxWaitMs) — none known ⇒ no timed promise
+        stopF.waiting = !on || !(ahead > 0) ? false : bound && ahead <= bound ? 'timed' : (stopF.bucket ? 'early' : false);
         paintToggle(on);
       };
       line.appendChild(tchip);

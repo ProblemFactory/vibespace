@@ -399,7 +399,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const srv8 = read('server.js');
   ok('WIRING: server.js routes beforeFire → beforeAutoResumeFire and provides the probe', /beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \}/.test(srv8) && /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(srv8));
   const ss8 = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
-  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session\); \} catch \{\}/.test(ss8));
+  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session, msg\); \} catch \{\}/.test(ss8));
 
   // the pre-fire VETO, functionally (async gate through a real create())
   const dV = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-veto-'));
@@ -1520,12 +1520,20 @@ await (async () => {
   // never twice for one stop: the switch's arm fires once; the stop still there and the switch pressed again ⇒ nothing more
   const twice = async (mod) => { const sent = [], m5 = new Map([['w5', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 60000 } })]]); const ar5 = mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: m5, serverSetting: () => false, sendToSession: (id, s9, t) => { sent.push(t); return true; } }); ar5.setEnabled('w5', true); const r = Date.now() + 60000; ar5.tick(r + GRACE_MS + 1); ar5.noteFireOutcome('w5', true); /* its turn ran: the breaker's «on its way» clears — only the never-twice test is left */ ar5.setEnabled('w5', false); ar5.setEnabled('w5', true); ar5.tick(r + GRACE_MS + 120000); ar5.tick(r + 3600e3); return sent.length; };
   ok('16c. never twice for one stop: one continue, a second press of the switch after it arms nothing more', (await twice({ create })) === 1);
+  // the restack cure's small ones: the STOP IS CLEARED at its continue's delivery (a restart then restores no stop a second
+  // press could arm again) — the engine's clear through the core's dep; RED: the core without the call
+  const clearAt = (mod) => { const cleared = [], m6 = new Map([['w6', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 60000 } })]]); const d6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-clr-')); setImmediate(() => { try { fs.rmSync(d6, { recursive: true, force: true }); } catch { } }); const ar6 = mod.create({ dataDir: d6, activeSessions: m6, serverSetting: () => false, sendToSession: () => true, clearStopped: (id, s9, why) => { cleared.push(`${id}:${why}`); s9._stoppedBy = null; } }); ar6.setEnabled('w6', true); ar6.tick(Date.now() + 60000 + GRACE_MS + 1); return cleared; };
+  ok('16c. the stop is CLEARED at its continue\'s delivery (so a restart restores none a second press could arm): the engine\'s clear, named', JSON.stringify(clearAt({ create })) === JSON.stringify(['w6:its continue was delivered']), clearAt({ create }));
+  const mCl = mutantAr([["      if (clearStopped && session._stoppedBy) { try { clearStopped(id, session, 'its continue was delivered'); }", "      if (false) { try { clearStopped(id, session, 'its continue was delivered'); }"]]);
+  ok('16c. RED: the core without the clear at delivery leaves the stop standing', mCl.hits === 1 && !!mCl.mod && clearAt(mCl.mod).length === 0, mCl.err || null);
+  ok('16c. WIRING: server.js hands the core the engine\'s clear (clearStopped → clearStoppedBy, destructured from the engine)', /clearStopped: \(id, s, why\) => \{ try \{ clearStoppedBy\(s, why\); \} catch \{ \} \}/.test(read('server.js')) && /noteTurnError, clearStoppedBy, noteSessionProduced,/.test(read('server.js')));
+  ok('16c. the waiting bound the card paints from is the SERVER\'s (statusFor maxWaitMs → the live fact\'s waitBoundMs) — the page copies no number', (() => { const a7 = mk({ dflt: true }); a7.sessions.set('w7', sess()); return a7.ar.statusFor('w7').maxWaitMs === MAX_WAIT_MS; })() && !/26 \* 3600e3/.test(read('src/lib/session-card.js')) && /Number\(stopF\.waitBoundMs\)/.test(read('src/lib/session-card.js')));
   const mTw = mutantAr([[' && session._stopContinuedAt !== f.at) {', ') {']]);
   ok('16c. never-twice RED: without the «already continued» test the same stop is continued a second time', mTw.hits === 1 && !!mTw.mod && (await twice(mTw.mod)) >= 2, mTw.err || null);
   // the engine: a wall with no stated reset shows none; B — a backlog's turn start never clears a mark (codex, end to end)
   const engOf = (mod, metas) => mod.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: (() => { const d = scratch('ar-stop2'); fs.mkdirSync(d, { recursive: true }); return d; })(), USAGE_CACHE_DIR: path.join(scratch('ar-stop2'), 'usage-cache'), activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; }, getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; }, patchSessionMeta: (n, p) => { metas[n] = { ...(metas[n] || {}), ...p }; return Promise.resolve(true); } }), onSessionListChange: () => { } });
   const ol = console.log, ow = console.warn; console.log = () => { }; console.warn = () => { };
-  let noReset = null, noResetMut = null, keptLate = null, clearedLive = null, keptMut = null;
+  let noReset = null, noResetMut = null, keptLate = null, clearedLive = null, keptMut = null, acpLate = null, acpLive = null, acpMut = null, acpEndMut = null, cxEndMut = null;
   try {
     const ENG = path.join(REPO, 'src/server/usage-pool-engine.js'), engSrc = read('src/server/usage-pool-engine.js');
     const wallNoReset = (eng) => { const s6 = { backend: 'claude', mode: 'chat', _webuiId: 'w-nr', sockName: 'sock-nr', claudeSessionId: 'c-nr' }; eng.noteWallSignal(s6, { bucket: 'fiveHour', key: '__global__' }); eng.noteTurnEnd(s6, { type: 'result', result: "You've hit your limit" }); return s6._stoppedBy; };
@@ -1541,19 +1549,78 @@ await (async () => {
       cxMod.create({ engine: eng, deliverRef: null, permissionRulesRef: null }).attach(s7, 'w-cx', pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta() { }, updateSessionTodos() { } });
       const line = (o) => feed && feed(JSON.stringify(o) + '\n');
       line({ type: 'event_msg', timestamp: new Date(Date.now() - 3600e3).toISOString(), payload: { type: 'task_started', turn_id: 't-old' } });
+      line({ type: 'event_msg', timestamp: new Date(Date.now() - 3600e3 + 5000).toISOString(), payload: { type: 'task_complete', turn_id: 't-old' } });   // …with that turn's END (U1 cure 2's read)
       const late = s7._stoppedBy;
       line({ type: 'event_msg', timestamp: new Date().toISOString(), payload: { type: 'task_started', turn_id: 't-new' } });
       return { late, live: s7._stoppedBy };
     };
     const cxReal = codexRun(require(path.join(REPO, 'src/server/stdout/codex-events.js')));
     keptLate = cxReal.late; clearedLive = cxReal.live;
-    const cxSrc = read('src/server/stdout/codex-events.js'), needle = 'try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop';
+    const cxSrc = read('src/server/stdout/codex-events.js'), needle = 'try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop';   // stale-pins: kept — the CODEX consumer's line (codex-events still says it); the ACP one moved
     keptMut = cxSrc.includes(needle) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', cxSrc.replace(needle, 'try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop'))).late : 'needle-missing';   // stale-pins: kept — the RED puts the old unguarded line BACK (the consumer without the test)
+    // MUST 1 of the restack's verdict: the ACP / agy wrappers stamp a record `ts`, the lateness rule reads `timestamp` — the
+    // consumer judges its record by its OWN stamp. The REAL acp-events consumer and the REAL engine, a restored mark.
+    const acpRun = (acMod) => {
+      const eng = engOf(require(ENG), { 'sock-ac': { name: 'ac' } });
+      const s8 = { backend: 'antigravity', mode: 'chat', _webuiId: 'w-ac', sockName: 'sock-ac', backendSessionId: 'th-ac', buffer: '', _stoppedBy: { kind: 'quota', at: Date.now() - 2 * 3600e3, resetsAt: Date.now() + 3600e3 } };
+      let feed = null; const pty = { onData: (cb) => { feed = cb; }, onExit() { }, write() { } };
+      acMod.create({ engine: eng, noteHarnessModels() { }, deliverRef: null, permissionRulesRef: null }).attach(s8, 'w-ac', pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta() { }, updateSessionTodos() { } });
+      const line = (o) => feed && feed(JSON.stringify(o) + '\n');
+      line({ ts: new Date(Date.now() - 3600e3).toISOString(), type: 'acp', kind: 'prompt_start' });   // the attach's replayed backlog: an hour old…
+      line({ ts: new Date(Date.now() - 3600e3 + 5000).toISOString(), type: 'acp', kind: 'prompt_end', stopReason: 'end_turn' });   // …with that turn's END
+      const late = s8._stoppedBy;
+      line({ ts: new Date().toISOString(), type: 'acp', kind: 'prompt_start' });
+      return { late, live: s8._stoppedBy };
+    };
+    const acReal = acpRun(require(path.join(REPO, 'src/server/stdout/acp-events.js')));
+    acpLate = acReal.late; acpLive = acReal.live;
+    const acSrc = read('src/server/stdout/acp-events.js'), acNeedle = 'if (!recordIsLate?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts })) noteTurnRunning?.(session);';
+    const acEnd = 'try { noteTurnEnd?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts }); } catch {}';
+    acpEndMut = acSrc.includes(acEnd) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', acSrc.replace(acEnd, 'try { noteTurnEnd?.(session); } catch {}'))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
+    const cxEnd = 'try { noteTurnEnd?.(session, msg); } catch {}';
+    cxEndMut = read('src/server/stdout/codex-events.js').includes(cxEnd) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', read('src/server/stdout/codex-events.js').replace(cxEnd, 'try { noteTurnEnd?.(session); } catch {}'))).late : 'needle-missing';   // stale-pins: kept — the RED is the bare turn end
+    acpMut = acSrc.includes(acNeedle) ? acpRun(MUTX.load('src/server/stdout/acp-events.js', acSrc.replace(acNeedle, 'if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session);'))).late : 'needle-missing';   // stale-pins: kept — the RED is the restack's line (the record judged without its own stamp)
   } finally { console.log = ol; console.warn = ow; }
   ok('16c. a wall with NO stated reset shows none — the engine writes resetsAt null (never a verdict\'s guess)', !!noReset && noReset.kind === 'quota' && noReset.resetsAt === null, noReset);
   ok('16c. no-reset RED: an engine that fills the reset from elsewhere shows one (the leg above reads the fact, not a spelling)', !!noResetMut && typeof noResetMut === 'object' && noResetMut.resetsAt !== null, noResetMut);
+  ok('16c. B end to end on ACP (the restack cure\'s MUST 1): a restored mark survives a replayed prompt_start an hour old (judged by the record\'s own `ts`); a LIVE one clears it — the REAL acp-events consumer and the REAL engine', !!acpLate && acpLate.kind === 'quota' && acpLive === null, { acpLate, acpLive });
+  ok('16c. ACP RED: the restack\'s line (the record judged without its own stamp) lets the backlog clear the mark', acpMut === null, acpMut);
+  ok('16c. the backlog\'s TURN END settles nothing either (ACP prompt_end, codex task_complete — by their own stamps); RED: the bare turn end clears the restored mark, on both', acpEndMut === null && cxEndMut === null, { acpEndMut, cxEndMut });
   ok('16c. B end to end: a restored mark survives the bridge\'s replayed backlog (a task_started an hour old); a LIVE turn start clears it', !!keptLate && keptLate.kind === 'quota' && clearedLive === null, { keptLate, clearedLive });
   ok('16c. B RED: the codex consumer without the late-record test lets the backlog clear the mark', keptMut === null, keptMut);
+})();
+
+// ── 16d. PATCHES OF ONE SESSION'S META LAND IN THE ORDER THEY WERE ASKED (the restack cure's MUST 2 — the cure's own stated law,
+// «loses no update»): the stop fact written, then cleared, within one read — the first read answers LAST; the disk ends with
+// the clear (memory's state), never the fact again. The REAL store over a scratch folder; RED: the patch without its chain.
+await (async () => {
+  console.log('\n16d. patches of one meta land in the order asked');
+  const SS = 'src/server/session-stdout.js', ssSrc = read(SS);
+  const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+  const storeOf = (mod, tmp) => { const META = path.join(tmp, 'meta'), BUF = path.join(tmp, 'buf'); fs.mkdirSync(META, { recursive: true }); fs.mkdirSync(BUF, { recursive: true });
+    fs.writeFileSync(path.join(META, 'two-1.json'), JSON.stringify({ sockName: 'two-1', webuiSessionId: 'w-two', stoppedBy: { kind: 'quota', at: 1 } }));
+    return { META, so: mod.create({ rootDir: tmp, BUFFERS_DIR: BUF, META_DIR: META, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmp, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine: new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true }), checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null, getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn() }) }; };
+  const scene = async (mod) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-two-')); const { META, so } = storeOf(mod, tmp);
+    const fsp = fs.promises, orig = fsp.readFile; let first = true;
+    fsp.readFile = function (p, ...a) { const r = orig.call(this, p, ...a); if (first && String(p).endsWith('two-1.json')) { first = false; return r.then((v) => new Promise((res) => setTimeout(() => res(v), 150))); } return r; };   // the FIRST read answers last
+    let out = null;
+    try {
+      const pa = so.patchSessionMeta('two-1', { stoppedBy: { kind: 'quota', at: 2 } }, { owner: 'w-two' });   // the walled turn writes its fact…
+      const pb = so.patchSessionMeta('two-1', { stoppedBy: null }, { owner: 'w-two' });                        // …and a turn start clears it, at once
+      await Promise.all([pa, pb]);
+      const SWm = require(path.join(REPO, 'src/store-writer.js'));
+      await Promise.race([SWm.storeWriter().durable(path.join(META, 'two-1.json')), new Promise((r) => setTimeout(r, 8000))]);   // the writer's thread lands what is owed (its own word — never a fixed sleep)
+      out = JSON.parse(fs.readFileSync(path.join(META, 'two-1.json'), 'utf8')).stoppedBy;
+    } finally { fsp.readFile = orig; fs.rmSync(tmp, { recursive: true, force: true }); }
+    return out;
+  };
+  const real = await scene(require(path.join(REPO, SS)));
+  ok('16d. the fact written then cleared within one read, the first read answering LAST ⇒ the disk ends CLEARED, as memory is', real === null, real);
+  const chainLine = '  const p = (metaPatchChain.get(fp) || Promise.resolve()).then(link, link);';
+  const red = ssSrc.includes(chainLine) ? await scene(MUTX.load(SS, ssSrc.replace(chainLine, '  const p = link();   // PRE-CURE: no chain'))) : 'needle-missing';
+  ok('16d. RED: the patch without its chain — the late first read writes the cleared fact BACK', !!red && typeof red === 'object' && red.at === 2, red);
+  ok('16d. the owner check runs on the copy already read (no second read of the mount); a patch that gives up writes nothing', /writeSessionMeta\(sockName, \{ \.\.\.m, \.\.\.patch \}, \{ prev: m, flagOnly \}\)/.test(ssSrc) && /sessionMetaOwnerConflict\(sockName, meta, prev\)/.test(ssSrc) && /tries > 0 \? patchMetaOnce\(sockName, fp, patch, tries - 1, owner, tok\) : false/.test(ssSrc));
 })();
 
 // ── 16b. TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure — the adversarial read's MUST 2): the card's switch says

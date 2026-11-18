@@ -871,12 +871,16 @@ class Sidebar {
   _renderStoppedQuickTab() {
     const box = document.getElementById('stopped-quick-tabs');
     if (!box) return;
-    box.innerHTML = '';
     const n = this._stoppedUnderFilters().length;   // N = exactly what a press shows (every other filter of the list applied)
     // a stated reset that passes REDRAWS the cards («resets 14:00» becomes «the limit has reset») — one timer, the earliest
     if (this._stopTimer) { clearTimeout(this._stopTimer); this._stopTimer = null; }
     const nextReset = Math.min(...(this._allSessions || []).filter((s) => isStoppedBy(s) && Number(s.stoppedBy.resetsAt) > Date.now()).map((s) => Number(s.stoppedBy.resetsAt)));
-    if (Number.isFinite(nextReset)) this._stopTimer = setTimeout(() => { this._stopTimer = null; this._render(); }, Math.min(2 ** 31 - 1, nextReset - Date.now() + 500));
+    if (Number.isFinite(nextReset)) this._stopTimer = setTimeout(() => { this._stopTimer = null; this._renderStoppedQuickTab(); this._render(); }, Math.min(2 ** 31 - 1, nextReset - Date.now() + 500));   // re-arms the NEXT reset at once
+    // rebuilt only when what it shows moved (every render asks — its focus and hover are kept otherwise)
+    const key = `${n}|${this._stoppedOnly ? 1 : 0}|${stoppedFilterWords(n, tr)}`;
+    if (key === this._stoppedPillKey) return;
+    this._stoppedPillKey = key;
+    box.innerHTML = '';
     if (!n && !this._stoppedOnly) return;
     const btn = document.createElement('button');
     btn.className = 'status-quick-tab stopped-quick-tab' + (this._stoppedOnly ? ' active' : '');
@@ -892,7 +896,9 @@ class Sidebar {
   _stoppedUnderFilters() {
     const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
     const showArchived = this._statusFilter && this._statusFilter.has('archived');
-    return (this._allSessions || []).filter((s) => isStoppedBy(s) && (showArchived || !this.isArchived(s))
+    const nonArch = new Set([...(this._statusFilter || [])]); nonArch.delete('archived');   // _render's status filter and quick view, as it applies them
+    const statusOk = (s) => (showArchived ? (this.isArchived(s) || this._statusFilter.has(s.status)) : (!this.isArchived(s) && (nonArch.size >= 4 || nonArch.has(s.status))));
+    return (this._allSessions || []).filter((s) => isStoppedBy(s) && statusOk(s) && (!this._activeView || s.status === this._activeView)
       && (!f || sessionMatchesFilter(s, f)) && !(this._backendFilter.size > 0 && !this._backendFilter.has(s.backend || 'claude'))
       && !(this._hostFilter.size > 0 && !this._hostFilter.has(s.host || 'local')) && (!this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter)));
   }
@@ -1336,6 +1342,7 @@ class Sidebar {
   }
 
   _render() {
+    try { this._renderStoppedQuickTab(); } catch { }   // the pill's N follows every filter as it changes (typing, backend, host) — U1 cure 2
     // The ACTUAL scrolling element moved over time (.sidebar-section
     // classically; #all-sessions-list itself in the current layout — measured
     // 391/7106 vs the section's 443/443). Anchoring the preserve on one

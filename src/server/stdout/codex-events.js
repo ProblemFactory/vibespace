@@ -234,7 +234,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           // codex turn boundary (task_complete; task_failed classifies
           // inside recordCodexQuotaSignal) — same wall machine as claude
           if (msg.type === 'event_msg' && msg.payload?.type === 'task_complete') {
-            try { noteTurnEnd?.(session); } catch {}
+            try { noteTurnEnd?.(session, msg); } catch {}   // the record itself (U1 cure 2's read): a replayed backlog's task_complete settles nothing — it never clears a restored mark
           }
           // rpc-queue delivery honesty (peerDelivery registry lane): the
           // deliver ladder returned ok on the stdin write, so a wrapper-side

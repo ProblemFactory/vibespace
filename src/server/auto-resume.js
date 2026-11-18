@@ -326,7 +326,7 @@ function writeJsonAtomic(file, obj) {
  *        frame keeps that slot's budget booked until the hold times out.
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  onListChange = null }) {   // lane auto-resume-bulk: the session list's one notify point — a STOPPED session's card shows its toggle
+  onListChange = null, clearStopped = null }) {   // clearStopped (U1 cure 2): the engine's clear of the stop fact, at a continue's delivery — lane auto-resume-bulk: the session list's one notify point — a STOPPED session's card shows its toggle
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -414,6 +414,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // is past the ceiling; only a fresh-window reading can continue it),
       // `lane` = which limit lane the wait is about (null = the harness has one).
       resume: verb ? verb.form : null,
+      maxWaitMs: MAX_WAIT_MS,   // the timed wait's bound — the card's optimistic paint reads it here, never a copied number (U1 cure 2)
       watch: !!(a && !a.fired && a.watch),
       lane: a ? (a.lane || null) : null,
       bucket: a ? (a.bucket || null) : null,
@@ -984,6 +985,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       if (session._stoppedBy && session._stoppedBy.at) session._stopContinuedAt = session._stoppedBy.at;   // this stop has had its continue (the switch never arms it again)
+      // …and the STOP IS OVER at its continue's delivery (U1 cure 2 — 主开发's small one): the fact is cleared and that is
+      // persisted, so a restart before the next turn's own start restores no stop a second press could arm again
+      if (clearStopped && session._stoppedBy) { try { clearStopped(id, session, 'its continue was delivered'); } catch (e) { log(`[auto-resume] ${id}: clearing the stop fact failed: ${e.message}`); } }
       armed.delete(id);
       noteFired(id, key2, kind, Date.now(), origin);
       // CHARGED ONLY WHEN THE TURN HAPPENED (two-phase): everything above can

@@ -75,7 +75,7 @@ function liveFactOf(sb, status = null) {
   if (!f) return null;
   const can = !!(status && status.resume) && f.kind === 'quota';
   const waiting = !can ? false : status.watch ? (status.bucket ? 'early' : false) : status.armed ? 'timed' : false;
-  return { ...f, autoResume: can ? !!status.enabled : null, waiting };
+  return { ...f, autoResume: can ? !!status.enabled : null, waiting, waitBoundMs: can && Number(status.maxWaitMs) > 0 ? Number(status.maxWaitMs) : null };   // the server's bound (the card's optimistic paint)
 }
 
 /** THE FILTER PREDICATE — the sidebar's «stopped by a limit or overload» filter and the bulk resume's candidate set. */
