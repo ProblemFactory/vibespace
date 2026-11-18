@@ -270,10 +270,10 @@ try {
   {
     const P = path.join(tmp, 'proc-b1ea6'), M = path.join(tmp, 'mounts');
     const mac = path.join(M, 'mac'), macbook = path.join(M, 'macbook'), inner = path.join(mac, 'inner');
-    const fake = (pid, argv, start) => {
+    const fake = (pid, argv, start, state = 'S') => {
       fs.mkdirSync(path.join(P, String(pid)), { recursive: true });
       fs.writeFileSync(path.join(P, String(pid), 'cmdline'), argv.join('\0') + '\0');
-      fs.writeFileSync(path.join(P, String(pid), 'stat'), `${pid} (${path.basename(argv[0])}) S 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${start} 0 0`);
+      fs.writeFileSync(path.join(P, String(pid), 'stat'), `${pid} (${path.basename(argv[0])}) ${state} 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 ${start} 0 0`);
     };
     fs.mkdirSync(path.join(P, 'self'), { recursive: true }); fs.writeFileSync(path.join(P, 'self', 'stat'), '1 (node) S');
     fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);       // THE stale daemon of …/mac
@@ -318,6 +318,26 @@ try {
     try { await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sig4.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rp; }
     check('a command line that no longer names the mount at the signal is never signalled', sig4.length === 0, JSON.stringify(sig4));
     fake(301, ['/usr/bin/rclone', ...pullMountArgs(mac)], 1000);
+    // the cure (the readers' 2): a process in uninterruptible sleep is never read further — its command line can hold a pool thread
+    fake(306, ['/usr/bin/rclone', ...pullMountArgs(mac)], 6000, 'D');
+    const rpD = fs.promises.readFile; let dRead = 0;
+    fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '306', 'cmdline')) dRead++; return rpD.call(this, q, ...a); };
+    let foundD, sigD = [];
+    try { foundD = await mountDaemonsOf(mac, { procRoot: P }); await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigD.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rpD; }
+    check('a process asleep in the kernel (D) is skipped — its command line is never read, it is never signalled', JSON.stringify(foundD) === JSON.stringify([{ pid: 301, starttime: 1000 }]) && dRead === 0 && sigD.every(([p]) => p !== 306), JSON.stringify({ foundD, dRead, sigD }));
+    {
+      const dsrc0 = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
+      const noSkip = "    if (!st || st.state === 'D') continue;\n    let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`";
+      if (!dsrc0.includes(noSkip)) check('CONTROL: the D-skip anchor was found in mountDaemonsOf', false);
+      else {
+        const SRCX = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
+        const cpD = path.join(tmp, 'device-mount-no-dskip.js');
+        fs.writeFileSync(cpD, dsrc0.replace(noSkip, noSkip.replace("if (!st || st.state === 'D') continue;", 'if (!st) continue;')).replace(/require\('\.\//g, `require('${SRCX}/`));
+        const foundC = await require(cpD).mountDaemonsOf(mac, { procRoot: P });
+        check('CONTROL (no D skip): the sleeping process is read and found (red)', foundC.some((x) => x.pid === 306), JSON.stringify(foundC));
+      }
+    }
+    fs.rmSync(path.join(P, '306'), { recursive: true, force: true });
     check('no /proc ⇒ nothing found, nothing signalled (the fusermount pass alone)', (await mountDaemonsOf(mac, { procRoot: path.join(tmp, 'no-proc') })).length === 0);
     const dsrc = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
     check('the pre-clean goes through killMountDaemons; no sync /proc walk and no substring match is left in the file',

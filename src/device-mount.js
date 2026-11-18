@@ -87,13 +87,21 @@ async function mountDaemonsOf(mountpoint, { procRoot = '/proc' } = {}) {
   let pids = [];
   try { pids = (await fs.promises.readdir(procRoot)).filter((n) => /^\d+$/.test(n) && Number(n) !== process.pid); } catch { return out; }
   for (const pid of pids) {
+    // the cure (the readers' 2): the STATE first — a process in uninterruptible sleep (D) is never read further: its command
+    // line takes its memory map's lock and can hold a pool thread for as long as it sleeps (proc-identity membersOf's rule)
+    const st = await statOf(procRoot, pid);
+    if (!st || st.state === 'D') continue;
     let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
     if (!isMountDaemonOf(argv, mountpoint)) continue;
-    let st; try { st = await fs.promises.readFile(`${procRoot}/${pid}/stat`, 'utf8'); } catch { continue; }
-    const start = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[19]);
-    if (Number.isFinite(start)) out.push({ pid: Number(pid), starttime: start });
+    if (Number.isFinite(st.start)) out.push({ pid: Number(pid), starttime: st.start });
   }
   return out;
+}
+/** /proc/<pid>/stat → { state, start } (field 3 and field 22, counted from the last ')'), or null. Async. */
+async function statOf(procRoot, pid) {
+  let st; try { st = await fs.promises.readFile(`${procRoot}/${pid}/stat`, 'utf8'); } catch { return null; }
+  const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
+  return { state: rest[0], start: Number(rest[19]) };
 }
 /** B-1ea6: the pre-clean's kill — each daemon the scan proved, RE-CHECKED at the signal: its command line read again (still
  *  a mount daemon of exactly this mount point) and then PI.signalIdentity (the start time judged in the same tick as the
@@ -101,6 +109,8 @@ async function mountDaemonsOf(mountpoint, { procRoot = '/proc' } = {}) {
 async function killMountDaemons(mountpoint, { procRoot = '/proc', kill = null, say = null } = {}) {
   const hit = [];
   for (const id of await mountDaemonsOf(mountpoint, { procRoot })) {
+    const st = await statOf(procRoot, id.pid);
+    if (!st || st.state === 'D') continue;   // asleep in the kernel now: never read further (a SIGKILL would wait for it anyway)
     let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${id.pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
     if (!isMountDaemonOf(argv, mountpoint)) continue;
     const r = PI.signalIdentity(id, 'SIGKILL', { procRoot, what: 'the stale daemon of a pull mount point', ...(kill ? { kill } : {}), ...(say ? { say } : {}) });
