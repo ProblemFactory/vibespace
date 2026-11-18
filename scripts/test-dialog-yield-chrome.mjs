@@ -1449,5 +1449,36 @@ await step('㊴', async () => {
   check('㊴ the Plugins modal (the phone tier) opened, then closed by its ✕ in ONE task with no socket frame between ⇒ its broadcast listener left AT THE CLOSE — the count is back (2.369.397: +1 until the next frame came)', r.mobile && r.opened && r.closer && r.gone && r.h1 === r.h0 + 1 && r.h2 === r.h0, r);
 });
 
+// ── B-3b8e ② (the row's item (2), 2026-11-18): a Plugin Git credential SAVED while Install plugin… stands open ENABLES its option
+// at once — the gap that let «not set» live ~100 releases (the dialog read the status once per open). LAST: it sets up a vault.
+// What it rests on (rule (d)), said plainly: SEEN in a run — the lane's picture walk on this dialog (bl-keys-misc logs/pics-look2.log,
+// 2026-11-18 05:39–05:40Z): POST /api/vault/setup 200 and PUT /api/integrations/plugin-git 200 from the page, and the option read as
+// `.plugin-install-cred option[value="plugin-git"]` (its text and `disabled`, with the vault locked, in a dialog opened after a
+// reload). NOT seen in any run, read from the code (src/lib/plugins-ui.js drawCred + its `integrations-updated` listener): the
+// first read redrawing the markup's bare option, the option enabling while the dialog stays open, the «— {host} ({kind})» words —
+// this leg's PROVE run is their first fact. The CONTROL waits for the first read to land (the markup's bare option redrawn, still
+// disabled) before anything is saved, so the enable below can only come from the broadcast (rule (b)).
+await step('B-3b8e②', async () => {
+  const api = (method, p, body) => evalJs(`fetch(${J(p)}, { method: ${J(method)}, headers: { 'content-type': 'application/json' }, body: ${body ? J(JSON.stringify(body)) : 'undefined'} }).then((r) => ({ status: r.status }), (e) => ({ status: 0, error: String(e) }))`);
+  await evalJs(`(() => { document.getElementById('plugin-install-dialog')?.remove(); app._pluginInstallDialog(() => {}); return true; })()`);
+  await waitFor(`!!document.querySelector('#plugin-install-dialog .plugin-install-source')`, 10000);
+  await evalJs(`(() => { const s = document.querySelector('#plugin-install-dialog .plugin-install-source'); s.value = 'git'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const OPT = `document.querySelector('#plugin-install-dialog .plugin-install-cred option[value="plugin-git"]')`;
+  const seen = await waitFor(`!!${OPT}`, 8000);
+  const read = () => evalJs(`(() => { const o = ${OPT}; return o ? { text: o.textContent, disabled: !!o.disabled } : null; })()`);
+  const MARKUP = 'Plugin Git credential';   // the option's own text in the dialog's markup (plugins-ui.js), before any read
+  const firstRead = seen && await waitFor(`(() => { const o = ${OPT}; return !!o && o.disabled && o.textContent !== ${J(MARKUP)}; })()`, 10000);
+  const before = seen ? await read() : null;
+  check('B-3b8e ② CONTROL first: the first read LANDED (the bare markup option redrawn) and, before any save, the Plugin Git option stands DISABLED', !!firstRead && !!before && before.disabled === true && before.text !== MARKUP, before);
+  const su = await api('POST', '/api/vault/setup', { password: 'dy-pass-' + 'not-real-3b8e' });
+  const sv = await api('PUT', '/api/integrations/plugin-git', { values: { host: 'example-host.invalid', username: 'x-access-token', token: 'dy-' + 'token-not-real' } });
+  const live = await waitFor(`(() => { const o = ${OPT}; return !!o && !o.disabled && /example-host\\.invalid/.test(o.textContent); })()`, 10000);
+  const after = await read();
+  await shot('b3b8e-saved-enables');
+  check('B-3b8e ② a Plugin Git credential SAVED while Install plugin… stands open ENABLES its option at once, the host in its words — no reopen', su.status === 200 && sv.status === 200 && live && !!after && after.disabled === false, { su, sv, after });
+  await api('DELETE', '/api/integrations/plugin-git');
+  await evalJs(`(() => { document.querySelector('#plugin-install-dialog .dialog-close')?.click(); return true; })()`);
+});
+
 console.log(`\n${fail ? '✗' : '✓'} test-dialog-yield-chrome: ${pass} passed, ${fail} failed${fail ? '' : ' — ALL PASS'}`);
 process.exit(fail ? 1 : 0);

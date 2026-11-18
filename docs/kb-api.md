@@ -1377,6 +1377,13 @@ the client can toast it (`fetchJson` never throws).
   store constructs no vendor request. Answers `{ok, error, detail, testedAt,
   caveat, kind, integration}`; a row whose consumer has not landed answers
   501 `not-wired` naming the phase (`detail.wiredIn`) and records nothing.
+  A row whose consumer says its Test cannot run YET answers 409 `test-waits`
+  with `detail: {code, params}` and records nothing. This comes after the
+  store's own refusals. B-3b8e: the Plugin Git credential waits until a
+  repository on its host is known (`repository-unknown`, `params.host`). The
+  view carries the same answer as `testWaits` (null = the Test is offered).
+  An `integrations-updated` with `why: 'test-waits'` pushes the card again
+  when what it waits for moves.
 - `DELETE /api/integrations/:id` — "drop my keys": `clearUserValues`, ALWAYS
   allowed, lands wherever precedence lands (cluster default or none).
   `{ok:true, integration}`. (r2: "always" is a statement about precedence,

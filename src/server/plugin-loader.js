@@ -145,6 +145,9 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
   for (const k of ['enabled', 'trust', 'installs']) if (!registry[k] || typeof registry[k] !== 'object') registry[k] = {};
   const saveRegistry = () => { try { fs.mkdirSync(path.dirname(registryFile), { recursive: true }); writeJsonAtomic(registryFile, registry); } catch (e) { log.warn?.('[plugins] registry write failed:', e.message); } };
   const notify = () => { try { broadcast({ type: 'plugins-manifests-updated', plugins: list() }); } catch { } };
+  // B-3b8e (4b): a git install / update / uninstall moves what the Plugin Git credential's Test waits for (a repository known on
+  // its host) — the store pushes that card again, so an open Integrations window follows without a reopen
+  const gitTestWaitsMoved = () => { try { const s = typeof integrations === 'function' ? integrations() : integrations; if (s && typeof s.testWaitsMoved === 'function') s.testWaitsMoved('plugin-git'); } catch { } };
   const tele = (name, detail) => { try { telemetry?.({ kind: 'event', name, detail: String(detail || '').slice(0, 300) }); } catch { } };
   const hashOf = (rec) => (rec?.manifest ? capabilitiesHash(rec.manifest) : null);
   /** The fleet's engine fact now: `{plugin, ref}` (D2 reads only these two). */
@@ -437,6 +440,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     if (rec && reconsent && !fleetTrust) { rec.notice = 'a different package under the same id — review what it asks for and enable it again'; log.warn?.(`[plugins] ${r.id}: ${rec.notice}`); tele('plugin-replaced-untrusted', r.id); }
     if (rec?.enabled) { rec.crashes = []; startChild(rec); }
     syncShims(); notify();
+    if (r.source === 'git' || (prevInst && prevInst.source === 'git')) gitTestWaitsMoved();
     tele('plugin-install', `${source} ${r.id}@${r.version}${r.replaced ? ' (replaced)' : ''}`);
     const plugin = list().find((p) => p.id === r.id);
     return { plugin, replaced: r.replaced, previous: r.previous, warnings: r.warnings, disabled: reconsent && !fleetTrust, consentRequired: reconsent && !fleetTrust && !!plugin?.needsConsent, notice: reconsent && !fleetTrust ? rec?.notice || null : null, ref: r.ref || null, sha: r.sha || null, trustedBy: fleetTrust ? 'fleet' : null };
@@ -446,9 +450,11 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     if (!rec) throw httpErr(404, `unknown plugin "${id}"`);
     stopChild(rec);
     const trashPath = installer.trash(id, { reason: 'uninstall' });
+    const wasGit = !!registry.installs[id] && registry.installs[id].source === 'git';
     delete registry.enabled[id]; delete registry.trust[id]; delete registry.installs[id]; saveRegistry();
     plugins.delete(id);
     discover(); syncShims(); notify();
+    if (wasGit) gitTestWaitsMoved();
     log.log?.(`[plugins] uninstalled ${id} → ${trashPath || '(nothing on disk)'}`);
     tele('plugin-uninstall', id);
     return { ok: true, id, trash: trashPath };
@@ -473,6 +479,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     const fresh = plugins.get(id);
     if (fresh?.enabled) { fresh.crashes = []; startChild(fresh); }
     syncShims(); notify();
+    if (inst.source === 'git') gitTestWaitsMoved();
     tele('plugin-update', `${inst.source} ${id}@${r.version}`);
     return { plugin: list().find((p) => p.id === id), previous: r.previous, warnings: r.warnings, unchanged };
   }
@@ -594,16 +601,24 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   // credential's host (the fleet's source, else a recorded git install) — a human's click through the integration store
   try {
     const store = typeof integrations === 'function' ? integrations() : integrations;
-    if (store && typeof store.registerTest === 'function') store.registerTest('plugin-git', async ({ resolved }) => {
-      const host = String((resolved && resolved.values && resolved.values.host) || '').trim().toLowerCase();
-      const PI = require('./plugin-install.js');
+    const PI = require('./plugin-install.js');
+    const hostOf = (values) => String((values && values.host) || '').trim().toLowerCase();
+    /** the one repository this instance knows on `host` (the fleet's source, else a recorded git install) → its URL | null */
+    const knownRepoOn = (host) => {
       const f = (() => { try { return fleetEngine(); } catch { return null; } })();
       const urls = [f && f.source && f.source.git, ...Object.values(registry.installs).filter((i) => i && i.source === 'git').map((i) => i.value)].filter(Boolean);
-      const url = urls.find((u) => PI.gitHostOf(u) === host);
+      return urls.find((u) => PI.gitHostOf(u) === host) || null;
+    };
+    // B-3b8e (4b — the coordinator's ruling (B)): the Test is OFFERED only once a repository on the credential's host is known;
+    // until then the card says when it will be (after the first install from that host) — never a door that can only refuse
+    const waits = ({ values }) => (knownRepoOn(hostOf(values)) ? null : { code: 'repository-unknown', params: { host: hostOf(values) } });
+    if (store && typeof store.registerTest === 'function') store.registerTest('plugin-git', async ({ resolved }) => {
+      const host = hostOf(resolved && resolved.values);
+      const url = knownRepoOn(host);
       if (!url) return { ok: false, error: `no repository on ${host || 'that host'} is known here yet — install one from it first (⚙ → Plugins → Install plugin…); the Test reaches it with git ls-remote` };
       try { const r = await installer.testCredential(url); return { ok: true, detail: `${r.host} answered git ls-remote with this credential${r.head ? ` (HEAD ${r.head.slice(0, 12)})` : ''}` }; }
       catch (e) { return { ok: false, error: `${e.message}${e.code ? ` [${e.code}]` : ''}` }; }
-    });
+    }, { waits });
   } catch (e) { log.warn?.(`[plugins] the Plugin Git credential's Test is not registered (${e && e.message})`); }
   /** The install record of an id (the boot job compares it — source, value, ref — and never re-pulls the same). */
   const installRecord = (id) => (registry.installs[id] ? { ...registry.installs[id] } : null);

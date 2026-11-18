@@ -77,6 +77,10 @@ const ago = (ms) => {
   return m < 1 ? t('just now') : m < 60 ? t('{n} min ago', { n: m }) : m < 1440 ? t('{n} h ago', { n: Math.round(m / 60) }) : t('{n} d ago', { n: Math.round(m / 1440) });
 };
 
+/** B-3b8e (4b): when a Test the card does not offer yet will be there — ONE sentence, in the reader's language. */
+const testWaitsLine = (w) => (w && w.code === 'repository-unknown'
+  ? (w.params && w.params.host ? t('The Test is offered after the first install from {host} (⚙ → Plugins → Install plugin…)', { host: w.params.host }) : t('The Test is offered after the first install from its host (⚙ → Plugins → Install plugin…)'))
+  : t('The Test is not offered yet'));
 /** The Test button's words follow `testKind` (design §14.2's closed set). */
 const TEST_LABEL = {
   'credential-exchange': () => t('Test connection'),
@@ -358,6 +362,9 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
     testBtn.disabled = true; const was = testBtn.textContent; testBtn.textContent = t('Testing…');
     try {
       const r = await fetchJson(`/api/integrations/${encodeURIComponent(v.id)}/test`, { method: 'POST' });
+      // B-3b8e (4b): a Test pressed on a card drawn before what it waits for went (a repository uninstalled) — the one sentence
+      // says when it will be there, and the card is drawn again from the server's view (no Test button)
+      if (r && r.code === 'test-waits') { result.textContent = ''; result.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(r.detail))); refresh(v.id); return; }
       if (!r || (r.error && r.ok !== false && !('testedAt' in r))) {
         // a REFUSAL (not-wired / no runner / 503): it is a line on the card, not a verdict
         result.textContent = '';
@@ -369,7 +376,10 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
       drawVerdict(!!r.ok, r.testedAt || Date.now(), r.error || null);
     } finally { testBtn.disabled = false; testBtn.textContent = was; }
   };
-  actions.appendChild(testBtn);
+  // B-3b8e (4b — the coordinator's ruling: no door that can only refuse): a Test its consumer says cannot run yet is not drawn;
+  // the card says, in one sentence, when it will be there
+  if (v.testWaits) actions.appendChild(el('div', 'plugin-detail integ-test-waits', testWaitsLine(v.testWaits)));
+  else actions.appendChild(testBtn);
   if (v.hasOwnValues) {
     const clear = el('button', 'mounts-btn mounts-btn-danger integ-clear', t('Clear my keys'));
     clear.onclick = async () => {
