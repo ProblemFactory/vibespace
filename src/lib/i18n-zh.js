@@ -4978,6 +4978,8 @@ export default {
   "Model overloaded · stopped {time}": "模型过载 · 停于 {time}",
   "Auto-continue: on": "自动继续：开",
   "Auto-continue: on · not waiting for this limit": "自动继续：开 · 这次上限不等待",
+  "Auto-continue: on · continues only if the limit clears early": "自动继续：开 · 只在上限提前解除时继续",
+  "Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off": "自动继续已开，但这次重置太远、不等它 —— 只有上限提前解除时这个会话才会继续 —— 点击关闭",
   "Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue": "自动继续已开，对下一次上限生效；这个会话不等这一次（重置已过或太远）—— 打开它继续",
   "The harness said: {said}": "原话：{said}",
   "This mark stays until the session runs again.": "会话再次运行前，这个标记一直保留。",

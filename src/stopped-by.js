@@ -44,9 +44,12 @@ function isOverloadError(declared, error) {
 /** THE VERDICT at a turn end. `walled` = the wall machine's walled-turn classification (it outranks everything: a turn
  *  the wall ended is a quota stop whatever else it said); else the turn's LAST typed error decides overload; else null
  *  (the turn ended for any other reason — nothing to mark). */
-function stopVerdict({ walled = false, resetsAt = 0, memberId = null, lastError = null, overloadErrors = [], said = null, at = Date.now() } = {}) {
+/** A wall's lane / bucket / scoped name, as the at-wall arm names them (a short word, or null) — kept so the switch's arm is
+ *  the arm the wall would have made (the fresh-window edge needs the bucket to open a watch). */
+const wallWord = (x) => (typeof x === 'string' && x && x.length <= 64 && /^[\w .:/+-]+$/.test(x) ? x : null);
+function stopVerdict({ walled = false, resetsAt = 0, memberId = null, lastError = null, overloadErrors = [], said = null, at = Date.now(), lane = null, bucket = null, scopedName = null } = {}) {
   if (walled) {
-    const out = { kind: 'quota', at: num(at) || Date.now(), resetsAt: num(resetsAt) || null, memberId: memberId ? String(memberId) : null, said: boundSaid(said) };
+    const out = { kind: 'quota', at: num(at) || Date.now(), resetsAt: num(resetsAt) || null, memberId: memberId ? String(memberId) : null, said: boundSaid(said), lane: wallWord(lane), bucket: wallWord(bucket), scopedName: wallWord(scopedName) };
     return out;
   }
   if (isOverloadError(overloadErrors, lastError)) return { kind: 'overload', at: num(at) || Date.now(), said: boundSaid(said) };
@@ -57,20 +60,22 @@ function stopVerdict({ walled = false, resetsAt = 0, memberId = null, lastError 
 function normalizeStoppedBy(x) {
   if (!x || typeof x !== 'object' || !STOP_KINDS.includes(x.kind) || !num(x.at)) return null;
   const out = { kind: x.kind, at: num(x.at), said: boundSaid(x.said) };
-  if (x.kind === 'quota') { out.resetsAt = num(x.resetsAt) || null; out.memberId = x.memberId ? String(x.memberId) : null; }
+  if (x.kind === 'quota') { out.resetsAt = num(x.resetsAt) || null; out.memberId = x.memberId ? String(x.memberId) : null; out.lane = wallWord(x.lane); out.bucket = wallWord(x.bucket); out.scopedName = wallWord(x.scopedName); }
   return out;
 }
 
 /** THE LIVE LIST'S FACT (server.js activeSessionsPayload): the session's stop re-validated, with its auto-continue state for
  *  the card's switch — `status` = the auto-resume core's statusFor(id) ({resume, enabled, armed, watch}). No switch
  *  (`autoResume: null`) where it can promise nothing: a harness that cannot continue a turn (no `resume`), and an OVERLOAD
- *  (auto-continue waits for a usage limit's reset — it never arms on an overload). `waiting` = the core holds a wait for
- *  this stop (armed, or watching for a fresh window): ON without it is said as such on the card. null when not stopped. */
+ *  (auto-continue waits for a usage limit's reset — it never arms on an overload). `waiting` = HOW the core waits for this
+ *  stop: 'timed' (armed — it continues at the reset), 'early' (a watch with its bucket — the reset is beyond the waiting
+ *  bound, it continues only if a reading says the limit cleared early), false (nothing can continue it). null when not stopped. */
 function liveFactOf(sb, status = null) {
   const f = normalizeStoppedBy(sb);
   if (!f) return null;
   const can = !!(status && status.resume) && f.kind === 'quota';
-  return { ...f, autoResume: can ? !!status.enabled : null, waiting: can ? !!(status.armed || status.watch) : false };
+  const waiting = !can ? false : status.watch ? (status.bucket ? 'early' : false) : status.armed ? 'timed' : false;
+  return { ...f, autoResume: can ? !!status.enabled : null, waiting };
 }
 
 /** THE FILTER PREDICATE — the sidebar's «stopped by a limit or overload» filter and the bulk resume's candidate set. */
@@ -97,7 +102,7 @@ function chipWords(sb, tIn, { now = Date.now(), autoResumeOn = null, waiting = n
   } else {
     text = t('Model overloaded · stopped {time}', { time: clock(f.at, now) });
   }
-  const toggle = autoResumeOn === null ? null : (autoResumeOn ? (waiting === false ? t('Auto-continue: on · not waiting for this limit') : t('Auto-continue: on')) : t('Auto-continue: off'));
+  const toggle = autoResumeOn === null ? null : (autoResumeOn ? (waiting === false ? t('Auto-continue: on · not waiting for this limit') : waiting === 'early' ? t('Auto-continue: on · continues only if the limit clears early') : t('Auto-continue: on')) : t('Auto-continue: off'));
   const lines = [text];
   if (f.said) lines.push(t('The harness said: {said}', { said: f.said }));
   lines.push(t('This mark stays until the session runs again.'));
@@ -111,7 +116,7 @@ function filterWords(n, tIn) { return tOf(tIn)('Stopped by a limit or overload (
 const WORD_KEYS = Object.freeze([
   'Stopped by a usage limit', 'Stopped by a usage limit · resets {time}', 'Stopped by a usage limit · the limit has reset',
   'Model overloaded · stopped {time}', 'Auto-continue: on', 'Auto-continue: off', 'The harness said: {said}',
-  'This mark stays until the session runs again.', 'Stopped by a limit or overload ({n})', 'Auto-continue: on · not waiting for this limit',
+  'This mark stays until the session runs again.', 'Stopped by a limit or overload ({n})', 'Auto-continue: on · not waiting for this limit', 'Auto-continue: on · continues only if the limit clears early',
 ]);
 
 module.exports = {

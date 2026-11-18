@@ -408,6 +408,21 @@ function knownOnDisk(dir, fp) {
   return knownMeta.has(fp);
 }
 const storeWriter = () => require('../store-writer.js').storeWriter();
+const metaSeq = new Map();   // fp → writes handed to the store so far (patchSessionMeta's «did one land while I read?»)
+/** PATCH a session's meta without a sync read on the caller's road (lg-recovery U1 cure: the stop fact on the stream's road):
+ *  a pending copy is patched in memory; else the file is read OFF the loop and patched — a write that landed meanwhile ⇒ again
+ *  (bounded); a socket with no meta of its own gets none (never a stub). → Promise<boolean> */
+function patchSessionMeta(sockName, patch, tries = 3) {
+  const fp = path.join(META_DIR, sockName + '.json');
+  const owed = pendingMeta.get(fp);
+  if (owed !== undefined) { let m = null; try { m = JSON.parse(owed); } catch { m = null; } return m && typeof m === 'object' ? writeSessionMeta(sockName, { ...m, ...patch }) : Promise.resolve(false); }
+  const seq0 = metaSeq.get(fp) || 0;
+  return fs.promises.readFile(fp, 'utf-8').then((t) => JSON.parse(t), () => null).then((m) => {
+    if ((metaSeq.get(fp) || 0) !== seq0 && tries > 0) return patchSessionMeta(sockName, patch, tries - 1);
+    if (!m || typeof m !== 'object' || !Object.keys(m).length) return false;
+    return writeSessionMeta(sockName, { ...m, ...patch });
+  });
+}
 function readSessionMeta(sockName) {
   const fp = path.join(META_DIR, sockName + '.json');
   const owed = pendingMeta.get(fp);
@@ -475,6 +490,7 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false } = {}
   const fp = path.join(META_DIR, sockName + '.json');
   const tmp = fp + '.tmp';
   const text = JSON.stringify(meta);
+  metaSeq.set(fp, (metaSeq.get(fp) || 0) + 1);
   let done = Promise.resolve(true);
   if (!sync && !knownOnDisk(META_DIR, fp)) {   // its FIRST version (a socket being born — never a live socket without its meta after a kill): here, now
     timedSync('session-meta.write', () => { fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp); });
@@ -785,7 +801,7 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
 }
 
 // On startup, reconnect to existing dtach sockets
-  return { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
+  return { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patchSessionMeta,
     deleteSessionMeta, sessionMetaOwnerConflict, _metaTombstones,
     applyTaskToolUpdate, emitTaskListTodos, updateSessionTodos,
     reattachLocalPty, ptyQuietSince, writeSessionInput }; // the ONE healer + the ONE liveness reader (ws-handler's input detector shares both) + the ONE typed-input write (B-c20d)

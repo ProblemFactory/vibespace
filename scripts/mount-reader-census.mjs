@@ -194,7 +194,7 @@ export const ROWS = [
   ['src/server/frame-host.js', 'user-path', 4, 'DOOR\\.blocked\\(', 'the code editor preview\'s folder (lane frame-host-preview): the base on the signed-in navigation and each file under a folder token — the door first, then SafeFs realpath + stat'],
   ['src/server/published-pages.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'publish a user file: the sentence, never a stat'],
   ['src/server/search-index.js', 'own-tree', 5, null, CLI],
-  ['src/server/session-stdout.js', 'own-tree', 14, null, PROC],   // lane hub-loop-stalls commit 2 round 3 (law 3) +1: the meta directory listed ONCE per process (knownOnDisk — a file's first version is a fact of the disk)
+  ['src/server/session-stdout.js', 'own-tree', 15, null, PROC],   // lg-recovery U1 cure +1: patchSessionMeta reads its own meta file OFF the loop   // lane hub-loop-stalls commit 2 round 3 (law 3) +1: the meta directory listed ONCE per process (knownOnDisk — a file's first version is a fact of the disk)
   ['src/server/spawn-priority.js', 'own-tree', 1, null, 'B-460d: the nice program in FIXED local system dirs (/usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin) — one look per process, never a user path'],
   ['src/server/spend-guard.js', 'own-tree', 1, null, DATA],
   ['src/server/stash-handover.js', 'own-tree', 1, null, DATA],

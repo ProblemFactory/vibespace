@@ -318,7 +318,7 @@ const {
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } }, onSessionListChange: () => { try { broadcastActiveSessions(); } catch { } }, // lane auto-resume-bulk: a stop fact appeared / cleared ⇒ the card's chip + the filter's count
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
   adapterRegistry, readUserState: () => { try { return persistenceRouter.readUserState(); } catch { return {}; } }, getUserTodos: () => { try { return userTodos; } catch { return null; } }, // lazy: the inbox a refused spend is reported in is created further down (TDZ otherwise)
-  getSessionMetaStore: () => { try { return { readSessionMeta, writeSessionMeta }; } catch { return null; } }, // lazy too (session-stdout is built below): the ONE use is persisting the classifier-reroute stamp so a RESTORED conversation still knows the CLI answers with a model we did not ask for (r3)
+  getSessionMetaStore: () => { try { return { readSessionMeta, writeSessionMeta, patchSessionMeta }; } catch { return null; } }, // lazy too (session-stdout is built below): the ONE use is persisting the classifier-reroute stamp so a RESTORED conversation still knows the CLI answers with a model we did not ask for (r3)
 });
 // noteTurnEnd ALSO wakes the delivery ladder's retry park (lane notify-retry, 2026-10-01): a parked notification is posted the
 // moment the conversation's turn ends (claude `result` / codex `task_complete` / ACP) — the stdout consumers keep the ONE name
@@ -378,7 +378,7 @@ const { checkClaudeGoalStatus } = require('./src/server/goal-sync.js').create({
 });
 // ── Session stdout engine (src/server/session-stdout.js, decomposition #6) ──
 // setupSessionPty + attachToDtach + the session-meta store.
-const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
+const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patchSessionMeta,
   deleteSessionMeta, sessionMetaOwnerConflict, _metaTombstones,
   applyTaskToolUpdate, emitTaskListTodos, updateSessionTodos, reattachLocalPty, ptyQuietSince, writeSessionInput,
 } = require('./src/server/session-stdout.js').create({

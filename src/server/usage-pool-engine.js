@@ -2813,9 +2813,9 @@ function stoppedListChanged() {
 function persistStoppedBy(session) {
   try {
     if (!session || !session.sockName) return;
-    const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
-    if (!prev || typeof prev !== 'object' || !Object.keys(prev).length) return; // no store, or no meta for this socket — memory only (never a stub file)
-    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), stoppedBy: session._stoppedBy || null });
+    // the stream's road reads NOTHING from the mount: the store patches its own pending copy, or reads off the loop (and
+    // never writes a stub for a socket with no meta of its own) — session-stdout.js patchSessionMeta
+    if (typeof sessionMetaStore.patchSessionMeta === 'function') { Promise.resolve(sessionMetaStore.patchSessionMeta(session.sockName, { stoppedBy: session._stoppedBy || null })).catch((e) => console.warn('[stopped-by] not persisted:', e && e.message)); return; }
   } catch (e) { console.warn('[stopped-by] not persisted:', e.message); }
 }
 /** Write the stop fact (a verdict from stoppedBy.stopVerdict; null = nothing to write). */
@@ -3366,7 +3366,10 @@ function onWalledTurn(session, sigs, said = null) {
     const stated = Math.max(0, ...(sigs || []).map((s2) => (s2 && s2.resetsAtMs) || 0));
     const resetsAt = stated || 0;   // U1 cure: the stated reset or none — the verdict's blockedUntil can be the engine's own bounded guess
     const memberId = (demoted && demoted.key) || ((sigs || []).find((s2) => s2 && s2.key) || {}).key || null;
-    noteStoppedBy(session, stoppedBy.stopVerdict({ walled: true, resetsAt, memberId, said, at: Date.now() }));
+    // the wall's lane / bucket / scoped name — the SAME choice the at-wall arm below makes (armWall), so a switch turned ON later
+    // arms exactly the wait the wall would have armed (a watch it can open early needs the bucket)
+    const wSig = (sigs || []).filter((s2) => s2 && s2.bucket).sort((x, y) => (y.resetsAtMs || 0) - (x.resetsAtMs || 0))[0] || null;
+    noteStoppedBy(session, stoppedBy.stopVerdict({ walled: true, resetsAt, memberId, said, at: Date.now(), lane: (sigs || []).map((s2) => s2 && s2.lane).find(Boolean) || null, bucket: wSig ? wSig.bucket : null, scopedName: wSig ? (wSig.scopedName || null) : null }));
   } catch (e) { console.warn('[stopped-by] walled-turn fact failed:', e.message); }
   try {
     const ar = getAutoResume();

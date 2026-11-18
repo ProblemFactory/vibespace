@@ -418,7 +418,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   // beside it its auto-resume state «自动继续：开/关» — a click flips it through the chat chip's own road (ws
   // `auto-resume` + the resume carrier). SVG icons (the icon law), escaped text.
   const stopF = s.stoppedBy && typeof s.stoppedBy === 'object' && s.webuiId ? s.stoppedBy : null;
-  const stopW = stopF ? stoppedChipWords(stopF, tr, { autoResumeOn: stopF.autoResume === true ? true : stopF.autoResume === false ? false : null, waiting: stopF.waiting === true, clock: stopClock }) : null;
+  const stopW = stopF ? stoppedChipWords(stopF, tr, { autoResumeOn: stopF.autoResume === true ? true : stopF.autoResume === false ? false : null, waiting: stopF.waiting || false, clock: stopClock }) : null;
   if (stopW) {
     const line = document.createElement('div');
     line.className = `session-card-stop ${stopW.cls}`;
@@ -433,9 +433,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       const paintToggle = (on) => {
         tchip.className = 'sess-stopped-autoresume' + (on ? ' on' : '');
         tchip.setAttribute('aria-pressed', on ? 'true' : 'false');
-        const words = stoppedChipWords(stopF, tr, { autoResumeOn: on, waiting: on ? stopF.waiting === true : null, clock: stopClock });
+        const words = stoppedChipWords(stopF, tr, { autoResumeOn: on, waiting: on ? (stopF.waiting || false) : null, clock: stopClock });
         tchip.innerHTML = `<span class="chip-icon">${UI_ICONS.autoContinue || ''}</span><span class="chip-text">${escHtml(words.toggle)}</span>`;
-        tchip.dataset.tip = on ? (stopF.waiting === true ? tr('Auto-continue is on: this session continues by itself when its limit resets — click to turn it off')
+        tchip.dataset.tip = on ? (stopF.waiting === 'timed' ? tr('Auto-continue is on: this session continues by itself when its limit resets — click to turn it off')
+            : stopF.waiting === 'early' ? tr('Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off')
             : tr('Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue'))
           : tr('Auto-continue is off: this session waits for you — click to have it continue by itself when its limit resets');
       };
@@ -446,7 +447,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         try { app?.ws?.send({ type: 'auto-resume', sessionId: s.webuiId, enabled: on }); } catch { }
         try { state.setSessionConfig?.(s, { ...(state.getSessionConfig?.(s) || {}), autoResume: on }); } catch { } // survives the next resume, like the chat chip
         stopF.autoResume = on;
-        stopF.waiting = on && Number(stopF.resetsAt) > Date.now();   // the server arms exactly this case (auto-resume.js setEnabled); the next list restates it
+        const ahead = Number(stopF.resetsAt) - Date.now();   // what the server arms (auto-resume.js setEnabled — a wait within its bound, else a watch); the next list restates it
+        stopF.waiting = !on || !(ahead > 0) ? false : ahead <= 26 * 3600e3 ? 'timed' : (stopF.bucket ? 'early' : false);
         paintToggle(on);
       };
       line.appendChild(tchip);

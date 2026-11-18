@@ -62,7 +62,7 @@ const opensForWrite = (call) => { const fl = call.arguments[1]; if (!fl) return 
 const HELPER = /\b(writeJsonAtomic|writeBuffersAtomic|_writeAtomic|writePrivateFile)\s*\(/g;
 const CLASSES = new Set(['durable', 'not-main', 'not-a-store', 'exit', 'debt']);
 // a file whose rows are by SCOPE (its other sites fall to '*')
-const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'],
+const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'],
   // channel-store-off-loop (commit 1): the channel store's doors BY NAME — the moved ones (adapters, groups, the outbox, the
   // aliases, people, the poll-stamps snapshot) have no synchronous call left (no row); the journal is the named exception;
   // every other door is LISTED as its own row, rows that only fall
@@ -658,7 +658,7 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     ['src/server/stdout/codex-events.js', 'create > attach', 1, 0, 'a codex thread id — a binding'],
     ['src/server/usage-pool-engine.js', 'create > noteServedModel > writeSessionMeta', 0, 1, 'the served fact handed to model-ask (its persist, paced — above)'],
     ['src/server/usage-pool-engine.js', 'create > persistFallbackStamp', 0, 1, 'derived — the next served record retires it'], ['src/server/usage-pool-engine.js', 'create > persistHeldStamp', 0, 1, 'a held-member stamp the ledger re-derives'],
-    ['src/server/usage-pool-engine.js', 'create > persistStoppedBy', 0, 1, 'why a session stopped (lane auto-resume-bulk) — a mark the next turn end restates or clears'],
+    ['src/server/session-stdout.js', 'create > patchSessionMeta', 0, 2, 'ONE field patched (lg-recovery U1 cure: the stop fact, usage-pool-engine persistStoppedBy): its pending copy, else the file read OFF the loop — paced like the mark it carries'],
     ['src/server/usage-pool-engine.js', 'create > persistPoolPin', 1, 0, 'the owner\'s pin'], ['src/server/usage-pool-engine.js', 'create > persistRequestStamp', 0, 1, 'request stamps'],
     ['src/ws-create.js', 'createWsCreateHandler > createBody > onAdopt', 1, 0, 'the claude conversation id after new / fork — a binding'], ['src/ws-create.js', 'createWsCreateHandler > createBody > tryCapture', 1, 0, 'a codex thread id — a binding'],
     ['src/ws-create.js', 'createWsCreateHandler > createBody', 0, 1, 'a new socket\'s FIRST version — written synchronously by construction'],

@@ -155,7 +155,7 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // autoResume} (src/stopped-by.js) — the card's chip («因用量停止 · 重置 14:00» + «自动继续：开/关») and the filter
   // row's «因限额/过载停止 (N)» draw it, so it GATES — on a scalar projection (never the object, the trap above). It
   // moves at most twice per stop (set at the turn end, cleared when the session runs) plus a toggle.
-  stoppedBy: { digest: (v) => (v && typeof v === 'object' ? `${v.kind}|${v.at || ''}|${v.resetsAt || ''}|${v.autoResume === true ? 'on' : v.autoResume === false ? 'off' : ''}` : '') },
+  stoppedBy: { digest: (v) => (v && typeof v === 'object' ? `${v.kind}|${v.at || ''}|${v.resetsAt || ''}|${v.autoResume === true ? 'on' : v.autoResume === false ? 'off' : ''}|${v.waiting || ''}|${v.resetsAt && v.resetsAt <= Date.now() ? 'passed' : ''}` : '') },   // «waiting» and a reset that PASSED redraw the card
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */
@@ -872,7 +872,11 @@ class Sidebar {
     const box = document.getElementById('stopped-quick-tabs');
     if (!box) return;
     box.innerHTML = '';
-    const n = (this._allSessions || []).filter((s) => isStoppedBy(s) && !this.isArchived(s) && (!this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter))).length;   // N = what a press shows
+    const n = this._stoppedUnderFilters().length;   // N = exactly what a press shows (every other filter of the list applied)
+    // a stated reset that passes REDRAWS the cards («resets 14:00» becomes «the limit has reset») — one timer, the earliest
+    if (this._stopTimer) { clearTimeout(this._stopTimer); this._stopTimer = null; }
+    const nextReset = Math.min(...(this._allSessions || []).filter((s) => isStoppedBy(s) && Number(s.stoppedBy.resetsAt) > Date.now()).map((s) => Number(s.stoppedBy.resetsAt)));
+    if (Number.isFinite(nextReset)) this._stopTimer = setTimeout(() => { this._stopTimer = null; this._render(); }, Math.min(2 ** 31 - 1, nextReset - Date.now() + 500));
     if (!n && !this._stoppedOnly) return;
     const btn = document.createElement('button');
     btn.className = 'status-quick-tab stopped-quick-tab' + (this._stoppedOnly ? ' active' : '');
@@ -882,6 +886,15 @@ class Sidebar {
       : tr('Show only the sessions a usage limit or an overloaded model stopped');
     btn.onclick = () => { this._stoppedOnly = !this._stoppedOnly; this._renderStoppedQuickTab(); this._render(); };
     box.appendChild(btn);
+  }
+
+  /** The stopped sessions a press of the pill shows: the list's own filters (text, backend, host, agent kind, archived). */
+  _stoppedUnderFilters() {
+    const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
+    const showArchived = this._statusFilter && this._statusFilter.has('archived');
+    return (this._allSessions || []).filter((s) => isStoppedBy(s) && (showArchived || !this.isArchived(s))
+      && (!f || sessionMatchesFilter(s, f)) && !(this._backendFilter.size > 0 && !this._backendFilter.has(s.backend || 'claude'))
+      && !(this._hostFilter.size > 0 && !this._hostFilter.has(s.host || 'local')) && (!this._agentKindFilter || passesAgentKindFilter(s, this._agentKindFilter)));
   }
 
   _renderAgentKindQuickTabs() {

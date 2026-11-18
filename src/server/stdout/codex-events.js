@@ -183,7 +183,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
             if (msg.type === 'event_msg') {
               const evType = payload.type;
               if (evType === 'task_started' && payload.turn_id) {
-                session._isStreaming = true; newLabel = 'thinking...'; try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop
+                session._isStreaming = true; newLabel = 'thinking...'; try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop — never a backlog's (a replay after a restart)
                 // lane queued-is-not-woke (law 1): the turn's start (said as «running since»), the edge a queued frame waits for
                 session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
                 session._turnOpenSaidAt = Date.parse(msg.timestamp) || null;   // lane queued-is-not-woke laws 2 + 3 (Shape B): the opening AS THE RECORD STATES IT (src/server/wait-watch.js «its turn opened at»); none ⇒ «it is in a turn»

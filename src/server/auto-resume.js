@@ -438,8 +438,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // billed turn ever starts from the switch itself — the card says so (stopped-by.js liveFactOf `waiting`).
     if (on && session && !armed.has(id)) {
       const f = session._stoppedBy;
-      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now()) {
-        try { armIfEnabled(id, session, Number(f.resetsAt), 'usage limit (auto-continue turned on after the wall)'); } catch (e) { log(`[auto-resume] ${id}: arming at the stop's reset failed: ${e.message}`); }
+      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now() && session._stopContinuedAt !== f.at) {   // never twice for ONE stop: one it already continued is not armed again
+        try { armIfEnabled(id, session, Number(f.resetsAt), 'usage limit (auto-continue turned on after the wall)', { lane: f.lane || null, bucket: f.bucket || null, scopedName: f.scopedName || null }); } catch (e) { log(`[auto-resume] ${id}: arming at the stop's reset failed: ${e.message}`); }
       }
     }
     emit(id);
@@ -503,7 +503,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         _refuseNotified.set(id, at);
         const ck = liveCause(cause) && liveCause(cause).checking;
         if (ck) { try { notify(id, session, armNoticeFor(reason, resets, at, cause)); } catch { } } else
-        try { notify(id, session, `用量已达上限，最近的重置在 ${new Date(resets).toLocaleString()}（约${hrs}小时后），超过自动等待上限（${Math.round(MAX_WAIT_MS / 3600000)}h），不会按时间自动续跑；但配额一旦提前恢复会自动继续。也可切换账号或手动继续。`); } catch { }
+        // the hourly notice says what is TRUE (lg-recovery U1 cure, as the card): a watch with its bucket can be opened by a
+        // reading that says the limit cleared early; one without cannot continue by itself at all
+        try { notify(id, session, bucket ? `用量已达上限，最近的重置在 ${new Date(resets).toLocaleString()}（约${hrs}小时后），超过自动等待上限（${Math.round(MAX_WAIT_MS / 3600000)}h），不会按时间自动续跑；但配额一旦提前恢复会自动继续。也可切换账号或手动继续。` : `用量已达上限，最近的重置在 ${new Date(resets).toLocaleString()}（约${hrs}小时后），超过自动等待上限（${Math.round(MAX_WAIT_MS / 3600000)}h），这次不会自动继续（看不出是哪个额度）。可切换账号或手动继续。`); } catch { }
       }
     }
     if (inherit && inherit.resetsAt === resets) return inherit; // idempotent
@@ -742,7 +744,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // beyond MAX_WAIT_MS, so squatting on it is the thing this module has
       // always refused to do. It retires itself once that reset passes — by
       // then either a reading continued the session or nothing ever will.
-      if (a.watch) { if (now >= a.resetsAt + GRACE_MS) { armed.delete(id); save(); log(`[auto-resume] ${id}: watch expired (its reset has passed with no reading)`); emit(id); } continue; }
+      if (a.watch) { if (now >= a.resetsAt + GRACE_MS) { armed.delete(id); save(); log(`[auto-resume] ${id}: watch expired (its reset has passed with no reading)`); emit(id); const s9 = activeSessions.get(id); if (s9 && s9._stoppedBy && onListChange) { try { onListChange(); } catch { } } } continue; }   // a stopped card's «waiting» moved
       if (now >= a.resetsAt + GRACE_MS) out.push([id, a]);
     }
     return out;
@@ -981,6 +983,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       try { ok = !!verb.deliver(session, continuePromptFor(note, label2), { sendChatInput: (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; } }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
+      if (session._stoppedBy && session._stoppedBy.at) session._stopContinuedAt = session._stoppedBy.at;   // this stop has had its continue (the switch never arms it again)
       armed.delete(id);
       noteFired(id, key2, kind, Date.now(), origin);
       // CHARGED ONLY WHEN THE TURN HAPPENED (two-phase): everything above can

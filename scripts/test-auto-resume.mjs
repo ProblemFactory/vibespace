@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { scratch } from './scratch.mjs';   // a suite's OWN scratch folder (/tmp/vs-<name>-<pid>): two runs on one machine never meet
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -73,12 +74,18 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   // when the window reopened 32 h later). "Refuse to squat" is preserved as
   // the thing that matters — no TIMED continue is ever scheduled — while the
   // fresh-window edge can still keep the promise on positive evidence.
-  const far = a.ar.armIfEnabled('s1', a.sessions.get('s1'), Date.now() + MAX_WAIT_MS + 60000, 'weekly');
+  const far = a.ar.armIfEnabled('s1', a.sessions.get('s1'), Date.now() + MAX_WAIT_MS + 60000, 'weekly', { lane: 'claude', bucket: 'sevenDay' });   // the wall's own bucket: a fresh-window reading can open it early
   ok('a reset a week out ⇒ a WATCH (armed, but no timed continue is promised)', !!far && far.watch === true);
   ok('…and the status says so, so the chip does not promise a time', a.ar.statusFor('s1').watch === true && a.ar.statusFor('s1').armed === true);
   ok('…and the TIMER never fires it, however long we wait (it still refuses to squat)', a.ar.tick(Date.now() + MAX_WAIT_MS) === 0 && a.sent.length === 0);
   ok('…and the far-reset notice says the timed continue will NOT happen but recovery still will', a.notes.some((n) => /不会按时间自动续跑/.test(n.text) && /提前恢复/.test(n.text)));
   a.ar.forget('s1');
+  // lg-recovery U1 cure (A): a watch with NO bucket can never be opened early (windowOpened needs it) — its notice says it
+  // will not continue by itself, never the early-recovery promise
+  a.sessions.set('s9', sess()); const n0 = a.notes.length;
+  a.ar.armIfEnabled('s9', a.sessions.get('s9'), Date.now() + MAX_WAIT_MS + 60000, 'weekly');
+  ok('…and a far reset with NO bucket says it will not continue by itself (nothing can open it early) — never «recovery still will»', a.notes.slice(n0).some((n) => /这次不会自动继续/.test(n.text)) && !a.notes.slice(n0).some((n) => /提前恢复/.test(n.text)), a.notes.slice(n0).map((n) => n.text));
+  a.ar.forget('s9');
   ok('an unknown session ⇒ no arm', a.ar.armIfEnabled('nope', null, Date.now() + 60000, 'x') === null);
 }
 
@@ -1437,11 +1444,11 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   const metas = { 'sock-stop': { name: 'stop' } };   // a session with its OWN meta (U1 cure: a session with none gets no stub file)
   let listChanges = 0;
   const eng = engMod.create({
-    app, rootDir: os.tmpdir(), USAGE_CACHE_DIR: path.join(os.tmpdir(), 'vs-uc-stopped'), activeSessions: new Map(),
+    app, rootDir: (() => { const d = scratch('ar-stop'); fs.mkdirSync(d, { recursive: true }); return d; })(), USAGE_CACHE_DIR: path.join(scratch('ar-stop'), 'usage-cache'), activeSessions: new Map(),   // its OWN scratch — never a fixed name under /tmp (the two zones of one gate run side by side)
     wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
     serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; },
     getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
-    getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; } }),
+    getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; }, patchSessionMeta: (n, p) => { const m = metas[n]; if (!m || !Object.keys(m).length) return Promise.resolve(false); metas[n] = { ...m, ...p }; return Promise.resolve(true); } }),
     onSessionListChange: () => { listChanges++; },
   });
   ok('16. the engine INSTANCE exports the fact\'s seams', ['noteStoppedBy', 'clearStoppedBy', 'noteTurnRunning', 'noteTurnError'].every((k) => typeof eng[k] === 'function'));
@@ -1484,6 +1491,71 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   ok('16. codex: task_failed serverOverloaded (final) ⇒ overload; a turn start clears; usageLimitExceeded is the wall machine\'s, not this', codexOv && codexOv.kind === 'overload' && codexWall === null, JSON.stringify({ codexOv, codexWall }));
 }
 
+// ── 16c. THE FOLLOW-UP (主开发's verdict on U1, 2026-11-18 06:46Z): A the card never promises a continue that cannot happen,
+// OFF disarms, never twice for one stop, a wall with no stated reset shows none, B a late record never clears a mark.
+await (async () => {
+  console.log('\n16c. the switch\'s arm is the wall\'s; a late record never clears a mark');
+  const SBm = require(path.join(REPO, 'src/stopped-by.js'));
+  const zh = (await import(new URL('file://' + path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
+  const tZh = (k, p) => String(zh[k] !== undefined ? zh[k] : k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? String(p[x]) : m));
+  // A — a WEEKLY limit three days out: the switch's arm is a WATCH with the wall's bucket ⇒ «continues only if the limit clears early»
+  const far = () => ({ kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3 * 24 * 3600e3, lane: 'claude', bucket: 'sevenDay', scopedName: null });
+  const wordsOf = (ar, id, s0) => { const lf = SBm.liveFactOf(s0._stoppedBy, ar.statusFor(id)); return SBm.chipWords(lf, tZh, { autoResumeOn: lf.autoResume, waiting: lf.waiting, clock: () => 'T' }).toggle; };
+  const a = mk({ dflt: false }); const s1 = sess({ _stoppedBy: far() }); a.sessions.set('w1', s1); a.ar.setEnabled('w1', true);
+  const st = a.ar.statusFor('w1');
+  ok('16c. A: a weekly limit three days out — the switch arms a WATCH carrying the wall\'s bucket; the card says «自动继续：开 · 只在上限提前解除时继续» (never the timed promise)', st.watch === true && st.bucket === 'sevenDay' && wordsOf(a.ar, 'w1', s1) === '自动继续：开 · 只在上限提前解除时继续', { st, w: wordsOf(a.ar, 'w1', s1) });
+  ok('16c. A: …and the hourly notice says the same (a reading that says it cleared early continues it)', a.notes.some((n) => /提前恢复会自动继续/.test(n.text)));
+  const b = mk({ dflt: false }); const s2 = sess({ _stoppedBy: { ...far(), bucket: null } }); b.sessions.set('w2', s2); b.ar.setEnabled('w2', true);
+  ok('16c. A: with no bucket the watch cannot be opened early — the card says «not waiting», the notice says it will not continue by itself', wordsOf(b.ar, 'w2', s2) === '自动继续：开 · 这次上限不等待' && b.notes.some((n) => /这次不会自动继续/.test(n.text)));
+  const mA = mutantAr([[", { lane: f.lane || null, bucket: f.bucket || null, scopedName: f.scopedName || null })", ')']]);
+  const cA = (() => { if (!mA.mod) return null; const sess3 = new Map([['w3', sess({ _stoppedBy: far() })]]); const ar3 = mA.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: sess3, serverSetting: () => false, sendToSession: () => true }); ar3.setEnabled('w3', true); return wordsOf(ar3, 'w3', sess3.get('w3')); })();
+  ok('16c. A RED: the switch\'s arm WITHOUT the wall\'s bucket (today\'s) — the early words go (the first leg goes red)', mA.hits === 1 && cA !== '自动继续：开 · 只在上限提前解除时继续', cA || mA.err);
+  // OFF disarms
+  const fut = () => ({ kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 3600e3, lane: 'claude', bucket: 'fiveHour' });
+  const d = mk({ dflt: false }); d.sessions.set('w4', sess({ _stoppedBy: fut() })); d.ar.setEnabled('w4', true); const armedOn = d.ar.statusFor('w4').armed; d.ar.setEnabled('w4', false);
+  ok('16c. OFF disarms: on ⇒ armed, off ⇒ nothing waits', armedOn === true && d.ar.statusFor('w4').armed === false);
+  const mOff = mutantAr([['    if (!on && armed.has(id)) { armed.delete(id); save(); }\n', '']]);
+  const cOff = (() => { if (!mOff.mod) return null; const m4 = new Map([['w4', sess({ _stoppedBy: fut() })]]); const ar4 = mOff.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: m4, serverSetting: () => false, sendToSession: () => true }); ar4.setEnabled('w4', true); ar4.setEnabled('w4', false); return ar4.statusFor('w4').armed; })();
+  ok('16c. OFF RED: without the disarm the wait survives OFF', mOff.hits === 1 && cOff === true, mOff.err || cOff);
+  // never twice for one stop: the switch's arm fires once; the stop still there and the switch pressed again ⇒ nothing more
+  const twice = async (mod) => { const sent = [], m5 = new Map([['w5', sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() + 60000 } })]]); const ar5 = mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: m5, serverSetting: () => false, sendToSession: (id, s9, t) => { sent.push(t); return true; } }); ar5.setEnabled('w5', true); const r = Date.now() + 60000; ar5.tick(r + GRACE_MS + 1); ar5.noteFireOutcome('w5', true); /* its turn ran: the breaker's «on its way» clears — only the never-twice test is left */ ar5.setEnabled('w5', false); ar5.setEnabled('w5', true); ar5.tick(r + GRACE_MS + 120000); ar5.tick(r + 3600e3); return sent.length; };
+  ok('16c. never twice for one stop: one continue, a second press of the switch after it arms nothing more', (await twice({ create })) === 1);
+  const mTw = mutantAr([[' && session._stopContinuedAt !== f.at) {', ') {']]);
+  ok('16c. never-twice RED: without the «already continued» test the same stop is continued a second time', mTw.hits === 1 && !!mTw.mod && (await twice(mTw.mod)) >= 2, mTw.err || null);
+  // the engine: a wall with no stated reset shows none; B — a backlog's turn start never clears a mark (codex, end to end)
+  const engOf = (mod, metas) => mod.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: (() => { const d = scratch('ar-stop2'); fs.mkdirSync(d, { recursive: true }); return d; })(), USAGE_CACHE_DIR: path.join(scratch('ar-stop2'), 'usage-cache'), activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; }, getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getSessionMetaStore: () => ({ readSessionMeta: (n) => metas[n] || {}, writeSessionMeta: (n, m) => { metas[n] = m; }, patchSessionMeta: (n, p) => { metas[n] = { ...(metas[n] || {}), ...p }; return Promise.resolve(true); } }), onSessionListChange: () => { } });
+  const ol = console.log, ow = console.warn; console.log = () => { }; console.warn = () => { };
+  let noReset = null, noResetMut = null, keptLate = null, clearedLive = null, keptMut = null;
+  try {
+    const ENG = path.join(REPO, 'src/server/usage-pool-engine.js'), engSrc = read('src/server/usage-pool-engine.js');
+    const wallNoReset = (eng) => { const s6 = { backend: 'claude', mode: 'chat', _webuiId: 'w-nr', sockName: 'sock-nr', claudeSessionId: 'c-nr' }; eng.noteWallSignal(s6, { bucket: 'fiveHour', key: '__global__' }); eng.noteTurnEnd(s6, { type: 'result', result: "You've hit your limit" }); return s6._stoppedBy; };
+    noReset = wallNoReset(engOf(require(ENG), { 'sock-nr': { name: 'x' } }));
+    const mE = MUTX.load('src/server/usage-pool-engine.js', engSrc.replace('    const resetsAt = stated || 0;', '    const resetsAt = stated || 4102444800000;'));
+    noResetMut = engSrc.includes('    const resetsAt = stated || 0;') ? wallNoReset(engOf(mE, { 'sock-nr': { name: 'x' } })) : 'needle-missing';
+    // B end to end: a stopped codex conversation, the hub restarted (the fact restored), its bridge re-attached and the backlog
+    // replayed (a task_started an hour old) — the mark stays; a LIVE task_started clears it
+    const codexRun = (cxMod) => {
+      const eng = engOf(require(ENG), { 'sock-cx': { name: 'cx' } });
+      const s7 = { backend: 'codex', mode: 'chat', _webuiId: 'w-cx', sockName: 'sock-cx', backendSessionId: 'th-cx', buffer: '', _stoppedBy: { kind: 'quota', at: Date.now() - 2 * 3600e3, resetsAt: Date.now() + 3600e3 } };
+      let feed = null; const pty = { onData: (cb) => { feed = cb; }, onExit() { }, write() { } };
+      cxMod.create({ engine: eng, deliverRef: null, permissionRulesRef: null }).attach(s7, 'w-cx', pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta() { }, updateSessionTodos() { } });
+      const line = (o) => feed && feed(JSON.stringify(o) + '\n');
+      line({ type: 'event_msg', timestamp: new Date(Date.now() - 3600e3).toISOString(), payload: { type: 'task_started', turn_id: 't-old' } });
+      const late = s7._stoppedBy;
+      line({ type: 'event_msg', timestamp: new Date().toISOString(), payload: { type: 'task_started', turn_id: 't-new' } });
+      return { late, live: s7._stoppedBy };
+    };
+    const cxReal = codexRun(require(path.join(REPO, 'src/server/stdout/codex-events.js')));
+    keptLate = cxReal.late; clearedLive = cxReal.live;
+    const cxSrc = read('src/server/stdout/codex-events.js'), needle = 'try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop';
+    keptMut = cxSrc.includes(needle) ? codexRun(MUTX.load('src/server/stdout/codex-events.js', cxSrc.replace(needle, 'try { noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop'))).late : 'needle-missing';   // stale-pins: kept — the RED puts the old unguarded line BACK (the consumer without the test)
+  } finally { console.log = ol; console.warn = ow; }
+  ok('16c. a wall with NO stated reset shows none — the engine writes resetsAt null (never a verdict\'s guess)', !!noReset && noReset.kind === 'quota' && noReset.resetsAt === null, noReset);
+  ok('16c. no-reset RED: an engine that fills the reset from elsewhere shows one (the leg above reads the fact, not a spelling)', !!noResetMut && typeof noResetMut === 'object' && noResetMut.resetsAt !== null, noResetMut);
+  ok('16c. B end to end: a restored mark survives the bridge\'s replayed backlog (a task_started an hour old); a LIVE turn start clears it', !!keptLate && keptLate.kind === 'quota' && clearedLive === null, { keptLate, clearedLive });
+  ok('16c. B RED: the codex consumer without the late-record test lets the backlog clear the mark', keptMut === null, keptMut);
+})();
+
 // ── 16b. TURNED ON AFTER THE WALL (lane auto-resume-bulk, U1 cure — the adversarial read's MUST 2): the card's switch says
 // «continues by itself when its limit resets»; before, only a wall seen WITH auto-continue on armed anything, so a press
 // after the wall kept no promise. Now the stop's OWN stated reset arms it; a passed reset or an overload arms nothing.
@@ -1500,7 +1572,7 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   ok('16b. …an overload arms nothing (auto-continue waits for a usage limit\'s reset only)', c.ar.statusFor('s3').armed === false);
   const d = mk({ dflt: false }); d.sessions.set('s4', sess({ _stoppedBy: fut() })); d.ar.setEnabled('s4', false);
   ok('16b. …turned OFF arms nothing', d.ar.statusFor('s4').armed === false);
-  const m = mutantAr([["      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now()) {", '      if (false) {']]);
+  const m = mutantAr([["      if (f && f.kind === 'quota' && Number(f.resetsAt) > Date.now() && session._stopContinuedAt !== f.at) {", '      if (false) {']]);   // the U1 cure's line (never twice for one stop)
   const mm = m.mod && m.mod.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')), activeSessions: new Map([['s1', sess({ _stoppedBy: fut() })]]), serverSetting: () => false, sendToSession: () => true });
   if (mm) mm.setEnabled('s1', true);
   ok('16b. CONTROL: without the turned-on arm the same press arms nothing — the first leg goes red', m.hits === 1 && !!mm && mm.statusFor('s1').armed === false, m.err || null);

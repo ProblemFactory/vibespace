@@ -4977,6 +4977,8 @@ export default {
   "Model overloaded · stopped {time}": "モデル過負荷 · {time} に停止",
   "Auto-continue: on": "自動続行：オン",
   "Auto-continue: on · not waiting for this limit": "自動続行：オン · この上限では待機しません",
+  "Auto-continue: on · continues only if the limit clears early": "自動続行：オン · 上限が早めに解除された場合のみ続行",
+  "Auto-continue is on, but this reset is too far to wait for — the session continues only if the limit clears early — click to turn it off": "自動続行はオンですが、このリセットは待つには先すぎます — 上限が早めに解除された場合にのみ続行します — クリックでオフ",
   "Auto-continue is on for the next limit; this session is not waiting for this one (its reset has passed or is too far) — open it to continue": "自動続行は次の上限からオンです。このセッションは今回の上限を待ちません（リセット済みか先すぎます）— 開いて続行してください",
   "The harness said: {said}": "ハーネスの表示：{said}",
   "This mark stays until the session runs again.": "セッションが再び動くまで、この印は残ります。",
