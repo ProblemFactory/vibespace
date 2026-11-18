@@ -527,14 +527,18 @@ leg('§3 IN-PROCESS ㉛ A REAP ONLY FOR A WRAPPER PROVEN GONE — its pid.json u
   fs.renameSync(pj, pj + '.away'); // the stamp unreadable at the boot (no /proc proof either way)
   fs.writeFileSync(path.join(dir, 'jobs.json'), JSON.stringify([job]));
   const killed = [];
-  const E = engine(dir, { reapReadMs: 5, reapConfirmMs: 10, cgroupRoot: root, memorySample: { stopMs: 400 } }, (E0) => { const ks = E0._killScope.bind(E0); E0._killScope = (s, o) => { killed.push(s.unit); return ks(s, o); }; E0._killGroup = () => false; });
+  // B-99e2 (the adversarial read): the two lines come only from the boot replay's grace loop, which ran 400 ms from init — a stall
+  // of that size before the leg's pid.json write ended the replay as a doubt. A grace no stall reaches (8 s, the wait's own guard)
+  const E = engine(dir, { reapReadMs: 5, reapConfirmMs: 10, cgroupRoot: root, memorySample: { stopMs: 8000 } }, (E0) => { const ks = E0._killScope.bind(E0); E0._killScope = (s, o) => { killed.push(s.unit); return ks(s, o); }; E0._killGroup = () => false; });
   const j = E.jobs.get(job.id);
   await sleep(20);
   const W = /^cannot prove its wrapper is gone \(pid\.json unreadable\) — its scope is not reaped; if it is gone: systemctl --user kill --signal=KILL jobs-memory-bound-fast-unproven-\d+\.scope$/;
   ok(!killed.length && S.procs().length === 1 && E.events.filter((e) => e.jobId === j.id && W.test(e.what || '')).length === 1, `the boot proves nothing — its scope keeps its process, no kill written, said once: «${(E.events.find((e) => e.jobId === j.id && /cannot prove/.test(e.what || '')) || {}).what || 'nothing'}» (336761e5: «its wrapper was gone and its scope did not answer a read» — killed)`, { killed, procs: S.procs() });
   const me = { ...JSON.parse(fs.readFileSync(pj + '.away', 'utf8')), pid: process.pid, starttime: Number(fs.readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ')[19]) };
   fs.writeFileSync(pj, JSON.stringify(me)); // read again: its wrapper RUNS (a live identity)
-  await until(() => journal(E, j, /not started beside it/), 300, 5);
+  // B-99e2: wait on the two journal lines themselves, never a 300 ms window (the .393 prep mirror read neither at load 7 —
+  // nothing killed, nothing spawned): the engine reads the stamp again on its own reap pace; the guard only ends a wait that never comes
+  await until(() => journal(E, j, /its wrapper is running after all/) && journal(E, j, /not started beside it/), 8000, 5);
   ok(!killed.length && S.procs().length === 1 && !E.spawned.length && journal(E, j, /its wrapper is running after all \(its pid\.json read again\) — nothing reaped/) && journal(E, j, /^its last run's wrapper still runs \(pid \d+\) — not started beside it \(boot\)/),
     'read alive: nothing reaped and its replay never starts a run beside it — both said', { killed, spawned: E.spawned });
   stopEngine(E);
