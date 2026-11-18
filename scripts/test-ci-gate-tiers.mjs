@@ -736,6 +736,21 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
     'ci.mjs KNOWS --keep-going (the usage says it; a typo of it is refused by name and runs nothing)');
   ok(/\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)/.test(src),   // B-7353: --fast-part's part rides the same call
     'WIRING: main() hands --keep-going to fastGate (and fastGate to runFastLanes — test-ci-gate §2i pins that line)');
+  // B-d24c (3)'s follow-up (the coordinator's as-if-must): a keep-going part WITH a red still exits 1 — fastClosing is fastGate's
+  // one closing road (a later edit gating that return on the flag would turn a red into a green); on the hosted runner ONE
+  // `::error` line names every red on the run page, and only there
+  const { fastClosing } = ci;
+  const kgR = fastClosing({ reds: ['test-kg-red1', 'test-kg-red2'], keepGoing: true, ran: 6, hangDir: '/x', part: { i: 1, n: 2 }, env: { GITHUB_ACTIONS: 'true' } });
+  const ffR = fastClosing({ reds: ['test-kg-red1'], keepGoing: false, ran: 6, hangDir: '/x', env: {} });
+  const kgBox = fastClosing({ reds: ['test-kg-red1'], keepGoing: true, ran: 6, hangDir: '/x', env: {} });
+  const kgG = fastClosing({ reds: [], flaky: ['test-kg-green1'], keepGoing: true, ran: 6, hangDir: '/x', env: { GITHUB_ACTIONS: 'true' } });
+  const annOf = (r) => r.out.filter(([, l]) => l.startsWith('::error')).map(([, l]) => l);
+  ok(kgR.code === 1 && ffR.code === 1 && kgBox.code === 1 && kgG.code === null && kgR.out.some(([w, l]) => w === 'err' && /--keep-going: 2 red of 6 suites that ran — test-kg-red1, test-kg-red2/.test(l)),
+    'a planted red is EXIT 1 with --keep-going (on the runner and on a box) AND without — a part that ran to its end is never a green; no red, no exit code from the closing');
+  ok(annOf(kgR).length === 1 && annOf(kgR)[0] === '::error title=fast 1/2::2 red: test-kg-red1, test-kg-red2' && !annOf(ffR).length && !annOf(kgBox).length && !annOf(kgG).length,
+    'on the hosted runner ONE ::error line names every red on the run page (GITHUB_ACTIONS only; none on a box, none for a green)', annOf(kgR));
+  ok(/const closing = fastClosing\(\{ reds, flaky, keepGoing, [^\n]*\n\s*for \(const \[w, l\] of closing\.out\)[^\n]*\n\s*if \(closing\.code === 1\) return 1;/.test(src),
+    'WIRING: fastGate prints fastClosing\'s lines and returns its 1 (one closing road for every part)');
 }
 
 // ── §8f A RED FAST SUITE IS RUN ONCE MORE, AND THE RETRY IS COUNTED (B-3f38) ──

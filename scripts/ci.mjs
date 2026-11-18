@@ -2528,6 +2528,21 @@ export const FAST_NO_RETRY = Object.freeze([
  *  cost as much again, so it is red at once; so is one its OWN watchdog ended (suite-watchdog.mjs: exit 1 just under the
  *  budget, the report kept — `r.hangReport`), and one that ran > 80 % of its budget (batch 24's reader). B-3f38 is about legs
  *  that read a clock under load, not about hangs. */
+/** THE FAST TIER'S CLOSING (B-d24c (3)'s follow-up) — PURE: the lines a run that ended prints and its exit code. Every red is
+ *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
+ *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
+ *  → { out: [['log' | 'err', line]], code: 1 | null } (null: no red — the caller goes on to its other checks) */
+export function fastClosing({ reds = [], flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env } = {}) {
+  const out = [];
+  if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
+  if (flaky.length) out.push(['log', `\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`]);
+  if (skippedLegs.length) out.push(['log', `\n${skippedLegsSaid('ci', skippedLegs).join('\n')}`]); // B-4829: a skip is never a green — a line per suite that skipped
+  // a workflow command's message escapes %, CR and LF (GitHub's rule); suite names hold none, the escape keeps it so
+  const ghEsc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}`)}`]);
+  if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; } // (B-4829: the verdict line carries the skip count)
+  return { out, code: null };
+}
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;
@@ -4423,10 +4438,9 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
       },
     });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
-    if (keepGoing && reds.length) console.error(`\n[ci] --keep-going: ${reds.length} red of ${fast.length - absent.length - skippedByName.length} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`);
-    if (flaky.length) console.log(`\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`);
-    if (skippedLegs.length) console.log(`\n${skippedLegsSaid('ci', skippedLegs).join('\n')}`); // B-4829: a skip is never a green
-    if (reds.length) { console.error(`\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`); return 1; }
+    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env });
+    for (const [w, l] of closing.out) (w === 'err' ? console.error : console.log)(l);
+    if (closing.code === 1) return 1;
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
     // contains none of these suites (measured: v2.30.0 ⇒ 73 of 73 absent), and
     // "ALL GREEN" for a run of zero suites is the vacuous green the `--only`
