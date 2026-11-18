@@ -19,7 +19,8 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
 const wt = scratch('menu-smoke'), home = scratch('menu-smoke-home'), chromeDir = scratch('menu-smoke-chrome');
-// the stop is installed BEFORE the worktree add (a signal during the add, the copy or the build leaves no worktree behind)
+// the stop is installed BEFORE the worktree add: a signal during the add, the copy or the build no longer kills the suite outright — Node
+// holds it and the stop runs at the first await after them (or at exit, when the signal reached the build's child too); a SIGKILL first still wins
 let srv = null, chrome = null, cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;

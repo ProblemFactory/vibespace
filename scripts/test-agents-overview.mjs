@@ -30,7 +30,8 @@ const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home'), chrome
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
-// the stop is installed BEFORE the worktree add (a signal during the add, the copy or the build leaves no worktree behind)
+// the stop is installed BEFORE the worktree add: a signal during the add, the copy or the build no longer kills the suite outright — Node
+// holds it and the stop runs at the first await after them (or at exit, when the signal reached the build's child too); a SIGKILL first still wins
 let srv = null, chrome = null, cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
