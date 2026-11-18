@@ -327,7 +327,7 @@ function create(engineCtx) {
   function fanTargets() {
     let live = [];
     try { live = liveSessions() || []; } catch (err) { log.warn(`[channels] liveSessions threw: ${(err && err.message) || err}`); }
-    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null, groups: Array.isArray(x.groups) ? x.groups.map(String) : [] }));
+    return live.filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), name: x.name || null, groups: Array.isArray(x.groups) ? x.groups.map(String) : [], inherited: Array.isArray(x.inherited) ? x.inherited.map(String) : [] }));   // lane lg-group-parents U3c: + the lineage
   }
   /** THE ANSWER EVERY WAKE PATH READS (lane everyone-principal): `effectiveFor` with every ALL-AGENTS watcher fanned
    *  out to one item per RUNNING conversation (F.fanOutWatchers — each its own key, pending, timers, scope chain and
@@ -346,8 +346,8 @@ function create(engineCtx) {
     // still see this conversation) — one not running is judged when it runs (its held hits wait, never dropped here)
     const admitOf = new Map();
     const admit = (item) => { if (!admitOf.has(item)) admitOf.set(item, wakeAdmitOf(en, item)); return admitOf.get(item); };
-    if (anyExcept) e = { ...e, watchers: e.watchers.filter((it) => { const p = it.watcher.principal; if (p.kind !== 'agent') return true; const m = members.find((x) => x.cid === String(p.id)); return !m || admit(it)(m.cid, m.groups); }) };
-    const x = F.fanOutWatchers(e, fanTargets(), { filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null), admit: (item, tg) => admit(item)(tg.cid, tg.groups) });   // lane reply-to-sent: a group row's sent half per member
+    if (anyExcept) e = { ...e, watchers: e.watchers.filter((it) => { const p = it.watcher.principal; if (p.kind !== 'agent') return true; const m = members.find((x) => x.cid === String(p.id)); return !m || admit(it)(m.cid, m.groups, m.inherited); }) };   // lane lg-group-parents (the U3c read, BLOCKER 3): + the lineage
+    const x = F.fanOutWatchers(e, fanTargets(), { filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null), admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) });   // lane lg-group-parents (the U3c read, BLOCKER 2): + the lineage   // lane reply-to-sent: a group row's sent half per member
     return x === e && e === e0 ? e : { ...x, base: e0 };
   }
   /**
@@ -369,11 +369,11 @@ function create(engineCtx) {
       }
       return checkReach;
     };
-    return (cid, groups = []) => {
+    return (cid, groups = [], inherited = []) => {   // lane lg-group-parents U3c: + the member's lineage
       if (!root || !cid) return false;
-      if (root.kind !== 'agent' && !CG.wakeAdmits(res, root, { cid, groups, ...require('./groups-hold.js').fact() })) return false;
+      if (root.kind !== 'agent' && !CG.wakeAdmits(res, root, { cid, groups, inherited, ...require('./groups-hold.js').fact() })) return false;
       if (!reachAsked()) return true;
-      try { return ACL.canSee(reachFor({ kind: 'agent', id: String(cid), name: null, groups, ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rk, en).level); } catch { return false; }
+      try { return ACL.canSee(reachFor({ kind: 'agent', id: String(cid), name: null, groups, inheritedGroups: inherited, ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rk, en).level); } catch { return false; }
     };
   }
   /** A grain's stored watcher for key `pk` — a fan-out key (`everyone:*><cid>`) answers the stored All row as that
@@ -386,7 +386,7 @@ function create(engineCtx) {
     if (!root) return null;
     // a member that left its group (lane grants-unify: or that the owner LEFT OUT of this notification) waits for nothing
     const res = holder.grainRes || (holder.key ? CG.RES.conversation(holder.key) : null);
-    const tg = res ? fanTargets().find((x) => x.cid === fan.cid && CG.wakeAdmits(res, root.principal, { cid: x.cid, groups: x.groups, ...require('./groups-hold.js').fact() })) : null;
+    const tg = res ? fanTargets().find((x) => x.cid === fan.cid && CG.wakeAdmits(res, root.principal, { cid: x.cid, groups: x.groups, inherited: x.inherited, ...require('./groups-hold.js').fact() })) : null;   // lane lg-group-parents (the U3c read, BLOCKER 3)
     return tg ? F.fanWatcher(root, tg.cid, tg.name) : null;
   }
   /** Is THIS item the watcher of principal `pk`? */
@@ -523,11 +523,12 @@ function create(engineCtx) {
   // over the same grants (its own list and its derived list are empty) — so that answer is judged ONCE per (asker, account,
   // generation of the rows: CG.generation moves at every channel row's change) and every such conversation reads it. A
   // conversation a row of its own or a rule's row decides is judged the old way.
-  const _acctReach = new WeakMap();   // ctx → { gen, id, groups, n, by: Map(adapterId → {level, via, grantId}) }
+  const _acctReach = new WeakMap();   // ctx → { gen, id, groups, n, inh, inhN, by: Map(adapterId → {level, via, grantId}) }
   function accountReachOf(ctx, adapterId, gen) {
     const g = ctx.groups, n = Array.isArray(g) ? g.length : -1;
+    const ih = ctx.inheritedGroups, ihN = Array.isArray(ih) ? ih.length : -1;   // lane lg-group-parents U3c: the lineage is in the memo's key too
     let m = _acctReach.get(ctx);
-    if (!m || m.gen !== gen || m.id !== ctx.id || m.groups !== g || m.n !== n) { m = { gen, id: ctx.id, groups: g, n, by: new Map() }; _acctReach.set(ctx, m); }
+    if (!m || m.gen !== gen || m.id !== ctx.id || m.groups !== g || m.n !== n || m.inh !== ih || m.inhN !== ihN) { m = { gen, id: ctx.id, groups: g, n, inh: ih, inhN: ihN, by: new Map() }; _acctReach.set(ctx, m); }
     let v = m.by.get(adapterId);
     if (!v) { const target = { key: '', adapterId }; v = ACL.effective(ctx, target, ACL.grantsForConversation(target, { accountGrants: accountScopeGrants(adapterId) })); m.by.set(adapterId, v); }
     return { ...v };
@@ -586,11 +587,16 @@ function create(engineCtx) {
    *  session belongs to (server.js liveSessions: tasks.groupsForSession, the same crosswalk the group round-robin wakes
    *  over). A group's access reaches its member sessions as notification targets through it (F.memberVia / memberStill). */
   function membersNow() {
-    try { return (liveSessions() || []).filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), groups: Array.isArray(x.groups) ? x.groups.map(String) : [] })); } catch { return []; }
+    try { return (liveSessions() || []).filter((x) => x && x.cid).map((x) => ({ cid: String(x.cid), groups: Array.isArray(x.groups) ? x.groups.map(String) : [], inherited: Array.isArray(x.inherited) ? x.inherited.map(String) : [] })); } catch { return []; }   // lane lg-group-parents U3c: + the lineage
   }
   /** The groups a live session belongs to (a drafter's, for its receipt). */
   function groupsOfSession(cid) {
     try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.groups) ? s.groups.slice() : []; } catch { return []; }
+  }
+  /** lane lg-group-parents U3c: the ancestors of those groups (the roster's `inherited`, from the ONE reader) — beside every
+   *  `groups: groupsOfSession(cid)` a channel ctx is built with */
+  function inheritedOfSession(cid) {
+    try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.inherited) ? s.inherited.slice() : []; } catch { return []; }
   }
   function convFor(adapterId, convId) {
     const en = store.index.peek(`${adapterId}/${convId}`);   // B-f32b: a copy of THAT row, never of the index
@@ -3100,7 +3106,7 @@ function create(engineCtx) {
     mayUseFor,   // unit what-it-may-use
     policyFor, policyRequiresReview, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal,
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
-    wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,
+    wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,

@@ -574,7 +574,10 @@ async function equality() {
   const step = async (name, f) => {
     const got = [];
     for (const x of xs) got.push(await f(x));
-    const d = firstDiff(got[0], got[1]);
+    // lane lg-group-parents U3c: this tree's roster carries each member's lineage (`inherited`) — an EMPTY one is the base's
+    // answer (no parents in this corpus), so it is left out of the comparison; a non-empty one would still show
+    const noLineage = (v) => JSON.parse(JSON.stringify(v === undefined ? null : v, (k, val) => (k === 'inherited' && Array.isArray(val) && !val.length ? undefined : val)));
+    const d = firstDiff(noLineage(got[0]), noLineage(got[1]));
     ok(!d, `equal to ${BASE}: ${name}`, d || undefined);
   };
   await step('seeded (list, listFor, liveRoster, reach, liveness, groupsOfSession, membersNow)', (x) => readAll(x));
@@ -676,7 +679,8 @@ const MUTANTS = [
   ['no re-ask before a gone act (round 1, efa03b334)', 'src/server/groups-engine.js', [["      if (act.end && act.end.why === 'gone' && typeof judge.confirm === 'function') {", "      if (false) {"]], 'gone:true-when-it-acts'],
   ['a failed walk forgets what it read', 'src/session-store.js', [["has: (id) => names.has(String(id) + '.jsonl') };", "has: (id) => ok && names.has(String(id) + '.jsonl') };"]], 'tree:whole-vs-unreadable'],
   ['a stuck walk said every sweep', 'src/session-store.js', [['  if (!e || e.said) return;', '  if (!e) return;']], 'tree:hung'],
-  ['entries not frozen', 'rp', [['    if (Array.isArray(e.groups)) Object.freeze(e.groups);\n    return Object.freeze(e);', '    return e;']], 'frozen'],
+  // lane lg-group-parents U3c: an entry also freezes its lineage (`inherited`) between its groups and itself
+  ['entries not frozen', 'rp', [['    if (Array.isArray(e.groups)) Object.freeze(e.groups);\n    if (Array.isArray(e.inherited)) Object.freeze(e.inherited);   // lane lg-group-parents U3c\n    return Object.freeze(e);', '    return e;']], 'frozen'],
   ['no leading edge', 'src/server/channels-wiring.js', [['    const wait = lastEnd + sweepGapMs - now();', '    const wait = Math.max(lastEnd + sweepGapMs - now(), sweepGapMs);']], 'gap:leading-edge'],
   ['no gap (a write queues a sweep)', 'src/server/channels-wiring.js', [['    const wait = lastEnd + sweepGapMs - now();', '    const wait = 0;']], 'gap:burst'],
 ];

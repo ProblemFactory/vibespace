@@ -148,6 +148,8 @@ function create({ grants = null, dataDir = null } = {}) {
   /** The left-out members of a grain's access row (the model's spelling). */
   function exceptOf(res) { return rowOf(DOORS.reach, res).except; }
   /** channel-acl grants of ONE row: `{principal, scope, level, origin, at, by, except}` (+ `pattern`/`derived` for a rule's). */
+  // lane lg-group-parents (the U3c read, BLOCKER 1): a reach / API grant's principal keeps «仅本组» (`only`) — rebuilt bare it
+  // read a «仅本组» group grant as «含子组» once the lineage is fed
   function grantsOf(res, { scope, origin, level = null }) {
     const r = rowOf(DOORS.reach, res);
     if (!r.to.length) return NO_GRANTS;   // no row (or an empty one): nothing to view — never a view kept per conversation key on the shared EMPTY row
@@ -155,7 +157,7 @@ function create({ grants = null, dataDir = null } = {}) {
       const principal = GM.toChannelPrincipal(e);
       if (!principal) return null;
       const lv = level || (e.level === 'requestable' ? 'requestable' : 'visible');
-      return { principal: { kind: principal.kind, id: principal.id, name: principal.kind === 'everyone' ? null : (principal.name || null) }, scope: { ...scope }, level: lv, origin, at: e.at || null, by: e.by || null, except: exceptFor(e, r.except) };
+      return { principal: { kind: principal.kind, id: principal.id, name: principal.kind === 'everyone' ? null : (principal.name || null), ...(principal.only === true ? { only: true } : {}) }, scope: { ...scope }, level: lv, origin, at: e.at || null, by: e.by || null, except: exceptFor(e, r.except) };
     }).filter(Boolean));
   }
   /** The reach grants a conversation's OWN rows hold: its access (origin access), the owner's (user), approvals (request). */
@@ -181,7 +183,7 @@ function create({ grants = null, dataDir = null } = {}) {
       out.push(...viewOf(r, `api|${cred}`, () => r.to.map((e) => {
         const principal = GM.toChannelPrincipal(e);
         if (!principal || !e.tier) return null;
-        return { principal: { kind: principal.kind, id: principal.id, name: principal.kind === 'everyone' ? null : (principal.name || null) }, scope: { kind: 'adapter', id: cred }, level: 'hidden', origin: 'api', api: e.tier, ...(e.perDay ? { perDay: e.perDay } : {}), at: e.at || null, by: e.by || null, except: exceptFor(e, r.except) };
+        return { principal: { kind: principal.kind, id: principal.id, name: principal.kind === 'everyone' ? null : (principal.name || null), ...(principal.only === true ? { only: true } : {}) }, scope: { kind: 'adapter', id: cred }, level: 'hidden', origin: 'api', api: e.tier, ...(e.perDay ? { perDay: e.perDay } : {}), at: e.at || null, by: e.by || null, except: exceptFor(e, r.except) };
       }).filter(Boolean)));
     }
     return out;
@@ -201,14 +203,14 @@ function create({ grants = null, dataDir = null } = {}) {
    * entry for THAT principal alone (its `except` kept) with the member's facts. A conversation principal answers for
    * itself. → boolean.
    */
-  function wakeAdmits(res, principal, { cid, groups = [], groupsUnreadable = false } = {}) {
+  function wakeAdmits(res, principal, { cid, groups = [], inherited = [], groupsUnreadable = false } = {}) {   // lane lg-group-parents U3c: + the member's lineage (every caller hands it — the U3c read, BLOCKER 3)
     const e = GM.fromChannelPrincipal(principal);
     if (!e || !cid) return false;
     const r = watchOf(res);
     const k = GM.principalKey(e);
     const own = r.to.filter((x) => GM.principalKey(x) === k);
     if (!own.length) return false;
-    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups, ...(groupsUnreadable === true ? { groupsUnreadable: true } : {}) }).ok;   // THE STORE HELD UNREAD (lane bl-windows): the caller hands the hold (a fact) — the groups UNKNOWN
+    return GM.admits([{ door: DOORS.watch, resource: String(res), to: own, except: exceptFor(own[0], r.except) }], { conversationKey: String(cid), groupIds: groups, inheritedGroupIds: Array.isArray(inherited) ? inherited : [], ...(groupsUnreadable === true ? { groupsUnreadable: true } : {}) }).ok;   // THE STORE HELD UNREAD (lane bl-windows): the caller hands the hold (a fact) — the groups UNKNOWN
   }
   /** «WHAT IT MAY USE» (unit what-it-may-use, cure r1 — 主开发 MUST 1): WHY nothing of a grain admits one conversation, judged
    *  ENTRY BY ENTRY exactly as the door gives them (each entry its OWN 「除了」 — exceptFor: a group's / everyone's carries the

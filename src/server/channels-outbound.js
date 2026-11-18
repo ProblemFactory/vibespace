@@ -33,7 +33,7 @@ function create(engineCtx) {
     userTodos, deliver, store, agentsWanted, live, BOOT_ID, adapterRecords, adapterFor, affordable, vendor, effectiveConvCaps, humanNameOf,
     accountsBrief, conversationName, notify, kick, budgetRefusal, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, offerNow,
     threadRefresh, rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, refreshConvCaps, track, policyFor,
-    policyRequiresReview, authorityCapsFor, healP2, effectiveFor, billedWake, reachFor, groupsOfSession, convFor, stillSees, effectiveForAccount,
+    policyRequiresReview, authorityCapsFor, healP2, effectiveFor, billedWake, reachFor, groupsOfSession, inheritedOfSession, convFor, stillSees, effectiveForAccount,
     accountScopeGrants, recallMessage,
   } = engineCtx;
 
@@ -246,7 +246,7 @@ function create(engineCtx) {
    *  withdraw verdicts read): what a receipt judges reach by when the drafter's session is not live at the decision. */
   // …and ITS OWN MARK when they were read while Task Groups were held (`drafterGroupsUnreadable`): unknown for good, never «no
   // group» once the store reads (the follow-owed read's MUST)
-  const drafterGroupsOf = (ctx) => (ctx && ctx.kind === 'agent' && Array.isArray(ctx.groups) ? { ...(ctx.groups.length ? { drafterGroups: ctx.groups.map(String).slice(0, 50) } : {}), ...(ctx.groupsUnreadable === true ? { drafterGroupsUnreadable: true } : {}) } : {});
+  const drafterGroupsOf = (ctx) => (ctx && ctx.kind === 'agent' && Array.isArray(ctx.groups) ? { ...(ctx.groups.length ? { drafterGroups: ctx.groups.map(String).slice(0, 50) } : {}), ...(Array.isArray(ctx.inheritedGroups) && ctx.inheritedGroups.length ? { drafterInherited: ctx.inheritedGroups.map(String).slice(0, 50) } : {}), ...(ctx.groupsUnreadable === true ? { drafterGroupsUnreadable: true } : {}) } : {});   // lane lg-group-parents U3c: + the drafter's lineage at draft time
   /** Does the DRAFTER of `p` still see where it drafted? — the receipt's question (no route principal at hand: the
    *  agent's own grants + its groups' — the LIVE session's, else the ones recorded at draft time: a group-granted
    *  drafter whose session ended before the decision still sees, and hears its receipt whole). A built-in Agents
@@ -261,7 +261,8 @@ function create(engineCtx) {
     // a list recorded while Task Groups were held keeps its mark while the drafter is STOPPED (a stopped conversation's membership cannot
     // be read through the live rule — groupsOfSession answers [] for it); live, its live groups judge
     const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(p.drafterGroups) ? p.drafterGroups.slice() : []);
-    return stillSees({ kind: 'agent', id: String(d.id), name: d.name || null, groups, ...(!live && p.drafterGroupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, p.adapterId, scopeConvOf(p));   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3): an ended drafter's recorded groups were refused while held at the base)
+    const inheritedGroups = live ? (Array.isArray(live.inherited) ? live.inherited.slice() : []) : (Array.isArray(p.drafterInherited) ? p.drafterInherited.slice() : []);   // lane lg-group-parents U3c
+    return stillSees({ kind: 'agent', id: String(d.id), name: d.name || null, groups, inheritedGroups, ...(!live && p.drafterGroupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, p.adapterId, scopeConvOf(p));   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3): an ended drafter's recorded groups were refused while held at the base)
   }
   /**
    * WHAT WAITS IN AN AGENT'S NEXT-TURN STASH IS RE-JUDGED WHEN IT IS READ (lane channel-threads verify r3, IDENTITY —
@@ -283,11 +284,13 @@ function create(engineCtx) {
   // conversation's «last wake held» with (a recall note or a judged-skip line about the same key is not)
   // `groups` read here while Task Groups are held (or handed with `groupsUnreadable`: a drafter's list recorded then) carry the
   // mark — the gate judges them UNKNOWN, never «in no group» (the follow-owed read's MUST)
-  const stashAbout = ({ keys = [], account = null, cid = null, groups = null, groupsUnreadable = false, wake = false } = {}) => {
+  const stashAbout = ({ keys = [], account = null, cid = null, groups = null, inherited = null, groupsUnreadable = false, wake = false } = {}) => {
     let g = groups;
     const unread = groupsUnreadable === true || (!Array.isArray(g) && require('./groups-hold.js').held());
     if (!Array.isArray(g)) g = cid ? groupsOfSession(String(cid)) : [];
-    return { ...(unread ? { groupsUnreadable: true } : {}), keys: [...new Set((keys || []).filter(Boolean).map(String))].slice(0, STASH_ABOUT_KEYS_MAX), ...(account ? { account: String(account) } : {}), groups: g.map(String).slice(0, 50), ...(wake === true ? { wake: true } : {}) };
+    let ih = inherited;   // lane lg-group-parents U3c: the recipient's lineage when it was filed (beside its groups)
+    if (!Array.isArray(ih)) ih = cid && typeof inheritedOfSession === 'function' ? inheritedOfSession(String(cid)) : [];
+    return { ...(unread ? { groupsUnreadable: true } : {}), keys: [...new Set((keys || []).filter(Boolean).map(String))].slice(0, STASH_ABOUT_KEYS_MAX), ...(account ? { account: String(account) } : {}), groups: g.map(String).slice(0, 50), ...(ih.length ? { inherited: ih.map(String).slice(0, 50) } : {}), ...(wake === true ? { wake: true } : {}) };
   };
   // `memo` = ONE read of one queue (the ladder hands a fresh Map per pass): the live session is looked up once, and a
   // (groups, key) verdict is asked once — a 30-entry stash read is one roster lookup + one reach per distinct key
@@ -302,8 +305,9 @@ function create(engineCtx) {
       const live = M.get('live');
       // a list recorded while held keeps its mark while the recipient is STOPPED (no live membership to read); live, its live groups judge
       const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(a.groups) ? a.groups.map(String) : []);
-      const ctx = { kind: 'agent', id: String(cid), name: null, groups, ...(!live && a.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3))
-      const gk = `${ctx.groupsUnreadable === true ? '?' : ''}${groups.join('\u0000')}`;   // the mark is part of the answer (the delta read: a marked and an unmarked entry shared a verdict)
+      const inheritedGroups = live ? (Array.isArray(live.inherited) ? live.inherited.slice() : []) : (Array.isArray(a.inherited) ? a.inherited.map(String) : []);   // lane lg-group-parents U3c
+      const ctx = { kind: 'agent', id: String(cid), name: null, groups, inheritedGroups, ...(!live && a.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3))
+      const gk = `${ctx.groupsUnreadable === true ? '?' : ''}${groups.join('\u0000')}` + '\u0002' + inheritedGroups.join('\u0000');   // the mark is part of the answer (the delta read: a marked and an unmarked entry shared a verdict)
       const seesKey = (adapterId, convId) => {
         const mk = `${gk}\u0001${adapterId}\u0001${convId === null ? '' : convId}`;
         if (!M.has(mk)) M.set(mk, msgAclAccount(adapterId) || stillSees(ctx, adapterId, convId));
@@ -2272,7 +2276,7 @@ function create(engineCtx) {
         // was running (`no free lane`) ⇒ busy; the conversation was idle and a delivery would open a billed turn ⇒ paced
         const stashWhy = (r && r.refused === 'no-wake') ? (/no free lane|running one|after the running/.test(String(r.reason || '')) ? 'busy' : 'paced') : null;
         // verify r4: a stash whose disk write failed THROWS (the entry is not stored) — the card says that, never "waiting"
-        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id, ...(stashWhy ? { held: { kind: 'notice', why: stashWhy } } : {}), about: stashAbout({ keys: key ? [key] : [], account: key ? null : p.adapterId, cid, groups: live ? null : (Array.isArray(cur.drafterGroups) ? cur.drafterGroups : []), groupsUnreadable: !live && cur.drafterGroupsUnreadable === true }) }); stashed = true; } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
+        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id, ...(stashWhy ? { held: { kind: 'notice', why: stashWhy } } : {}), about: stashAbout({ keys: key ? [key] : [], account: key ? null : p.adapterId, cid, groups: live ? null : (Array.isArray(cur.drafterGroups) ? cur.drafterGroups : []), inherited: live ? null : (Array.isArray(cur.drafterInherited) ? cur.drafterInherited : []), groupsUnreadable: !live && cur.drafterGroupsUnreadable === true }) }); stashed = true; } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
       }
     }
     // a stashed receipt for a drafter whose session is not live is KEPT for when it comes back — the card says so

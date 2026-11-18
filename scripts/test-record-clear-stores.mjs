@@ -1258,9 +1258,10 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     const w = await drive(require(path.join(ROOT, 'src/agent-routes.js')));
     ok(w.r.status === 200 && w.by && w.by.kind === 'agent' && w.by.id === ME_CID && !has(J(w.by)), 'verify r9: a job withdrawing its (not running) owner conversation\'s draft speaks as that conversation — its id, never the job\'s NAME (the engine stores the principal on the outbox proposal: a copy of the job\'s words no clear reaches)', { status: w.r.status, by: w.by && { kind: w.by.kind, id: w.by.id, name: w.by.name } });
     const AR_REL = 'src/agent-routes.js', AR_SRC = fs.readFileSync(path.join(ROOT, AR_REL), 'utf8');
-    const NEW_BY = "{ kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [] }";
+    // lane lg-group-parents U3c: the principal also carries the caller's lineage (`inheritedGroups`) after its own groups
+    const NEW_BY = "{ kind: 'agent', id: who.cid, name: null, groups: who.myGroups || [], inheritedGroups: ";
     ok(AR_SRC.split(NEW_BY).length === 2, 'the job caller\'s principal is built once, nameless (the control swaps exactly it)');
-    const PRE = MUT.load(AR_REL, AR_SRC.replace(NEW_BY, "{ kind: 'agent', id: who.cid, name: (who.job && who.job.name) || null, groups: who.myGroups || [] }"), 'withdraw-names-job');
+    const PRE = MUT.load(AR_REL, AR_SRC.replace(NEW_BY, "{ kind: 'agent', id: who.cid, name: (who.job && who.job.name) || null, groups: who.myGroups || [], inheritedGroups: "), 'withdraw-names-job');
     const c = await drive(PRE);
     ok(c.r.status === 200 && c.by && has(String(c.by.name || '')), 'NEGATIVE CONTROL (verify r9): the pre-fix route hands the engine the job\'s name as the withdrawing principal\'s', c.by && c.by.name);
     jm.jobs.delete(WD);

@@ -928,7 +928,8 @@ for (const [label, pr] of [['a GROUP of A + B', GRP], ['ALL AGENTS', { kind: 'ev
 {
   const src = engineSource(REPO);
   // lane grants-unify: the fan-out also takes THE wake admission (`admit`) — the mutant drops only the filter reader
-  const cut = src.replace("{ filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null), admit: (item, tg) => admit(item)(tg.cid, tg.groups) }", '{ admit: (item, tg) => admit(item)(tg.cid, tg.groups) }');
+  // (lane lg-group-parents U3c: the admission also takes each target's lineage, `tg.inherited`)
+  const cut = src.replace("{ filterOf: (w) => (w && w.mode === 'filtered' ? filterFor(w.filterId) : null), admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) }", '{ admit: (item, tg) => admit(item)(tg.cid, tg.groups, tg.inherited) }');
   const E9 = MUT.load('src/server/channels-engine.js', cut, 'group-not-per-member');
   const rc = await replyLeg(E9, 'e9c', GRP);
   ok(cut !== src && !(rc.s2 === 'agent-1,agent-1' && rc.s3 === 'agent-1,agent-1,agent-2'), 'CONTROL: an engine judging the group row as ONE round-robin item hands a reply to the wrong member — the group leg above would be red', JSON.stringify(rc));

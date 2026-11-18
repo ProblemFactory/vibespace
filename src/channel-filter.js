@@ -1229,7 +1229,10 @@ function memberVia(keys, cid, members = []) {
   if (!s || !keys) return null;
   // lane grants-unify: the access-holding groups as ONE row, judged by THE model with the member's facts
   const to = [...keys].filter((k) => /^group:/.test(k) && !k.includes(FAN_SEP)).map((k) => ({ kind: 'group', id: k.slice(6) }));
-  const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [] }) : null;
+  // lane lg-group-parents (the U3c read, MAJOR 4): the via shortcut judges OWN groups only (the release's answer) — its group entries
+  // are rebuilt from key strings and cannot carry «仅本组», so a lineage here would read a «仅本组» access as «含子组»; a child's
+  // conversation is a watcher by its own name or through its own group's access
+  const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }) : null;
   return v && v.ok && v.entry.kind === 'group' ? v.entry.id : null;
 }
 /** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
@@ -1237,7 +1240,7 @@ function memberVia(keys, cid, members = []) {
 function memberStill(row, members = []) {
   if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
-  return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [] }).ok;
+  return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }).ok;   // lane lg-group-parents (the U3c read, MAJOR 4): own groups only, as memberVia
 }
 /**
  * A grain's whole WATCHERS list against ITS OWN access list: one row per
@@ -1611,17 +1614,17 @@ function rowNames(row, ctx) {
 const _namedRows = new WeakMap();   // principal → { x, xn, kind, id, name, n }
 function namedRowOf(p, x) {
   const xn = Array.isArray(x) ? x.length : -1, m = _namedRows.get(p);
-  if (m && m.x === x && m.xn === xn && m.kind === p.kind && m.id === p.id && m.name === p.name) return m.n;
+  if (m && m.x === x && m.xn === xn && m.kind === p.kind && m.id === p.id && m.name === p.name && m.only === p.only) return m.n;   // lane lg-group-parents (the U3c read, 7): «仅本组» in the memo's key
   const e = GM.fromChannelPrincipal(p);
   const n = e ? GM.prepareRow({ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(x) ? x : [] }) : null;
-  _namedRows.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, n });
+  _namedRows.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, only: p.only, n });
   return n;
 }
 const _namedFacts = new WeakMap();  // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
 const NO_GROUPS = Object.freeze([]);
 function namedFactsOf(ctx) {
   const held = ctx.groupsUnreadable === true;   // THE STORE HELD UNREAD (lane bl-windows): a fact the hub's principal carries — the groups UNKNOWN, never «in none» (a row's except)
-  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _namedFacts.get(ctx));
+  const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, inheritedGroupIds: Array.isArray(ctx.inheritedGroups) ? ctx.inheritedGroups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _namedFacts.get(ctx));
   _namedFacts.set(ctx, F);
   return F;
 }
@@ -1667,14 +1670,14 @@ function fanOutWatchers(eff, live = [], { filterOf = null, admit = null } = {}) 
   // lane grants-unify: WHO a fanned row may wake is THE model's answer — the caller's `admit(item, target)` (the watch
   // row's `except`, the target's reach) or, without one, `admits` over the row's principal alone (All agents: every
   // running conversation; a Task Group: its members)
-  const mayWake = (item, tg) => (typeof admit === 'function' ? !!admit(item, tg) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(item.watcher.principal)].filter(Boolean), except: [] }], { conversationKey: tg.cid, groupIds: tg.groups }).ok);
+  const mayWake = (item, tg) => (typeof admit === 'function' ? !!admit(item, tg) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(item.watcher.principal)].filter(Boolean), except: [] }], { conversationKey: tg.cid, groupIds: tg.groups, inheritedGroupIds: Array.isArray(tg.inherited) ? tg.inherited : [] }).ok);   // lane lg-group-parents U3c
   const seen = new Set();
   const targets = [];
   for (const s of Array.isArray(live) ? live : []) {
     const cid = s && str(s.cid).trim();
     if (!cid || seen.has(cid)) continue;
     seen.add(cid);
-    targets.push({ cid, name: s.name || null, groups: Array.isArray(s.groups) ? s.groups.map(str) : [] });
+    targets.push({ cid, name: s.name || null, groups: Array.isArray(s.groups) ? s.groups.map(str) : [], inherited: Array.isArray(s.inherited) ? s.inherited.map(str) : [] });   // lane lg-group-parents (the U3c read, BLOCKER 2): the target carries its lineage
   }
   const watchers = [];
   for (const item of eff.watchers) {

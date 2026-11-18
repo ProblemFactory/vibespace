@@ -38,9 +38,12 @@ function sessionRoster({ sessions, tasks, addressableId, statusKey }) {
   // `groupsUnread: true`, set only then (a read entry is byte-identical to before) — so the channels readers can wait for the
   // read (readUnread below) instead of judging «not a member» on it and dropping a delivery
   const build = () => heads().map(([id, s, cid]) => {
-    let groups = [], unread = false;
+    let groups = [], unread = false, inherited = [];
     try { const gs = tasks().groupsForSession({ sessionKey: statusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []; groups = gs.map((g) => g.id); unread = !!gs.unread; } catch { }
-    return { cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null, ...(unread ? { groupsUnread: true } : {}) };
+    // lane lg-group-parents U3c: the ancestors of those groups (the ONE reader) — the channel doors' lineage; `groups` stays own
+    // (msg-acl's «the same group» and group-visibility read only it — rule ④)
+    try { const tk = tasks(); inherited = tk && typeof tk.grantGroupsOf === 'function' ? tk.grantGroupsOf(groups).inherited : []; } catch { inherited = []; }
+    return { cid, name: s.name || null, groups, inherited, webuiId: id, reachability: s._msgReachability || null, ...(unread ? { groupsUnread: true } : {}) };
   });
   /** B-43bc — THE DECIDING DOOR FOR THE ROSTER: before a channels delivery judges a member (a wake, a recall note, a reaction
    *  digest), the live conversations (`cids`, or all) whose membership facts were never read are READ — the Task Groups'
@@ -80,6 +83,7 @@ function createRosterPass(build, { fingerprint = null } = {}) {
   const freeze = (e) => {
     if (!e || typeof e !== 'object') return e;
     if (Array.isArray(e.groups)) Object.freeze(e.groups);
+    if (Array.isArray(e.inherited)) Object.freeze(e.inherited);   // lane lg-group-parents U3c
     return Object.freeze(e);
   };
   const load = () => {

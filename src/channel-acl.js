@@ -140,10 +140,10 @@ function principalApplies(ctx, grant) {
 const _prepared = new WeakMap();   // principal → { x, xn, kind, id, name, n }
 function preparedOf(grant, p) {
   const x = grant.except, xn = Array.isArray(x) ? x.length : -1, m = _prepared.get(p);
-  if (m && m.x === x && m.xn === xn && m.kind === p.kind && m.id === p.id && m.name === p.name) return m.n;
+  if (m && m.x === x && m.xn === xn && m.kind === p.kind && m.id === p.id && m.name === p.name && m.only === p.only) return m.n;   // lane lg-group-parents: «仅本组» is in the memo's key
   const e = GM.fromChannelPrincipal(p);
   const n = e ? GM.prepareRow({ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(x) ? x : [] }) : null;
-  _prepared.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, n });
+  _prepared.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, only: p.only, n });
   return n;
 }
 const _facts = new WeakMap();      // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
@@ -153,7 +153,7 @@ const NO_GROUPS = Object.freeze([]);
 // carries (`groupsUnreadable`, src/server/groups-hold.js); this pure judge reads only its arguments
 function factsFor(ctx) {
   const held = ctx.groupsUnreadable === true;
-  const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _facts.get(ctx));
+  const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS, inheritedGroupIds: Array.isArray(ctx.inheritedGroups) ? ctx.inheritedGroups : NO_GROUPS, ...(held ? { groupsUnreadable: true } : {}) }, _facts.get(ctx));
   _facts.set(ctx, F);
   return F;
 }

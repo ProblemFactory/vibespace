@@ -264,7 +264,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
    *  ones beyond PROPOSALS_KEEP are dropped. The caller saves + tells the owner. */
   function fileProposal(ctx, cred, c, req, { cls, sensitive, note = null, why, extra = {} }) {
     const id = `api-${crypto.randomBytes(6).toString('hex')}`;
-    state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [], ...(ctx.groupsUnreadable === true ? { groupsUnreadable: true } : {}) }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note, why, ...extra };
+    state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [], ...(Array.isArray(ctx.inheritedGroups) && ctx.inheritedGroups.length ? { inheritedGroups: ctx.inheritedGroups } : {}), ...(ctx.groupsUnreadable === true ? { groupsUnreadable: true } : {}) }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note, why, ...extra };
     const keep = Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(PROPOSALS_KEEP).filter((p) => p.status !== 'pending');
     for (const p of keep) delete state.proposals[p.id];
     return state.proposals[id];
@@ -375,7 +375,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   // judged the held [] as read, and an «All agents except G» row admitted G's agent). It is judged under the hold NOW as well
   // (主开发 05:42Z (3)). An unknown that decides the tier refuses BY NAME, never «no longer holds».
   const markOf = (r) => (r && r.groupsUnreadable === true ? { groupsUnreadable: true } : {});
-  const judgedCtx = (pr) => ({ kind: pr.kind, id: pr.id, name: pr.name, groups: pr.groups || [], ...markOf(pr), ...require('./groups-hold.js').fact() });
+  const judgedCtx = (pr) => ({ kind: pr.kind, id: pr.id, name: pr.name, groups: pr.groups || [], inheritedGroups: pr.inheritedGroups || [], ...markOf(pr), ...require('./groups-hold.js').fact() });   // lane lg-group-parents U3c: + the recorded lineage
   // the unknown DECIDES when any row of the credential is a Task Group's or leaves a Task Group out (the delta read: access that comes
   // THROUGH a group reads the held [] as a known «none» — «no longer holds» there was false too)
   const groupDecides = (cred, tiers = null) => { const e = eng(); return (e && typeof e.apiGrants === 'function' ? e.apiGrants() : []).some((g) => g && g.scope && g.scope.id === cred && (!tiers || tiers.includes(g.api)) && ((g.principal && g.principal.kind === 'group') || (Array.isArray(g.except) && g.except.some((x) => x && x.kind === 'group')))); };
@@ -383,7 +383,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   const HELD_TIER_WORDS = 'Task Groups cannot be read right now, and this access comes through a Task Group — nothing ran; the card stays — decide it again once they read';
   const FILED_UNREAD_WORDS = 'This was filed while Task Groups could not be read, and this access comes through a Task Group — the agent\'s groups then are unknown, so nothing ran; reject it and let the agent ask again';
   const unknownRefusal = (pr) => (pr && pr.groupsUnreadable !== true && require('./groups-hold.js').held() ? { ok: false, code: 'groups_unreadable', error: HELD_TIER_WORDS } : { ok: false, code: 'groups_unknown_filed', error: FILED_UNREAD_WORDS });
-  const shapeCtx = (s) => { const i = String(s.principal).indexOf(':'); return { kind: s.principal.slice(0, i), id: s.principal.slice(i + 1), groups: s.groups || [], ...markOf(s), ...require('./groups-hold.js').fact() }; };
+  const shapeCtx = (s) => { const i = String(s.principal).indexOf(':'); return { kind: s.principal.slice(0, i), id: s.principal.slice(i + 1), groups: s.groups || [], inheritedGroups: s.inheritedGroups || [], ...markOf(s), ...require('./groups-hold.js').fact() }; };
   /** `digest` = the frozen digest the user's card was drawn from: a record that changed since (a restart over an edited
    *  file) runs nothing (verify r1 M3). */
   async function approve(id, { always = false, by = 'user', digest = null } = {}) {
@@ -402,7 +402,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (tierNow(ctx, p.cred).tier === 'none' && heldTierUnknown(ctx, p.cred)) return unknownRefusal(p.principal);
     if (tierNow(ctx, p.cred).tier === 'none') { p.status = 'failed'; p.reason = 'the agent no longer holds API access to this credential — nothing ran'; refused('api_not_granted'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_not_granted', error: p.reason }; }
     p.status = 'running'; p.decidedAt = now(); p.decidedBy = by;
-    if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, ...markOf(p.principal), shape: F.shapeOf(req), at: now(), by });   // the shape keeps the list's own mark
+    if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, ...(ctx.inheritedGroups && ctx.inheritedGroups.length ? { inheritedGroups: ctx.inheritedGroups } : {}), ...markOf(p.principal), shape: F.shapeOf(req), at: now(), by });   // the shape keeps the list's own mark
     save();
     const kept = {};
     const r = await run(ctx, p.cred, c, req, kept);

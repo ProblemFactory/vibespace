@@ -485,16 +485,10 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/server/vault-run-door.js', 'const facts = { ...uf, conversationKeys:', 'spreads vaultUseFacts — its inheritedGroupIds ride in `...uf`'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
     ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
+    ['src/channel-filter.js', "const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid)", 'the «via» shortcut (memberVia) judges OWN groups only — its entries are rebuilt from key strings and cannot carry «仅本组» (the U3c read, MAJOR 4)'],
+    ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'the «via» shortcut (memberStill) judges OWN groups only, as memberVia'],
   ];
   const PENDING = [
-    ['src/channel-acl.js', 'groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS', 'U3c (the channel doors)'],
-    ['src/channel-filter.js', "door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid)", 'U3c'],
-    ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'U3c'],
-    ['src/channel-filter.js', 'const F = GM.prepareFacts({ conversationKey: str(ctx.id), groupIds:', 'U3c'],
-    ['src/channel-filter.js', 'const mayWake = (item, tg) =>', 'U3c'],
-    ['src/server/channels-engine.js', 'const all = live.filter((x) => x && x.cid &&', 'U3c'],
-    ['src/server/channels-engine.js', 'return live.some((x) => x && x.cid === cid && GM.admits(', 'U3c'],
-    ['src/server/channels-grants.js', 'return GM.admits([{ door: DOORS.watch, resource: String(res), to: own,', 'U3c'],
     ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'U3d (the automation doors, after batch 22 B-3190)'],
     ['src/automation-keys.js', "const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds:", 'U3d'],
     ['src/automation-keys.js', "const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds:", 'U3d'],
@@ -561,6 +555,36 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const lr = (rows) => (res) => (res === 'https://shop.example.test#*' ? rows : []);
   const fill = (rows, inh) => BLg.fillVerdict({ tabOrigin: 'https://shop.example.test', spec, entries: [{ origin: 'https://shop.example.test', user: 'alice', hasCurrent: true }], grantRows: lr(rows), facts: { conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: inh }, vaultState: 'unlocked' }).ok;
   ok(fill([{ door: 'browser-login', resource: 'https://shop.example.test#*', to: [P], except: [] }], ['tg-p']) && !fill([{ door: 'browser-login', resource: 'https://shop.example.test#*', to: [PO], except: [] }], ['tg-p']), 'browser-login: a parent\'s web-login row fills for the child; «仅本组» does not');
+  // U3c: the channel doors — reach (the ACL over the ONE store's rows), watch (the wake admission), a group's members (round-robin / via)
+  const ACL = require('../src/channel-acl.js');
+  const chLevel = (to, except, ctx) => { const s2 = GS.create({ memory: true }); s2.set('channel-reach', 'conversation:a1/c1', { to, except }); return ACL.effective(ctx, { key: 'a1/c1', adapterId: 'a1' }, CGM.create({ grants: s2 }).conversationGrants('a1/c1')).level; };
+  const kidCtx = { kind: 'agent', id: 'k1', groups: ['tg-c'], inheritedGroups: ['tg-p'] }, parCtx = { kind: 'agent', id: 'p1', groups: ['tg-p'] };
+  ok(chLevel([{ ...P, authority: 'draft' }], [], kidCtx) === 'visible' && chLevel([{ ...P, authority: 'draft' }], [], { ...kidCtx, inheritedGroups: [] }) !== 'visible' && chLevel([{ ...PO, authority: 'draft' }], [], kidCtx) !== 'visible' && chLevel([{ ...PO, authority: 'draft' }], [], parCtx) === 'visible' && chLevel([{ kind: 'everyone', authority: 'draft' }], [P], kidCtx) !== 'visible', 'channel-reach: a parent\'s access reaches the child (only with the lineage); «仅本组» only the parent\'s own; «All except the parent» leaves the child out');
+  const s3 = GS.create({ memory: true });
+  s3.set('channel-watch', 'conversation:a1/c1', { to: [P], except: [] });
+  const cg3 = CGM.create({ grants: s3 });
+  ok(cg3.wakeAdmits('conversation:a1/c1', { kind: 'group', id: 'tg-p' }, { cid: 'k1', groups: ['tg-c'], inherited: ['tg-p'] }) && !cg3.wakeAdmits('conversation:a1/c1', { kind: 'group', id: 'tg-p' }, { cid: 'k1', groups: ['tg-c'] }), 'channel-watch: a parent\'s notification wakes the child\'s conversation (with the lineage)');
+  const CF = require('../src/channel-filter.js');
+  ok(!CF.memberStill({ via: 'tg-p', principal: { kind: 'agent', id: 'k1' } }, [{ cid: 'k1', groups: ['tg-c'], inherited: ['tg-p'] }]) && CF.memberStill({ via: 'tg-p', principal: { kind: 'agent', id: 'k1' } }, [{ cid: 'k1', groups: ['tg-p'] }]) && CF.memberVia(new Set(['group:tg-p']), 'k1', [{ cid: 'k1', groups: ['tg-c'], inherited: ['tg-p'] }]) === null, 'the U3c read (MAJOR 4): the «via» shortcut judges OWN groups only (the release\'s answer — its entries cannot carry «仅本组»)');
+  // the U3c read (BLOCKER 1): every reach / API grant the ACL reads keeps «仅本组»
+  const s4 = GS.create({ memory: true });
+  s4.set('channel-reach', 'conversation:a1/c1', { to: [{ ...PO, authority: 'draft' }] });
+  s4.set('channel-api', 'acct-1', { to: [{ ...PO, tier: 'write-auto' }] });
+  const cg4 = CGM.create({ grants: s4 });
+  const rg = cg4.conversationGrants('a1/c1'), ag = cg4.apiGrants();
+  ok(rg[0] && rg[0].principal.only === true && ag[0] && ag[0].principal.only === true && ACL.effective(kidCtx, { key: 'a1/c1', adapterId: 'a1' }, rg).level !== 'visible', 'the U3c read (BLOCKER 1): the reach and API grants keep «仅本组» — the child is not let in through a «仅本组» parent', { rg: rg[0] && rg[0].principal, ag: ag[0] && ag[0].principal });
+  // the U3c read (BLOCKER 2): the fan-out hands each target its lineage
+  const seenTg = [];
+  CF.fanOutWatchers({ watchers: [{ watcher: { principal: { kind: 'everyone', id: '*' }, mode: 'all' } }] }, [{ cid: 'k1', name: 'K', groups: ['tg-c'], inherited: ['tg-p'] }], { admit: (item, tg) => { seenTg.push(tg); return true; } });
+  ok(seenTg.length === 1 && JSON.stringify(seenTg[0].inherited) === JSON.stringify(['tg-p']), 'the U3c read (BLOCKER 2): fanOutWatchers hands admit a target that carries its lineage', seenTg);
+  const accSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8'), engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  ok(/admit\(it\)\(m\.cid, m\.groups, m\.inherited\)/.test(accSrc) && /admit\(item\)\(tg\.cid, tg\.groups, tg\.inherited\)/.test(accSrc) && /groups: x\.groups, inherited: x\.inherited \}\)\) : null;/.test(accSrc) && /\(cid, gs, ih\) => held\.every\(\(h\) => h\.admit\(cid, gs, ih\)\)/.test(engSrc) && (engSrc.match(/to: \[GM\.fromChannelPrincipal\(w\.principal\)\]\.filter\(Boolean\), except: \[\] \}\]/g) || []).length === 2, 'the U3c read (BLOCKER 3, MAJOR 4): the named-watcher re-judge, the fan-out admit, the stored fan watcher and the digest all hand the lineage; a group watcher\'s own entry keeps «仅本组»');
+  const RP = require('../src/server/roster-pass.js');
+  const fakeTasks = { groupsForSession: () => [{ id: 'tg-c' }], grantGroupsOf: (ids) => ({ ids, inherited: ids.includes('tg-c') ? ['tg-p'] : [] }), rev: () => 1 };
+  const rb = typeof RP.createRosterBuild === 'function' ? RP.createRosterBuild : null;
+  const rsrc = fs.readFileSync(path.join(REPO, 'src/server/roster-pass.js'), 'utf-8'), asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8'), osrc = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf-8'), apisrc = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf-8'), esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  ok(/inherited = tk && typeof tk\.grantGroupsOf === 'function' \? tk\.grantGroupsOf\(groups\)\.inherited : \[\]/.test(rsrc) && /return \{ cid, name: s\.name \|\| null, groups, inherited,/.test(rsrc) && /inheritedGroups = tasks\.grantGroupsOf\(myGroups\)\.inherited/.test(asrc) && /groups: myGroups, inheritedGroups,/.test(asrc) && (esrc2.match(/inheritedGroups: inheritedOfSession\(cid\)/g) || []).length === 2 && /drafterInherited/.test(osrc) && /inheritedGroups: p\.principal\.inheritedGroups \|\| \[\]/.test(apisrc), 'the channel producers: the roster and the agent\'s channel principal ask the ONE reader; the engine\'s hearers, a draft, a stash and an API proposal carry the lineage (a stored one beside the groups it stored)');
+  void rb; void fakeTasks;
 }
 
 // ═══ ⑩ lane lg-group-parents: «仅本组» leaves by name only ═══════════════════════

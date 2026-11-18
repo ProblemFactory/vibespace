@@ -5938,7 +5938,7 @@ function create(deps = {}) {
     const mayHear = (cid) => {
       if (!reach.has(cid)) {
         let ok = false;
-        try { ok = ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rec, en).level); } catch { ok = false; }
+        try { ok = ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), inheritedGroups: inheritedOfSession(cid), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rec, en).level); } catch { ok = false; }
         reach.set(cid, ok);
       }
       return reach.get(cid);
@@ -6455,7 +6455,7 @@ function create(deps = {}) {
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
     // removed since the wake hears nothing more from here
-    const mayHear = (cid) => { try { return ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rec, en).level); } catch { return false; } };
+    const mayHear = (cid) => { try { return ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), inheritedGroups: inheritedOfSession(cid), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, rec, en).level); } catch { return false; } };
     for (const d of due) {
       if (!mayHear(d.cid)) continue;
       const text = Rev.recallNoteText({ account: peerName(String(rec.label || rec.id), 80) || '', conversation: peerName(String((en && en.title) || convId), 120) || '', at: d.at });
@@ -8644,7 +8644,7 @@ function create(deps = {}) {
         held.push({ key: en.key, id: en.id, eff, carried: pend, admit: wakeAdmitOf(en, item, { rec }) });
       }
       const item0 = { watcher: w, source, patternId };
-      const target = groups.length ? resolveTarget(w, null, null, (cid, gs) => held.every((h) => h.admit(cid, gs))) : { cid: null, why: 'nothing-pending' };   // lane grants-unify: a member that may hear EVERY conversation of the digest
+      const target = groups.length ? resolveTarget(w, null, null, (cid, gs, ih) => held.every((h) => h.admit(cid, gs, ih))) : { cid: null, why: 'nothing-pending' };   // lane grants-unify: a member that may hear EVERY conversation of the digest   // lane lg-group-parents (the U3c read, BLOCKER 3): + the lineage
       // B-1ca5: a record another chain is starting for this receiver is waited for (bounded), then the marks are read again
       const names = [pk, target.cid ? `→${target.cid}` : null];
       if (target.cid) for (const h of held) if (h.carried.hits.some((x) => flyingOf(rec.id, h.id, names, x))) await waitTaken(rec.id, h.id, names, h.carried.hits);
@@ -8792,7 +8792,8 @@ function create(deps = {}) {
     // lane grants-unify: the group's members are THE model's answer — `admit` (channels-access wakeAdmitOf: the watch row's
     // entry for this group, its `except` honoured, the member's reach re-asked when an exception decides it) or, without
     // one, `admits` over the group alone — a member the owner left out is never the round-robin's pick (never billed)
-    const all = live.filter((x) => x && x.cid && (typeof admit === 'function' ? admit(String(x.cid), Array.isArray(x.groups) ? x.groups.map(String) : []) : GM.admits([{ door: 'channel-watch', resource: '-', to: [{ kind: 'group', id: String(w.principal.id) }], except: [] }], { conversationKey: String(x.cid), groupIds: Array.isArray(x.groups) ? x.groups.map(String) : [] }).ok)).map((x) => x.cid);
+    const inhOf = (x) => (Array.isArray(x.inherited) ? x.inherited.map(String) : []);   // lane lg-group-parents U3c: the member's lineage (the roster's)
+    const all = live.filter((x) => x && x.cid && (typeof admit === 'function' ? admit(String(x.cid), Array.isArray(x.groups) ? x.groups.map(String) : [], inhOf(x)) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(w.principal)].filter(Boolean), except: [] }], { conversationKey: String(x.cid), groupIds: Array.isArray(x.groups) ? x.groups.map(String) : [], inheritedGroupIds: inhOf(x) }).ok)).map((x) => x.cid);
     if (prefer && all.includes(prefer)) { const s = live.find((x) => x.cid === prefer); return { cid: prefer, name: (s && s.name) || prefer, via: 'group', live: true, cursor: null }; }   // lane stash-pending-live: the member whose turn carries
     const got = batch && batch.got ? batch.got : null;
     const fresh = got ? all.filter((c) => !got.has(c)) : all;
@@ -8932,7 +8933,7 @@ function create(deps = {}) {
     if (!w || w.principal.kind !== 'group') return true;
     let live = []; try { live = liveSessions() || []; } catch { return false; }
     // lane grants-unify: THE model's answer (a member of the group NOW), never a hand-written membership test
-    return live.some((x) => x && x.cid === cid && GM.admits([{ door: 'channel-watch', resource: '-', to: [{ kind: 'group', id: String(w.principal.id) }], except: [] }], { conversationKey: String(cid), groupIds: Array.isArray(x.groups) ? x.groups.map(String) : [] }).ok);
+    return live.some((x) => x && x.cid === cid && GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(w.principal)].filter(Boolean), except: [] }], { conversationKey: String(cid), groupIds: Array.isArray(x.groups) ? x.groups.map(String) : [], inheritedGroupIds: Array.isArray(x.inherited) ? x.inherited.map(String) : [] }).ok);   // lane lg-group-parents U3c
   }
   /** R4 verify r2: is the watcher `pk` of this conversation STILL in effect
    *  (its access + notification rows, read fresh) and its target still
@@ -9194,7 +9195,7 @@ function create(deps = {}) {
     mayUseFor,   // unit what-it-may-use (channels-access)
     policyFor, authorityCapsFor, healP2, rotationsOf, filterFor, assignmentView, pendingOf, clearCarried, elidedTotal, statsView, wakeLatencyFor,
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
-    storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, convFor,
+    storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, inheritedOfSession, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
