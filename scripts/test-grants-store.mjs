@@ -483,18 +483,13 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/server/grants-migration.js', '*', 'the one migration\'s legacy-equivalence probes (pre-lineage readers by design)'],
     ['src/server/mounts-plugins-wiring.js', 'const conversationSubjects = ', 'the automation picker\'s roster (display, not a verdict)'],
     ['src/server/vault-run-door.js', 'const facts = { ...uf, conversationKeys:', 'spreads vaultUseFacts — its inheritedGroupIds ride in `...uf`'],
+    ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'the legacy subject list (session:<cid> + group:<gid>) — exported for GM.LEGACY\'s migration probes, no door calls it'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
     ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
     ['src/channel-filter.js', "const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid)", 'the «via» shortcut (memberVia) judges OWN groups only — its entries are rebuilt from key strings and cannot carry «仅本组» (the U3c read, MAJOR 4)'],
     ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'the «via» shortcut (memberStill) judges OWN groups only, as memberVia'],
   ];
-  const PENDING = [
-    ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'U3d (the automation doors, after batch 22 B-3190)'],
-    ['src/automation-keys.js', "const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds:", 'U3d'],
-    ['src/automation-keys.js', "const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds:", 'U3d'],
-    ['src/server/automation-engine.js', 'const covers = (g, q) => GM.admits(', 'U3d'],
-    ['src/server/automation-engine.js', 'const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || []', 'U3d'],
-  ];
+  const PENDING = [];   // lane lg-group-parents U3d: every door is wired (the automation doors last, on B-3190's tip)
   const listed = [...EXEMPT, ...PENDING];
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(path.join(d, e.name))) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const ASKS = /grant-model(?:\.js)?'\)|GM\.(?:admits|prepareFacts|hitsOf)\(/;
@@ -528,6 +523,52 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   ok(bare.length === 0, 'CENSUS: every facts builder naming a caller\'s groups carries inheritedGroupIds — or is named exempt / pending', bare);
   const stale = listed.filter((_, i) => !used.has(i)).map(([f, n]) => `${f} «${n.slice(0, 60)}»`);
   ok(stale.length === 0, `CENSUS: every named entry still names a line (${EXEMPT.length} exempt, ${PENDING.length} pending: ${[...new Set(PENDING.map((p) => p[2].split(' ')[0]))].join(', ')})`, stale);
+  // U3d: the automation doors — a key's USE (a parent's grant serves the child's conversation; «仅本组» does not; a parent's «除了»
+  // leaves it out) and its REACH (a target in a child of a reached group)
+  {
+    const AK2 = require('../src/automation-keys.js');
+    const verb2 = AK2.SCOPES[0].verb;
+    const key2 = { id: 'ak-00000000000c', name: 'k2', scopes: [verb2], digest: 'd', at: 1 };
+    const g2 = (to, except = []) => AK2.grantOf({ id: 'ag-00000000000d', keyId: key2.id, mode: 'always', at: 1, use: { door: 'automation-key-use', resource: 'ag-00000000000d', to, except }, reachRow: null });
+    const use2 = (grant, inh) => AK2.useVerdict({ key: key2, grants: [grant], subject: 'session:k1', subjectGroups: ['tg-c'], subjectInherited: inh, verb: verb2, vaultState: 'unlocked' }).ok;
+    ok(use2(g2([P]), ['tg-p']) && !use2(g2([P]), []) && !use2(g2([PO]), ['tg-p']) && !use2(g2([EV], [P]), ['tg-p']), 'automation-key-use: a parent\'s grant serves the child\'s conversation (with the lineage only); «仅本组» does not; «All except the parent» leaves it out');
+    const reach2 = (inh) => AK2.reachVerdict({ keyId: key2.id, caller: 'c0', target: { conversationId: 'k1', groups: ['tg-c'], inherited: inh }, grants: [], opened: [], reach: { taskGroups: ['tg-p'] }, reachRows: [{ door: 'automation-key-reach', resource: 'ag-1', to: [P], except: [] }] });
+    ok(reach2(['tg-p']).ok && !reach2([]).ok, 'automation-key-reach: a key reaching the parent reaches a conversation of its child (the target\'s lineage)', [reach2(['tg-p']), reach2([])]);
+    const wSrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf-8'), aeSrc = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf-8');
+    ok(/const gg = tasks\.grantGroupsOf\(tasks\.groupsForSession\(\{ sessionKey: sessionStatusKey\(s, id\)/.test(wSrc) && /groups: g\.ids, inherited: g\.inherited \|\| \[\]/.test(wSrc) && /inherited = tasks \? tasks\.grantGroupsOf\(groups\)\.inherited : \[\]/.test(wSrc) && /lineageOf: \(ids\) => \{ const tk = getTasks && getTasks\(\); return tk \? tk\.grantGroupsOf\(ids\)\.inherited : \[\]; \}/.test(wSrc) && (opsSrc.match(/lineageOfIds\(gl\)/g) || []).length === 2 && (opsSrc.match(/reach\(targetOf\(/g) || []).length === 2 && (aeSrc.match(/subjectInherited: inherited,/g) || []).length === 3 && /inherited: lineageIn\(caller\.inherited\),/.test(aeSrc) && (aeSrc.match(/lineageIn\(/g) || []).length === 4, 'the automation producers: the caller and every target (live or stopped) carry the lineage from the ONE reader; the engine hands it to every use / pick verdict and records it on an ask');
+    // the U3d read (1): a parent's grant never outranks the caller's own group's — ONE order (grant-model specificityOf)
+    ok(GM.specificityOf('group', true) < GM.specificityOf('group') && GM.specificityOf('group', true) > GM.specificityOf('everyone') && GM.specificityOf('conversation', true) === GM.specificityOf('conversation') && GM.specificityOf('group', 'yes') === GM.specificityOf('group'), 'the rank: a parent\'s group entry sits below the caller\'s own group and above All agents (only `true` says so; a conversation\'s rank is its own)');
+    const kOld = { id: 'ak-00000000001a', name: 'parent-key', scopes: [verb2], digest: 'd', at: 1 }, kNew = { id: 'ak-00000000001b', name: 'own-key', scopes: [verb2], digest: 'd', at: 2 };
+    const gOf = (k, id, to, reach) => AK2.grantOf({ id, keyId: k.id, mode: 'always', at: 1, reach, use: { door: 'automation-key-use', resource: id, to, except: [] }, reachRow: null });
+    const pickScene = () => AK2.pickKey({ keys: [kOld, kNew], grants: [gOf(kOld, 'ag-00000000001a', [P], 'instance'), gOf(kNew, 'ag-00000000001b', [{ kind: 'group', id: 'tg-c' }], 'opened')], subject: 'session:k1', subjectGroups: ['tg-c'], subjectInherited: ['tg-p'], verb: verb2 });
+    const pk = pickScene();
+    ok(pk.ok && pk.key && pk.key.id === kNew.id, 'pickKey: the key granted to the caller\'s OWN group wins over an older key granted to its parent (the parent\'s instance reach never rides in its place)', pk);
+    {
+      const real = GM.specificityOf;
+      GM.specificityOf = (kind) => real(kind);   // CONTROL: the order without the parent's step
+      let pc = null;
+      try { pc = pickScene(); } finally { GM.specificityOf = real; }
+      ok(pc && pc.ok && pc.key && pc.key.id === kOld.id, 'CONTROL: an order that ranks a parent\'s group as the caller\'s own picks the OLDER parent key — the leg above would be red', pc);
+    }
+    // the U3d read (2, 3): a target whose groups or lineage could not be read — or a lineage that is no list — refuses by name
+    const rx = (t) => AK2.reachVerdict({ keyId: key2.id, caller: 'c0', target: { conversationId: 'k1', groups: ['tg-c'], ...t }, opened: [], reach: 'instance', reachRows: [{ door: 'automation-key-reach', resource: 'ag-1', to: [EV], except: [P] }] });
+    ok(rx({ inherited: ['tg-p'] }).code === 'excepted' && rx({ inherited: [] }).ok && rx({ inherited: [], groupsUnreadable: true }).code === 'groups_unreadable' && rx({ inherited: 'tg-p' }).code === 'groups_unreadable', 'automation-key-reach: «everyone except the parent» leaves the child\'s conversation out; a target whose lineage could not be read (or is no list) is refused groups_unreadable, never reached', [rx({ inherited: ['tg-p'] }), rx({ inherited: [], groupsUnreadable: true }), rx({ inherited: 'tg-p' })]);
+    const ux = (inh) => AK2.useVerdict({ key: key2, grants: [g2([EV], [P])], subject: 'session:k1', subjectGroups: ['tg-c'], subjectInherited: inh, verb: verb2, vaultState: 'unlocked' });
+    ok(ux('tg-p').code === 'groups_unreadable' && ux(['tg-p']).code === 'excepted' && ux([]).ok, 'automation-key-use: a lineage handed as no list is unreadable (the model\'s reading), never «no parents»', [ux('tg-p'), ux(['tg-p'])]);
+    // the producer: conversation-ops hands the reach a target whose lineage read threw as unreadable; the stopped target's
+    // lineage is the one the wiring read (the U3d read, 7)
+    {
+      const OPS2 = require('../src/server/conversation-ops.js');
+      const seen = [];
+      const verbsOf = (lineageOf, deadOf = () => null) => OPS2.automationVerbs({ activeSessions: new Map([['w-0001', { claudeSessionId: 'k1', name: 'child' }]]), groupsOf: () => ['tg-c'], lineageOf, deadOf, archive: () => ({ ok: true }) });
+      const ctx = { caller: { conversationId: 'c0' }, keyId: key2.id, reach: (t) => { seen.push(t); return { ok: false, code: 'not_granted', why: 'stop here' }; } };
+      await verbsOf(() => { throw new Error('the store'); })['conversations.end']({ target: 'w-0001' }, ctx);
+      await verbsOf(() => ['tg-p'])['conversations.end']({ target: 'w-0001' }, ctx);
+      await verbsOf(() => ['tg-x'], () => ({ conversationId: 'k9', sessionKey: 'claude:k9', name: 'ended', groups: ['tg-c'], inherited: ['tg-p'] }))['conversations.archive']({ target: 'k9' }, ctx);
+      await verbsOf(() => ['tg-x'], () => ({ conversationId: 'k9', sessionKey: 'claude:k9', name: 'ended', groups: ['tg-c'], inherited: null }))['conversations.archive']({ target: 'k9' }, ctx);
+      ok(seen.length === 4 && seen[0].groupsUnreadable === true && J(seen[0].inherited) === '[]' && !seen[1].groupsUnreadable && J(seen[1].inherited) === '["tg-p"]' && J(seen[2].inherited) === '["tg-p"]' && !seen[2].groupsUnreadable && seen[3].groupsUnreadable === true, 'conversation-ops: a lineage read that throws hands the reach an UNREADABLE target; a stopped target is judged with the lineage the wiring read (its own, never re-read), and one read as null is unreadable', seen);
+    }
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",

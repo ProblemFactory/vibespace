@@ -970,7 +970,8 @@ console.log('⑮ THE ARCHIVE VERB (lane conversations-archive-verb) — the row,
 // key-grant-everyone's All-agents carve-out) — put back into a copy at the signature and the facts line (a RED control)
 const B3190 = (() => {
   const SIG = "function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach = 'opened', reachRows = null } = {}) {";
-  const FACTS = "  const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String) };\n";
+  // lane lg-group-parents U3d: the target's lineage as handed + whether its groups could be read (the line carries its comment)
+  const FACTS = "  const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String), inheritedGroupIds: Array.isArray(t.inherited) ? t.inherited.filter(Boolean).map(String) : t.inherited, groupsUnreadable: t.groupsUnreadable === true };   // the U3d read (2, 3): a lineage that could not be read is unreadable\n";
   const anchored = () => SRC.split(SIG).length === 2 && SRC.split(FACTS).length === 2;
   const oldB = (carve = true) => SRC.replace(SIG, SIG.replace('target = {}, ', 'target = {}, grants = [], ')).replace(FACTS, FACTS
     + `  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => { if (!g || g.keyId !== keyId || g.subject === 'external') return false; const v = GM.admits([useRowOf(g)].filter(Boolean), facts); return v.ok${carve ? " && v.via !== 'everyone'" : ''}; })) return { ok: true, by: 'grant' };\n`);
@@ -1780,10 +1781,10 @@ console.log('㉑b THE ONCE RESERVATION + UNREADABLE TASK GROUPS (lane key-grant-
   ok(uv(A, [GEX, G({ n: 2, subject: 'session:conv-m' })], 'conv-m', { subjectGroupsUnreadable: true }).ok, '…and the caller\'s OWN grant still counts (rows add)');
   ok(A.pickKey({ keys: [K()], grants: [GEX], subject: 'session:conv-m', subjectGroups: [], subjectGroupsUnreadable: true, verb: 'conversations.rename' }).ask === true && A.pickKey({ keys: [K()], grants: [GEX], subject: 'session:conv-m', subjectGroups: [], verb: 'conversations.rename' }).ask === false,
     'pickKey reads the same fact: an undecided grant is no grant to pick by');
-  const UNEEDLE = 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };';
+  const UNEEDLE = 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited, groupsUnreadable: !!subjectGroupsUnreadable };';   // lane lg-group-parents U3d: + the lineage beside the groups (as handed — the model reads a non-list unreadable)
   ok(SRC.split(UNEEDLE).length === 2, 'ANCHOR: useVerdict hands the unreadable fact to the ONE admission — spelled once');
   if (SRC.split(UNEEDLE).length === 2) {
-    const Au = M.load('src/automation-keys.js', SRC.replace(UNEEDLE, 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [] };'), 'groups-unreadable-dropped');
+    const Au = M.load('src/automation-keys.js', SRC.replace(UNEEDLE, 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited };'), 'groups-unreadable-dropped');
     const mv = uv(Au, [GEX], 'conv-m', { subjectGroupsUnreadable: true });
     ok(mv.ok === true, 'MUTANT RED: the fact dropped (01b6db270\'s shape) ⇒ the conversation the owner left out of All agents is ADMITTED while its Task Groups are unreadable', mv);
   }
@@ -1802,7 +1803,7 @@ console.log('㉑b THE ONCE RESERVATION + UNREADABLE TASK GROUPS (lane key-grant-
   }
   // the WIRING: the caller's Task Groups read SAYS a failed read (the hub's one reading of a session token)
   const WIRE = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/catch \{ return \{ ids: \[\], unreadable: true \}; \} \};/.test(WIRE) && /groups: g\.ids, groupsUnreadable: g\.unreadable\b/.test(WIRE), 'the wiring: a Task Group read that throws is { unreadable: true } and the caller carries groupsUnreadable (it was [] — «in no Task Group»)');
+  ok(/catch \{ return \{ ids: \[\], unreadable: true \}; \} \};/.test(WIRE) && /groups: g\.ids, inherited: g\.inherited \|\| \[\], groupsUnreadable: g\.unreadable\b/.test(WIRE), 'the wiring: a Task Group read that throws is { unreadable: true } and the caller carries groupsUnreadable (it was [] — «in no Task Group»)');
 }
 // R2 + R4, text pins: the window's picker offers the row; its chip / the audit / the CLI say the words
 {
@@ -1855,9 +1856,10 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   ok(SRC.split(PSORT).length === 2, 'ANCHOR: pickKey\'s ranking, spelled once');
   const redPk = runPk(M.load('src/automation-keys.js', SRC.replace(PSORT, "    const pick = granted.sort((a, b) => (b.v.grant.mode === 'always') - (a.v.grant.mode === 'always') || (a.k.createdAt || 0) - (b.k.createdAt || 0))[0];"), 'b3190-pick-by-age'));
   ok(redPk.length === 4 && redPk.every((n) => /vs the conversation|vs a Task Group/.test(n)), 'MUTANT RED: the release\'s ranking (always, then key age) ⇒ the four specificity rows go red (an older key overrides the conversation\'s own)', redPk);
-  const RSPEC = '  const usable = bySpec.filter((c) => c.g.mode === \'always\' || !c.g.spentAt), spec = usable.length ? viaRank(usable[0].via) : -1;';
+  // lane lg-group-parents U3d: the rank also reads whether a parent's group entry decided (`inherited`)
+  const RSPEC = '  const usable = bySpec.filter((c) => c.g.mode === \'always\' || !c.g.spentAt), spec = usable.length ? viaRank(usable[0].via, usable[0].inherited) : -1;';
   ok(SRC.split(RSPEC).length === 2, 'ANCHOR: a key\'s claim (spec), spelled once');
-  const redSp = runPk(M.load('src/automation-keys.js', SRC.replace(RSPEC, "  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank((bySpec.find((c) => c.g.mode === 'always') || usable[0]).via) : -1;"), 'b3190-rank-by-ridden'));
+  const redSp = runPk(M.load('src/automation-keys.js', SRC.replace(RSPEC, "  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank((bySpec.find((c) => c.g.mode === 'always') || usable[0]).via, (bySpec.find((c) => c.g.mode === 'always') || usable[0]).inherited) : -1;"), 'b3190-rank-by-ridden'));
   ok(redSp.length === 1 && /the key\'s claim, not the grant ridden/.test(redSp[0]), 'MUTANT RED: ranking by the grant RIDDEN (an All-agents «Always» before the own once-grant) ⇒ adding that «Always» makes the key lose to a Task Group\'s (r1: not monotonic)', redSp);
 
   // PURE pickKey, the caller's Task Groups UNREADABLE: a key they decide is in the running ⇒ said by name
@@ -1899,7 +1901,8 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   const ob = uvb(A, OB);
   ok(ob.ok && ob.spend === true && ob.grant.id === 'ag-000000000002' && ob.via === 'conversation', 'two unspent once-grants admit (All agents, released; the one the owner\'s «Allow once» wrote) ⇒ the use spends its OWN', { grant: ob.grant && ob.grant.id, via: ob.via });
   ok(uvb(A, [G({ subject: 'group:T-1' }), G({ n: 2, subject: 'session:conv-b' })], { subjectGroups: ['T-1'] }).grant.id === 'ag-000000000002', '…an always use names its own grant too (the Task Group\'s comes second)');
-  const VSORT = '  const bySpec = cands.slice().sort((a, b) => viaRank(b.via) - viaRank(a.via));';
+  // lane lg-group-parents U3d: the order reads the parent step too (the line carries its comment)
+  const VSORT = '  const bySpec = cands.slice().sort((a, b) => viaRank(b.via, b.inherited) - viaRank(a.via, a.inherited));';
   ok(SRC.split(VSORT).length === 2, 'ANCHOR: useVerdict\'s specificity order, spelled once');
   const mo = uvb(M.load('src/automation-keys.js', SRC.replace(VSORT, '  const bySpec = cands.slice();'), 'b3190-once-store-order'), OB);
   ok(mo.ok && mo.grant.id === 'ag-000000000001', 'MUTANT RED: the store\'s order ⇒ the All-agents once-grant is spent and the answer\'s own stays behind (the next open runs with no card)', mo.grant && mo.grant.id);
@@ -1962,7 +1965,7 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   ok(listedAfterBoot(M.load('src/server/automation-engine.js', ENGS.replace(KLIVE, '      const gs = db.grants.filter((g) => g.keyId === k.id'), 'b3190-keys-store')) === true,   // stale-pins: kept — a deliberate mutant planting the pre-cure listing
     'MUTANT RED: keysFor over the store\'s rows ⇒ the dead once-grant is listed after a restart (a key the pick then refuses)');
   // (4) one law, one place: the rank is the grant model's
-  ok(/const viaRank = \(via\) => GM\.specificityOf\(via\);/.test(SRC) && GM.specificityOf('conversation') > GM.specificityOf('group') && GM.specificityOf('group') > GM.specificityOf('everyone') && GM.specificityOf('x') < GM.specificityOf('everyone')
+  ok(/const viaRank = \(via, inherited = false\) => GM\.specificityOf\(via, inherited\);/.test(SRC) && GM.specificityOf('conversation') > GM.specificityOf('group') && GM.specificityOf('group') > GM.specificityOf('everyone') && GM.specificityOf('x') < GM.specificityOf('everyone')
     && [GM.specificityOf('conversation'), GM.specificityOf('group'), GM.specificityOf('everyone'), GM.specificityOf(undefined), GM.specificityOf(['group']), GM.specificityOf('external')].join() === '2,1,0,-1,-1,-1',
     'follow-up (4): pickKey\'s rank IS the grant model\'s specificity (read, never restated)');
   // (5) a spent once-grant decides nothing — in the excepted branch as in the unreadable one

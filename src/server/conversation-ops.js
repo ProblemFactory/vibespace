@@ -442,7 +442,7 @@ function beltRow(r) {
 }
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
 const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
-function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null, ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null,
   // the manager design's piece 4 (conversations.resume): the hub's one line of resumes nobody pressed (src/server/resume-line.js), an
   // ended conversation's kept facts ({goal, timerMark, mode, cwd, hostId}), the archived list, its harness's row (src/resume-line.js
@@ -496,12 +496,16 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     return { ...r, ended: { ...r.ended, by: mine ? { kind: 'agent', actorId: by.actorId, name: by.name ? beltRow({ name: by.name }).name : null, ...(by.forced ? { forced: true } : {}) } : { kind: by.kind === 'agent' ? 'agent' : 'person' } } };
   };
   const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return []; } };
+  // lane lg-group-parents U3d: the ONE reader's ancestors; a read that throws (or answers no list) is null = UNREADABLE (its read, 2)
+  const lineageOfIds = (ids) => { if (typeof lineageOf !== 'function') return []; try { const l = lineageOf(ids); return Array.isArray(l) ? l : null; } catch { return null; } };
+  const targetOf = (base, inh) => ({ ...base, inherited: Array.isArray(inh) ? inh : [], ...(Array.isArray(inh) ? {} : { groupsUnreadable: true }) });
   /** The target, if the key reaches it → [s, id] | a named refusal (carrying the target's name for the owner's notice). */
   function reached(target, { caller, reach }) {
     const hit = findSession(target || caller.conversationId);
     if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
     const [s, id] = hit;
-    const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // + the hub's hold (lane bl-windows): a reach «… except G» never admits a target whose groups are unknown   // ONE rule: opener / self / the grant's reach (B-3190)
+    const gl = groupsOfLive(s, id);
+    const v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: gl, ...require('./groups-hold.js').fact() }, lineageOfIds(gl)));   // lane lg-group-parents U3d: + the lineage   // ONE rule: opener / self / the grant's reach (B-3190)
     if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id, by: (v && v.by) || null };   // lane end-obeys-verdict: how the key reached it (`opener` = it opened it)
   }
@@ -574,15 +578,15 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       if (typeof archive !== 'function') return { ok: false, code: 'not_ready', why: 'the archive path is not wired yet' };
       const hit = findSession(args.target);
       let f;   // the target's facts: { s?, id?, conversationId, sessionKey, name, groups }
-      if (hit) { const [s, id] = hit; f = { s, id, conversationId: idOf(s), sessionKey: keyOf(s), name: s.name || null, groups: groupsOfLive(s, id) }; }
+      if (hit) { const [s, id] = hit; const gl = groupsOfLive(s, id); f = { s, id, conversationId: idOf(s), sessionKey: keyOf(s), name: s.name || null, groups: gl, inherited: lineageOfIds(gl) }; }   /* lane lg-group-parents U3d */
       else {
         let d = null; try { d = deadOf(args.target); } catch { d = null; }
         if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target };
-        f = { s: null, id: null, conversationId: d.conversationId, sessionKey: d.sessionKey || `claude:${d.conversationId}`, name: d.name || null, groups: Array.isArray(d.groups) ? d.groups : [] };
+        f = { s: null, id: null, conversationId: d.conversationId, sessionKey: d.sessionKey || `claude:${d.conversationId}`, name: d.name || null, groups: Array.isArray(d.groups) ? d.groups : [], ...(d.inherited !== undefined ? { inherited: d.inherited } : {}) };   // lane lg-group-parents U3d (its read, 7): the lineage the stopped target was read with
       }
       const label = f.name || args.target;
       if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
-      const v = reach({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() });
+      const v = reach(targetOf({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() }, f.inherited !== undefined ? f.inherited : lineageOfIds(f.groups || [])));   // lane lg-group-parents U3d
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
       let asks; try { asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, target: label }; throw e; }   // B-44f3: For you held unread — its asks are unknown, never «none»
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };

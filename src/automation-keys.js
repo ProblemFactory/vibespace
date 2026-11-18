@@ -362,7 +362,8 @@ function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach
   if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };
   // THE ONE ADMISSION (lane grants-unify — src/grant-model.js admits): the target as the caller the grant's REACH would name
   // (B-3190: no grant row is a reach of its own — the `grants` a caller passes are not read)
-  const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String) };
+  // lane lg-group-parents U3d: + the target's lineage (the ONE reader's — conversation-ops hands it)
+  const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String), inheritedGroupIds: Array.isArray(t.inherited) ? t.inherited.filter(Boolean).map(String) : t.inherited, groupsUnreadable: t.groupsUnreadable === true };   // the U3d read (2, 3): a lineage that could not be read is unreadable
   if (t.groupsUnreadable === true) facts.groupsUnreadable = true;   // THE STORE HELD UNREAD (lane bl-windows): the hub hands it (a fact of the target) — a reach «…, except G» never admits a target whose groups are unknown
   const r = reachOf(reach) || 'opened';   // an unknown reach reads as the narrowest
   // the reach this use rides (`reachRows`, the riding grants' rows — useVerdict's), else the summary mapped
@@ -372,6 +373,9 @@ function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach
   if (rv.code === 'excepted') return { ok: false, code: 'excepted', reach: reachKind(r), why: 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it' };
   // THE STORE HELD UNREAD (the hold's law, 主开发 2026-11-19 05:42Z): a target whose Task Groups are unknown is refused BY NAME — never «not in the groups»
   if (rv.code === 'groups_unreadable') return { ok: false, code: 'groups_unreadable', reach: reachKind(r), why: 'the Task Groups could not be read just now, so whether this grant reaches that conversation is unknown — nothing was done; try again in a moment' };
+  // lane lg-group-parents U3d (its read, 2): the target's Task Groups or their parents could not be read — a reach the groups
+  // decide is never judged against none (a parent's «除了» must still leave the child's conversation out)
+  if (rv.code === 'groups_unreadable') return { ok: false, code: 'groups_unreadable', reach: reachKind(r), why: 'that conversation\'s Task Groups could not be read just now — call again in a moment' };
   const kind = reachKind(r);
   return { ok: false, code: 'not_granted', reach: kind, why: kind === 'groups'
     ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}) and the key did not open it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace)`
@@ -389,7 +393,7 @@ function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach
  * grant is: 'conversation' › 'group' › 'everyone', B-3190) | { ok: false, code } — in this order: the vault (everything stops
  * while it is locked), the key, its scope, the caller, the grant.
  */
-function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [], subjectGroupsUnreadable = false, subjectLive = true, verb = '', vaultState = 'locked' } = {}) {
+function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [], subjectGroupsUnreadable = false, subjectInherited = [], subjectLive = true, verb = '', vaultState = 'locked' } = {}) {
   if (vaultState !== 'unlocked') return { ok: false, code: 'vault_locked' };
   const k = keyOf(key);
   if (!k) return { ok: false, code: 'not_granted' };
@@ -400,7 +404,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   if (!external && !subjectLive) return { ok: false, code: 'subject_ended' };
   // an outside caller is judged by `external` grants ONLY; a conversation by THE ONE ADMISSION over each grant's use row
   // (lane grants-unify: its own conversation, one of its Task Groups, All agents — minus the members the owner left out) — never the other's
-  const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };
+  const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited, groupsUnreadable: !!subjectGroupsUnreadable };   // lane lg-group-parents U3d: + the caller's lineage
   const cands = [];
   let excepted = false, could = null;
   for (const g of (Array.isArray(grants) ? grants : []).map(grantOf)) {
@@ -409,7 +413,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
     if (g.subject === 'external') continue;
     const v = GM.admits([useRowOf(g)].filter(Boolean), facts);
     const canAdmit = !(g.mode === 'once' && g.spentAt);   // B-3190 follow-up: a spent once-grant can never admit — it decides nothing, excepted or undecided
-    if (v.ok) cands.push({ g, via: v.via }); else if (v.code === 'excepted' && canAdmit) excepted = true;
+    if (v.ok) cands.push({ g, via: v.via, inherited: v.inherited === true }); else if (v.code === 'excepted' && canAdmit) excepted = true;
     // B-3190 r1: a grant a Task Group decides, not judged (the groups unreadable), counts only when it COULD be used — a spent
     // once-grant could not, read or not; `could` = the best of them (how specific it could be, its mode) — pickKey's question
     else if (v.code === 'groups_unreadable' && canAdmit) { const c = { spec: viaRank(undecidedVia(g)), always: g.mode === 'always' }; if (!could || c.spec > could.spec || (c.spec === could.spec && c.always && !could.always)) could = c; }
@@ -419,11 +423,11 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   // B-3190: the MOST SPECIFIC grant is the one this use rides — the caller's own › a Task Group's › All agents' (a stable sort:
   // the store's order breaks a tie). A released once-grant to All agents is no longer spent by the call the owner's «Allow once»
   // answered (key-grant-everyone r2's minor: the grant the answer wrote stayed unspent, the next open ran with no card)
-  const bySpec = cands.slice().sort((a, b) => viaRank(b.via) - viaRank(a.via));
+  const bySpec = cands.slice().sort((a, b) => viaRank(b.via, b.inherited) - viaRank(a.via, a.inherited));   // lane lg-group-parents U3d (its read, 1): a parent's grant after the own group's
   // `spec` = the KEY's claim on this caller: its most specific grant that can be used (any mode — the caller's own once-grant
   // makes the key the caller's own even while an «Always» to All agents is the one ridden; r1: ranking by the ridden one was
   // not monotonic — adding an All-agents «Always» to a key made it lose to a Task Group's key)
-  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank(usable[0].via) : -1;
+  const usable = bySpec.filter((c) => c.g.mode === 'always' || !c.g.spentAt), spec = usable.length ? viaRank(usable[0].via, usable[0].inherited) : -1;
   const always = bySpec.filter((c) => c.g.mode === 'always');
   if (always.length) return { ok: true, grant: always[0].g, via: always[0].via, spec, spend: false, reach: widestReach(always.map((c) => c.g.reach)), reachRows: always.map((c) => reachRowOf(c.g)).filter(Boolean), ...cx };
   const once = bySpec.find((c) => c.g.mode === 'once' && !c.g.spentAt);
@@ -434,7 +438,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
 }
 /** How SPECIFIC an admission is — the grant model's own order (GM.specificityOf: its own › a Task Group's › All agents'), read,
  *  never restated (B-3190 follow-up); anything else ranks last. */
-const viaRank = (via) => GM.specificityOf(via);
+const viaRank = (via, inherited = false) => GM.specificityOf(via, inherited);   // lane lg-group-parents U3d: + a parent's group (the model's `inherited`)
 /** An undecided grant (a Task Group decides it, the groups unreadable) at best: a Task Group's when its row names one, else All agents'. */
 const undecidedVia = (g) => { const n = GM.normRow(useRowOf(g)); return n && n.ok && n.row.to.some((e) => e.kind === 'group') ? 'group' : 'everyone'; };
 
@@ -446,7 +450,7 @@ const undecidedVia = (g) => { const n = GM.normRow(useRowOf(g)); return n && n.o
  * the verb is asked for; none ⇒ not_granted; several ⇒ key_ambiguous (`names`). The caller's Task Groups unreadable and a key
  * they decide in the running ⇒ groups_unreadable (`names`), unless the caller's own grant wins whatever they read.
  */
-function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGroups = [], subjectGroupsUnreadable = false, verb = '' } = {}) {
+function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGroups = [], subjectGroupsUnreadable = false, subjectInherited = [], verb = '' } = {}) {
   const all = (Array.isArray(keys) ? keys : []).map(keyOf).filter(Boolean);
   const live = all.filter((k) => !k.revokedAt && k.scopes.includes(verb));
   if (want != null && want !== '') {
@@ -454,7 +458,7 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
     const k = all.find((x) => x.id === w) || all.filter((x) => x.name === w).sort((a, b) => (a.revokedAt ? 1 : 0) - (b.revokedAt ? 1 : 0))[0] || null;
     return k ? { ok: true, key: k, ask: false } : { ok: false, code: 'not_found' };
   }
-  const judged = live.map((k) => ({ k, v: useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb, vaultState: 'unlocked' }) }));
+  const judged = live.map((k) => ({ k, v: useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, subjectInherited, verb, vaultState: 'unlocked' }) }));
   const granted = judged.filter((x) => x.v.ok);
   // a key a Task Group decides, not judged (the caller's groups could not be read)
   const unread = judged.filter((x) => !x.v.ok && x.v.code === 'groups_unreadable').map((x) => x.k.name).slice(0, 20);
@@ -476,7 +480,7 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
   if (!live.length) {
     // lane key-folder-picker-all: a verb the owner took off the keys THIS caller holds is refused by name (verb_not_in_scope,
     // the keys named) — never a not_granted that reads as «ask for a grant»
-    const held = all.filter((k) => !k.revokedAt && useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb: k.scopes[0], vaultState: 'unlocked' }).ok);
+    const held = all.filter((k) => !k.revokedAt && useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, subjectInherited, verb: k.scopes[0], vaultState: 'unlocked' }).ok);
     return held.length ? { ok: false, code: 'verb_not_in_scope', names: held.map((k) => k.name).slice(0, 20) } : { ok: false, code: 'not_granted' };
   }
   // B-3190 (r2's minor): several keys hold the verb, one a Task Group decides could not be judged ⇒ said by name — key_ambiguous

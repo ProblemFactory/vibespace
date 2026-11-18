@@ -51,6 +51,9 @@ const crypto = require('crypto');
 const A = require('../automation-keys.js');
 const { tokenMatches } = require('../pairing-token.js');   // lane fleet-feedback-marks: the maintainer key's sha, compared in constant time
 const GM = require('../grant-model.js');   // lane grants-unify: THE grant model (admits)
+// lane lg-group-parents U3d (its read, 3): a caller's lineage as the model reads it — none, a list, or (anything else) as handed:
+// the model reads that as unreadable, never as «no parents»
+const lineageIn = (x) => (x == null ? [] : Array.isArray(x) ? x.map(String) : x);
 const GS = require('./grants-store.js');   // lane grants-unify: a grant's WHO and REACH are rows of the ONE grants store
 const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
 
@@ -245,7 +248,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // own answer (once or always) settles only that card, in answer() (q-048 verify M3: one card per verb)
     // lane grants-unify: «covers» is THE model's answer over the new grant's use row (its own conversation, one of its
     // Task Groups — minus the members the owner left out), never a hand-written membership test
-    const covers = (g, q) => GM.admits([A.useRowOf(g)].filter(Boolean), { conversationKeys: [String(q.subject).replace(/^session:/, '')], groupIds: (q.groups || []).map((x) => String(x).replace(/^group:/, '')), ...(q.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() }).ok;   // the ask's RECORDED groups judged under the hold (held ⇒ never «covered»: the card stays the person's)
+    const covers = (g, q) => GM.admits([A.useRowOf(g)].filter(Boolean), { conversationKeys: [String(q.subject).replace(/^session:/, '')], groupIds: (q.groups || []).map((x) => String(x).replace(/^group:/, '')), ...(q.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() , inheritedGroupIds: lineageIn(q.inherited) }).ok;   // the ask's RECORDED groups judged under the hold (held ⇒ never «covered»: the card stays the person's)   // lane lg-group-parents U3d: + the asker's lineage (recorded on the ask)
     if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => covers(g, q))) settle(q, 'always', { answeredBy: by, why: 'granted' });
     return { ok: true, added };
   }
@@ -407,7 +410,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (open && asks.has(open)) { asks.get(open).waiters.push(waiter); withdrawOn(asks.get(open)); return; }
       const askId = randomBytes(16).toString('hex');
       const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
-      const q = { askId, pair, keyId: key.id, keyName: key.name, subject, groups: (caller.groups || []).map((g) => `group:${g}`), ...(caller.groupsUnreadable === true ? { groupsUnreadable: true } : {}), sessionKey: caller.sessionKey || null, who, verb, askedAt: now(), waiters: [waiter], todoId: null, timer: null };
+      const q = { askId, pair, keyId: key.id, keyName: key.name, subject, groups: (caller.groups || []).map((g) => `group:${g}`), inherited: lineageIn(caller.inherited),   /* lane lg-group-parents U3d */ ...(caller.groupsUnreadable === true ? { groupsUnreadable: true } : {}), sessionKey: caller.sessionKey || null, who, verb, askedAt: now(), waiters: [waiter], todoId: null, timer: null };
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -573,14 +576,15 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (vaultState() !== 'unlocked') return done(named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked', null, { args: v0.args }));
     db = read();
     const groups = Array.isArray(caller.groups) ? caller.groups : [];
+    const inherited = lineageIn(caller.inherited);   // lane lg-group-parents U3d: the caller's lineage (the wiring's ONE reader)
     // lane key-grant-everyone r2: the caller's Task Groups could not be read (the wiring says so) ⇒ a group «除了» is never
     // judged against [] — that admitted the very conversation the owner left out of All agents (groups_unreadable instead)
     const groupsUnreadable = !!caller.groupsUnreadable;
-    const pick = A.pickKey({ keys: db.keys, grants: liveGrants(), want, subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, verb });   // B-3190 r1: the grants the verdict below judges (a once-grant dead since a lock or a restart ranks nothing)
+    const pick = A.pickKey({ keys: db.keys, grants: liveGrants(), want, subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectInherited: inherited, verb });   // B-3190 r1: the grants the verdict below judges (a once-grant dead since a lock or a restart ranks nothing)
     // lane key-folder-picker-all: the keys this conversation holds lack the verb (the owner took it off, or never gave it) ⇒ said by name
     if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : pick.code === 'verb_not_in_scope' ? `the key${pick.names.length > 1 ? 's' : ''} granted to this conversation (${pick.names.join(', ')}) do${pick.names.length > 1 ? '' : 'es'} not hold ${verb} — the owner adds it with Edit… in the Vault window` : pick.code === 'groups_unreadable' ? `this conversation's Task Groups could not be read just now, so which key it may use for ${verb} could not be judged (${pick.names.join(', ')}) — nothing ran; call again in a moment${pick.works ? `, or call with --key ${pick.works.id} («${pick.works.name}», granted to this conversation now)` : ''}` : null), args: v0.args });
     const key = pick.key;
-    let verdict = A.useVerdict({ key, grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
+    let verdict = A.useVerdict({ key, grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectInherited: inherited, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
     let asked = null;
     if (!verdict.ok && (verdict.code === 'not_granted' || verdict.code === 'once_spent')) {
       // lane automation-open-limits: an open its key may not make files no card — the owner is never asked about it
@@ -593,7 +597,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (r.outcome === 'unfiled') return done({ ...named('ask_unfiled', 'the question could not be filed in For you'), args: v0.args }, key.id, { ask: 'unfiled' });
       if (r.outcome !== 'allowed' && r.outcome !== 'always') return done({ ...named(r.outcome === 'expired' ? 'ask_expired' : 'ask_denied'), args: v0.args }, key.id, { ask: r.outcome });
       db = read();
-      verdict = A.useVerdict({ key: keyById(key.id), grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
+      verdict = A.useVerdict({ key: keyById(key.id), grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectInherited: inherited, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
       // once: the grant the answer wrote — spent by THIS call (a joined call finds it spent and asks again)
     }
     // lane grants-unify: a conversation the owner LEFT OUT of the key's Task Group grant is refused BY NAME — never a first-use card
@@ -676,13 +680,14 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const subject = caller && caller.conversationId ? `session:${caller.conversationId}` : null;
     if (!subject) return [];
     // lane grants-unify: THE ONE ADMISSION over each grant's use row (its own conversation, a Task Group — minus the members left out)
-    const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || [], groupsUnreadable: !!caller.groupsUnreadable };   // lane key-grant-everyone r2
+    const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || [], inheritedGroupIds: lineageIn(caller.inherited), groupsUnreadable: !!caller.groupsUnreadable };   // lane lg-group-parents U3d   // lane key-grant-everyone r2
     const lg = liveGrants();   // cure 2: once per call (it was once per key: every grant copied for each key on the main loop)
+    const rankOf = (g) => { const v = GM.admits([A.useRowOf(g)].filter(Boolean), facts); return A.viaRank(v.via, v.inherited === true); };   // lane lg-group-parents U3d (its read, 1)
     return db.keys.filter((k) => !k.revokedAt).map((k) => {
       const gs = lg.filter((g) => g.keyId === k.id && g.subject !== 'external' && GM.admits([A.useRowOf(g)].filter(Boolean), facts).ok && !(g.mode === 'once' && g.spentAt));   // B-3190 follow-up: the LIVE grants (a once-grant dead since a lock or a restart is listed nowhere)
       const always = gs.filter((g) => g.mode === 'always');
       return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode, reach: g.reach })), limits: k.limits,
-        reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs.slice().sort((a, b) => A.viaRank(GM.admits([A.useRowOf(b)].filter(Boolean), facts).via) - A.viaRank(GM.admits([A.useRowOf(a)].filter(Boolean), facts).via))[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's — B-3190 r1: its most specific once-grant)
+        reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs.slice().sort((a, b) => rankOf(b) - rankOf(a))[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's — B-3190 r1: its most specific once-grant)
     }).filter(Boolean);
   }
   /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every live key grant judged for ONE conversation by the

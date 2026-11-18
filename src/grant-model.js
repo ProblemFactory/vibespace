@@ -451,8 +451,10 @@ function factsOf(f = {}) {
 }
 const SPECIFIC = Object.freeze({ conversation: 2, group: 1, everyone: 0 });
 /** How SPECIFIC an admission's kind is — its own › a Task Group's › All agents' (B-3190 follow-up: the automation keys' pick
- *  reads THIS order, never a copy); a kind it does not know ranks below every one. */
-const specificityOf = (kind) => (typeof kind === 'string' && Object.prototype.hasOwnProperty.call(SPECIFIC, kind) ? SPECIFIC[kind] : -1);
+ *  reads THIS order, never a copy); a kind it does not know ranks below every one. lane lg-group-parents U3d (its read, 1): an
+ *  admission a PARENT's group entry decided (`admits`' `inherited: true`, handed as the second argument) ranks below the caller's
+ *  own Task Group's and above All agents' — a parent's key never outranks the one granted to the caller's own group. */
+const specificityOf = (kind, inherited = false) => (typeof kind === 'string' && Object.prototype.hasOwnProperty.call(SPECIFIC, kind) ? SPECIFIC[kind] - (inherited === true && kind === 'group' ? 0.5 : 0) : -1);
 /** ONE row against the caller → `{state:'ok', hits}` | `{state:'excepted', entry}` | `{state:'unreadable'}` |
  *  `{state:'unknown', why}` | `{state:'no'}`. */
 function judgeRow(raw, F) { return judgePrepared(normRow(raw), F); }

@@ -224,14 +224,14 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
 // lane key-grant-everyone r2: a read that failed is SAID (`unreadable`) — the caller's groups judge a Task Group «除了», and []
 // would admit the conversation the owner left out of All agents (the engine refuses groups_unreadable instead)
-const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { const ids = grantMemberIds(tasks, { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); return { ids: [...ids], unreadable: !!ids.unread }; } catch { return { ids: [], unreadable: true }; } };   // held ⇒ throws: unreadable; B-55dc ⇒ unreadable (lane bl-windows seam)
+const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { const ids = grantMemberIds(tasks, { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); const gg = tasks.grantGroupsOf(ids); return { ids: gg.ids, inherited: gg.inherited, unreadable: !!ids.unread }; } catch { return { ids: [], unreadable: true }; } };   // held ⇒ throws: unreadable; B-55dc ⇒ unreadable (lane bl-windows seam) · lane lg-group-parents U3d: + the lineage over the same ids (the ONE reader)
 const automationGroupsOf = (s, id) => automationGroupsRead(s, id).ids;
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
 const automationSettings = require('./harness-config-sync.js').accessorsFor({ serverSetting, harnesses: require('../harnesses') });
 // the caller = the vsst_'s conversation; the live list IS the running conversations (an ended one's token is unknown ⇒ 401) —
 // the automation doors' and the two-step code door's (design q-047 L1) ONE reading of a session token
-const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; const g = automationGroupsRead(s, id); return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: g.ids, groupsUnreadable: g.unreadable,
+const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; const g = automationGroupsRead(s, id); return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: g.ids, inherited: g.inherited || [], groupsUnreadable: g.unreadable,
   scope: String(s._webuiId || id), conv: require('../claude-lock-capture.js').addressableId(s) }; } return null; };   // scope / conv: lane vault-agent-own — the conversation's registered and durable ids (an entry it stored itself is its own)
 // the grant pickers' subjects: every running conversation and every Task Group (automation keys' 授权给…, two-step codes' 用于…)
 const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, ...((gr) => ({ groupIds: gr.ids, ...(gr.unreadable ? { groupsUnreadable: true } : {}) }))(automationGroupsRead(s, id)) /* lane grants-unify: the «除了» row offers a picked group's members; the follow-owed read: the hold rides it (the login dialog's «by what» judges them) */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
@@ -279,7 +279,9 @@ function endedKeyOf(target) {
   if (st.customNames && st.customNames[sessionKey]) name = String(st.customNames[sessionKey]);
   let groups = [];
   try { groups = tasks ? tasks.groupsForSession({ sessionKey }).map((g) => g.id) : []; } catch { groups = []; }
-  return { conversationId: cid, sessionKey, name, groups };
+  let inherited = [];   // lane lg-group-parents U3d: a stopped target's lineage too (restack 415: deadOf's body moved here)
+  try { inherited = tasks ? tasks.grantGroupsOf(groups).inherited : []; } catch { inherited = null; }   // null = could not be read (the reach refuses by name)
+  return { conversationId: cid, sessionKey, name, groups, inherited };
 }
 const isArchivedKey = (key) => !!(persistenceRouter && typeof persistenceRouter.isArchived === 'function' && persistenceRouter.isArchived(key));   // persistence's ONE reader (in memory; a bare-id entry answers too)
 const resumeRowOf = (backend) => RL_PURE.harnessRowOf(require('../backend-caps.js').capsOf(backend));
@@ -340,7 +342,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
   // write, the For-you store's open asks of a conversation (its own: by agent, not a notice) and their dismissal, the turn fact, and
   // an ENDED conversation's facts (its session key from the stores that still name it — the sidebar's names, the Task Groups — else claude:<id>)
-  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf,
+  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf, lineageOf: (ids) => { const tk = getTasks && getTasks(); return tk ? tk.grantGroupsOf(ids).inherited : []; },
     archive: (key) => persistenceRouter.archiveSession(key),
     asksOf: (key) => { if (userTodos.isHeldUnread?.()) throw Object.assign(new Error(userTodos.unreadRefusal('archiving a conversation (its open asks are unread)')), { code: 'todos-unread' }); try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },   // B-44f3: held ⇒ refused by name (never «no open asks»)
     resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
