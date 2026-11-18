@@ -77,7 +77,7 @@ function grantDialog({ id, scope, resource, name, title, head = null, consequenc
   const own = [...roster, ...extra.filter((x) => !roster.some((r) => r.key === x.key))];
   const isStopped = (k) => k.startsWith('conversation:') && !own.some((r) => r.key === pk(k));
   // a stopped conversation's lock says so in its OWN words (a locked row hides the row's own hint, «not running now» among them)
-  const locked = plan.locked.map((l) => ({ key: pk(l.key), why: (l.still ? stillWords(l.through) : throughWords(l.through)) + (l.key === 'everyone' ? evWords : '') + (isStopped(l.key) ? ` · ${words.notRunning}` : ''), door: { label: doorWords(l.through), run: () => openWider && openWider(l.through) } }));
+  const locked = plan.locked.map((l) => ({ key: pk(l.key), why: (l.still ? stillWords(l.through) : throughWords(l.through)) + (l.key === 'everyone' ? evWords : '') + (isStopped(l.key) ? ` · ${words.notRunning}` : ''), door: { label: doorWords(), run: () => openWider && openWider(l.through) } }));
   const hintOf = new Map();
   for (const [k, sc] of Object.entries(plan.also)) hintOf.set(pk(k), alsoWords(sc) + (k === 'everyone' ? evWords : ''));
   for (const [k, sc] of Object.entries(plan.leftOut)) hintOf.set(pk(k), leftOutWords(sc));

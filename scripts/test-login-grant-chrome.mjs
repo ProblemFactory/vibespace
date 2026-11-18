@@ -274,12 +274,12 @@ for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { v
   p.close();
 }
 console.log('⑩ a STOPPED conversation the star row admits — locked, and its lock says «当前未运行» in its own words');
-{
-  const p = await page({ vw: 960, vh: 900, query: 'mode=login&star=gone', sel: LOGIN + ' .pp-row[data-key="agent:conv-gone"]' });
+for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { vw: 960, vh: 900 }]]) {
+  const p = await page({ ...o, query: 'mode=login&star=gone', sel: LOGIN + ' .pp-row[data-key="agent:conv-gone"]' });
   const r = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const chip = [...d.querySelectorAll('.pp-chip-locked')].find((c) => c.dataset.key === 'agent:conv-gone'); const row = d.querySelector('.pp-row[data-key="agent:conv-gone"]');
     return { chip: chip ? chip.textContent : '', rowLocked: row ? row.classList.contains('pp-locked') : null, rowWhy: row ? ((row.querySelector('.pp-lock-why') || {}).textContent || '') : '', rowHintShown: row ? [...row.querySelectorAll(':scope > .pp-hint:not(.pp-lock-why)')].filter((h) => getComputedStyle(h).display !== 'none').length : -1 }; })()`);
   ok(/经由：任何网站/.test(r.chip) && /当前未运行/.test(r.chip) && r.rowLocked === true && /当前未运行/.test(r.rowWhy) && r.rowHintShown === 0,
-    'a stopped conversation the star row admits: its locked chip and its locked row say «经由：任何网站 · 当前未运行» — the lock carries the words its row\'s hidden hint used to', r);
+    `${tag}: a stopped conversation the star row admits: its locked chip and its locked row say «经由：任何网站 · 当前未运行» — the lock carries the words its row's hidden hint used to`, r);
   p.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);

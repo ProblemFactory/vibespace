@@ -35,7 +35,7 @@ function principalName(e, data) {
  *  and the openers `grant`, `anySite`, `anyAccount`. */
 export function loginExtras(row, data, { refresh, show, doors: open = {} } = {}) {
   const entry = ((data && data.entries) || []).find((e) => e.name === row.entry) || { name: row.entry, grants: [] };
-  if (show) show.title = t('Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names');
+  if (show) show.title = t('Shows the password — after the second password. VibeSpace never hands it to an agent: it types it itself, only on the matching site, into the field the agent names');
   const box = el('div', 'vw-ak vw-login');
   box.dataset.login = row.entry;
   // what it holds FIRST — the bound two-step code leads (the owner 2026-11-17: «比如绑定了哪个两步验证码»)

@@ -236,27 +236,33 @@ console.log('⑦ THE WALK (主开发 00:28Z; 03:08Z): for EVERY case of the thre
   const WALK_PROBE = '#walk-oracle';
   const factsOf = (s) => (s.key === 'everyone' ? { conversationKey: WALK_PROBE } : s.key.startsWith('group:') ? { conversationKey: WALK_PROBE, groupIds: [s.key.slice(6)] } : { conversationKey: s.key.slice(13), groupIds: s.groupIds });
   const named = (o, p) => !!o && [...o.to, ...o.except].some((q) => q === p);
-  // THE CASES, computed ONCE (they do not depend on the drawing): the rows, «by what», the oracle per scope and subject
-  const CASES = [];
-  let byWhatAgrees = 0, byWhatDiffers = 0; const differs = [];
-  for (const ta of OPTIONS) for (const aa of OPTIONS) for (const as of OPTIONS) {
-    const all = { 'this-account': ta, 'any-account': aa, 'any-site': as };
-    const raw = (sc) => (all[sc] ? [row(RES[sc], all[sc].to, all[sc].except)] : []);
-    const bw = BL.byWhatOf({ rows: { thisAccount: raw('this-account'), anyAccount: raw('any-account'), anySite: raw('any-site') }, subjects: probes });
-    for (const scope of M.SCOPES) {
-      const at = M.SCOPES.indexOf(scope);
-      const rows = {};
-      for (const sc of M.SCOPES) if (M.SCOPES.indexOf(sc) >= at) rows[sc] = all[sc] || (sc === scope ? { to: [], except: [] } : null);
-      const subjects = M.SCOPES.some((sc) => M.SCOPES.indexOf(sc) >= at && named(all[sc], X)) ? [...BASE_SUBJECTS, XS] : BASE_SUBJECTS;
-      const oracle = {};
-      for (const s of subjects) {
-        oracle[s.key] = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && all[sc] && GM.admits(raw(sc), factsOf(s)).ok);
-        const viaBw = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && (bw[s.key] || []).includes(sc));
-        if (JSON.stringify(viaBw) === JSON.stringify(oracle[s.key])) byWhatAgrees++; else { byWhatDiffers++; if (differs.length < 3) differs.push({ all, scope, subject: s.key, viaBw, oracle: oracle[s.key] }); }
+  // THE CASES, built by ONE function from a given «by what» module (the real one for the walk; the seventh control feeds it a
+  // mutant — 主开发 07:51Z: the control runs THIS code, not a copy of it): the rows, «by what», the oracle per scope and subject,
+  // and the agreement of the two oracles. `stopAfter` ends it at that many disagreements.
+  const buildCases = (BLx, stopAfter = Infinity) => {
+    const cases = []; let agrees = 0, differ = 0; const first = [];
+    for (const ta of OPTIONS) for (const aa of OPTIONS) for (const as of OPTIONS) {
+      const all = { 'this-account': ta, 'any-account': aa, 'any-site': as };
+      const raw = (sc) => (all[sc] ? [row(RES[sc], all[sc].to, all[sc].except)] : []);
+      const bw = BLx.byWhatOf({ rows: { thisAccount: raw('this-account'), anyAccount: raw('any-account'), anySite: raw('any-site') }, subjects: probes });
+      for (const scope of M.SCOPES) {
+        const at = M.SCOPES.indexOf(scope);
+        const rows = {};
+        for (const sc of M.SCOPES) if (M.SCOPES.indexOf(sc) >= at) rows[sc] = all[sc] || (sc === scope ? { to: [], except: [] } : null);
+        const subjects = M.SCOPES.some((sc) => M.SCOPES.indexOf(sc) >= at && named(all[sc], X)) ? [...BASE_SUBJECTS, XS] : BASE_SUBJECTS;
+        const oracle = {};
+        for (const s of subjects) {
+          oracle[s.key] = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && all[sc] && GM.admits(raw(sc), factsOf(s)).ok);
+          const viaBw = M.SCOPES.filter((sc) => M.SCOPES.indexOf(sc) >= at && (bw[s.key] || []).includes(sc));
+          if (JSON.stringify(viaBw) === JSON.stringify(oracle[s.key])) agrees++; else { differ++; if (first.length < 3) first.push({ all, scope, subject: s.key, viaBw, oracle: oracle[s.key] }); if (differ >= stopAfter) return { cases, agrees, differ, first }; }
+        }
+        cases.push({ all, scope, at, rows, subjects, bw, oracle });
       }
-      CASES.push({ all, scope, at, rows, subjects, bw, oracle });
     }
-  }
+    return { cases, agrees, differ, first };
+  };
+  const built = buildCases(BL);
+  const CASES = built.cases, byWhatAgrees = built.agrees, byWhatDiffers = built.differ, differs = built.first;
   const outOf = (o, s) => !!o && o.except.some((p) => M.principalKeyOf(p) === s.key || (s.groupIds || []).some((g) => M.principalKeyOf(p) === `group:${g}`));
   const holdsEveryone = (o) => !!o && o.to.some((p) => p.kind === 'everyone');
   const walk = (Mod, stopAfter = Infinity) => {
@@ -315,16 +321,8 @@ console.log('⑦ THE WALK (主开发 00:28Z; 03:08Z): for EVERY case of the thre
   // only in a row's exceptions is never asked) — compiled into a copy of src/browser-login.js; the two oracles part
   const BLm = (() => { const file = path.join(REPO, 'src/browser-login.js'); const src = fs.readFileSync(file, 'utf8'); const from = '[...(r && Array.isArray(r.to) ? r.to : []), ...(r && Array.isArray(r.except) ? r.except : [])]';
     if (src.split(from).length !== 2) throw new Error('mutant: byWhatOf\'s probing line not found exactly once'); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.split(from).join('[...(r && Array.isArray(r.to) ? r.to : [])]'), file); return m.exports; })();
-  let parted = null;
-  for (const ta of OPTIONS) { for (const aa of OPTIONS) { for (const as of OPTIONS) {
-    const all = { 'this-account': ta, 'any-account': aa, 'any-site': as };
-    const raw = (sc) => (all[sc] ? [row(RES[sc], all[sc].to, all[sc].except)] : []);
-    if (!M.SCOPES.some((sc) => named(all[sc], X))) continue;
-    const bwm = BLm.byWhatOf({ rows: { thisAccount: raw('this-account'), anyAccount: raw('any-account'), anySite: raw('any-site') }, subjects: probes });
-    const viaBw = M.SCOPES.filter((sc) => (bwm[XS.key] || []).includes(sc)), oracle = M.SCOPES.filter((sc) => all[sc] && GM.admits(raw(sc), factsOf(XS)).ok);
-    if (JSON.stringify(viaBw) !== JSON.stringify(oracle)) { parted = { all, viaBw, oracle }; break; }
-  } if (parted) break; } if (parted) break; }
-  ok(!!parted && parted.oracle.length > 0 && parted.viaBw.length === 0, 'RED CONTROL (07:17Z — byWhatOf without its «除了» half): the two oracles part — a stopped conversation a row leaves out, admitted by another row, is never asked by «by what»; the grant model admits it', parted);
+  const parted = buildCases(BLm, 1);
+  ok(parted.differ > 0 && parted.first.some((f) => f.subject === XS.key && f.oracle.length > 0 && f.viaBw.length === 0), 'RED CONTROL (07:17Z; 07:51Z — through leg ⑦\'s OWN code, buildCases): byWhatOf without its «除了» half makes the two oracles part — a stopped conversation a row leaves out, admitted by another row, is never asked by «by what»; the grant model admits it', parted.first[0]);
   const GS2 = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-grants.js'), 'utf8');
   ok(/\+ \(isStopped\(l\.key\) \? ` · \$\{words\.notRunning\}` : ''\)/.test(GS2), '(4) a stopped conversation drawn locked says «not running now» in the lock\'s own words (a locked row hides the row\'s own hint)');
   // the dialog draws from the plan and nothing else

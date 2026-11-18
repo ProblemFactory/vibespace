@@ -11424,7 +11424,7 @@ export default {
   "Site: {site}": "网站：{site}", // the owner 2026-11-17: who may have a web login filled
   "Any site": "任何网站",
   "This account": "这个账号",
-  "Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names": "显示密码 — 先输入第二道密码。VibeSpace 不会把密码交给 agent：只由 Hub 在匹配的网站上填进 agent 指定的字段",
+  "Shows the password — after the second password. VibeSpace never hands it to an agent: it types it itself, only on the matching site, into the field the agent names": "显示密码 — 先输入第二道密码。VibeSpace 不会把密码交给 agent：只由 VibeSpace 自己在匹配的网站上填进 agent 指定的字段",
   "Filled for:": "可为谁填入：",
   "Choose who may sign in with this login — VibeSpace never hands them the password": "选择谁可以用这个登录 — VibeSpace 不会把密码交给他们",
   "For": "范围",

@@ -11423,7 +11423,7 @@ export default {
   "Site: {site}": "サイト：{site}", // the owner 2026-11-17: who may have a web login filled
   "Any site": "すべてのサイト",
   "This account": "このアカウント",
-  "Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names": "パスワードを表示します — 2 つ目のパスワードの後で。VibeSpace はエージェントにパスワードを渡しません：一致するサイトでのみ、エージェントが指定した欄に Hub が入力します",
+  "Shows the password — after the second password. VibeSpace never hands it to an agent: it types it itself, only on the matching site, into the field the agent names": "パスワードを表示します — 2 つ目のパスワードの後で。VibeSpace はエージェントにパスワードを渡しません：一致するサイトでのみ、エージェントが指定した欄に VibeSpace 自身が入力します",
   "Filled for:": "入力を許可：",
   "Choose who may sign in with this login — VibeSpace never hands them the password": "このログインでサインインできる対象を選びます — VibeSpace はパスワードを渡しません",
   "For": "範囲",
