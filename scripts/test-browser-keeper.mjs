@@ -416,7 +416,7 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
     const realEnsure = ATL.ensureSocketDir, realSpawn = ATL.spawnChrome;
     const BRANCHES = [
       { label: 'lock', code: 'profile_locked', words: /locked under another machine's name \(elsewhere, pid/, plant: (pr) => { fs.mkdirSync(pr.dir, { recursive: true }); fs.symlinkSync(`elsewhere-${deadPid}`, path.join(pr.dir, 'SingletonLock')); },
-        drop: ["if (!lk.ok) { const e = failed(lk.code, lk.error);", "if (!lk.ok) { const e = failed(lk.code, lk.error, {}, { said: true });"] },
+        drop: ["\n    if (!lk.ok) { const e = failed(lk.code, lk.error);", "\n    if (!lk.ok) { const e = failed(lk.code, lk.error, {}, { said: true });"] }, // the ATTACH road's (4 spaces — the driver road's has 6)
       { label: 'socket-dir', code: 'socket_dir_unavailable', words: /planted: the socket directory cannot be used/, plant: () => { ATL.ensureSocketDir = () => ({ ok: false, code: 'socket_dir_unavailable', error: 'planted: the socket directory cannot be used' }); },
         drop: ['if (!so.ok) throw failed(so.code, so.error);', 'if (!so.ok) throw failed(so.code, so.error, {}, { said: true });'] },
       { label: 'spawn', code: 'launch_failed', words: /planted: Chrome could not be started/, plant: () => { ATL.spawnChrome = async () => ({ ok: false, code: 'launch_failed', error: 'planted: Chrome could not be started' }); },
