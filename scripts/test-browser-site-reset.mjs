@@ -38,7 +38,6 @@ const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const B = require('../src/browser-profiles.js');
 const SW = require('../src/browser-switch.js');
-const ST = require('../src/browser-stuck.js');
 const K = require('../src/server/browser-keeper.js');
 const D = require('../src/server/browser-dialogs.js');
 const PR = require('../src/server/browser-propose.js');
@@ -458,8 +457,7 @@ try {
     // verify r1 (the silent incident): a verb of A that TIMED OUT there is told, without an address, with the way out
     const auA = await j('POST', '/api/agent/browser/audit', { profile: shared.id, verb: 'snapshot', ok: false, timedOut: true }, as(sA));
     ok(auA.status === 200 && auA.json.dialog && auA.json.dialog.loopShared === true && auA.json.dialog.loop === null && !/bank\.test/.test(JSON.stringify(auA.json.dialog)), 'the audit of a timed-out verb on the unattributed shared browser says `loopShared` and carries NO address', auA.json.dialog);
-    const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-    ok(/after\.loopShared && !after\.loop && \(code !== 0 \|\| timedOut\)[^\n]*DS\.loopSharedText\(\)\} \[navigation_loop_shared\]/.test(cliSrc) && /cannot tell whether it is yours/.test(ST.loopSharedText()) && /tab close/.test(ST.loopSharedText()) && /site-reset --host <host>/.test(ST.loopSharedText()) && !/https?:/.test(ST.loopSharedText()), 'the CLI prints THE sentence (no address; `tab close`, `tab new`, `site-reset --host`) on a failed or timed-out verb there [navigation_loop_shared]');
+    // (the CLI's shared-loop sentence pin of data/bin/vibespace-browser: MOVED to the fast scripts/test-browser-site-reset-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
     // attribution from the keeper's own knowledge (the production wiring unions it with a live view's active target)
     const ht = keeper.holderTabs(shared.id, sA._browserKey);
     const leaseA = keeper.leasesFor(sA._browserKey).find((l) => l.profileId === shared.id);
