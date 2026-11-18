@@ -3255,6 +3255,21 @@ const shortSha = (s) => String(s || '').slice(0, 8);
 // of it still BLOCKS (as a red whose failures are unknown — only a FULL green on a descendant clears it). `failed` / `selected` /
 // `partial` / `absent` that are not lists of names are no list.
 const strList = (x) => Array.isArray(x) && x.every((v) => typeof v === 'string');
+/** PURE (B-479e's cure's read, 主开发 09:32Z): a commit's OWN table, read from its scripts/ci.mjs TEXT — every name the SUITES
+ *  array names, with its tier when its row has the shape `{ name: 'x', tier: 'y'` — the tier right after the name (every row today,
+ *  one line each; a census leg pins it) — else null (a shape this reader does not know). ok false: no SUITES array to read. A name outside SUITES (EXCLUDED, gone) is
+ *  no key. → { ok, tiers: Map<name, tier|null> } */
+export function tableTiersOf(text) {
+  const a = typeof text === 'string' ? text.indexOf('export const SUITES = [') : -1, b = a < 0 ? -1 : text.indexOf('\n];', a);
+  const tiers = new Map();
+  if (a < 0 || b < 0) return { ok: false, tiers };
+  const body = text.slice(a, b);
+  for (const m of body.matchAll(/\bname:\s*(['"`])([^'"`\n]+)\1/g)) {
+    const t = /\{\s*$/.test(body.slice(Math.max(0, m.index - 8), m.index)) && m[1] === "'" ? /^,\s*tier:\s*'(\w+)'/.exec(body.slice(m.index + m[0].length, m.index + m[0].length + 40)) : null;
+    if (!tiers.has(m[2]) || tiers.get(m[2]) === null) tiers.set(m[2], t ? t[1] : null);
+  }
+  return { ok: true, tiers };
+}
 /** PURE: the heavy table a run was judged by (B-479e (2)) — its heavy names, sorted, and their digest; a FULL green carries it. */
 export function heavyTableOf(suites) {
   const heavy = suites.filter((s) => s.tier === 'heavy').map((s) => s.name).sort();
@@ -3587,14 +3602,15 @@ export function heavyBlocker({ dir, head, repoRoot = repo, resolveShort, peelFul
   // commit's own table — its scripts/ci.mjs row `{ name: 'X', tier: 'heavy'` (every row is one line, the tier right after the name)
   // — never of whether scripts/X.mjs exists (B-479e's must, 主开发 08:53Z: a red on a suite moved to the fast tier could never clear,
   // since no list run can name a fast suite, and the doors the block names could not open it). One `git show` per commit asked,
-  // memoised; a commit whose table cannot be read keeps every name heavy (fail closed).
+  // memoised as its name → tier map (tableTiersOf), never the text. FAIL CLOSED: a commit whose table cannot be read, or a row of
+  // a shape the reader does not know, keeps the name heavy; a name outside the commit's SUITES is no heavy suite there.
   const tableAt = new Map(), heavyAt = (c, f) => {
-    if (!tableAt.has(c)) { const r = spawnSync('git', ['-C', repoRoot, 'show', `${c}:scripts/ci.mjs`], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 << 20 }); tableAt.set(c, r.status === 0 ? r.stdout : null); }
-    const t = tableAt.get(c);
-    if (t == null) return true;
-    if (!/^[\w.-]+$/.test(f)) return false;
-    const row = new RegExp(`\\{\\s*name:\\s*'${f.replace(/\./g, '\\.')}',\\s*tier:\\s*'(\\w+)'`).exec(t);
-    return !!row && row[1] === 'heavy';
+    if (!tableAt.has(c)) { const r = spawnSync('git', ['-C', repoRoot, 'show', `${c}:scripts/ci.mjs`], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 << 20 }); tableAt.set(c, r.status === 0 ? tableTiersOf(r.stdout) : { ok: false, tiers: new Map() }); }
+    const { ok, tiers } = tableAt.get(c);
+    if (!ok) return true;
+    if (!tiers.has(f)) return false;
+    const tier = tiers.get(f);
+    return tier === null || tier === 'heavy';
   };
   const tableKnows = (g, f) => g.table === undefined || (!!g.table && strList(g.table.heavy) && (g.table.heavy.includes(f) || !heavyAt(g.commit, f)));
   // a suite that SKIPPED ITSELF in a green (B-479e (1), the box's own markers) ran nothing: the green does not vouch for it

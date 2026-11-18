@@ -36,7 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync } from './ci.mjs';
+import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -509,6 +509,19 @@ console.log('§4g THE TABLE A FULL GREEN WAS RUN BY (B-479e) — it covers a fai
   { const N = makeRepo('no-table'); const nr = commit(N, 'r.txt', 'r\n', 'R'), nd = commit(N, 'd.txt', 'd\n', 'D'), nh = commit(N, 'h.txt', 'h\n', 'HEAD');
     const d = scratch('no-table'); fs.writeFileSync(path.join(d, `${nr}.red`), JSON.stringify(goodRec(nr, 'red', { failed: ['test-gone'] }))); fs.writeFileSync(path.join(d, `${nd}.green`), JSON.stringify(goodRec(nd, 'green', older)));
     ok(blockedBy(d, nh, N) === nr, '…and a green\'s commit whose table cannot be read keeps every failed name heavy (fail closed): its older table covers nothing it did not list'); }
+  // THE READER FAILS CLOSED ON A SHAPE IT DOES NOT KNOW (the cure's read, 主开发 09:32Z): tableTiersOf gives a name's tier only for the
+  // one-line row `{ name: 'x', tier: 'y'`; a name in another shape is null — heavy to the gate — and a name outside SUITES is no key
+  { const T2 = (rows) => `export const SUITES = [\n${rows}\n];\nexport const EXCLUDED = [\n  { name: 'test-ex', why: 'manual' },\n];\n`;
+    const tt = tableTiersOf(T2("  { name: 'test-a', tier: 'heavy', why: 'x · 1 s' },\n  { name: 'test-b', tier: 'fast', reads: ['src/'], why: 'x · 1 s' },\n  { name: 'test-c', reads: ['src/'], tier: 'fast', why: 'x' },\n  {\n    name: 'test-d',\n    tier: 'fast',\n  },\n  { name: \"test-e\", tier: 'fast' },"));
+    ok(tt.ok && tt.tiers.get('test-a') === 'heavy' && tt.tiers.get('test-b') === 'fast' && tt.tiers.get('test-c') === null && tt.tiers.get('test-d') === 'fast' && tt.tiers.get('test-e') === null && !tt.tiers.has('test-ex') && tableTiersOf('const X = 1;\n').ok === false,
+      `PURE tableTiersOf: a row's tier when it follows its name (a row over two lines too); a field between name and tier, or double quotes → null (a shape it does not know); EXCLUDED's names no key; no SUITES → not ok (${JSON.stringify([...tt.tiers])})`);
+    const R = makeRepo('moved-drift'); commit(R, 'scripts/ci.mjs', TABLE(), 'the table'); commit(R, 'scripts/test-moved.mjs', '// a suite\n', 'the suite');
+    const rc = commit(R, 'r.txt', 'r\n', 'C: red on test-moved'), dc = commit(R, 'scripts/ci.mjs', TABLE().replace("{ name: 'test-moved', tier: 'heavy',", "{ name: 'test-moved', reads: ['src/'], tier: 'fast',"), 'D: test-moved fast, in a shape the reader does not know'), hc = commit(R, 'h.txt', 'h\n', 'HEAD');
+    const d = scratch('moved-drift'); fs.writeFileSync(path.join(d, `${rc}.red`), JSON.stringify(goodRec(rc, 'red', { failed: ['test-moved'] }))); fs.writeFileSync(path.join(d, `${dc}.green`), JSON.stringify(goodRec(dc, 'green', older)));
+    ok(blockedBy(d, hc, R) === rc, '…so a row whose shape drifted keeps its suite HEAVY to the gate (fail closed): the older table\'s FULL green does not clear its red');
+    const real = tableTiersOf(fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8')), unknown = [...real.tiers].filter(([, t]) => t === null).map(([n]) => n);
+    ok(real.ok && real.tiers.size > 500 && unknown.length === 0 && SUITES.every((x) => real.tiers.get(x.name) === x.tier),
+      `CENSUS: every SUITES row of this ci.mjs is the one-line shape the gate reads, its tier the table's own (${real.tiers.size} rows${unknown.length ? ' — NOT READ: ' + unknown.join(', ') : ''}) — a drifted row is red here, never a silent over-defence`); }
   ok(blockedBy(dirOf({ ...knows, skipped: ['test-new'] }), h, T) === a && blockedBy(dirOf(older, ['test-new'], { scope: 'affected', selected: ['test-new'], skipped: ['test-new'] }), h, T) === a,
     '…and a green in which the suite SKIPPED ITSELF does not vouch for it (B-479e (1) on the box\'s own markers): neither a FULL green nor a list');
   const du = scratch('tbl-u'); fs.writeFileSync(path.join(du, `${a}.red`), 'null'); fs.writeFileSync(path.join(du, `${b}.green`), JSON.stringify(goodRec(b, 'green', older)));
