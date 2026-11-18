@@ -71,7 +71,7 @@ function installArgv(plan) { return plan && plan.root ? ['sh', '-c', plan.script
  * machine, and the slot IS a pidfile beside it: `<stateDir>/xpra-install.pid` = "<pid> <starttime> <lock>" of the
  * detached runner (a recycled pid is never taken for it), `xpra-install.exit` = "<code> <unix nanoseconds> <lock>" once
  * it ends (nanoseconds since verify r5 L1, below); who may START one is decided by a lock the running install holds (verify r4, below). The hub
- * only FOLLOWS the log (`tail --pid`) — a follower that dies (hub gone, link gone, daemon re-exec) leaves the install
+ * only FOLLOWS the log (by offset, ending on its own proof — B-6c46) — a follower that dies (hub gone, link gone, daemon re-exec) leaves the install
  * running; a new follower re-attaches (the facts op reports `installing: {pid, since, lock}` while the pid+starttime
  * lives).
  * `stateDir` = the machine keeper's data dir (a device's ~/.vibespace, the hub's data/); empty ⇒ $HOME/.vibespace.
@@ -80,7 +80,7 @@ function installArgv(plan) { return plan && plan.root ? ['sh', '-c', plan.script
  *   a live recorded install ⇒ follow it (never a second — whatever the mode); `follow` with none running ⇒ its last
  *   log and recorded exit; `start` ⇒ start the runner detached, wait for its pidfile, follow. Exits with the install's
  *   RECORDED exit code, or INSTALL_UNRECORDED_EXIT when the runner ended without recording one (killed / a reboot).
- * Linux + GNU coreutils (`tail --pid`, fractional `sleep`, `sha1sum`) + util-linux `setsid` and `flock` — the plan only
+ * Linux + coreutils (`tail -c`, `head -c`, `wc -c`, fractional `sleep`, `sha1sum` — GNU or uutils: no follow mode is trusted) + util-linux `setsid` and `flock` — the plan only
  * runs on apt systems.
  */
 const INSTALL_FILES = Object.freeze({ log: 'xpra-install.log', pid: 'xpra-install.pid', exit: 'xpra-install.exit' });
@@ -114,8 +114,8 @@ const INSTALL_LOCK_PREFIX = 'vibespace-xpra-install-';
  * (a process an earlier install started may still hold it) is refused by name. The lock file is never removed (a
  * removed lock file lets two holders lock two different files); after taking the lock a start re-reads the pidfile
  * and follows a live recorded install (a belt for a lock file that was removed under a running install).
- * M1 (r3): the winner resets pid/starttime, reads only the NEW pidfile, and `tail --pid` follows that runner only while
- * it is not PROVEN gone. L5: `setsid` and `flock` (util-linux) are checked before anything else. L8: a starttime that
+ * M1 (r3): the winner resets pid/starttime, reads only the NEW pidfile, and the follow reads that runner only while
+ * it is not PROVEN gone (since B-6c46 the follow also ends on the exit file — a belt, then). L5: `setsid` and `flock` (util-linux) are checked before anything else. L8: a starttime that
  * cannot be read (no /proc) is refused by the runner before it runs (the pidfile's identity needs it).
  * Every refusal is exit 125 with one line naming its cause; nothing here ever signals the install.
  * verify r5 (2026-09-25, four lows):
@@ -201,8 +201,21 @@ const INSTALL_LAUNCHER = [
   '    echo "+ [vibespace] the install did not start (no pid in $P)"; exit 125',
   '  fi',
   'fi',
-  'tail -s 0.2 --pid="$pid" -n +1 -f "$L"',
-  `if [ -r "$X" ]; then read c at k < "$X"; exit "$c"; fi`,
+  // B-6c46: THE LAUNCHER FOLLOWS THE LOG ITSELF AND ENDS ON ITS OWN PROOF. It followed with a tail in follow mode and took
+  // that tool's RETURN as «the runner ended»: where tail returns early (as on the integration box — Ubuntu 26.04, its tail
+  // uutils coreutils: the likely trigger, not proven; test-desktop-serve red 12 of 12 there) every launcher answered 199
+  // «ended without recording its exit» while apt still ran, and the log stopped. Now the new bytes are copied by OFFSET
+  // (no follow mode: tail -c +N | head -c N) every 0.2 s until the exit file exists — its exit READ first in each round,
+  // before any copy and before the wait below (a start that comes after the runner can hand this launcher another install's
+  // exit only inside one round's gap, ≤ 0.2 s, not across the wait) — or the runner is PROVEN gone (pid + starttime); then
+  // the last bytes. A log that shrank is not copied from while it stays below the old offset (a newer install's); a round
+  // whose `wc` failed is taken again; a reader gone (SIGPIPE) ends the launcher, as the old tail's death did. Its cost: a
+  // few short processes every 0.2 s for the install's life (a sleeping tail before).
+  'o=0; fo() { z=$({ wc -c < "$L"; } 2>/dev/null) || return 0; [ -n "$z" ] || return 0; z=$((z)); [ "$z" -gt "$o" ] || return 0; { tail -c +$((o+1)) "$L" 2>/dev/null | head -c $((z-o)); } && o=$z || { [ $? -eq 141 ] && exit 141; }; }',
+  'c=; while :; do if [ -s "$X" ]; then read c at k < "$X"; break; fi; fo; gone "$pid" "$s" && break; sleep 0.2; done',
+  'fo; [ -n "$c" ] || { [ -s "$X" ] && read c at k < "$X"; }',
+  'n=0; while ! gone "$pid" "$s" && [ $n -lt 40 ]; do sleep 0.05; n=$((n+1)); done', // the exit is recorded, the runner ends on its next lines (its pidfile removed; its lock freed unless a process the install left holds it): answer once it is gone — a start right after this one never follows a finished install (about 2 s at most: a pid 1 that never reaps keeps a zombie)
+  `if [ -n "$c" ]; then exit "$c"; fi`,
   'echo "+ [vibespace] the install ended without recording its exit (it was stopped, or the machine restarted) - check again"',
   `exit ${INSTALL_UNRECORDED_EXIT}`,
 ].join('\n');
