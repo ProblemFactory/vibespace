@@ -264,7 +264,7 @@ console.log('⑤ THE PICTURE RULE (B-c9ed: no size, type, empty-file check on an
       /limits: \(\) => imageLimitsOf\(this\._getBackend\(\)\),/.test(ci) && /getBackend: \(\) => \(this\._getSessionIds\(\) \|\| \{\}\)\.backend \|\| null,/.test(cvSrc)
       && /limits: \(\) => imageLimitsOf\(typeof backend === 'function' \? backend\(\) : backend\),/.test(rpSrc) && /backend: \(\) => backendOfKey\(i\.sessionKey\)/.test(upSrc) && /return backendOfKey\(it && it\.sessionKey\);/.test(iwSrc));
     const a = rpSrc.indexOf('export function backendOfKey('), e = rpSrc.indexOf('\n}\n', a);
-    const backendOfKey = new Function(`${rpSrc.slice(a + 'export '.length, e + 2)}\nreturn backendOfKey;`)();
+    const backendOfKey = new Function('harnessOfRecord', `${rpSrc.slice(a + 'export '.length, e + 2)}\nreturn backendOfKey;`)(req('../src/backend-caps.js').harnessOfRecord);   // the ONE rule a row without a harness reads by (cure 2)
     const rows = [{ webuiId: 'sess-9', backend: 'codex' }, { webuiId: 'sess-8' }];
     ok('backendOfKey: a conversation key names its harness; a page-only key reads its live row (a row without one is claude); unknown ⇒ null',
       backendOfKey('codex:th-1', rows) === 'codex' && backendOfKey('claude:abc', rows) === 'claude' && backendOfKey('webui:sess-9', rows) === 'codex' && backendOfKey('webui:sess-8', rows) === 'claude' && backendOfKey('webui:sess-0', rows) === null && backendOfKey('', rows) === null && backendOfKey(null, rows) === null);

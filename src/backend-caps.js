@@ -664,8 +664,12 @@ function contributeCaps(id, row) {
   return merged;
 }
 
+/** THE ONE RULE (batch 20's cure 2, 主开发 10:30Z): a conversation record that names NO harness is claude's — as the release reads it
+ *  everywhere (capsOf below, the hub's sessionStatusKey, the page's rows). `harnessOfRecord(rec)` = its harness. */
+const LEGACY_HARNESS = 'claude';
+const harnessOfRecord = (rec) => (rec && typeof rec.backend === 'string' && rec.backend) || LEGACY_HARNESS;
 function capsOf(backend) {
-  const id = backend || 'claude';
+  const id = backend || LEGACY_HARNESS;
   return BACKEND_CAPS[id] || CONTRIBUTED_CAPS.get(id) || NO_CAPS;
 }
 /** the pictures a harness's model takes — its row's {b64PerPicture, sidePx, requestB64}, or null (it states none: no numeric
@@ -950,7 +954,7 @@ function doorCapsOf(inputModes, servedVerbs) {
   return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
 }
 
-module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, imageLimitsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
+module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, imageLimitsOf, harnessOfRecord, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite,
   NO_CHECKPOINTS, checkpointsRowOf, CLAUDE_CHECKPOINTS,

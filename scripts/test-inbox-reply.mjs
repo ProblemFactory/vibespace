@@ -1009,10 +1009,10 @@ const endedPhoto = async (routeFile) => {
     'an ENDED claude conversation: the 4.6 MB photo is judged with claude\'s row (its key) and refused BEFORE the reopen — nothing reopened, nothing sent', { status: e.r.status, json: e.r.json, reopened: e.reopened });
   // RED CONTROL: a route that reads only the LIVE session's harness judges the ended conversation with no numbers — it reopens and sends
   const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
-  const needle = "      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;";
-  ok(rsrc.includes(needle), '§10 reopen-key control needle exists');
+  const needle = "      const rec = s || conversationOfKey(item.sessionKey) || null;";   // (cure 2: the one rule reads the record — the live one, else the key's)
+  ok(rsrc.split(needle).length === 2, '§10 reopen-key control needle exists');
   const MUT = mutantCopies('inbox-reply-reopen-key', REPO);
-  const mut = MUT.write(rel, rsrc.split(needle).join('      const backend = (s && s.backend) || null;'), 'live-only');
+  const mut = MUT.write(rel, rsrc.split(needle).join('      const rec = s || null;'), 'live-only');
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 reopen key ' })) ok(row.pass, row.name, row.detail);
   const red = await endedPhoto(mut);
   ok(red.r.json.code !== 'bad_image' && red.reopened === 1, 'RED CONTROL: without the key\'s harness the ended conversation is reopened with a photo claude refuses — the leg above can go red', { json: red.r.json, reopened: red.reopened });
@@ -1084,6 +1084,35 @@ const reopenBig = async (routeFile, capsAfterMs) => {
   const r = H.call(it.id, { text: 'here', images: [{ base64: Buffer.concat([JPEG, Buffer.alloc(4.6e6)]).toString('base64'), name: 'IMG_2041.jpg' }] });
   ok(r.status === 400 && r.json.code === 'bad_image' && r.json.picture && r.json.picture.code === 'too_big', 'RED CONTROL: one vendor\'s numbers for every harness refuse the codex photo — the per-harness leg can go red', r.json);
   H.userTodos.stop(); H.userTodos.flush();
+}
+{
+  // batch 20's cure 2 (主开发 10:30Z): A LIVE CONVERSATION THAT NAMES NO HARNESS (no backend field, a page-only key — no conversation id
+  // yet) is judged as the release judges it everywhere else: as claude's (backend-caps harnessOfRecord — the ONE rule), never «no numbers»
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+  const PHOTO = { base64: Buffer.concat([JPEG, Buffer.alloc(4.6e6)]).toString('base64'), name: 'IMG_2041.jpg' };
+  const BC = require(path.join(REPO, 'src/backend-caps.js'));
+  ok(BC.harnessOfRecord({}) === 'claude' && BC.harnessOfRecord({ backend: 'codex' }) === 'codex' && BC.harnessOfRecord(null) === 'claude' && BC.capsOf(undefined) === BC.capsOf('claude'), '§10 cure 2: the ONE rule — a record that names no harness is claude\'s (capsOf reads the same default)');
+  const drive = (routeFile) => {
+    const H = harness(routeFile);
+    const { wrote } = H.addSession('nob-1', { backend: undefined, backendSessionId: undefined });
+    const it = H.userTodos.add('webui:nob-1', { origin: 'agent', text: 'a photo of the board' });
+    const r = H.call(it.id, { text: 'here', images: [PHOTO] });
+    H.userTodos.stop(); H.userTodos.flush();
+    return { r, wrote };
+  };
+  const now = drive();
+  ok(now.r.status === 400 && now.r.json.code === 'bad_image' && now.r.json.picture && now.r.json.picture.code === 'too_big' && now.r.json.picture.limits && now.r.json.picture.limits.b64PerPicture === 5 * 1024 * 1024 && now.wrote.length === 0,
+    '§10 cure 2: a live conversation with NO harness field (page-only key webui:…) ⇒ judged with claude\'s row — the 4.6 MB photo refused before the send, nothing written', now.r.json);
+  const rel = 'src/routes/user-todos-reply.js', rsrc = read(rel);
+  const NOW_L = '      const rec = s || conversationOfKey(item.sessionKey) || null;\n      const backend = rec ? harnessOfRecord(rec) : null;';
+  ok(rsrc.split(NOW_L).length === 2, '§10 cure 2: the route reads the harness in ONE place (the control edits it)');
+  const MUT = mutantCopies('inbox-reply-noharness', REPO);
+  const mut = MUT.write(rel, rsrc.replace(NOW_L, '      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;   // stale-pins: kept — the cure 1 line the RED control re-plants'), 'no-harness-null');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§10 cure 2 ' })) ok(row.pass, row.name, row.detail);
+  const red = drive(mut);
+  // (the stand-in sender has no adapter for a session that names no harness, so the photo the old route let through fails at the SEND —
+  // what matters is that it was NOT refused by any picture rule before it)
+  ok(red.r.json.code !== 'bad_image' && !(red.r.json.picture), 'RED CONTROL: batch 20 cure 1\'s route (no harness field ⇒ no numbers) lets the same photo through its picture rule (on to the send) — the leg above can go red', red.r.json);
 }
 console.log('§10b the reply boxes take a picture (wiring census, both surfaces + the model + the chat\'s card)');
 {

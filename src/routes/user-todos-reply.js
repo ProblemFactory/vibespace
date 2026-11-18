@@ -55,7 +55,7 @@
  */
 const { checkReplyText, composeReply, replyVerdict } = require('../inbox-reply.js');
 const { judgeImageBase64, refusalVars, REFUSAL_WORDS, REPLY_WORDS } = require('../image-attach-rule.js'); // B-51dd: THE picture rule — the page's door asked it, the route asks it again
-const { imageLimitsOf } = require('../backend-caps.js');   // batch 20 cure: judged with the HARNESS of the conversation the reply goes to
+const { imageLimitsOf, harnessOfRecord } = require('../backend-caps.js');   // batch 20 cure: judged with the HARNESS of the conversation the reply goes to
 const { conversationOfKey } = require('../inbox-reopen.js');   // …a reopened one's harness is its key's
 
 const STATUS = Object.freeze({
@@ -144,7 +144,9 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
       // reopen would resume: its key names it); a conversation nobody can name has no numbers (the reopen refuses it anyway)
       const hit = sessionForItem(item, activeSessions, sessionStatusKey);
       const s = hit && hit[1];
-      const backend = (s && s.backend) || (conversationOfKey(item.sessionKey) || {}).backend || null;
+      // (cure 2: a record that names no harness is claude's — backend-caps harnessOfRecord, the release's reading everywhere — never «no numbers»)
+      const rec = s || conversationOfKey(item.sessionKey) || null;
+      const backend = rec ? harnessOfRecord(rec) : null;
       const pics = picturesOf(req.body && req.body.images, { limits: imageLimitsOf(backend) });
       if (!pics.ok) return res.status(STATUS.bad_image).json({ error: pics.error, code: 'bad_image', ...(pics.picture ? { picture: pics.picture } : {}) });
       const t0 = checkReplyText(req.body && req.body.text);

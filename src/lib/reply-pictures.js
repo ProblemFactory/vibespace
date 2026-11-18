@@ -18,7 +18,7 @@
 //   strip (the chips, hidden while empty) · btn (the picture button) · input + camera.input (hidden file inputs) — the
 //   caller places them
 import { createImageDoor, refusalText, heldOf } from './image-attach.js';
-import { imageLimitsOf } from '../backend-caps.js';   // batch 20 cure: the numbers are the conversation's HARNESS row
+import { imageLimitsOf, harnessOfRecord } from '../backend-caps.js';   // batch 20 cure: the numbers are the conversation's HARNESS row
 import { cameraDoor, sheetRow } from './chat-input.js';   // THE camera door (lane phone-take-photo) and the sheet's row
 import { UI_ICONS } from './icons.js';
 import { showToast, showImageOverlay, showContextMenu } from './utils.js';
@@ -39,7 +39,7 @@ export function backendOfKey(key, rows = null) {
   if (head !== 'webui') return head;
   const list = rows || (typeof window !== 'undefined' && window.app && window.app.sidebar && window.app.sidebar._allSessions) || [];
   const row = Array.isArray(list) ? list.find((s) => s && s.webuiId === rest) : null;
-  return row ? (row.backend || 'claude') : null;
+  return row ? harnessOfRecord(row) : null;   // a row that names no harness is claude's (the ONE rule, backend-caps)
 }
 
 export function replyPictures({ box, ta, id, store, t, backend = null }) {
