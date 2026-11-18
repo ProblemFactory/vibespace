@@ -595,6 +595,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
       const t0 = performance.now();
       const r = readJsonlTail(fp, cached, { dropSubagent: true, stat, appendOnly: true });
       if (r) {
+        if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
         _stampJsonlParse(r.bytes, performance.now() - t0);
         _jsonlCachePut(claudeSessionId, r.entry);
         return true;
@@ -622,6 +623,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     const t0 = performance.now();
     const r = readJsonlTail(fp, cached && cached.spanEnd != null ? cached : null, { dropSubagent: true, stat });
     if (r.mode !== 'hit') _stampJsonlParse(r.bytes, performance.now() - t0);
+    if (r.mode === 'append') carryPosFrom(r.entry, cached);   // B-299b A5 r4: the merge's index follows the append
     _jsonlCachePut(claudeSessionId, r.entry);   // refreshes the LRU position on a hit too
     return r.entry.messages;
   } catch { return []; }
@@ -851,6 +853,132 @@ function getHistorySessionId(session) {
 // last buffer merge over it. Weak: a cache entry that is evicted or replaced
 // takes its memo with it.
 const _mergeMemo = new WeakMap();
+// B-299b A5 (lane bl-loop-a — 1.6 s in one hold measured: the merge built two Sets and a Map over EVERY transcript record and
+// JSON.parsed EVERY buffer line, again for each reader after any write — a live conversation's buffer moves with every record):
+// the position map is built ONCE per transcript array (it changes when the file does, never with the buffer); the buffer's
+// records are parsed once per session — a buffer that only GREW parses the lines it gained; the two Sets nothing read are gone.
+// r2 (its read): the kept parse lives in a WeakMap by session (no blackboard field); its identity is two probes (no copy of the
+// ring); a webui record asks the transcript's greatest user stamp, not a scan. NOT CURED: a head trim parses the whole ring.
+// r3 (its re-read): the position index follows a transcript append (a NEW array) at the cost of what changed, never rebuilt;
+// r4: the array it follows is carried by the parse cache's entry (never a map of whole arrays of its own).
+const _jsonlPosMemo = new WeakMap();   // the jsonl array → its position index (makePos)
+// the buffer's kept parse, keyed by the SESSION OBJECT (r2: never a field on the live session — the blackboard keeps none; it
+// dies with the session, and each module copy keeps its own): { head, tail, len, recs, kept }
+const _bufRecsOf = new WeakMap();
+const _mergeCounts = { posBuilt: 0, posExtended: 0, posIndexed: 0, linesParsed: 0, userScans: 0, userRescans: 0 };   // what the merge built / moved / indexed / parsed / scanned (test-task-scan-loop ⑦ counts them)
+/** THE POSITION INDEX of a transcript array, by ABSOLUTE ordinals (r3): 'u:<uuid>' and 'm:<message.id>' → every record's
+ *  ordinal, ascending; `base` = the ordinal of the array's first record. idx(key, last) answers an index INTO the array — the
+ *  LAST record of a uuid (the release's map: a later one overwrote) or the FIRST of a message.id (the release kept the first). */
+function makePos() {
+  return { at: new Map(), base: 0, userTs: null, userTsAll: true, userTsStale: false,
+    idx(k, last) {
+      const v = this.at.get(k); if (!v || !v.length) return undefined;
+      const o = last ? v[v.length - 1] : v[0];
+      return o >= this.base ? o - this.base : undefined;
+    } };
+}
+function posIndex(pos, m, o) {
+  _mergeCounts.posIndexed++;
+  if (!m) return;
+  if (m.uuid) { const k = 'u:' + m.uuid, v = pos.at.get(k); if (v) v.push(o); else pos.at.set(k, [o]); }
+  const mid = m.message?.id;
+  if (mid) { const k = 'm:' + mid, v = pos.at.get(k); if (v) v.push(o); else pos.at.set(k, [o]); }
+  if (m.type === 'user') {   // the greatest user stamp (r2, S4): the webui-record check below asks it, not a scan per record
+    const t = m.timestamp;
+    if (typeof t === 'string') { if (pos.userTs === null || t > pos.userTs) pos.userTs = t; } else if (t != null) pos.userTsAll = false;
+  }
+}
+function posUnindex(pos, m, o) {
+  if (!m) return;
+  for (const k of [m.uuid ? 'u:' + m.uuid : null, m.message?.id ? 'm:' + m.message.id : null]) {
+    if (!k) continue;
+    const v = pos.at.get(k); if (!v) continue;
+    const i = v[0] === o ? 0 : v.lastIndexOf(o);   // a slid head is the front, a replaced last line the end
+    if (i >= 0) v.splice(i, 1);
+    if (!v.length) pos.at.delete(k);
+  }
+  if (m.type === 'user' && typeof m.timestamp === 'string' && pos.userTs !== null && m.timestamp >= pos.userTs) pos.userTsStale = true;   // the greatest left: asked again
+}
+/** r3: an append makes a NEW array (src/adapters/codex.js readJsonlTail: the old one's records — a head that slid out of the
+ *  tail window dropped, a partial last line replaced — then the new records). The index MOVES with it at the cost of what
+ *  changed: the dropped and the replaced records leave, the new ones enter. Anything else (a full read: new objects) ⇒ null. */
+function extendPos(last, B) {
+  const A = last.arr, pos = last.pos;
+  if (!A.length || !B.length) return null;
+  const d = A[0] === B[0] ? 0 : A.indexOf(B[0], 1);
+  if (d < 0) return null;
+  const L = A.length - d;
+  let c = Math.min(L, B.length);
+  if (A[d + c - 1] !== B[c - 1]) c--;   // the old array's partial last line, read again
+  if (c < 1 || c < L - 1 || A[d + c - 1] !== B[c - 1]) return null;
+  const base0 = pos.base;
+  for (let i = 0; i < d; i++) posUnindex(pos, A[i], base0 + i);
+  for (let i = d + c; i < A.length; i++) posUnindex(pos, A[i], base0 + i);
+  pos.base = base0 + d;
+  for (let i = c; i < B.length; i++) posIndex(pos, B[i], pos.base + i);
+  _jsonlPosMemo.delete(A);
+  return pos;
+}
+/** r4 (its delta read): the array an appended one was built from is CARRIED BY ITS PARSE-CACHE ENTRY (`_posFrom`: the newest
+ *  array the merge indexed — its predecessor, or the one that predecessor carried) until a read indexes it — never held by a map
+ *  of its own (a tail the byte-bounded cache evicted lived on in r3's); it goes with the entry when the cache evicts it */
+function carryPosFrom(entry, prev) {
+  if (!entry || !prev || entry === prev || !Array.isArray(prev.messages)) return;
+  entry._posFrom = _jsonlPosMemo.has(prev.messages) ? prev.messages : (prev._posFrom || null);
+}
+function jsonlPosOf(jsonl, key = null, from = undefined) {
+  let pos = _jsonlPosMemo.get(jsonl);
+  if (pos) return pos;
+  const entry = from === undefined && key != null ? _jsonlCache.get(key) : null;
+  const own = !!entry && entry.messages === jsonl;
+  const prev = from !== undefined ? from : (own ? entry._posFrom || null : null);   // `from`: a leg's own predecessor
+  const prevPos = prev ? _jsonlPosMemo.get(prev) : null;
+  pos = prevPos ? extendPos({ arr: prev, pos: prevPos }, jsonl) : null;
+  if (own) entry._posFrom = null;
+  if (pos) _mergeCounts.posExtended++;
+  else { pos = makePos(); _mergeCounts.posBuilt++; jsonl.forEach((m, i) => posIndex(pos, m, i)); }
+  _jsonlPosMemo.set(jsonl, pos);
+  return pos;
+}
+/** = jsonl.some((m) => m.type === 'user' && m.timestamp >= ts): for string stamps the greatest one answers (the same order);
+ *  a transcript holding a user stamp that is not a string is scanned, as the release did */
+function userAtOrAfter(pos, jsonl, ts) {
+  if (pos.userTsStale) {   // r3: the greatest stamp slid out of the tail window — asked again, once
+    _mergeCounts.userRescans++;
+    pos.userTs = null; pos.userTsAll = true; pos.userTsStale = false;
+    for (const m of jsonl) if (m && m.type === 'user') { const t = m.timestamp; if (typeof t === 'string') { if (pos.userTs === null || t > pos.userTs) pos.userTs = t; } else if (t != null) pos.userTsAll = false; }
+  }
+  if (typeof ts === 'string' && pos.userTsAll) return pos.userTs !== null && pos.userTs >= ts;
+  _mergeCounts.userScans++;
+  return jsonl.some((m) => m.type === 'user' && m.timestamp >= ts);
+}
+const BUF_PROBE = 4096;   // the kept buffer's identity: its first BUF_PROBE chars and the BUF_PROBE chars before its kept end
+const flatCopy = (s) => (' ' + s).slice(1);   // a copy: a plain slice would keep the whole old ring alive after a trim
+/** The buffer's records — parsed once per session: a buffer that only GREW parses the complete lines it gained; a last line
+ *  still being written is parsed each time (never kept). Every writer of session.buffer appends or trims its head (+=,
+ *  .slice(-N), the acp cut at a line; the restore assigns a NEW session) — so the same first chars and the same chars before
+ *  the kept end, at a length no shorter, say it only grew; a trimmed head parses the whole buffer again (bounded by the ring).
+ *  `resolve` = the kept copies'; a new kept map (the restore's preload landing) parses again. */
+function bufferRecordsOf(session, buffer, kept, resolve) {
+  const keyed = !!session && typeof session === 'object';
+  const c = keyed ? _bufRecsOf.get(session) : null;
+  const same = !!(c && c.kept === kept && buffer.length >= c.len && buffer.startsWith(c.head) && buffer.startsWith(c.tail, c.len - c.tail.length));
+  const from = same ? c.len : 0;
+  const end = buffer.lastIndexOf('\n') + 1;   // past the last complete line (≥ from when `same`: the kept span ends at a line)
+  const parse = (text, into) => {
+    for (const line of text.split('\n')) {
+      const trimmed = line.replace(/\r/g, '').trim();
+      if (!trimmed) continue;
+      _mergeCounts.linesParsed++;
+      try { const rec = JSON.parse(trimmed); into.push(rec && rec.webui_copy ? resolve(rec) : rec); } catch {}
+    }
+  };
+  let recs = same ? c.recs : [];   // the kept array is never pushed into: the lines it gains go into a copy
+  if (end > from) { recs = recs.slice(); parse(buffer.slice(from, end), recs); }
+  if (keyed && !(same && end <= from)) _bufRecsOf.set(session, { head: flatCopy(buffer.slice(0, Math.min(BUF_PROBE, end))), tail: flatCopy(buffer.slice(Math.max(0, end - BUF_PROBE), end)), len: end, recs, kept });
+  if (end < buffer.length) { recs = recs.slice(); parse(buffer.slice(end), recs); }   // the line still being written: parsed, never kept
+  return recs;
+}
 
 // THE COPY'S KEPT FILES (lane claude-steer-inject r5, r6): a claude wrapper's copy of a mid-turn frame (`webui_copy`) names its
 // pictures — and a text block over 8 KB — by sha + extension, the files beside its buffer in ITS OWN session's folder
@@ -893,17 +1021,9 @@ class SessionMessages {
       this._display = this._all.filter(isDisplayMessage);
       return;
     }
-    const uuids = new Set();
-    const msgIds = new Set();
-    for (const m of jsonl) {
-      if (m.uuid) uuids.add(m.uuid);
-      // Streaming stdout events can carry a PLACEHOLDER uuid (…-000000000001)
-      // while the JSONL record for the SAME message has the real one — uuid
-      // dedup misses those and the stale buffer copy would render pinned after
-      // the entire history. message.id (msg_…) is stable across both copies.
-      const mid = m.message?.id;
-      if (mid) msgIds.add(mid);
-    }
+    // (B-299b A5: the two Sets of every record's uuid and message.id built here were read by nothing — gone. The dedup is the
+    // position map below: a streaming stdout event can carry a PLACEHOLDER uuid (…-000000000001) while the JSONL record for the
+    // SAME message has the real one — message.id (msg_…) is stable across both copies.)
 
     this._pendingPerms = {};
     this._helperResults = []; // verify r3: the helpers' tool_results the record list skips (they settle an asked ask at the rebuild)
@@ -916,25 +1036,15 @@ class SessionMessages {
     // server restart (real user report); end-append also scrambled turn
     // boundaries in the replay. The buffer is chronological, so the index of
     // the last JSONL-matched record is a correct position anchor.
-    const jsonlPos = new Map(); // 'u:<uuid>' | 'm:<message.id>' → jsonl index
-    jsonl.forEach((m, i) => {
-      if (m.uuid) jsonlPos.set('u:' + m.uuid, i);
-      const mid = m.message?.id;
-      if (mid && !jsonlPos.has('m:' + mid)) jsonlPos.set('m:' + mid, i);
-    });
-    const parsed = [];
-    for (const line of buffer.split('\n')) {
-      const trimmed = line.replace(/\r/g, '').trim();
-      if (!trimmed) continue;
-      try { const rec = JSON.parse(trimmed); parsed.push(rec && rec.webui_copy ? KC.resolveRecord(rec, kept, (m) => console.warn(`[kept] ${this._sessionId || 'a session'}: ${m}`)) : rec); } catch {}
-    }
+    const jsonlPos = jsonlPosOf(jsonl, historySessionId); // 'u:<uuid>' | 'm:<message.id>' → jsonl index — built once per transcript, moved by each append (B-299b A5)
+    const parsed = bufferRecordsOf(session, buffer, kept, (rec) => KC.resolveRecord(rec, kept, (m) => console.warn(`[kept] ${this._sessionId || 'a session'}: ${m}`)));
     // A ROTATED buffer can start with unmatched stdout-only records from mid-
     // history; anchor those just before the first matched record (not at the
     // very start) — much closer to their true position.
     let firstHit = -1;
     for (const msg of parsed) {
-      const hitU = msg.uuid != null ? jsonlPos.get('u:' + msg.uuid) : undefined;
-      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.get('m:' + msg.message.id) : undefined);
+      const hitU = msg.uuid != null ? jsonlPos.idx('u:' + msg.uuid, true) : undefined;
+      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.idx('m:' + msg.message.id) : undefined);
       if (hit !== undefined) { firstHit = hit; break; }
     }
     let anchor = firstHit >= 0 ? firstHit - 1 : jsonl.length - 1;
@@ -942,8 +1052,8 @@ class SessionMessages {
     let anyInsert = false;
     for (const msg of parsed) {
       if (msg.type === 'control_request' && msg.request?.tool_use_id) { this._pendingPerms[msg.request.tool_use_id] = msg; }
-      const hitU = msg.uuid != null ? jsonlPos.get('u:' + msg.uuid) : undefined;
-      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.get('m:' + msg.message.id) : undefined);
+      const hitU = msg.uuid != null ? jsonlPos.idx('u:' + msg.uuid, true) : undefined;
+      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.idx('m:' + msg.message.id) : undefined);
       if (hit !== undefined) { if (hit > anchor) anchor = hit; continue; } // in JSONL — advances the position cursor
       const isControl = msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request';
       if (!isControl) {
@@ -952,7 +1062,7 @@ class SessionMessages {
         // those words the transcript may hold — never dropped for a later user record (a tool_result is one); the
         // normalizer draws it once (src/message-manager.js _processUser)
         if (msg._fromWebui && msg.timestamp && !msg.webui_copy) {
-          if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;
+          if (userAtOrAfter(jsonlPos, jsonl, msg.timestamp)) continue;   // B-299b A5 r2: the kept greatest user stamp
         }
       }
       const list = inserts.get(anchor) || inserts.set(anchor, []).get(anchor);
@@ -1582,7 +1692,7 @@ function dedupWebuiSockets(entries) {
 
 module.exports = { claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
-  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache,
+  taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter,
   extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,

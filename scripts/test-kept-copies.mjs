@@ -280,8 +280,8 @@ mw.convertHistory([...new SS.SessionMessages({ buffer: pBuf, cwd: dir, backend: 
 const mwv = view(mw.messages.filter((m) => m.role === 'user'));
 ok(mmSrc.includes(POOLED) && mwv.length === 3 && mwv.filter((v) => v.text === 'continue' && !v.pics).length === 2, 'MUTANT every copy pooled by its words (r7\'s road): RED — the still-held «continue» drawn TWICE (three bubbles for two messages)', mwv);
 const ssSrc = read('src/session-store.js');
-const RESOLVE = "parsed.push(rec && rec.webui_copy ? KC.resolveRecord(rec, kept, ";
-const ssMut = M.write('src/session-store.js', ssSrc.replace(RESOLVE, 'parsed.push(rec && false ? KC.resolveRecord(rec, kept, '), 'no-resolve');
+const RESOLVE = "into.push(rec && rec.webui_copy ? resolve(rec) : rec);";   // B-299b A5: the buffer's records are parsed in bufferRecordsOf (its resolve = KC.resolveRecord over the kept copies)
+const ssMut = M.write('src/session-store.js', ssSrc.replace(RESOLVE, 'into.push(rec && false ? resolve(rec) : rec);'), 'no-resolve');
 const SSx = require(ssMut);
 const nr = await restart(line1, { SSx });
 ok(ssSrc.includes(RESOLVE) && view(nr)[0].pics === 0 && view(nr)[0].gone === 1, 'MUTANT the store\'s merge without resolveRecord: RED — every kept picture a placeholder', view(nr));

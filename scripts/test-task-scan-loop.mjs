@@ -10,6 +10,8 @@
 //  ③ the worker's inline road (the pool down) answers null on the main thread — never a read
 //  ④ the kept conversations are bounded (TASK_EVENT_CACHE_MAX, least recently warmed out first)
 //  ⑤ the two HTTP roads (status, GET /api/session-todos) await the warm before they answer
+//  ⑥ (A4) chatStatus probes no project folder · ⑦ (A5) the merge parses the buffer lines it gained, against the release's merge
+//     planted back (an append, a split line, a mid-line trim, a kept map landing late; each guard's mutant RED)
 // Runs in a CHILD with a fake HOME (findSessionJsonlPath resolves into a throwaway projects dir — never the real ~/.claude).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -208,6 +210,107 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     ok(ssrc.split(NOW_LINE).length === 2 && st && st.subagentMetas.length === 0 && n === 0 && st.model === 'claude-opus-5-5' && st2 && st2.subagentMetas.length === 0 && n2 === 0,
       `chatStatus after the warm: ${n} and ${n2} probes of a helper folder (a conversation with helpers, one without), the field empty as on every other harness (no client, CLI or doc reads it)`);
     ok(nRel >= 31 && rst && rst.subagentMetas.length === 1 && rst.subagentMetas[0].agentId === 'a1', `RED CONTROL — the release's walk for a conversation with no helper folder: ${nRel} probes on the main thread (one per project folder), for a field nothing reads (with one, it carried ${rst && rst.subagentMetas.length} meta)`);
+  }
+  console.log('⑦ the merge (B-299b A5): a reader after one new buffer record parses that record, never the whole buffer, and builds no position map — the RELEASE\'s merge planted back beside it');
+  {
+    // r2 (its read, M1 + S1): the control is the release's OWN _ensureParsed (7b89ef14c, the checkpoint 2.369.410's text,
+    // verbatim) planted into a module copy — its own parse cache and merge memo — so a reader of it pays what every reader
+    // paid on the release, and every step's merged history is compared with the release's, never with itself
+    const REL_ENSURE = "  _ensureParsed() {\n    if (this._all) return;\n    const session = this._session;\n    const historySessionId = getHistorySessionId(session);\n    const jsonl = historySessionId ? parseSessionJsonl(historySessionId, session.cwd) : [];\n    // THE MERGE MEMO (perf chunk C): the merge below is a pure function of\n    // (the jsonl array, the buffer string) and the cache hands back the SAME\n    // array until the file changes, so a burst of SessionMessages over one\n    // session (a reconnect storm: chatStatus + pending permissions per\n    // re-attach) merges once. `_all` is shared exactly as the no-insert case\n    // always shared the cache's array; `_pendingPerms` is copied per instance.\n    const buffer = session.buffer || '';\n    const kept = session._keptFiles || null; // the restore's preload (a new map ⇒ a new merge)\n    const memo = _mergeMemo.get(jsonl);\n    if (memo && memo.buffer === buffer && memo.kept === kept) {\n      this._pendingPerms = { ...memo.perms };\n      this._helperResults = memo.helperResults || [];\n      this._all = memo.all;\n      this._display = this._all.filter(isDisplayMessage);\n      return;\n    }\n    const uuids = new Set();\n    const msgIds = new Set();\n    for (const m of jsonl) {\n      if (m.uuid) uuids.add(m.uuid);\n      // Streaming stdout events can carry a PLACEHOLDER uuid (…-000000000001)\n      // while the JSONL record for the SAME message has the real one — uuid\n      // dedup misses those and the stale buffer copy would render pinned after\n      // the entire history. message.id (msg_…) is stable across both copies.\n      const mid = m.message?.id;\n      if (mid) msgIds.add(mid);\n    }\n\n    this._pendingPerms = {};\n    this._helperResults = []; // verify r3: the helpers' tool_results the record list skips (they settle an asked ask at the rebuild)\n    // Surviving buffer records are INTERLEAVED at their true chronological\n    // position (right after the JSONL record their buffer-neighborhood dedups\n    // against) instead of all appended at the end. Stream-json stdout-only\n    // records (result/init/control_*) never dedup — appended at the end, an\n    // EARLIER turn's `result` replayed AFTER a still-running tool_use and the\n    // normalizer flushed the live pending tool card to ✗ Interrupted on every\n    // server restart (real user report); end-append also scrambled turn\n    // boundaries in the replay. The buffer is chronological, so the index of\n    // the last JSONL-matched record is a correct position anchor.\n    const jsonlPos = new Map(); // 'u:<uuid>' | 'm:<message.id>' → jsonl index\n    jsonl.forEach((m, i) => {\n      if (m.uuid) jsonlPos.set('u:' + m.uuid, i);\n      const mid = m.message?.id;\n      if (mid && !jsonlPos.has('m:' + mid)) jsonlPos.set('m:' + mid, i);\n    });\n    const parsed = [];\n    for (const line of buffer.split('\\n')) {\n      const trimmed = line.replace(/\\r/g, '').trim();\n      if (!trimmed) continue;\n      try { const rec = JSON.parse(trimmed); parsed.push(rec && rec.webui_copy ? KC.resolveRecord(rec, kept, (m) => console.warn(`[kept] ${this._sessionId || 'a session'}: ${m}`)) : rec); } catch {}\n    }\n    // A ROTATED buffer can start with unmatched stdout-only records from mid-\n    // history; anchor those just before the first matched record (not at the\n    // very start) — much closer to their true position.\n    let firstHit = -1;\n    for (const msg of parsed) {\n      const hitU = msg.uuid != null ? jsonlPos.get('u:' + msg.uuid) : undefined;\n      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.get('m:' + msg.message.id) : undefined);\n      if (hit !== undefined) { firstHit = hit; break; }\n    }\n    let anchor = firstHit >= 0 ? firstHit - 1 : jsonl.length - 1;\n    const inserts = new Map(); // jsonl index (-1 = before all) → [records]\n    let anyInsert = false;\n    for (const msg of parsed) {\n      if (msg.type === 'control_request' && msg.request?.tool_use_id) { this._pendingPerms[msg.request.tool_use_id] = msg; }\n      const hitU = msg.uuid != null ? jsonlPos.get('u:' + msg.uuid) : undefined;\n      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.get('m:' + msg.message.id) : undefined);\n      if (hit !== undefined) { if (hit > anchor) anchor = hit; continue; } // in JSONL — advances the position cursor\n      const isControl = msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request';\n      if (!isControl) {\n        if (isSubagentMessage(msg)) { this._noteHelperResult(msg); continue; }\n        // a claude wrapper's copy of a MID-TURN frame (`webui_copy`, lane claude-steer-inject r2) is the only record of\n        // those words the transcript may hold — never dropped for a later user record (a tool_result is one); the\n        // normalizer draws it once (src/message-manager.js _processUser)\n        if (msg._fromWebui && msg.timestamp && !msg.webui_copy) {\n          if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;\n        }\n      }\n      const list = inserts.get(anchor) || inserts.set(anchor, []).get(anchor);\n      list.push(msg);\n      anyInsert = true;\n    }\n    if (!anyInsert) this._all = jsonl;\n    else {\n      const all = [...(inserts.get(-1) || [])];\n      for (let i = 0; i < jsonl.length; i++) {\n        all.push(jsonl[i]);\n        const ins = inserts.get(i);\n        if (ins) all.push(...ins);\n      }\n      this._all = all;\n    }\n    _mergeMemo.set(jsonl, { buffer, kept, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });\n    this._display = this._all.filter(isDisplayMessage);\n  }\n";   // stale-pins: kept — the release's merge, planted back as the control
+    const ssrc7 = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8');
+    const ensureOf = (src) => { const i = src.indexOf('  _ensureParsed() {'), j = src.indexOf('\n  get total() {', i); return i < 0 || j < 0 ? null : src.slice(i, j); };
+    const MC7 = mutantCopies('a5-merge', REPO);
+    const plant = (tag, edits) => {
+      let t = ssrc7;
+      for (const [x, y] of edits) { if (t.split(x).length !== 2) throw new Error(`⑦ (${tag}): its anchor is not ONE site: ${x.slice(0, 70)}`); t = t.replace(x, () => y); }
+      return MC7.load('src/session-store.js', t, tag);
+    };
+    const REL = plant('release', [[ensureOf(ssrc7), REL_ENSURE]]);
+    const KEEP_TAIL = "  if (keyed && !(same && end <= from)) _bufRecsOf.set(session, { head: flatCopy(buffer.slice(0, Math.min(BUF_PROBE, end))), tail: flatCopy(buffer.slice(Math.max(0, end - BUF_PROBE), end)), len: end, recs, kept });\n  if (end < buffer.length) { recs = recs.slice(); parse(buffer.slice(end), recs); }";
+    const MUT = {   // each guard of bufferRecordsOf / userAtOrAfter taken out, and the step it must turn red
+      partialKept: [plant('partial-kept', [[KEEP_TAIL, "  if (end < buffer.length) { recs = recs.slice(); parse(buffer.slice(end), recs); }\n  if (keyed) _bufRecsOf.set(session, { head: flatCopy(buffer.slice(0, Math.min(BUF_PROBE, buffer.length))), tail: flatCopy(buffer.slice(Math.max(0, buffer.length - BUF_PROBE))), len: buffer.length, recs, kept });"]]), 'splitB'],
+      lengthOnly: [plant('length-only', [['buffer.length >= c.len && buffer.startsWith(c.head) && buffer.startsWith(c.tail, c.len - c.tail.length)', 'buffer.length >= c.len']]), 'trim'],
+      keptIgnored: [plant('kept-ignored', [['c && c.kept === kept && buffer.length', 'c && buffer.length']]), 'keptSet'],
+      noUserStamp: [plant('no-user-stamp', [['if (typeof ts === \'string\' && pos.userTsAll) return pos.userTs !== null && pos.userTs >= ts;', 'if (typeof ts === \'string\' && pos.userTsAll) return false;']]), 'first'],
+    };
+    const T7 = (k) => new Date(Date.parse(T1) + k * 1000).toISOString();
+    const SHA7 = 'ab'.repeat(16);
+    const PIC64 = Buffer.from('the kept picture').toString('base64');   // the kept picture, resolved (keptSet) — a «gone» reference before its map (keptNull)
+    // ONE session object through the buffer's roads (an append, a line split across two appends, a ring trim cut mid-line, a
+    // kept copy read before its map landed and after): each step's merged history + the JSON.parse calls the read made
+    const drive = async (M, N) => {
+      const sidM = `cccccccc-0000-4000-8000-${String(N).padStart(12, '0')}`, fM = path.join(projDir, sidM + '.jsonl');
+      const tRec = (k) => JSON.stringify({ uuid: `j${N}-${k}`, timestamp: T7(k), type: k % 2 ? 'assistant' : 'user', message: { id: `msg_${N}_${k}`, role: k % 2 ? 'assistant' : 'user', content: [{ type: 'text', text: `record ${k}` }] } });
+      fs.writeFileSync(fM, Array.from({ length: N }, (_, k) => tRec(k)).join('\n') + '\n');   // every drive from the same transcript (r3: a drive appends to it)
+      await M.warmSessionJsonlAsync(sidM, cwd);
+      const live = (k) => JSON.stringify({ uuid: `b${N}-${k}`, timestamp: T7(N + k), type: 'assistant', message: { id: `msg_b${N}_${k}`, role: 'assistant', content: [{ type: 'text', text: `live ${k}` }] } });
+      const typed = (ts, text) => JSON.stringify({ type: 'user', message: { role: 'user', content: text }, _fromWebui: true, timestamp: ts });
+      const session = { backend: 'claude', backendSessionId: sidM, claudeSessionId: sidM, cwd,
+        buffer: [...Array.from({ length: 150 }, (_, k) => live(k)), typed(T7(10), 'typed, the transcript holds a later user record'), ...Array.from({ length: 150 }, (_, k) => live(150 + k)), typed(T7(N + 999), 'typed, not in the transcript yet')].join('\n') + '\n' };
+      const c0 = { ...M._mergeCounts }, steps = {};
+      const read = (name) => {
+        let n = 0; const realParse = JSON.parse;
+        JSON.parse = function (...x) { n++; return realParse.apply(this, x); };
+        let all; try { all = new M.SessionMessages(session, null, { buffersDir: path.join(os.homedir(), 'buf'), permissionModes: [] }).raw(); } finally { JSON.parse = realParse; }
+        const mc = M._mergeCounts || {};
+        steps[name] = { json: JSON.stringify(all), len: all.length, parses: n, pos: (mc.posBuilt || 0) - (c0.posBuilt || 0), ext: (mc.posExtended || 0) - (c0.posExtended || 0), idx: (mc.posIndexed || 0) - (c0.posIndexed || 0) };
+      };
+      read('first');
+      session.buffer += live(300) + '\n'; read('one');                                   // ONE new record
+      fs.appendFileSync(fM, [tRec(N), tRec(N + 1), tRec(N + 2), live(300)].join('\n') + '\n');   // r3: the TRANSCRIPT gains three records + the buffered one the CLI wrote
+      await M.warmSessionJsonlAsync(sidM, cwd); read('tAppend');                         // the tail cache's append: a NEW array of the old records + four
+      fs.appendFileSync(fM, tRec(N + 3) + '\n'); await M.warmSessionJsonlAsync(sidM, cwd);   // r4: TWO appends with no read between
+      fs.appendFileSync(fM, tRec(N + 4) + '\n'); await M.warmSessionJsonlAsync(sidM, cwd); read('tAppend2');
+      const half = live(301); session.buffer += half.slice(0, 40); read('splitA');        // a record split across two appends
+      session.buffer += half.slice(40) + '\n'; read('splitB');
+      session.buffer = (session.buffer + live(302) + '\n').slice(37); read('trim');      // the ring trimmed, cut mid-line, no shorter
+      session.buffer += JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'see' }, { type: 'image', source: { type: 'kept', sha: SHA7, ext: 'png', media_type: 'image/png' } }] }, _fromWebui: true, webui_copy: true, timestamp: T7(N + 303) }) + '\n';
+      read('keptNull');                                                                  // read before the restore's preload landed
+      session._keptFiles = new Map([[SHA7 + '.png', Buffer.from('the kept picture')]]); read('keptSet');
+      return { steps, userScans: M._mergeCounts ? M._mergeCounts.userScans - c0.userScans : null };
+    };
+    const STEPS = ['first', 'one', 'tAppend', 'tAppend2', 'splitA', 'splitB', 'trim', 'keptNull', 'keptSet'];
+    for (const N of [1000, 10000]) {
+      const now = await drive(SS, N), rel = await drive(REL, N);
+      const differ = STEPS.filter((k) => now.steps[k].json !== rel.steps[k].json);
+      const s1 = now.steps.one, r1 = rel.steps.one;
+      ok(s1.parses === 1 && s1.pos === 1 && r1.parses === 303 && s1.len === N + 302,
+        `${N} transcript records + a 302-line buffer, one record new: the reader parses ${s1.parses} line and builds no position map past its first (${s1.pos} in all); the release's reader parses ${r1.parses} (RED CONTROL: the release, planted back)`, { now: s1.parses, rel: r1.parses, pos: s1.pos });
+      ok(differ.length === 0 && now.steps.splitB.parses === 1 && now.steps.keptSet.json.includes(PIC64) && !now.steps.keptNull.json.includes(PIC64) && now.steps.keptNull.json.includes('"gone":true'),
+        `every step's merged history is the release's, byte for byte (an append; a line split across two appends — parsed once it ends: ${now.steps.splitB.parses}; a trim cut mid-line; a kept picture before and after its map) — ${STEPS.length} steps at ${N}`, { differ });
+      ok(now.userScans === 0, `the typed-record check asks the transcript's greatest user stamp: ${now.userScans} scans of the ${N} records (the release scanned them for every typed record at every merge)`);
+      const ta = now.steps.tAppend, tb = now.steps.tAppend2;
+      ok(ta.pos === 1 && ta.ext === 1 && ta.idx - now.steps.one.idx === 4 && ta.parses === 0 && tb.pos === 1 && tb.ext === 2 && tb.idx - ta.idx === 2,
+        `r3 (its re-read's MUST): the transcript gained 4 records (a NEW array from the tail cache): the index MOVED (${ta.ext}), ${ta.idx - now.steps.one.idx} records indexed, no rebuild (${ta.pos} build in all) — the release rebuilt the map over all ${N + 4}; two more appends with no read between: still moved (${tb.ext}), 2 indexed (r4: the cache entry carries the array last indexed)`, { ta, tb });
+    }
+    const NOEXT = plant('no-extend', [['  pos = prevPos ? extendPos({ arr: prev, pos: prevPos }, jsonl) : null;\n', '  pos = null;\n']]);
+    const ne = await drive(NOEXT, 1000);
+    ok(ne.steps.tAppend.pos === 2 && ne.steps.tAppend.json === (await drive(REL, 1000)).steps.tAppend.json, `RED CONTROL (no extension — the r2 index): the transcript's append REBUILT the map (${ne.steps.tAppend.pos} builds), the same history`);
+    // r3: the tail window's SLIDE (a transcript past 32 MB: an append drops head records) and a partial last line read again —
+    // on the index itself, against the release's own map rule over the new array (uuid: the last record; message.id: the first)
+    const slide = (M) => {
+      const mk = (i) => ({ uuid: `s-${i % 97 === 0 ? 'dup' : i}`, type: i % 3 ? 'assistant' : 'user', timestamp: T7(i % 50 === 0 ? 9e6 - i : i), message: { id: `msg_s_${Math.floor(i / 2)}` } });
+      const A = Array.from({ length: 400 }, (_, i) => mk(i)); A.push({ type: 'assistant', uuid: 's-399', message: { id: 'msg_s_partial' } });   // its last line still being written
+      M._jsonlPosOf(A);
+      const B = A.slice(37, A.length - 1).concat(Array.from({ length: 6 }, (_, k) => mk(400 + k)));
+      const c = { ...M._mergeCounts }, pB = M._jsonlPosOf(B, null, A);   // its predecessor handed as the cache entry carries it
+      const rel = new Map(); B.forEach((m, i) => { if (m.uuid) rel.set('u:' + m.uuid, i); const mid = m.message?.id; if (mid && !rel.has('m:' + mid)) rel.set('m:' + mid, i); });
+      const gone = ['u:s-1', 'u:s-36', 'm:msg_s_partial', 'm:msg_s_17'];
+      const bad = [...rel].filter(([k, i]) => pB.idx(k, k.startsWith('u:')) !== i).map(([k]) => k).concat(gone.filter((k) => pB.idx(k, k.startsWith('u:')) !== undefined));
+      const x = T7(9e6 - 10);   // between the greatest stamp that slid out (9e6) and the greatest left (9e6 − 150)
+      const release = B.some((m) => m.type === 'user' && m.timestamp >= x);
+      const stampSame = M._userAtOrAfter(pB, B, x) === release, r1 = M._mergeCounts.userRescans - c.userRescans; M._userAtOrAfter(pB, B, x);
+      return { bad, ext: M._mergeCounts.posExtended - c.posExtended, built: M._mergeCounts.posBuilt - c.posBuilt, idx: M._mergeCounts.posIndexed - c.posIndexed, stampSame, release, rescans: [r1, M._mergeCounts.userRescans - c.userRescans].join(',') };
+    };
+    const sl = slide(SS);
+    ok(sl.bad.length === 0 && sl.ext === 1 && sl.built === 0 && sl.idx === 6 && sl.stampSame && sl.release === false && sl.rescans === '1,1',
+      `r3: a slide of 37 head records + a partial last line read again + 5 new: every key answers the release's index over the new array, the slid ones none; ${sl.idx} records indexed, no rebuild; the greatest user stamp that slid out is asked again ONCE (the answer the release gives; rescans ${sl.rescans})`, sl);
+    const noShift = slide(plant('no-base-shift', [['  pos.base = base0 + d;\n', '  pos.base = base0;\n']])), noStale = slide(plant('no-stale-stamp', [['m.timestamp >= pos.userTs) pos.userTsStale = true;', 'm.timestamp >= pos.userTs) pos.userTsStale = false;']]));
+    ok(noShift.bad.length > 0 && !noStale.stampSame, `RED CONTROLS: the base not moved ⇒ ${noShift.bad.length} keys answer the wrong record; the slid-out stamp kept ⇒ a typed record is dropped that the release keeps`, { noShift: noShift.bad.slice(0, 4), noStale });
+    for (const [name, [M, step]] of Object.entries(MUT)) {
+      const mut = await drive(M, 1000), rel = await drive(REL, 1000);
+      ok(mut.steps[step].json !== rel.steps[step].json, `RED CONTROL (${name}): the guard taken out ⇒ the «${step}» step's merged history is not the release's`);
+    }
   }
   console.log(fail ? `FAILED (${fail})` : `task-scan-loop test passed (${pass})`);
   process.exit(fail ? 1 : 0);
