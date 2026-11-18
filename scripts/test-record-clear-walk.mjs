@@ -70,7 +70,8 @@ const MUT = mutantCopies('rc-walk', repo);
 const S = 'SNTL';
 const has = (x) => (typeof x === 'string' ? x : J(x) || '').includes(S);
 const wordsIn = (x) => { const t = typeof x === 'string' ? x : J(x) || ''; return [...new Set(t.match(/SNTL-[a-z0-9]+/g) || [])].sort(); };
-const w = (tag) => `${S}-${tag}`;
+const SEEDED = new Set();   // every word this suite seeded (all of them through w())
+const w = (tag) => { const x = `${S}-${tag}`; SEEDED.add(x); return x; };
 
 // identities
 const SID = 'f01d0000-0000-4000-8000-00000000d00d';         // the agent's seat (a stub chat session that prints this id)
@@ -526,7 +527,12 @@ await turn('second turn');
   // any other way (an assistant row, another conversation, an artifact, a byte no row explains) stays undeclared ⇒ red.
   const IX = /^\$HOME\/\.vibespace\/db\/[0-9a-f]+\/search\.db(?:-wal|-shm)?$/;
   const ixFiles = out.filter((f, i) => IX.test(rel[i]));
-  const ixWords = [...new Set(ixFiles.flatMap((f) => wordsIn(fs.readFileSync(f, 'latin1'))))];
+  // The raw page bytes: a value runs on into the NEXT column's text when that text follows it in the record — B-19bd's msg.who
+  // («notice», «peer», «typed») sits right after the body (schema 3), so a body's last word reads «SNTL-j5hnotice». A raw run is
+  // the longest SEEDED word it starts with (the suite made every word through w()); a run no seeded word begins stays as read.
+  // Each such word must still be found by the index's OWN reader, and only in the seat's own user-side rows (below).
+  const seededOf = (x) => [...SEEDED].filter((s) => x.startsWith(s)).sort((a, b) => b.length - a.length)[0] || x;
+  const ixWords = [...new Set(ixFiles.flatMap((f) => wordsIn(fs.readFileSync(f, 'latin1'))).map(seededOf))];
   // read through the index's OWN reader (the worker holds the db with locking_mode=EXCLUSIVE — a second connection reads "locked")
   const ixHits = [];
   for (const x of ixWords) { const r = await raw(`/api/search?q=${encodeURIComponent(x)}&limit=100`); for (const h of (r.json && r.json.hits) || []) ixHits.push({ word: x, kind: h.kind, sid: h.sid || h.sessionId || null, role: h.role || null, at: h.uuid || h.path || null, has: has(h.snippet) }); }
