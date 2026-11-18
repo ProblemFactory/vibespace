@@ -8080,6 +8080,7 @@ function maybeStopOnFallback(session, id, from, to) {
   try {
     if (!harnessDeclares(session.backend, 'disableModelFallback') || harnessSetting(session.backend, 'disableModelFallback') !== true) return; // the session's harness declares the row, or there is nothing to stop on
     if (session._fallbackStopFired || session.mode !== 'chat' || !session.pty) return;
+    if (require('../settings-file-words.js').fileGoverns(session, 'noFallback')) return;   // B-8dcf item two: the person's settings file governs the fallback
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter?.formatInterrupt) return;
     session._fallbackStopFired = true;

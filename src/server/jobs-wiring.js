@@ -290,6 +290,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       for (const [, s] of activeSessions) {
         if (!s.pty || s.mode !== 'chat' || (s.backend || 'claude') !== 'claude' || s.host) continue;
         if (s._csiAccepted) continue;
+        if (require('../settings-file-words.js').fileGoverns(s, 'jobNotices')) continue;   // B-8dcf item two: the person's settings file governs it
         try {
           s.pty.write(JSON.stringify({ type: 'control_request', request_id: `vs-csi-${++csiSeq}`, request: { subtype: 'apply_flag_settings', settings: { crossSessionInbound: 'accept' } } }) + '\n');
           s._csiAccepted = true;

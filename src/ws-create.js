@@ -1091,6 +1091,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             _lockedModel: data.modelLock ? (data.lockModel || data.model || null) : null,
             _lockedContext: data._lockContext || null,   // B-6c55: the person's context ask beside the target (the repin sends both)
             _spawnContext: data._spawnContext || null,   // B-6c55: the context the spawn's --model carried
+            _settingsFileGoverns: ((sessionSpec && sessionSpec.settingsNotes) || []).filter((k) => k !== 'billing'),   // B-8dcf item two: what the person's settings file governs (running-CLI pushes skip it)
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -1573,6 +1574,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once
           activeSessions.set(id, session);
           session._webuiId = id;
+          // B-8dcf item two: what the person's own settings file met at this start (the adapter's `settingsNotes`, read off the argv the hub
+          // builds — local and remote alike, nothing reads the file) — SAID by name, once per start, where the person looks, with its door;
+          // only a start that got this far is told (a refused one says its refusal)
+          for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {
+            const w = require('./settings-file-words.js').SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
+            if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }
+          }
           // 2.368.0: what this session was spawned with / prefers. undefined on
           // _autoResume means "follow the global default" — the tri-state is
           // deliberate so a per-session OFF survives the default being ON.
@@ -1713,6 +1721,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             lockedModel: session._lockedModel || undefined,
             lockedContext: session._lockedContext || undefined,   // B-6c55: survives a server restart beside the target
             spawnContext: session._spawnContext || undefined,     // B-6c55: what the spawn commanded (a Lock after a restart reads it)
+            settingsFileGoverns: session._settingsFileGoverns && session._settingsFileGoverns.length ? session._settingsFileGoverns : undefined,   // B-8dcf item two
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             taskIds: session._initialGroupIds && session._initialGroupIds.length ? session._initialGroupIds : undefined, // lane new-session-form: every group, in selection order

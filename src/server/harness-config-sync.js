@@ -164,6 +164,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       const value = coerce(row, n[path]);
       for (const [sid, sess] of activeSessions) {
         if (sess.backend !== harness || sess.mode !== 'chat' || !sess.pty) continue;
+        { const k = require('../settings-file-words.js').KIND_OF_ROW[row.key]; if (k && require('../settings-file-words.js').fileGoverns(sess, k)) continue; }   // B-8dcf item two: a value the person's settings file governs is never pushed
         try {
           const ad = adapterRegistry.get(sess.backend);
           if (ad && typeof ad[row.apply.live] === 'function') sess.pty.write(ad[row.apply.live](value) + '\n');

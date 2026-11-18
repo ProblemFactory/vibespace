@@ -135,11 +135,25 @@ class ClaudeCodeAdapter extends BackendAdapter {
       if (typeof a === 'string' && a.startsWith('--settings=')) xa.push('--settings', a.slice('--settings='.length));
       else xa.push(a);
     }
-    const userSettingsMergeable = (() => {
+    let userSettingsMergeable = (() => {
       const i = xa.indexOf('--settings');
       if (i < 0) return true;
       try { const o = JSON.parse(xa[i + 1]); return !!o && typeof o === 'object' && !Array.isArray(o); } catch { return false; }
     })();
+    // B-8dcf item two (ruled 2026-11-18 01:19Z — src/settings-file-words.js): the person's own settings FILE meets the values this
+    // start adds. An explicit subscription pick NEVER stands down (a money choice a file does not override): the file is set aside
+    // for this start — and so the other defaults apply as on a start without it. Otherwise the file governs: the output style, the
+    // no-fallback setting and the Background Work inbound accept stand down. Each said by name, once per start (`settingsNotes`).
+    const settingsNotes = [];
+    if (!userSettingsMergeable && neutralizeKeyHelper) {
+      const i = xa.indexOf('--settings');
+      notes.push(`subscription pick: the session's own --settings ${JSON.stringify(String(xa[i + 1] || ''))} is set aside for this start (the helper key it may name never bills a subscription pick)`);
+      xa[i + 1] = '{}';
+      userSettingsMergeable = true;
+      settingsNotes.push('billing');
+    }
+    const fileGoverns = !userSettingsMergeable;
+    const standDown = (kind, what) => { settingsNotes.push(kind); notes.push(`${what} stands down: the session's own --settings ${JSON.stringify(String(xa[xa.indexOf('--settings') + 1] || ''))} is not inline JSON, so its file governs`); };
 
     if (resumeId) {
       args.push('--resume', resumeId);
@@ -222,10 +236,10 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // / Learning / Proactive) are a SETTINGS key, and a stream-json session is
     // never offered `/output-style` (verified against a real init record), so
     // spawn is the only door — which is why the UI says "next resume".
-    if (outputStyle && outputStyle !== 'default') mergeSettings({ outputStyle });
+    if (outputStyle && outputStyle !== 'default') { if (fileGoverns) standDown('outputStyle', 'the output style'); else mergeSettings({ outputStyle }); }
     if (disableModelFallback) {
-      mergeSettings({ switchModelsOnFlag: false });
-      env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1';
+      if (fileGoverns) standDown('noFallback', 'disableModelFallback');   // both halves stand down — the notice says the setting is not applied
+      else { mergeSettings({ switchModelsOnFlag: false }); env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1'; }
     }
     // CLAUDE CODE'S OWN AUTO-CONTINUE AT A USAGE LIMIT (owner ruling
     // 2026-09-22; row `autoContinueAtUsageLimit`, default OFF). The CLI's own
@@ -352,7 +366,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // documented unattended-accept knob is crossSessionInbound:"accept" in
     // --settings (docs/en/cross-session-messaging §Non-interactive sessions);
     // repo/managed settings can still tighten it — we never override a hold.
-    if (options.acceptPeerMessages) mergeSettings({ crossSessionInbound: 'accept' });
+    if (options.acceptPeerMessages) { if (fileGoverns) standDown('jobNotices', 'crossSessionInbound accept'); else mergeSettings({ crossSessionInbound: 'accept' }); }
 
     // TUI renderer for terminal-mode sessions (CLI ≥2.1.x): "fullscreen" is the
     // flicker-free alternate-screen renderer with virtualized scrollback (same
@@ -373,6 +387,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       cwd: cwd || os.homedir(),
       mode,
       ...(notes.length ? { notes } : {}),
+      ...(settingsNotes.length ? { settingsNotes } : {}),   // B-8dcf item two: the kinds the create SAYS to the person (src/settings-file-words.js)
     };
   }
 

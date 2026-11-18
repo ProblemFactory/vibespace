@@ -125,11 +125,15 @@ function claudeAuthAtSpawn({ hostId, accounts }) {
     : (accounts?.cliPrimaryKey?.().present ? 'console' : 'unknown');
 }
 
+const isJsonObject = (v) => { try { const o = JSON.parse(v); return !!o && typeof o === 'object' && !Array.isArray(o); } catch { return false; } };
 /** The usage statusline rides the CLI's `--settings` JSON (merged into one the
  *  spawn already carries — the existing arg is rewritten IN PLACE, as before). */
 function withStatusline(args, command) {
   let settingsObj = {};
   const si = args.indexOf('--settings');
+  // B-8dcf item two: a value that is not an inline JSON object is the PERSON's settings FILE — it governs, used as it is: the usage
+  // statusline stands down (never a rewrite of the file into `{statusLine}` — the terminal road dropped the file whole)
+  if (si >= 0 && args[si + 1] && !isJsonObject(args[si + 1])) { console.warn('[claude] usage statusline stands down: the session\'s own --settings is a file'); return args; }
   if (si >= 0 && args[si + 1]) { try { settingsObj = JSON.parse(args[si + 1]) || {}; } catch {} }
   settingsObj.statusLine = { type: 'command', command, padding: 0 };
   const sjson = JSON.stringify(settingsObj);

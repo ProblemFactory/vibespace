@@ -593,5 +593,73 @@ console.log('㉒ the third prompt\'s folder offer + a request in a person\'s wor
   ok(keys.length >= 25 && !missing.length, `㉒ every phrase of src/command-words.js (${keys.length}) has zh + ja`, missing);
 }
 
+console.log('⑬b B-8dcf item two (ruled 2026-11-18 01:19Z): a person\'s own settings FILE — three stand down and are said; the billing one never stands down');
+{
+  const SFW = require(path.join(REPO, 'src/settings-file-words.js'));
+  const FILE = '/home/u/.claude/my-settings.json';
+  const run = (A, o) => { const r = new A({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', ...o }); const i = r.args.indexOf('--settings'); let set = null; try { set = i < 0 ? null : JSON.parse(r.args[i + 1]); } catch { set = null; } return { r, flag: i < 0 ? null : r.args[i + 1], set, flags: r.args.filter((x) => x === '--settings').length, notes: r.settingsNotes || [] }; };
+  const file = ['--settings', FILE];
+  const cases = {
+    outputStyle: { o: { outputStyle: 'Explanatory' }, on: (x) => x.set && x.set.outputStyle === 'Explanatory' },
+    noFallback: { o: { settings: { disableModelFallback: true } }, on: (x) => x.set && x.set.switchModelsOnFlag === false && x.r.env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK === '1' },
+    jobNotices: { o: { acceptPeerMessages: true }, on: (x) => x.set && x.set.crossSessionInbound === 'accept' },
+  };
+  for (const [k, c] of Object.entries(cases)) {
+    const bare = run(ClaudeCodeAdapter, c.o), withFile = run(ClaudeCodeAdapter, { ...c.o, extraArgs: file });
+    ok(c.on(bare) && !bare.notes.length, `⑬b ${k}, no settings file: VibeSpace's value rides the one --settings flag, nothing said`, { set: bare.set, notes: bare.notes });
+    ok(withFile.flag === FILE && withFile.flags === 1 && !c.on(withFile) && !withFile.r.env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK && JSON.stringify(withFile.notes.filter((n) => n === k)) === JSON.stringify([k]),
+      `⑬b ${k}, the person's settings FILE: it is used as it is (the flag still names the file, once), VibeSpace's value stands down and the start says «${k}» ONCE`, { flag: withFile.flag, notes: withFile.notes });
+  }
+  const bill = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true }), billFile = run(ClaudeCodeAdapter, { neutralizeKeyHelper: true, outputStyle: 'Explanatory', extraArgs: file }), noPick = run(ClaudeCodeAdapter, { extraArgs: file });
+  ok(bill.set && bill.set.apiKeyHelper === '' && !bill.notes.length, '⑬b billing, no file: an explicit subscription pick neutralizes the helper, nothing said');
+  ok(billFile.flag !== FILE && billFile.set && billFile.set.apiKeyHelper === '' && billFile.set.outputStyle === 'Explanatory' && billFile.flags === 1 && JSON.stringify(billFile.notes) === JSON.stringify(['billing']),
+    '⑬b billing WITH the person\'s file: it NEVER stands down — the file is set aside for this start (the helper neutralized; the other values apply as without a file) and the start says «billing» once', { flag: billFile.flag, set: billFile.set, notes: billFile.notes });
+  ok(noPick.flag === FILE && !noPick.notes.length && !(noPick.set && 'apiKeyHelper' in noPick.set), '⑬b no explicit pick + a file: the file governs (no helper neutralization, nothing set aside)');
+  const all = run(ClaudeCodeAdapter, { outputStyle: 'Explanatory', settings: { disableModelFallback: true }, acceptPeerMessages: true, extraArgs: file });
+  ok(JSON.stringify(all.notes) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices']) && all.flag === FILE, '⑬b all three at once: each said once, in order; the file intact', all.notes);
+  ok(SFW.SETTINGS_FILE_KINDS.every((k) => typeof SFW.SETTINGS_FILE_WORDS[k] === 'string') && JSON.stringify(SFW.SETTINGS_FILE_KINDS) === JSON.stringify(['outputStyle', 'noFallback', 'jobNotices', 'billing']), '⑬b every kind has its words (src/settings-file-words.js)');
+  // RED controls: the release's adapter overwrote the person's file with the three; a copy where the billing one stands down like the three
+  let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/adapters/claude-code.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
+  const M13 = mutantCopies('agent-tool-rules-8dcf', REPO);
+  if (base) { const B = M13.load('src/adapters/claude-code.js', base, 'release').ClaudeCodeAdapter; const rel = run(B, { outputStyle: 'Explanatory', extraArgs: file }); ok(rel.flag !== FILE && rel.set && rel.set.outputStyle === 'Explanatory', '⑬b RED control: the release b06f36e90\'s adapter rewrote the person\'s file into inline JSON (the file silently dropped) — the legs above can go red', { flag: rel.flag }); }
+  else skip('⑬b the release b06f36e90 is not in this clone (a shallow checkout) — its red controls cannot run here');
+  const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  const reg = wc.indexOf('          activeSessions.set(id, session);'), loopAt = wc.indexOf('for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {');
+  ok(reg > 0 && loopAt > reg && /const w = require\('\.\/settings-file-words\.js'\)\.SETTINGS_FILE_WORDS\[k\], name = String\(session\.name \|\| data\.name \|\| ''\)\.slice\(0, 80\) \|\| 'This conversation';\s*if \(w\) \{ try \{ serverNotice\?\.\(`settings-file-\$\{k\}-\$\{id\}`, w\.replace\('\{name\}', name\), \{ level: 1, i18n: \{ key: w, params: \{ name \} \} \}\); \} catch \{ \} \}/.test(wc),
+    '⑬b WIRING: the create says each kind by name, once per start (keyed by the new session), AFTER the session is registered (a refused start says only its refusal), as an information notice naming the conversation — the remote road the same (the argv the hub builds)');
+  ok(/_settingsFileGoverns: \(\(sessionSpec && sessionSpec\.settingsNotes\) \|\| \[\]\)\.filter\(\(k\) => k !== 'billing'\),/.test(wc) && /settingsFileGoverns: session\._settingsFileGoverns && session\._settingsFileGoverns\.length \? session\._settingsFileGoverns : undefined,/.test(wc)
+    && (fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8').match(/_settingsFileGoverns: Array\.isArray\(meta\.settingsFileGoverns\)/g) || []).length === 2,
+    '⑬b the kinds the file governs ride the session (meta settingsFileGoverns, restored on both rebuilds)');
+  {
+    // the RUNNING-CLI pushes skip what the file governs: the jobs engine's inbound catch-up, the fallback stop, a live settings change
+    const jw = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), hc = fs.readFileSync(path.join(REPO, 'src/server/harness-config-sync.js'), 'utf8');
+    ok(/if \(s\._csiAccepted\) continue;\s*if \(require\('\.\.\/settings-file-words\.js'\)\.fileGoverns\(s, 'jobNotices'\)\) continue;/.test(jw)
+      && /if \(require\('\.\.\/settings-file-words\.js'\)\.fileGoverns\(session, 'noFallback'\)\) return;/.test(eng)
+      && /const k = require\('\.\.\/settings-file-words\.js'\)\.KIND_OF_ROW\[row\.key\]; if \(k && require\('\.\.\/settings-file-words\.js'\)\.fileGoverns\(sess, k\)\) continue;/.test(hc),
+      '⑬b the three pushes to a RUNNING CLI skip a value the person\'s file governs (the inbound catch-up after a restart, the fallback stop, a live «Disable model fallback» change)');
+    ok(SFW.fileGoverns({ _settingsFileGoverns: ['jobNotices'] }, 'jobNotices') && !SFW.fileGoverns({ _settingsFileGoverns: ['jobNotices'] }, 'noFallback') && !SFW.fileGoverns({}, 'jobNotices') && SFW.KIND_OF_ROW.disableModelFallback === 'noFallback', '⑬b fileGoverns / KIND_OF_ROW');
+  }
+  {
+    // the TERMINAL road: the usage statusline merge kept a settings FILE rewritten into {statusLine} — the file now governs as it is
+    const SL = require(path.join(REPO, 'src/harnesses/claude.js')).spawn.statusline;
+    const kept = SL(['--model', 'x', '--settings', FILE], 'vs-status'), merged = SL(['--settings', '{"a":1}'], 'vs-status'), none = SL(['--model', 'x'], 'vs-status');
+    ok(JSON.stringify(kept) === JSON.stringify(['--model', 'x', '--settings', FILE]) && JSON.parse(merged[1]).a === 1 && JSON.parse(merged[1]).statusLine.command === 'vs-status' && JSON.parse(none[none.length - 1]).statusLine.command === 'vs-status',
+      '⑬b the terminal road\'s statusline merge: a settings FILE is kept as it is (the statusline stands down), inline JSON is merged, no flag gains one', { kept, merged });
+    let relH = '';   // the release's harness file, read behind its own guard (test-architecture §75)
+    if (base) { try { relH = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/harnesses/claude.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { relH = ''; } }
+    if (relH) { const BH = M13.load('src/harnesses/claude.js', relH, 'release-harness'); const r = BH.spawn.statusline(['--settings', FILE], 'vs-status'); ok(r[1] !== FILE, '⑬b RED control: the release\'s statusline merge rewrote the person\'s file into {statusLine} (the terminal start lost the file whole)', r); }
+    else console.log('  - SKIP ⑬b RED control: the release b06f36e90 is not in this clone (its history is not here)');
+  }
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok(Object.values(SFW.SETTINGS_FILE_WORDS).every((w) => d.includes(JSON.stringify(w) + ':')), `⑬b ${path.basename(f)} words all four`); }
+  const src = fs.readFileSync(path.join(REPO, 'src/adapters/claude-code.js'), 'utf8');
+  const A1 = "    if (!userSettingsMergeable && neutralizeKeyHelper) {", A2 = "    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });";
+  if (src.includes(A1) && src.includes(A2)) {
+    const W = M13.load('src/adapters/claude-code.js', src.replace(A1, '    if (false) {').replace(A2, "    if (neutralizeKeyHelper && !fileGoverns) mergeSettings({ apiKeyHelper: '' });"), 'file-wins').ClaudeCodeAdapter;
+    const w = run(W, { neutralizeKeyHelper: true, extraArgs: file });
+    ok(w.flag === FILE && !(w.set && 'apiKeyHelper' in w.set), '⑬b RED control (the billing rule): a copy where the subscription pick stands down like the three leaves the helper NOT neutralized under a file — the billing leg can go red', { flag: w.flag });
+  } else ok(false, '⑬b control needles exist');
+  for (const row of copiesCensus(M13.files, M13.dir, REPO, { label: '⑬b ' })) ok(row.pass, row.name, row.detail);
+}
+
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
 process.exit(fail ? 1 : 0);
