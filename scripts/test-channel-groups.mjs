@@ -416,10 +416,15 @@ console.log('§2c a set-aside store is on the FIRST SCREEN, and a blocked one is
     ok(it && !/set aside as adapters\.json/.test(it.text) && /could NOT be set aside/.test(it.text) && it.i18n && /could NOT be set aside/.test(it.i18n.text.key) && !('where' in (it.i18n.text.params || {})),
       'a BLOCKED file\'s headline says it could NOT be set aside (never "set aside as adapters.json") — its own i18n key', JSON.stringify(it && { text: it.text, key: it.i18n && it.i18n.text.key }));
     ok(ce2 && (ce2.digest().quarantined || []).some((q) => q.file === 'adapters.json' && q.blocked === true && q.to === null), '…and the digest says `blocked: true`', JSON.stringify(ce2 && ce2.digest().quarantined));
+    // the store's open closes its root to the owning account by its own async stat + chmod (bits only taken away: this
+    // read-only 0555 root becomes 0500) — its event is awaited here, or that chmod lands AFTER the 0755 below and the
+    // scratch folder stays locked (the exit cleanup's rmSync refused with EACCES, swallowed)
+    try { ce2 && await ce2.store.rootClosed; } catch {}
     try { ce2 && ce2.stop(); } catch {}
     try { ce2 && ce2.store.close(); } catch {}
   }
   fs.chmodSync(cdir, 0o755);
+  ok((fs.statSync(cdir).mode & 0o777) === 0o755, 'the scratch store folder is given back 0755 (fs.statSync after the restore: the store\'s own root close had landed before it)', (fs.statSync(cdir).mode & 0o777).toString(8));
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
   const KEY = 'Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved';
   ok(zh.includes(JSON.stringify(KEY)) && ja.includes(JSON.stringify(KEY)), 'the blocked headline has zh + ja rows');
