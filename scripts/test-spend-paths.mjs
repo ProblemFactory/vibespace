@@ -621,11 +621,24 @@ function guardWiring(texts) {
   const takers = [], sites = [], unwired = [];
   for (const f of Object.keys(texts).filter((x) => scanOf(texts[x]).takes)) {
     const t = stripCached(texts[f]);
-    for (const m of t.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(\s*\{/g)) {
+    const heads = [];   // [name, the index of its destructured parameter's «{»]
+    for (const m of t.matchAll(/function\s+([A-Za-z_$][\w$]*)\s*\(\s*\{/g)) heads.push([m[1], m.index + m[0].length - 1]);
+    // (the verdict's should) an ARROW or a function EXPRESSION bound to a name — `const create = ({ spendGuard }) => …` — counts
+    // when its destructured parameter list closes into `) =>` / `) {`; and a CLASS whose constructor destructures the guard (its
+    // sites: `new X(` — a call of the bound name, read below like any other)
+    for (const m of t.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\s*[\w$]*\s*)?\(\s*\{/g)) {
       const open = m.index + m[0].length - 1, close = matchClose(t, open, '{', '}');
+      if (close > 0 && /^\s*(=\s*\{\s*\}\s*)?\)\s*(=>|\{)/.test(t.slice(close + 1, close + 40))) heads.push([m[1], open]);
+    }
+    for (const m of t.matchAll(/\bclass\s+([A-Za-z_$][\w$]*)[^{]*\{/g)) {
+      const b0 = m.index + m[0].length - 1, b1 = matchClose(t, b0, '{', '}'), body = t.slice(b0, b1 > 0 ? b1 : undefined), c = /\bconstructor\s*\(\s*\{/.exec(body);
+      if (c) heads.push([m[1], b0 + c.index + c[0].length - 1]);
+    }
+    for (const [fn, open] of heads) {
+      const close = matchClose(t, open, '{', '}');
       if (close < 0) continue;
       const params = t.slice(open + 1, close);
-      for (const p of GUARD_PARAMS) if (new RegExp(`(^|[\\s,])${p}\\s*(=|,|:|$)`).test(params)) takers.push({ f, fn: m[1], p });
+      for (const p of GUARD_PARAMS) if (new RegExp(`(^|[\\s,])${p}\\s*(=|,|:|$)`).test(params)) takers.push({ f, fn, p });
     }
   }
   const stemOf = (f) => f.split('/').pop().replace(/\.js$/, '');
@@ -748,6 +761,12 @@ function trackedServerSource() {
       ok('§2c RED CONTROL: a module bound to a name (`const SH = require(…); SH.create(…)`) is read — built there without the guard, it is named', Wv.unwired.some((u) => /stash-handover\.js create\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wv.unwired);
       const Wn = guardWiring({ ...texts, 'src/server/zz-census-taker.js': 'function create({ activeSessions, spendGuard = null }) { return { activeSessions, spendGuard }; }\nmodule.exports = { create };\n' });
       ok('§2c RED CONTROL: a function that takes the guard and is built nowhere the census can read is named', Wn.unwired.some((u) => /zz-census-taker\.js create\(\{spendGuard\}\) is built nowhere a census can read/.test(u)), Wn.unwired);
+      const Wa = guardWiring({ ...texts, 'src/server/zz-census-arrow.js': 'const create = ({ activeSessions, spendGuard = null }) => ({ activeSessions, spendGuard });\nmodule.exports = { create };\n',
+        'src/server/zz-census-probe.js': "const d = require('./zz-census-arrow.js').create({ activeSessions });\n" });
+      ok('§2c RED CONTROL (the verdict\'s should): an ARROW constructor that takes the guard (`const create = ({ spendGuard }) => …`), built without it, is named', Wa.unwired.some((u) => /zz-census-arrow\.js create\(\{spendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wa.unwired);
+      const Wk = guardWiring({ ...texts, 'src/server/zz-census-class.js': 'class Door {\n  constructor({ activeSessions, getSpendGuard = () => null }) { this.g = getSpendGuard; }\n}\nmodule.exports = { Door };\n',
+        'src/server/zz-census-probe.js': "const { Door } = require('./zz-census-class.js');\nconst d = new Door({ activeSessions });\n" });
+      ok('§2c RED CONTROL (the verdict\'s should): a CLASS whose constructor takes the guard, built by `new` without it, is named', Wk.unwired.some((u) => /zz-census-class\.js Door\(\{getSpendGuard\}\) built at src\/server\/zz-census-probe\.js without it/.test(u)), Wk.unwired);
       const keyAR = 'serverSetting, spendGuard, scheduleCtxSync';
       if (sj.split(keyAR).length !== 2) throw new Error('the anchor of the control «the agent routes unwired» is not in server.js once');
       const W4 = guardWiring({ ...texts, 'server.js': sj.replace(keyAR, 'serverSetting, scheduleCtxSync') });
