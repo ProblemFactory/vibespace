@@ -30,6 +30,17 @@ const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home'), chrome
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
+// the stop is installed BEFORE the worktree add (a signal during the add, the copy or the build leaves no worktree behind)
+let srv = null, chrome = null, cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  try { chrome?.kill('SIGKILL'); } catch {}; try { srv?.kill('SIGKILL'); } catch {}
+  for (const r of [wt, fakeHome, chromeDir]) { try { endRootedProcesses(r); } catch {} }
+  try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
+  for (const d of [chromeDir, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -50,22 +61,15 @@ fs.mkdirSync(cacheDir, { recursive: true });
 const mkSnap = (o = {}) => ({ fiveHour: { utilization: 0.42, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 0.87, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 86400 }, scopedWeekly: [], overallStatus: 'allowed', fetchedAt: Date.now(), ...o });
 fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify(mkSnap()));
 fs.writeFileSync(path.join(cacheDir, 'host-host-deadbeef-sub-abcdefabcdef.json'), JSON.stringify({ ...mkSnap(), name: 'HeldAcct' }));
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+// the hub's env: a scratch HOME, and none of the machine user's XDG stores or session bus (its children resolve them under the
+// scratch home); XDG_RUNTIME_DIR stays — the tree's own socket rules read it, keyed by the scratch root (src/agentd/client.js)
+const { DBUS_SESSION_BUS_ADDRESS: _hb, XDG_CONFIG_HOME: _hc, XDG_DATA_HOME: _hd, XDG_CACHE_HOME: _hk, XDG_STATE_HOME: _hs, ...hubBase } = process.env;
+srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubBase, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 // (the EXCLUDED package's verdict, the kill law — as test-window-menu: its Chrome asks no keyring and keeps its files under its
 // profile; the login terminal the add-subscription leg opens and every other process it started end BY IDENTITY at any exit)
 fs.mkdirSync(chromeDir, { recursive: true });
 const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1280,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
-let cleaned = false;
-const cleanup = () => {
-  if (cleaned) return; cleaned = true;
-  try { chrome.kill('SIGKILL'); } catch {}; try { srv.kill('SIGKILL'); } catch {}
-  for (const r of [wt, fakeHome, chromeDir]) { try { endRootedProcesses(r); } catch {} }
-  try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
-  for (const d of [chromeDir, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-};
-process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
+chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1280,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
 // ── server-side asserts ──

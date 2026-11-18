@@ -18,7 +18,19 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
-const wt = scratch('menu-smoke');
+const wt = scratch('menu-smoke'), home = scratch('menu-smoke-home'), chromeDir = scratch('menu-smoke-chrome');
+// the stop is installed BEFORE the worktree add (a signal during the add, the copy or the build leaves no worktree behind)
+let srv = null, chrome = null, cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  try { chrome?.kill('SIGKILL'); } catch {}
+  try { srv?.kill('SIGKILL'); } catch {}
+  for (const r of [wt, home, chromeDir]) { try { endRootedProcesses(r); } catch {} }   // the dtach sessions and every child, BY IDENTITY
+  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+  for (const d of [chromeDir, home]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -35,23 +47,15 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 // never the machine user's own home, whose default device-agent root (src/agentd/client.js) is a production one on the hub box —
 // its Chrome asks no keyring and keeps its files under its profile, and everything it started ends BY IDENTITY at any exit (as its siblings test-stage-preview and
 // test-desktop-reorder): no pattern kill
-const home = scratch('menu-smoke-home'), chromeDir = scratch('menu-smoke-chrome'); fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(chromeDir, { recursive: true });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', PORT: String(PORT) }, stdio: 'ignore' });
+fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(chromeDir, { recursive: true });
+// the hub's env: a scratch HOME, and none of the machine user's XDG stores or session bus (its children resolve them under the
+// scratch home); XDG_RUNTIME_DIR stays — the tree's own socket rules read it, keyed by the scratch root (src/agentd/client.js)
+const { DBUS_SESSION_BUS_ADDRESS: _hb, XDG_CONFIG_HOME: _hc, XDG_DATA_HOME: _hd, XDG_CACHE_HOME: _hk, XDG_STATE_HOME: _hs, ...hubBase } = process.env;
+srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubBase, ...VNC_ENV, HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', PORT: String(PORT) }, stdio: 'ignore' });
 const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;   // its crash handler too lives under the profile
-const chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
   '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 
-let cleaned = false;
-const cleanup = () => {
-  if (cleaned) return; cleaned = true;
-  try { chrome.kill('SIGKILL'); } catch {}
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const r of [wt, home, chromeDir]) { try { endRootedProcesses(r); } catch {} }   // the dtach sessions and every child, BY IDENTITY
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [chromeDir, home]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-};
-process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
