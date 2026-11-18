@@ -1082,6 +1082,19 @@ function ownedJobsView(jobs, cid) {
     .sort((a, b) => ((ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)) || a.name.localeCompare(b.name));
 }
 
+/** B-70f9 ② (the owner's option A, 2026-11-18): ENDING A CONVERSATION THAT OWNS RUNNING JOBS — one NON-BLOCKING notice where a
+ *  person ends or archives it: the jobs it owns that still run (a task or service up, a cron that will fire) named, and ONE press
+ *  stops them all; no press = they keep running, as before. → {jobs: [{id, name}], words: {key, params}} | null — PURE */
+const OWNED_LIVE = new Set(['up', 'starting', 'awaiting-user', 'waiting', 'scheduled']);
+function endNotice(jobs, cids) {
+  const want = new Set((Array.isArray(cids) ? cids : [cids]).filter(Boolean).map(String));
+  if (!want.size) return null;
+  const seen = new Set(), out = [];
+  for (const c of want) for (const j of ownedJobsView(jobs, c)) if (OWNED_LIVE.has(j.state) && !seen.has(j.id)) { seen.add(j.id); out.push({ id: j.id, name: j.clearedAt ? j.id : j.name }); }
+  if (!out.length) return null;
+  const names = out.slice(0, 4).map((j) => j.name).join(', ') + (out.length > 4 ? ` +${out.length - 4}` : '');
+  return { jobs: out, words: { key: want.size > 1 ? 'Background jobs of these conversations keep running: {names}' : 'Background jobs of this conversation keep running: {names}', params: { names } } };
+}
 /** B-70f9 (the owner's option A, 2026-11-18): A JOB RUNS ON THE HUB'S MACHINE — never on another. A conversation that runs on
  *  ANOTHER machine asking for a job in a folder the hub's machine does not have is refused AT ONCE, by name (it would only fail
  *  later); a folder that exists there (a shared mount, the same path on both) runs, and the answer says on which machine. Two
@@ -1095,7 +1108,7 @@ function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null,
   if (at && cwdExists === false) return { ok: false, code: 'wrong-machine', error: `jobs run on ${hub}, not on ${there} where your conversation runs; this folder is not there: ${at} — nothing was created. Give --cwd a folder ${hub} has, or run the command on ${there} yourself` };
   return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs (the path is used as it is on ${hub})` };
 }
-module.exports = { jobWhereVerdict, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
+module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,

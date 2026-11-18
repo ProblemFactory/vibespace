@@ -378,7 +378,7 @@ export function registerWindowMenu() {
   registerCommand({ id: 'window.move', title: () => t('Move'), run: (c) => c.app.wm.startMoveMode(c.id) });
   registerCommand({ id: 'window.minimizeOrRestore', title: (c) => (c.win.isMinimized ? t('Restore') : t('Minimize')), run: (c) => { c.app.wm.witnessGeometry?.(c.id); c.win.isMinimized ? c.app.wm.restore(c.id) : c.app.wm.minimize(c.id); } }); // the user's act: witnessed (verify r4 ③)
   registerCommand({ id: 'window.renameSession', title: () => t('Rename…'), run: (c) => c.app.sidebar?.renameSession?.(c.s, c.s.name) });
-  registerCommand({ id: 'window.terminateSession', title: () => t('Terminate session'), run: (c) => c.app.killSession(c.s.webuiId, undefined, { endTree: true }) });   // B-c134: a person's Terminate ends the background tree
+  registerCommand({ id: 'window.terminateSession', title: () => t('Terminate session'), run: (c) => c.app.endConversation(c.s.webuiId, undefined, { endTree: true }) });   // B-70f9 ②: a person's end (its jobs named) · B-c134: a person's Terminate ends the background tree
   registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => (c.group ? c.app.wm.requestCloseGroup(c.id) : c.app.wm.requestClose(c.id)) }); // ctx.group = a WHOLE group's menu (the frame's, the taskbar group's): asked first (B-a67c)
   // P2-2: Close and Terminate never read alike — a running session's window Close says it keeps running and is not red
   const closeStyle = (c) => (c.closeKeeps ? '' : 'color:var(--red, #e55)');

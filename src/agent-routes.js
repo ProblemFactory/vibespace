@@ -2708,7 +2708,7 @@ app.post('/api/agent/jobs', async (req, res) => {
     singleInstance: b.singleInstance, timeoutMs: b.timeoutMs, untilOutput: b.untilOutput,
     stdinOpen: b.stdinOpen, notifyUser: b.notifyUser, schedule: b.schedule,
     catchUp: b.catchUp, action: b.action, context: b.context, access: b.access,
-    stopWithOwner: b.stopWithOwner, notify: b.notify, memoryMb: b.memoryMb, // lane jobs-memory-bound: `--memory 8G` (the engine judges it; 0 is the user's alone)
+    notify: b.notify, memoryMb: b.memoryMb, // lane jobs-memory-bound: `--memory 8G` (the engine judges it; 0 is the user's alone)
     vault: b.vault, // lane vault-job-road: `--vault NAME=vault://…` REFERENCES (the engine judges them; a value never rides this body)
     owner: {
       conversation: a.caller.conversationId ? { id: a.caller.conversationId } : null,
@@ -2720,7 +2720,10 @@ app.post('/api/agent/jobs', async (req, res) => {
   // DERIVED from the copy above (a field removed there is unknown here at once) + the body's bearer `token` + `notifyOk` (the CLI
   // sends it with every shape; only a cron's task reads it). An older hub meeting a newer CLI says so — it never starts a job
   // without what it was asked to carry (its --vault values)
-  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk']);
+  const known = new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'token', 'notifyOk', 'stopWithOwner']);
+  // B-70f9 ②: the stored stop-with-conversation flag is RETIRED (0 of 2 950 stored jobs carried it) — an older CLI's `false` passes;
+  // asked for, it is refused by name with its door: the notice where a person ends the conversation
+  if (b.stopWithOwner === true) return res.status(400).json({ error: '--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was created', code: 'retired-flag' });
   const unknownFields = Object.keys(b).filter((k) => !known.has(k));
   if (unknownFields.length) return res.status(400).json({ error: `unknown field${unknownFields.length === 1 ? '' : 's'}: ${unknownFields.map((k) => (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) ? k : '(a field of another shape)')).join(', ')} — this hub does not read ${unknownFields.length === 1 ? 'it' : 'them'}; nothing was created (an older hub than the CLI? update VibeSpace)`, code: 'unknown_field', fields: unknownFields.filter((k) => /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k)) });
   if (!spec.cmd && b.action && b.action.type === 'spawn-task') { /* notify-cron / cron shapes carry cmd inside action */ }

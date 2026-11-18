@@ -9,6 +9,7 @@ import { stampAt as when, durationMark } from './page-time.js'; // lane ui-langu
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { endNotice } from '../job-model.js'; // B-70f9 ② (PURE): a conversation's jobs that still run, named at its end
 import { bucketView, unconfirmedText } from './usage-source.js'; // a landed reset is shown reset, unconfirmed (lane reset-unproven)
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict (windowDisplay)
 // THE RESUME LADDER, the client's half (B-6b6d) — the same PURE rule the server
@@ -516,7 +517,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           chatView._applyLiveMeta?.(msg);
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.killSession(msg.sessionId, undefined, { endTree: this._personClose() });   // the person's setting: a close IS their Terminate — never a resume's or a record's close
+            if (shouldKill) this.endConversation(msg.sessionId, undefined, { endTree: this._personClose() });   // B-70f9 ②: a person's end — its running jobs are named · B-c134: a close IS their Terminate, never a resume's or a record's close
             // pending name/fork-title entries otherwise only clear on identity
             // adoption — a window closed before that leaked them forever
             this._pendingForkTitles?.delete(msg.sessionId);
@@ -600,7 +601,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // otherwise honor the global close-behavior (default: detach — user
       // directive, no per-type exceptions; sessions stay re-attachable)
       const shouldKill = ephemeral || (killOnClose && this.settings.get('window.closeBehavior') === 'terminate');
-      if (shouldKill) this.killSession(sessionId, undefined, { endTree: !ephemeral && this._personClose() });   // an automation helper's own terminal is no person's Terminate, nor a resume's or a record's close
+      if (shouldKill) this.endConversation(sessionId, undefined, { endTree: !ephemeral && this._personClose() });   // B-70f9 ② · B-c134: an automation helper's own terminal is no person's Terminate, nor a resume's or a record's close
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
@@ -643,6 +644,47 @@ export function installSessionLifecycle(App, ctx = {}) {
   // B-c134 cure: a window close is a person's Terminate only when a PERSON closed it — never a resume's own close (the fence:
   // _reopenWin / _closeSecondView) nor a record's (a layout apply, a desktop's restore: layoutManager._applying / _restoring)
   _personClose() { return !((this._fenceOpen || 0) > 0 || this.layoutManager?._restoring || this.layoutManager?._applying); },
+  // B-70f9 ② A PERSON ENDS A CONVERSATION: the kill, then ONE non-blocking notice when it owns jobs that still run — named, with
+  // «Stop these too» (one press stops them all; no press = they keep running, as before). A RESTART (kill → resume) is no end: it
+  // calls killSession alone
+  // the door's options ({ endTree }, B-c134) ride the kill
+  endConversation(webuiId, backendSessionId, opts = {}) {
+    if (!webuiId) return;
+    const all = this.sidebar?._allSessions || [];
+    const s = all.find((x) => x.webuiId === webuiId);
+    this.killSession(webuiId, backendSessionId, opts);
+    this.noticeOwnedJobs([backendSessionId || (s && (s.sessionId || s.backendSessionId))]);
+  },
+  // A «Clear content…» is news here (the record-clear rule): a clear that lands while the list is on its way names its jobs by
+  // id, never by the words it cleared, and one that lands while the notice shows takes the notice down. The toast history keeps
+  // the head and the count alone — never the jobs' names; a failed press says how many, by count
+  async noticeOwnedJobs(cids) {
+    const want = (cids || []).filter(Boolean);
+    if (!want.length) return;
+    const clearedNow = new Set();
+    let shown = null, ids = null;
+    const off = this.ws?.onGlobal?.((m) => {
+      if (!m || m.type !== 'jobs-updated' || !Array.isArray(m.cleared)) return;
+      for (const id of m.cleared) clearedNow.add(id);
+      if (shown && ids && m.cleared.some((id) => ids.has(id))) { const st = shown.parentNode; shown.remove(); if (st && !st.children.length) st.remove(); }
+    });
+    const done = () => { try { off?.(); } catch { } };
+    let r = null;
+    try { r = await fetchJson('/api/jobs'); } catch { r = null; }
+    const jobs = r && !r.error && Array.isArray(r.jobs) ? r.jobs.map((j) => (j && clearedNow.has(j.id) && !j.clearedAt ? { ...j, clearedAt: Date.now() } : j)) : null;
+    const n = jobs ? endNotice(jobs, want) : null;
+    if (!n) { done(); return; }
+    const stopAll = async () => {
+      done();
+      const res = await Promise.all(n.jobs.map((j) => fetchJson(`/api/jobs/${encodeURIComponent(j.id)}/stop`, { method: 'POST' }).then((a) => ({ j, a }), () => ({ j, a: null }))));
+      const bad = res.filter((x) => !x.a || x.a.error);
+      if (bad.length) showToast(t('Could not stop {n} of these background jobs: {error}', { n: bad.length, error: (bad[0].a && bad[0].a.error) || t('no answer') }), { type: 'error' });
+      else showToast(t('Stopped {n} background jobs', { n: res.length }));
+    };
+    ids = new Set(n.jobs.map((j) => j.id));
+    shown = showToast(t(n.words.key, n.words.params), { duration: 12000, action: { label: t('Stop these too'), run: stopAll }, history: { m: t('A conversation ended; {n} of its background jobs keep running', { n: n.jobs.length }) } });
+    setTimeout(done, 12500);
+  },
   killSession(webuiId, backendSessionId) {
     if (!webuiId) return;
     const tree = arguments[2] && arguments[2].endTree === true ? { endTree: true } : {};   // the door's { endTree } (the signature stays the seam's)
@@ -933,7 +975,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.killSession(serverId, undefined, { endTree: this._personClose() });   // the person's setting: a close IS their Terminate — never a resume's or a record's close
+            if (shouldKill) this.endConversation(serverId, undefined, { endTree: this._personClose() });   // B-70f9 ② · B-c134: the person's setting — a close IS their Terminate
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();

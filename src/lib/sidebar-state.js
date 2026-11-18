@@ -529,6 +529,7 @@ export function installSidebarState(SidebarClass) {
     if (!n) return;
     this._pushUserState(); this._render(); this.app.updateTaskbar();
     showToast(tr('Archived {n} sessions', { n }));
+    this.app.noticeOwnedJobs?.((sessions || []).map((s) => s.sessionId || s.backendSessionId));   // B-70f9 ②: an archived conversation's jobs still run — named, one press stops them
   };
 
   proto.getCustomName = function(sessionOrKey) { return this._stateMapGet(this._customNames, sessionOrKey); };

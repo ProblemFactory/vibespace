@@ -598,6 +598,7 @@ export function installSidebarWorkbench(Sidebar) {
         if (s.webuiId) this.app.killSession(s.webuiId, undefined, { endTree: true });   // B-c134: a person's terminate-and-archive ends the background tree
         else if (s.pid) this.app.killPid(s.pid, s.host);
       }
+      this.app.noticeOwnedJobs?.(termList.map((s) => s.sessionId || s.backendSessionId));   // B-70f9 ②: ONE notice for the jobs they still run
       // archive as a batch — toggle the set directly, single state push + render
       for (const s of archList) {
         const sk = this._getSessionStateKey(s);

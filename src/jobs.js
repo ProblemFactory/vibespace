@@ -3188,7 +3188,7 @@ class JobManager {
       schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: M.storedAction(spec.action),
       context: spec.context || null, interaction: { pending: null, answers: [] },
       owner: spec.owner, access: spec.access || { view: 'group', control: 'session' },
-      stopWithOwner: !!spec.stopWithOwner, desiredUp: true,
+      desiredUp: true,
       state: spec.kind === 'cron' ? 'scheduled' : 'starting', proc: null, supervise: { consecutiveFails: 0, parkedAt: null },
       runs: [], createdAt: now(),
       ...(memMb !== null && !task ? { memoryMb: memMb } : {}),
@@ -3401,7 +3401,7 @@ class JobManager {
       // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify);
       // notifyUser is the one reader's answer (lane job-notify-user: `show` printed nothing about the For-you copy)
       untilOutput: job.untilOutput || M.spawnTaskOf(job).untilOutput || null, notifyUser: M.notifyUserOf(job), notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
-      catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
+      catchUp: job.catchUp || null, singleInstance: job.singleInstance !== false,
       // lane jobs-memory-bound: THE LADDER's answer now (a cron's: its task's), the rung its latest run measured, the park's
       // reason and the out-of-memory ends counted toward it
       ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null }; })(), // round 4: the NEXT run's (a live run's own rides its memoryBound.cap)

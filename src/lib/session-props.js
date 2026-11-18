@@ -773,7 +773,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         : t('This conversation is NOT notified when its background jobs finish — agents must poll. Toggle globally in Settings → Integration, per group in the group window.');
       bwSec.appendChild(hint);
       // B-70f9 ② (design §9): the jobs this conversation OWNS — glyph · name · state; a click opens the Background Work
-      // panel at that job. Read-only: what a kill does to them is the panel's (and the job's --stop-with-owner).
+      // panel at that job. Read-only here; when a person ENDS or archives the conversation, one notice names those still running with «Stop these too» (B-70f9 ②).
       {
         const conv = s.backendSessionId || s.claudeSessionId || '';
         const oj = ownedJobs(conv, () => { if (root.isConnected) render(); });

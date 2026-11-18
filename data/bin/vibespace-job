@@ -43,7 +43,7 @@ const verb = pos[0];
 // never learned — `--vault` before it existed) was SWALLOWED and the job started without it. test-jobs-cli-body pins this list
 // to the usage the CLI prints and the flags the branch reads.
 const RUN_FLAGS = Object.freeze(['name', 'note', 'context', 'cwd', 'until', 'timeout', 'stdin-open', 'notify', 'notify-user', 'notify-ok', 'memory',
-  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'stop-with-owner', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault']);
+  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault']);
 // a --vault is a REFERENCE (NAME=vault://…): anything else is refused HERE, before anything is sent — a value typed where a
 // reference belongs never leaves this command line (refused at its position, its text never echoed). The hub judges the rest.
 function vaultRefusal(v, isNotify) {
@@ -235,7 +235,6 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         context: flags.context ? { payload: readArg(flags.context) } : null,
         schedule,
         access: { view: flags.view || 'group', control: flags.control || 'session' },
-        stopWithOwner: !!flags['stop-with-owner'],
         notify: flags.notify === 'on' || flags.notify === 'off' ? flags.notify : undefined,
         // lane job-notify-user: the For-you copy is ONE top-level field for every shape — notify-cron never sent it (the
         // fire woke only the agent) and a scheduled run hid it inside action.task, where the cron's own record said false
@@ -339,7 +338,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + atWords(j, 'nextFireAt') : ''}`);
       // lane job-notify-user r3: a notify cron's reminder (the snapshot kept none)
       if (j.actionText) console.log('text: ' + j.actionText);
-      console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
+      console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
       if (forYouLine(j)) console.log(forYouLine(j));
       if (memLine(j)) console.log(memLine(j));
       if (vaultLine(j)) console.log(vaultLine(j));

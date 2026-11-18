@@ -762,5 +762,28 @@ console.log('B-70f9 ① a job says where it runs; a folder the hub\'s machine do
   ok(/res\.json\(\{ machine: hubMachine, where: where\.words,/.test(ar) && /machine: os\.hostname\(\),   \/\/ B-70f9/.test(ar) && /if \(r\.where\) console\.log\(`where: \$\{r\.where\}`\);/.test(cli) && /if \(r\.machine\) console\.log\(`machine: \$\{r\.machine\} \(a job runs on the hub's machine\)`\);/.test(cli), 'WIRING: the create and the show answers name the machine; the CLI prints «where:» at a run and «machine:» at a show');
 }
 
+// ── B-70f9 ② ENDING A CONVERSATION THAT OWNS RUNNING JOBS: one non-blocking notice, «Stop these too»; the stored flag retired ──
+console.log('B-70f9 ② the notice at a person\'s end / archive; the stop-with-conversation flag retired');
+{
+  const own = (id, name, state, cid = 'conv-a', kind = 'task') => ({ id, name, state, kind, owner: { conversation: { id: cid } } });
+  const jobs = [own('jb-1', 'build', 'up'), own('jb-2', 'nightly', 'scheduled', 'conv-a', 'cron'), own('jb-3', 'old', 'done'), own('jb-4', 'theirs', 'up', 'conv-b'), own('jb-5', 'asks', 'awaiting-user')];
+  const one = M.endNotice(jobs, ['conv-a']), two = M.endNotice(jobs, ['conv-a', 'conv-b']), none = M.endNotice(jobs, ['conv-z']), many = M.endNotice([1, 2, 3, 4, 5, 6].map((k) => own('jb-m' + k, 'w' + k, 'up')), 'conv-a');
+  ok(one && one.jobs.map((j) => j.id).join() === 'jb-5,jb-1,jb-2' && one.words.key === 'Background jobs of this conversation keep running: {names}' && one.words.params.names === 'asks, build, nightly', 'endNotice: the jobs a conversation OWNS that still run (waiting for you first, a cron that will fire too) — never a finished one, never another conversation\'s', one);
+  ok(two && two.jobs.length === 4 && /these conversations/.test(two.words.key) && none === null && M.endNotice(jobs, []) === null, 'several conversations (an archive of many): one notice; none running: NO notice');
+  ok(many.words.params.names === 'w1, w2, w3, w4 +2' && many.jobs.length === 6, 'many jobs: four named, the rest counted — the press stops them ALL');
+  const L = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/session-lifecycle.js'), 'utf8'), tb = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/taskbar.js'), 'utf8'), sw = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/sidebar-workbench.js'), 'utf8'), ss = fs.readFileSync(path.join(__dirname_jm, '..', 'src/lib/sidebar-state.js'), 'utf8');
+  ok((L.match(/if \(shouldKill\) this\.endConversation\(/g) || []).length === 3 && /registerCommand\(\{ id: 'window\.terminateSession', title: \(\) => t\('Terminate session'\), run: \(c\) => c\.app\.endConversation\(c\.s\.webuiId\) \}\)/.test(tb) && /this\.app\.noticeOwnedJobs\?\.\(termList\.map/.test(sw) && /this\.app\.noticeOwnedJobs\?\.\(\(sessions \|\| \[\]\)\.map/.test(ss), 'WIRING: every door where a PERSON ends a conversation (three window closes, Terminate, the sidebar\'s terminate-and-archive) and the archive door notice its running jobs');
+  ok(/this\.killSession\(webuiId, cid\);/.test(L) && /this\.killSession\(live\.webuiId, backendSessionId\);/.test(L) && /action: \{ label: t\('Stop these too'\), run: stopAll \}/.test(L) && /fetchJson\(`\/api\/jobs\/\$\{encodeURIComponent\(j\.id\)\}\/stop`, \{ method: 'POST' \}\)/.test(L), 'WIRING: a RESTART (kill → resume) stays killSession — no notice; the one press stops every named job through the user route, a failure said by count');
+  // the record-clear rule (test-record-clear-census H7 + I): a clear is news to the notice
+  const clearPin = (src) => /const jobs = [^\n]*clearedNow\.has\(j\.id\) && !j\.clearedAt \? \{ \.\.\.j, clearedAt: Date\.now\(\) \}/.test(src) && /if \(shown && ids && m\.cleared\.some\(\(id\) => ids\.has\(id\)\)\) \{ const st = shown\.parentNode; shown\.remove\(\);/.test(src) && /history: \{ m: t\('A conversation ended; \{n\} of its background jobs keep running', \{ n: n\.jobs\.length \}\) \}/.test(src) && !/x\.j\.name/.test(src);
+  const cl = M.endNotice([{ ...own('jb-c', 'the cleared words', 'up'), clearedAt: 1 }, own('jb-d', 'kept', 'up')], ['conv-a']);
+  ok(clearPin(L) && cl && cl.words.params.names.split(', ').sort().join() === 'jb-c,kept' && !JSON.stringify(cl).includes('the cleared words'), 'THE CLEAR IS NEWS: a clear landing during the GET marks its jobs cleared before the notice (a cleared job is named by its id, never by the words cleared), one landing while it shows takes it down, the toast history keeps the head + count, a failed press is a count');
+  const GUARD = "clearedNow.has(j.id) && !j.clearedAt ? { ...j, clearedAt: Date.now() } : j";
+  if (!L.includes(GUARD)) ok(false, 'the anchor of the control «clear guard cut» is not in the source');
+  else ok(!clearPin(L.replace(GUARD, 'j')), 'CONTROL: the clear guard cut (the answer used as it came) fails the pin');
+  const js = fs.readFileSync(path.join(__dirname_jm, '..', 'src/jobs.js'), 'utf8'), ar = fs.readFileSync(path.join(__dirname_jm, '..', 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(__dirname_jm, '..', 'data/bin/vibespace-job'), 'utf8');
+  ok(!/stopWithOwner/.test(js) && !/stop-with-owner|stopWithOwner/.test(cli) && /if \(b\.stopWithOwner === true\) return res\.status\(400\)\.json\(\{ error: '--stop-with-owner was retired:[^']*', code: 'retired-flag' \}\);/.test(ar) && /'notifyOk', 'stopWithOwner'\]\);/.test(ar), 'THE FLAG RETIRED (0 of 2 950 stored jobs carried it): no engine line stores or shows it, the CLI has no such flag, an older CLI\'s false passes, true is refused by name with its door');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
