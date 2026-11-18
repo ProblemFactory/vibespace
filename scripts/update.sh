@@ -13,9 +13,14 @@ cd "$(dirname "$0")/.."
 # the update — single-user container, and the exec is already privileged.
 # B-f6fd: `--after-pull` = the NEW script, exec'd by the old one right after its pull (below): the pull is done — everything
 # after the pull runs from the script the pull brought; the lock is re-taken on the inherited fd 9 (the same open file: it
-# holds), or taken anew when the mode was typed by hand
+# holds) — fd 9 counts only when it IS the update lock — or taken anew when the mode was typed by hand
 AFTER_PULL=; [ "${1:-}" = "--after-pull" ] && AFTER_PULL=1
-[ -n "$AFTER_PULL" ] || git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+# …ONCE (batch 11 cure): added only when this user's git config does not list it yet — the hand-over and every later run
+# find it and add nothing
+case $'\n'"$(git config --global --get-all safe.directory 2>/dev/null || true)"$'\n' in
+  *$'\n'"$(pwd)"$'\n'*) ;;
+  *) git config --global --add safe.directory "$(pwd)" 2>/dev/null || true ;;
+esac
 # Single-flight guard: the update restarts the server, whose fresh in-memory
 # pid map can't see this still-running script — a second POST /api/self-update
 # (another tab / re-click) would interleave a concurrent git pull/npm install.
@@ -33,7 +38,7 @@ if [ -e data/.update.lock ] && [ ! -w data/.update.lock ]; then
   }
 fi
 if command -v flock >/dev/null 2>&1; then
-  { [ -n "$AFTER_PULL" ] && { true >&9; } 2>/dev/null; } || exec 9>data/.update.lock
+  { [ -n "$AFTER_PULL" ] && [ /dev/fd/9 -ef data/.update.lock ]; } || exec 9>data/.update.lock
   flock -n 9 || { echo "Another update is already running — aborting this one."; exit 1; }
 fi
 # Ownership preflight (same incident, the bigger half): a root-run update
@@ -88,10 +93,10 @@ git checkout HEAD -- src/agentd/version.js 2>/dev/null || true
 # Any tracked-and-modified generated helper under data/bin (per-path so one bad
 # pathspec can't wedge the rest); untracked ones don't block a ff pull.
 git ls-files -m data/bin/ 2>/dev/null | xargs -r -n1 git checkout HEAD -- 2>/dev/null || true
-# Last-resort belt: if the tree is STILL dirty enough to block a ff pull, stash
-# the leftover noise away (kept, not dropped) so the pull can proceed.
 PRE_PULL="$(git rev-parse HEAD)"
 if [ -z "$AFTER_PULL" ]; then # B-f6fd: the new script (--after-pull) never pulls again
+# Last-resort belt: if the tree is STILL dirty enough to block a ff pull, stash
+# the leftover noise away (kept, not dropped) so the pull can proceed.
 if ! git pull --ff-only; then
   git stash push -u -m "vibespace-update-autostash" >/dev/null 2>&1 || true
   if ! git pull --ff-only; then

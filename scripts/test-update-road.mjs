@@ -21,7 +21,13 @@
 //     still ends 0 — on every box (the base it judges is set through runtime-check's own seam, VIBESPACE_RUNTIME_BASE)
 //   ⑥ B-f6fd THE UPDATE THAT SHIPS A STEP RUNS IT: origin's commit adds a step to scripts/update.sh AFTER its pull line; the
 //     update that pulls it runs that step (the old script exec's the new one --after-pull: no second pull, the lock kept);
-//     an update that pulls nothing never re-execs. On the base it is the measured bug: the step is skipped
+//     an update that pulls nothing never re-execs. On the base it is the measured bug: the step is skipped.
+//     Batch 11 cure: THE LOCK HOLDS ACROSS THE HAND-OVER — a probe origin's script carries between its fd-9 line and its
+//     flock asks the lock from another process: held (RED control: the new script re-opening fd 9 unconditionally — the lock
+//     is FREE there); a hand-typed `--after-pull` takes the lock anew (a lock held elsewhere ⇒ «Another update is already
+//     running»), also when the shell that typed it holds fd 9 on ANOTHER file; safe.directory is added ONCE over every
+//     update; a pulled tree without scripts/update.sh never hands over. The scratch runs set maintenance.auto=false (a
+//     detached git maintenance would keep the inherited fd 9). On d3921f8d0 the count leg and the fd-9-elsewhere leg are red
 // Run: node scripts/test-update-road.mjs
 //      VS_UPDATE_ROAD_NODE=v22.23.3 node scripts/test-update-road.mjs — PRETEND the running node is v22.23.3 (the update's
 //      check judges it through VIBESPACE_RUNTIME_BASE); ③ (the real binary's swap) runs only on the real node
@@ -29,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
@@ -89,7 +95,7 @@ const HOME = path.join(ROOT, 'home'), STUBS = path.join(ROOT, 'stubs');
 for (const d of [HOME, STUBS]) fs.mkdirSync(d, { recursive: true });
 fs.writeFileSync(path.join(STUBS, 'npm'), '#!/bin/sh\necho "npm (stub) $*"\nexit 0\n', { mode: 0o755 });
 fs.writeFileSync(path.join(STUBS, 'systemctl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });   // no user unit here ⇒ "restart your server"
-const ENV = { PATH: `${STUBS}:${path.dirname(REAL)}:/usr/local/bin:/usr/bin:/bin`, HOME, LANG: 'C.UTF-8', GIT_AUTHOR_NAME: 'u', GIT_AUTHOR_EMAIL: 'u@example.invalid', GIT_COMMITTER_NAME: 'u', GIT_COMMITTER_EMAIL: 'u@example.invalid', VIBESPACE_NODE_MIRROR: MIRROR, ...(PRETEND ? { VIBESPACE_RUNTIME_BASE: RUN } : {}) };
+const ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', PATH: `${STUBS}:${path.dirname(REAL)}:/usr/local/bin:/usr/bin:/bin`, HOME, LANG: 'C.UTF-8', GIT_AUTHOR_NAME: 'u', GIT_AUTHOR_EMAIL: 'u@example.invalid', GIT_COMMITTER_NAME: 'u', GIT_COMMITTER_EMAIL: 'u@example.invalid', VIBESPACE_NODE_MIRROR: MIRROR, ...(PRETEND ? { VIBESPACE_RUNTIME_BASE: RUN } : {}) };
 const SEED = path.join(ROOT, 'seed'), ORIGIN = path.join(ROOT, 'origin.git'), CHECKOUT = path.join(ROOT, 'checkout');
 fs.mkdirSync(SEED, { recursive: true });
 for (const f of ['scripts/update.sh', 'scripts/runtime-check.mjs', 'src/runtime-floor.js', 'src/node-runtime.js', 'src/server/runtime-boot.js', 'package.json', 'package-lock.json', 'src/agentd/version.js']) {
@@ -120,8 +126,8 @@ fs.writeFileSync(path.join(SEED, '.gitignore'), 'data/\nnode_modules/\n');
 git(SEED, 'init', '-q', '-b', 'master'); git(SEED, 'add', '-A'); git(SEED, 'commit', '-qm', 'scratch product');
 execFileSync('git', ['clone', '-q', '--bare', SEED, ORIGIN], { env: ENV });
 execFileSync('git', ['clone', '-q', ORIGIN, CHECKOUT], { env: ENV });
-const update = (extra = {}) => new Promise((resolve) => {
-  const c = spawn('bash', ['scripts/update.sh'], { cwd: CHECKOUT, env: { ...ENV, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+const update = (extra = {}, args = []) => new Promise((resolve) => {
+  const c = spawn('bash', ['scripts/update.sh', ...args], { cwd: CHECKOUT, env: { ...ENV, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
   c.on('close', (code) => resolve({ code, out }));
 });
@@ -200,6 +206,48 @@ try {
     '⑥ the update that PULLS a new step runs it — the old script hands over to the new one right after its pull (one pull, the new script\'s step said)', u6.out.split('\n').filter((l) => /^==|Fast-forward|Already/.test(l)));
   const u7 = await update();
   ok(u7.code === 0 && !u7.out.includes('== continuing with the updated script') && u7.out.includes('== a step this release ships (B-f6fd)'), '⑥ …an update that pulls nothing never hands over (one run of the script) — and the step is simply there', u7.out.split('\n').filter((l) => /^==/.test(l)));
+  // THE LOCK HOLDS ACROSS THE HAND-OVER: origin's script asks the lock from ANOTHER process right after its fd-9 line (the
+  // inherited open file, or a fresh one) and before its own flock — held ⇒ no second update could start in between
+  const FD9 = '  { [ -n "$AFTER_PULL" ] && [ /dev/fd/9 -ef data/.update.lock ]; } || exec 9>data/.update.lock\n';
+  // (under update.sh's set -e: the probe's own «held» answer must never end the script — `|| r=$?`)
+  const PROBE = '  if [ -n "$AFTER_PULL" ]; then r=0; flock -n -E 75 data/.update.lock true || r=$?; case $r in 0) echo "== hand-over: the lock was FREE";; 75) echo "== hand-over: the lock held";; *) echo "== hand-over: the probe failed ($r)";; esac; fi\n';
+  const handOver = async (text, msg) => { fs.writeFileSync(path.join(W, 'scripts/update.sh'), text); git(W, 'commit', '-qam', msg); git(W, 'push', '-q', 'origin', 'master'); return update(); };
+  const us2 = fs.readFileSync(path.join(W, 'scripts/update.sh'), 'utf8');
+  ok(us2.split(FD9).length === 2, '⑥ the lock\'s anchor (the fd-9 line) is in scripts/update.sh once');
+  const flockHere = spawnSync('sh', ['-c', 'command -v flock'], { env: ENV }).status === 0;
+  if (flockHere) {
+    const u8 = await handOver(us2.replace(FD9, FD9 + PROBE), 'update.sh: the lock probe');
+    ok(u8.code === 0 && u8.out.includes('== continuing with the updated script') && u8.out.includes('== hand-over: the lock held') && !u8.out.includes('lock was FREE'),
+      '⑥ the lock HOLDS across the hand-over: asked from another process between the new script\'s fd-9 line and its flock, it is held (the inherited open file)', u8.out.split('\n').filter((l) => /^==|Another/.test(l)));
+    // a hand-typed --after-pull takes the lock ANEW: with the lock held elsewhere it refuses by name — also when the shell
+    // that typed it holds fd 9 on ANOTHER file (fd 9 counts only when it IS the update lock)
+    // ONE process holds it: a shell takes the lock on its fd 9 (waiting up to 5 s), says so in a marker, and EXECS sleep
+    const mark = path.join(ROOT, 'holder-locked');
+    const holder = spawn('sh', ['-c', 'exec 9>"$1"; flock -w 5 9 || exit 3; : > "$2"; exec sleep 20', 'sh', path.join(CHECKOUT, 'data', '.update.lock'), mark], { env: ENV, stdio: 'ignore' });
+    const holderGone = new Promise((r) => holder.on('exit', r));
+    try {
+      let held = false; for (let t = 0; t < 100 && !held; t++) { await new Promise((r) => setTimeout(r, 50)); held = fs.existsSync(mark); }
+      const u9 = await update({}, ['--after-pull']);
+      const u9b = await new Promise((resolve) => {
+        const c = spawn('bash', ['-c', 'exec 9>/dev/null; exec bash scripts/update.sh --after-pull'], { cwd: CHECKOUT, env: ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out }));
+      });
+      ok(held && u9.code === 1 && /Another update is already running/.test(u9.out), '⑥ …a hand-typed `--after-pull` takes the lock ANEW: with the lock held elsewhere it refuses — «Another update is already running»', { held, code: u9.code, out: u9.out.slice(-200) });
+      ok(held && u9b.code === 1 && /Another update is already running/.test(u9b.out), '⑥ …and refuses the same when the shell that typed it holds fd 9 on ANOTHER file (fd 9 counts only when it IS the update lock)', { code: u9b.code, out: u9b.out.slice(-200) });
+    } finally { holder.kill('SIGTERM'); await holderGone; fs.rmSync(mark, { force: true }); }   // ours: the handle does nothing once the child has exited
+    // RED CONTROL: the new script re-opening fd 9 unconditionally (the line before B-f6fd) — the lock is FREE in the hand-over
+    const u10 = await handOver(us2.replace(FD9, '  exec 9>data/.update.lock\n' + PROBE), 'update.sh: CONTROL — fd 9 re-opened');
+    ok(u10.out.includes('== continuing with the updated script') && u10.out.includes('== hand-over: the lock was FREE'), 'RED CONTROL: a new script that re-opens fd 9 unconditionally — the probe finds the lock FREE in the hand-over (a second update could start there)', u10.out.split('\n').filter((l) => /^==/.test(l)));
+  } else console.log('  · flock(1) is not on this machine — the lock legs are the Linux road\'s (update.sh skips the guard there too)');
+  // safe.directory ONCE: every update above (and the hand-over, and the hand-typed mode) added it at most once
+  const sd = spawnSync('git', ['config', '--global', '--get-all', 'safe.directory'], { env: ENV, encoding: 'utf8' }).stdout.split('\n').filter((l) => l === CHECKOUT || l === fs.realpathSync(CHECKOUT));
+  ok(sd.length === 1, `⑥ safe.directory is added ONCE over every update of this checkout (${sd.length} entries)`, sd);
+  // a pulled tree without scripts/update.sh: the old script — the product's, pushed back first — finishes (no hand-over)
+  if (flockHere) { const back = await handOver(us2, 'update.sh: the product script again'); ok(back.code === 0 && back.out.includes('== continuing with the updated script'), '⑥ (the product script is pushed back before the next leg)', back.out.split('\n').filter((l) => /^==/.test(l))); }
+  git(W, 'rm', '-q', 'scripts/update.sh'); git(W, 'commit', '-qm', 'no update.sh'); git(W, 'push', '-q', 'origin', 'master');
+  const u11 = await update();
+  ok(u11.code === 0 && !u11.out.includes('== continuing with the updated script') && u11.out.includes('== npm install') && /== now at /.test(u11.out) && /✓ Updated/.test(u11.out) && !fs.existsSync(path.join(CHECKOUT, 'scripts', 'update.sh')),
+    '⑥ a pulled tree WITHOUT scripts/update.sh never hands over: the old script finishes its run (npm install, «== now at», «✓ Updated»)', u11.out.split('\n').filter((l) => /^==/.test(l)));
 } finally { mirror.close(); }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

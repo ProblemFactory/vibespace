@@ -47,7 +47,9 @@
 //    env fallback), fleet.json no longer a stray. CONTROL: a merge reading the layers in the wrong order lets the
 //    cluster win.
 // B-e0d1 (end of file): THE DROPLINE CLUSTER PRESET RESOLVES — the real store over a scratch data dir: the Connect plan takes the
-//   preset's client id and its relay page beside the hub's own https; no preset ⇒ unchanged
+//   preset's client id and its relay page beside the hub's own https; no preset ⇒ unchanged; ONE PAIR, NEVER MIXED (batch 11
+//   cure): the person's own relay page beside the preset ⇒ the person's values alone (no preset client id), with a planted
+//   mixed answer as the leg's control
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -797,6 +799,15 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   ok(p.clientId === CID && p.preset === true && p.via === 'relay' && p.redirectUri === RL, 'B-e0d1: a fleet Dropline preset RESOLVES — the Connect plan takes the preset\'s client id and sends the browser to ITS relay page (the client is registered there), even beside the hub\'s own https', JSON.stringify(p));
   const noPreset = planOf(mk({}, 'bare'));
   ok(noPreset.clientId === '' && noPreset.preset === false && noPreset.via === 'own-https', 'B-e0d1: …with no preset nothing changes: no client id, the hub\'s own https address', JSON.stringify(noPreset));
+  // ONE PAIR, NEVER MIXED: the person saved their own relay page on a cluster that has a preset — the person's values outrank
+  // the WHOLE preset (the store's precedence), so the plan carries no preset client id beside the person's page
+  const OWN = 'https://own.example.test/relay/';
+  const mixedStore = mk({ VIBESPACE_INTEGRATION_DROPLINE_CLIENTID: CID, VIBESPACE_INTEGRATION_DROPLINE_RELAYURL: RL }, 'mixed');
+  mixedStore.setIntegration('dropline', { relayUrl: OWN });
+  const onePair = (q) => q.clientId === '' && q.preset === false && q.relayUrl === OWN && q.via === 'own-https' && /^https:\/\/hub\.example\.ts\.net\//.test(q.redirectUri || '');
+  const m = planOf(mixedStore);
+  ok(onePair(m), 'B-e0d1: ONE PAIR, NEVER MIXED — the person\'s own relay page beside a preset gives the person\'s values alone: no preset client id, preset false', JSON.stringify(m));
+  ok(!onePair({ ...m, clientId: CID, preset: true }), 'CONTROL: a mixed answer (the preset\'s client id beside the person\'s page — a per-field merge) fails that leg');
   quiet.lines.length = 0; empty.stop?.();
 }
 
