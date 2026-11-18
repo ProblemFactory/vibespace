@@ -4,8 +4,16 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.411 — 2026-11-18
 
+### Added
+- When you browse a profile yourself and a site asks you to sign in, VibeSpace shows its sign-in form in your window, as it does while an agent drives.
+
 ### Changed
 - Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
+
+### Fixed
+- On a busy machine, VibeSpace no longer freezes for up to half a minute at startup while it checks which agent programs are running.
+- A conversation VibeSpace is still checking is never resumed by Resume all or a restored layout; resuming it yourself asks you first.
+- In a Claude chat, when a Stop comes too late to keep a message you sent into the turn from reaching the model, the chat now says so, and that it may be billed.
 
 ## 2.369.410 — 2026-11-18
 
