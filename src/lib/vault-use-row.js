@@ -118,8 +118,9 @@ const sigOf = (scopes) => scopes.filter((s) => s && s.kind !== 'window').map(sco
 export function rowChanged(stored = {}, next = {}, { now = Date.now() } = {}) {
   const endedW = (s) => !!s && s.kind === 'window' && (!!s.expired || (Number(s.until) > 0 && Number(s.until) <= now));
   if ((stored.to || []).filter(Boolean).some((m) => scopesOfM(m).some(endedW))) return true;
-  const a = new Map((stored.to || []).filter(Boolean).map((m) => [keyOfM(m), sigOf(scopesOfM(m))]));
-  const b = new Map((next.to || []).filter(Boolean).map((m) => [keyOfM(m), sigOf(Array.isArray(m.scopes) ? m.scopes : [])]));
+  // the chain's cure (C): a member's «仅本组» is part of what the row says — a flag-only change is a change (switched off = only:false)
+  const a = new Map((stored.to || []).filter(Boolean).map((m) => [keyOfM(m), sigOf(scopesOfM(m)) + (m.only === true ? '#only' : '')]));
+  const b = new Map((next.to || []).filter(Boolean).map((m) => [keyOfM(m), sigOf(Array.isArray(m.scopes) ? m.scopes : []) + (m.only === true ? '#only' : '')]));
   if (a.size !== b.size || [...b].some(([k, v]) => a.get(k) !== v)) return true;
   const xa = new Set((stored.except || []).filter(Boolean).map(keyOfM)), xb = new Set((next.except || []).filter(Boolean).map(keyOfM));
   return xa.size !== xb.size || [...xb].some((k) => !xa.has(k));
@@ -267,13 +268,13 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
-  const stateOf = (pol) => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', pol !== undefined ? pol : polIn ? polIn.value.trim() : '']);
+  const stateOf = (pol) => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], picker && picker.onlyKeys ? (picker.onlyKeys() || []).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', pol !== undefined ? pol : polIn ? polIn.value.trim() : '']);
   const { body, close, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
   let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
   body.append(el('div', 'vw-ak-hint', u.own ? t('Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere, is refused: an agent\'s own value goes only where you say.') : t('Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.')));   // B-bc3b: an agent's own entry — another host is REFUSED there, never a card
-  picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
+  picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, only: { keys: (stored.only || []).slice() }, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
   const common = (() => { if (!members.length) return null; const k = JSON.stringify(members[0].hosts || []); return members.every((m) => JSON.stringify(m.hosts || []) === k) ? members[0].hosts || [] : null; })();
@@ -338,7 +339,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     // MINOR 1): the held list is the picker's OWN answer (the stored one less a kept-line ✕), so pickToRow keeps exactly what the
     // dialog shows and exceptRemovedOf names the ✕-ed one (passing the stored `held` re-added it — the ✕ did nothing)
     const exNow = picker.except({ held });
-    const pick = pickToRow(picker.knownRows(), picker.selected(), exNow, { held: exNow });
+    const pick = pickToRow(picker.knownRows(), picker.selected(), exNow, { held: exNow, only: typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null, onlyWas: stored.only || [] });   // the chain's cure (C): + «仅本组»
     const had = new Map((snap ? snap.to : members).map((m) => [keyOfM(m), m]));   // r11: by the principal; the row as it landed
     const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {

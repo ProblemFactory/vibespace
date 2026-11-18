@@ -745,7 +745,7 @@ function fromAutomationReach(r) {
 function fromChannelPrincipal(p) {
   if (!p || typeof p !== 'object') return null;
   if (p.kind === 'everyone') return { kind: 'everyone' };
-  if (p.kind === 'group') { const g = withName(bareOf({ kind: 'group', id: p.id }), p.name); return g && p.only === true ? { ...g, only: true } : g; }   // lane lg-group-parents (the U1 read, MAJOR 1): «仅本组» rides the channel spelling both ways
+  if (p.kind === 'group') { const g = withName(bareOf({ kind: 'group', id: p.id }), p.name); return g && typeof p.only === 'boolean' ? { ...g, only: p.only } : g; }   // lane lg-group-parents (the U1 read, MAJOR 1; the chain's cure (C): false too — a switch-off is said): «仅本组» rides the channel spelling both ways
   if (p.kind === 'agent') return withName(bareOf({ kind: 'conversation', key: p.id }), p.name);
   return null;
 }

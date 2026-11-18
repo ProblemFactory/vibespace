@@ -235,6 +235,17 @@ export async function showReachDialog(app, conv0) {
         const who = el('span', 'chan-reach-who');
         if (g.principal.kind !== 'everyone') who.appendChild(el('span', 'chan-reach-kind', g.principal.kind === 'group' ? t('group') : t('agent')));   // "All agents" names itself
         who.appendChild(el('span', '', nameOf(g.principal)));
+        // the chain's cure (B1 + C): a Task Group row says what it admits; the owner's own row switches «仅本组» (one PUT, level kept)
+        if (g.principal.kind === 'group') {
+          const on = g.principal.only === true;
+          if (g.origin === 'user') {
+            const sw = document.createElement('button'); sw.type = 'button'; sw.className = 'pp-chip-only chan-reach-only' + (on ? ' on' : '');
+            sw.textContent = on ? t('this group only') : t('and its child groups'); sw.setAttribute('aria-label', t('this group only')); sw.setAttribute('aria-pressed', on ? 'true' : 'false');
+            sw.title = on ? t('Only conversations in this group itself — its child groups are not included (press to include them)') : t('This group and every child group under it (press for this group only)');
+            sw.onclick = async () => { sw.disabled = true; const r = await api(`${base}/reach`, { principal: { ...g.principal, only: !on }, level: g.level }); if (!r) sw.disabled = false; };
+            who.appendChild(sw);
+          } else who.appendChild(el('span', 'pp-chip-reach', on ? t('this group only') : t('and its child groups')));
+        }
         const lv = el('span', `chan-reach-level chan-reach-level-${g.level}`, levelLabel(g.level));
         // WHERE the row lives (§8, 2026-09-26): the whole account, a rule, or this conversation
         const org = el('span', 'chan-reach-origin', g.scope && g.scope.kind === 'adapter' ? `${originLabel(g.origin)} · ${t('the whole account')}` : g.pattern ? `${originLabel(g.origin)} · ${t('by a rule')}` : originLabel(g.origin));

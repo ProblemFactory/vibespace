@@ -102,8 +102,10 @@ export async function showApiAccessDialog(app, cred) {
     pick.addEventListener('change', () => { cur = creds.find((c) => c.id === pick.value) || cur; draw(); });
     body.append(el('div', 'dialog-label', t('Credential')), pick);
     // WHO, AT WHICH TIER
-    const rows = (cur.grants || []).map((g) => ({ key: `${g.principal.kind}:${g.principal.id}`, principal: g.principal, tier: g.tier, perDay: g.perDay, allWrite: g.principal.kind === 'everyone' && g.tier !== 'read' }));
-    const wire = () => rows.map((r) => ({ principal: r.principal, tier: r.tier, perDay: r.perDay, allWrite: !!r.allWrite }));
+    const rows = (cur.grants || []).map((g) => ({ key: `${g.principal.kind}:${g.principal.id}`, principal: g.principal, tier: g.tier, perDay: g.perDay, allWrite: g.principal.kind === 'everyone' && g.tier !== 'read', onlyWas: g.principal.kind === 'group' && g.principal.only === true }));
+    // the chain's cure (C): a Task Group row's «仅本组» rides its principal — true, or false for one stored on and switched off
+    const onlyWire = (r) => { if (!r.principal || r.principal.kind !== 'group') return r.principal; const { only: _o, ...b } = r.principal; const on = picker && picker.onlyKeys ? (picker.onlyKeys() || []).includes(r.key) : r.onlyWas; return on ? { ...b, only: true } : r.onlyWas ? { ...b, only: false } : b; };
+    const wire = () => rows.map((r) => ({ principal: onlyWire(r), tier: r.tier, perDay: r.perDay, allWrite: !!r.allWrite }));
     // «除了» (lane grants-unify): with a Task Group or All agents granted, the members left OUT of this credential's tier
     const exPick = rowToPick({ to: [], except: cur.except || [] }, rosterFromApp(app), { everyoneKey: 'everyone:*', notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
     let picker = null;
@@ -149,7 +151,7 @@ export async function showApiAccessDialog(app, cred) {
     };
     picker = principalPicker({
       items: () => rosterFromApp(app), app, multi: true, selected: rows.map((r) => r.key), placeholder: t('Add an agent or group…'), label: t('Add an agent or group'), everyone: { key: 'everyone:*' },
-      except: { selected: exPick.except, extra: exPick.extra },
+      except: { selected: exPick.except, extra: exPick.extra }, only: { keys: rows.filter((r) => r.onlyWas).map((r) => r.key) },   // the chain's cure (C): the «仅本组» switch
       onChange: (keys) => {
         for (let i = rows.length - 1; i >= 0; i--) if (!keys.includes(rows[i].key)) rows.splice(i, 1);
         for (const k of keys) if (!rows.some((r) => r.key === k)) { const i = k.indexOf(':'); rows.push({ key: k, principal: { kind: k.slice(0, i), id: k.slice(i + 1) }, tier: 'read', perDay: null }); }   // D1: a new principal starts at Read

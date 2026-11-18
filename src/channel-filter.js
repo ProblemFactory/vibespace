@@ -1108,7 +1108,7 @@ function cleanPrincipal(p0) {
   if (p.kind === 'everyone') return { ok: true, principal: { kind: 'everyone', id: EVERYONE_ID, name: null } };
   const pid = str(p.id).trim();
   if (!pid) return refuse('bad-principal', 'principal.id is required');
-  return { ok: true, principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null } };
+  return { ok: true, principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null, ...(p.kind === 'group' && typeof p.only === 'boolean' ? { only: p.only } : {}) } };   // the chain's cure (C): + «仅本组»
 }
 const principalWords = (p) => (p.kind === 'everyone' ? 'all agents' : `${p.kind} ${p.name || p.id}`);
 

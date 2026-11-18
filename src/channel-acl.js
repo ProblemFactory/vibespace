@@ -109,7 +109,7 @@ function validateGrant(input = {}) {
   if (!LEVELS.includes(g.level)) return { ok: false, error: `level must be ${LEVELS.join('|')}` };
   if (!GRANT_ORIGINS.includes(g.origin)) return { ok: false, error: `origin must be ${GRANT_ORIGINS.join('|')} — every grant says who wrote it` };
   const grant = {
-    principal: { kind: p.kind, id: pid.slice(0, 256), name: p.kind === 'everyone' ? null : (p.name ? String(p.name).slice(0, 200) : null) },
+    principal: { kind: p.kind, id: pid.slice(0, 256), name: p.kind === 'everyone' ? null : (p.name ? String(p.name).slice(0, 200) : null), ...(p.kind === 'group' && typeof p.only === 'boolean' ? { only: p.only } : {}) },   // the chain's cure (C): + «仅本组»
     scope: { kind: s.kind, id: sid.slice(0, 512) },
     level: g.level, origin: g.origin,
     at: Number.isFinite(Number(g.at)) ? Number(g.at) : null,

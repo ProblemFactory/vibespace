@@ -642,6 +642,24 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       && /const to = widenGroup \? row\.to\.map\(\(e\) => \(e\.kind === 'group' && e\.id === widenGroup \? \{ \.\.\.e, only: false \} : e\)\) : row\.to;/.test(wte) && /putReach\(rec\.id, s\.record, 'user', \[\], on === true \? null : p\.id\);/.test(wte)
       && /router\.put\('\/api\/desktop\/apps\/:id\/reach\/only'/.test(dar), 'the exit and window dialogs offer the switch and carry it: exit\'s Save (only:true / only:false, never on an exception), window\'s ONE verb (off said explicitly to the writer)');
   }
+  // the chain's cure (C): the «仅本组» switch on the vault-use and channel dialogs, each write carrying it to the ONE writer
+  {
+    const VU3 = require('../src/vault-use-grant.js'), ACL3 = require('../src/channel-acl.js'), CF3 = require('../src/channel-filter.js');
+    const sm = [VU3.scopedMember({ kind: 'group', id: 'tg-p', only: true, scopes: [] }), VU3.scopedMember({ kind: 'group', id: 'tg-p', only: false, scopes: [] }), VU3.scopedMember({ kind: 'group', id: 'tg-p', scopes: [] })];
+    const vRow0 = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf-8');
+    const flipPin = (vRow0.match(/sigOf\((?:scopesOfM\(m\)|Array\.isArray\(m\.scopes\) \? m\.scopes : \[\])\) \+ \(m\.only === true \? '#only' : ''\)/g) || []).length;
+    ok(sm[0].only === true && sm[1].only === false && !('only' in sm[2]) && flipPin === 2, 'vault-use (the cure (C)): a rebuilt member keeps the «仅本组» it says (a silent one would be refused only_unnamed); rowChanged counts a flag-only change as a change', { sm, flipPin });
+    const vg = [ACL3.validateGrant({ principal: { kind: 'group', id: 'tg-p', only: true }, scope: { kind: 'conversation', id: 'a1/c1' }, level: 'visible', origin: 'user' }), ACL3.validateGrant({ principal: { kind: 'group', id: 'tg-p', only: false }, scope: { kind: 'conversation', id: 'a1/c1' }, level: 'visible', origin: 'user' }), ACL3.validateGrant({ principal: { kind: 'agent', id: 'k1', only: true }, scope: { kind: 'conversation', id: 'a1/c1' }, level: 'visible', origin: 'user' })];
+    const fc = [GM.fromChannelPrincipal({ kind: 'group', id: 'tg-p', only: true }), GM.fromChannelPrincipal({ kind: 'group', id: 'tg-p', only: false }), GM.fromChannelPrincipal({ kind: 'group', id: 'tg-p' })];
+    ok(vg[0].ok && vg[0].grant.principal.only === true && vg[1].grant.principal.only === false && !('only' in vg[2].grant.principal) && fc[0].only === true && fc[1].only === false && !('only' in fc[2]) && typeof CF3.validateWatchers === 'function', 'channels (the cure (C)): validateGrant and the channel spelling keep a group\'s «仅本组» (true, or false = switched off — the ONE writer widens only then); never on an agent');
+    const vRow = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf-8'), reE = fs.readFileSync(path.join(REPO, 'src/lib/channel-reach-editor.js'), 'utf-8'), apD = fs.readFileSync(path.join(REPO, 'src/lib/channel-api-dialog.js'), 'utf-8'), feE = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8'), caS = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8'), cfS = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+    ok(/only: \{ keys: \(stored\.only \|\| \[\]\)\.slice\(\) \}/.test(vRow) && /\{ held: exNow, only: picker\.onlyKeys\(\) \|\| \[\], onlyWas: stored\.only \|\| \[\] \}/.test(vRow)
+      && /api\(`\$\{base\}\/reach`, \{ principal: \{ \.\.\.g\.principal, only: !on \}, level: g\.level \}\)/.test(reE)
+      && /only: \{ keys: rows\.filter\(\(r\) => r\.onlyWas\)\.map\(\(r\) => r\.key\) \}/.test(apD) && /principal: onlyWire\(r\)/.test(apD)
+      && /only: \{ keys: \[\.\.\.onlyWas\] \}/.test(feE) && /only: \{ keys: whoOnlyWas \? \[key\] : \[\] \}/.test(feE) && /principal: \{ kind: p\.kind, id: p\.id, name: p\.name, \.\.\.wOnly \}/.test(feE)
+      && (caS.match(/\.\.\.\((?:row|w)\.principal\.only === true \? \{ only: true \} : \{\}\)/g) || []).length === 2
+      && /\.\.\.\(p\.kind === 'group' && typeof p\.only === 'boolean' \? \{ only: p\.only \} : \{\}\)/.test(cfS), 'the vault-use and channel dialogs offer the switch and carry it (the reach row, the access list, the watcher, the raw-API tiers); the views carry the stored flag back');
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",

@@ -339,6 +339,7 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
   let cap = F.authorityCapCode(st.caps);
   const capWords = (c) => F.authorityCapText(c, { t, sendWhyText: chanCaps.sendWhyText });
   const rows = st.access.map((r) => ({ key: pkOf(r.principal), authority: r.authority === 'send' && !cap ? 'send' : 'draft' }));
+  const onlyWas = new Set(st.access.filter((r) => r.principal && r.principal.kind === 'group' && r.principal.only === true).map((r) => pkOf(r.principal)));   // the chain's cure (C)
   // ALL AGENTS's row first (the chips put it first; the rows follow)
   rows.sort((a, b) => (b.key === EVERYONE_KEY) - (a.key === EVERYONE_KEY));
   // WHO (the ONE picker, multi-select — chips, the box focused on open): the live roster + every principal
@@ -355,7 +356,7 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
   const exPick = rowToPick({ to: [], except: st.except || [] }, pickRows(), { everyoneKey: EVERYONE_KEY, notRunning: t('not live now'), deletedGroup: t('a deleted Task Group') });
   picker = principalPicker({
     items: pickRows, app, multi: true, selected: rows.map((r) => r.key), autofocus: true,
-    except: { selected: exPick.except, extra: exPick.extra },
+    except: { selected: exPick.except, extra: exPick.extra }, only: { keys: [...onlyWas] },   // the chain's cure (C): the «仅本组» switch
     placeholder: t('Add an agent or group…'), label: t('Add an agent or group'),
     // ALL AGENTS (lane everyone-principal): the first row — every conversation may see and act here, now and later
     everyone: { key: EVERYONE_KEY },
@@ -447,7 +448,7 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     syncUnexcept();
   };
   draw();
-  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null, except: exceptPicks() });
+  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null, except: exceptPicks(), only: picker && picker.onlyKeys ? (picker.onlyKeys() || []).slice().sort() : [] });
   let base = drawn();
   const actions = el('div', 'chan-flow-actions');
   if (st.kind === 'pattern' && st.id) {
@@ -464,7 +465,9 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     // the payload's principals come from the SAME choices as before (kind, id, name) — the wire is unchanged;
     // re-read at the click (a session that went live after the dialog opened is in it)
     const choices = principalChoices(app, st.access);
-    const access = rows.map((r) => { const c = choices.find((x) => x.value === r.key); return c ? { principal: { kind: c.kind, id: c.id, name: c.name }, authority: r.authority } : null; }).filter(Boolean);
+    const swA = picker && typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null;   // the chain's cure (C): true, or false for one stored on and switched off — a switch it cannot read says nothing (kept)
+    const onlyNow = new Set(Array.isArray(swA) ? swA : []);
+    const access = rows.map((r) => { const c = choices.find((x) => x.value === r.key); return c ? { principal: { kind: c.kind, id: c.id, name: c.name, ...(c.kind === 'group' && Array.isArray(swA) ? (onlyNow.has(r.key) ? { only: true } : onlyWas.has(r.key) ? { only: false } : {}) : {}) }, authority: r.authority } : null; }).filter(Boolean);
     // «除了»: the members left out, in the grant model's spelling (a conversation by its id, a Task Group by its id)
     const except = exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
     const removeExcept = exceptRemoved(exPick.except, exceptPicks()).map((k) => principalOfRow(exRowOf(k))).filter(Boolean).map(pkOfPrincipal);   // lane held-except-doors
@@ -736,7 +739,8 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   const whoItems = () => principals.filter((p) => !(usedNow.has(p.value) && p.value !== key)).map((p) => (p.kind === 'everyone'
     ? { key: p.value, kind: 'everyone', id: '*', name: t('All agents'), groupIds: [], groupNames: [], hint: t('every running conversation gets a billed turn on each hit') }
     : { key: p.value, kind: p.kind === 'group' ? 'group' : 'agent', id: p.id, name: p.name || p.label, groupIds: [], groupNames: [], hint: accessAuthorityText(p.authority) }));
-  const whoPick = principalPicker({ items: whoItems, compact: true, selected: key ? [key] : [], placeholder: t('Who gets woken?'), label: t('Who gets woken?'), everyone: 'roster', onChange: (keys) => { key = keys[0] || ''; authLine(); changed(); } });
+  const whoOnlyWas = !!(w && w.principal && w.principal.kind === 'group' && w.principal.only === true);   // the chain's cure (C): the watcher's «仅本组»
+  const whoPick = principalPicker({ items: whoItems, compact: true, selected: key ? [key] : [], only: { keys: whoOnlyWas ? [key] : [] }, placeholder: t('Who gets woken?'), label: t('Who gets woken?'), everyone: 'roster', onChange: (keys) => { key = keys[0] || ''; authLine(); changed(); } });
   whoPick.el.classList.add('chan-watch-who');
   const rm = document.createElement('button');
   rm.type = 'button'; rm.className = 'icon-btn chan-af-rm'; rm.title = t('Remove this notification'); rm.setAttribute('aria-label', t('Remove this notification'));
@@ -986,7 +990,9 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       const c = clampOf(capInp, 0, F.MAX_DAILY_WAKE_CAP);
       if (d.value !== null) digestMin.value = String(d.value);
       if (c.value !== null) capInp.value = String(c.value);
-      return { watcher: { principal: { kind: p.kind, id: p.id, name: p.name }, delivery: whenNow(), ...(w && F.watchOriginOf(w) === 'agent' ? { origin: 'agent' } : {}), mode: cur.mode, notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap, receiptWake: cur.receiptWake, ...(filter ? { filter } : {}), estimateAtSet: state.lastEstimate }, clamped: !!((howNow() === 'digest' && d.note) || c.note) };
+      const swW = typeof whoPick.onlyKeys === 'function' ? whoPick.onlyKeys() : null;   // a switch it cannot read says nothing (kept)
+      const wOnly = p.kind === 'group' && Array.isArray(swW) ? (swW.includes(key) ? { only: true } : whoOnlyWas && w && pkOf(w.principal) === key ? { only: false } : {}) : {};   // the chain's cure (C)
+      return { watcher: { principal: { kind: p.kind, id: p.id, name: p.name, ...wOnly }, delivery: whenNow(), ...(w && F.watchOriginOf(w) === 'agent' ? { origin: 'agent' } : {}), mode: cur.mode, notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap, receiptWake: cur.receiptWake, ...(filter ? { filter } : {}), estimateAtSet: state.lastEstimate }, clamped: !!((howNow() === 'digest' && d.note) || c.note) };
     },
   };
 }

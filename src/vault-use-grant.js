@@ -162,7 +162,9 @@ const storedScope = (s) => (s.kind === 'window' ? { kind: 'window', until: s.unt
 function scopedMember(e, scopes = scopesOf(e)) {
   const b = GM.bareOf(e);
   if (!b) return null;
-  return { ...b, ...(typeof e.name === 'string' && e.name ? { name: e.name } : {}), ...(typeof e.by === 'string' && e.by ? { by: e.by } : {}), scopes: scopes.map(storedScope), ...(typeof e.mac === 'string' ? { mac: e.mac } : {}) };
+  // the chain's cure (C): a group member keeps the «仅本组» it SAYS (true, or false = switched off) — a member rebuilt silent on it
+  // would be refused only_unnamed by the ONE writer (its mark covers the flag) or read wider
+  return { ...b, ...(b.kind === 'group' && typeof e.only === 'boolean' ? { only: e.only } : {}), ...(typeof e.name === 'string' && e.name ? { name: e.name } : {}), ...(typeof e.by === 'string' && e.by ? { by: e.by } : {}), scopes: scopes.map(storedScope), ...(typeof e.mac === 'string' ? { mac: e.mac } : {}) };
 }
 /** Derived views a page / the CLI / a test read off the scopes (all — live or ended): the hosts, the per-host tools, the
  *  command tokens. `span` = until when ANY of `list` is usable: null when one has no end, else the latest end. */

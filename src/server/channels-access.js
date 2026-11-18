@@ -457,14 +457,14 @@ function create(engineCtx) {
     return { hits7d: F.countSince(s.hits, t, 7), wakes24h: okWakes.filter((w) => Number(w.at) > t - 86400e3).length, wakes7d: okWakes.filter((w) => Number(w.at) > t - 7 * 86400e3).length, lastRefusal: s.lastRefusal || null };
   }
   function accessRowView(row, capsNow = null) {
-    const base = { principal: { kind: row.principal.kind, id: row.principal.id, name: row.principal.name || null }, authority: row.authority, createdAt: row.createdAt || null, updatedAt: row.updatedAt || null };
+    const base = { principal: { kind: row.principal.kind, id: row.principal.id, name: row.principal.name || null, ...(row.principal.only === true ? { only: true } : {}) }, authority: row.authority, createdAt: row.createdAt || null, updatedAt: row.updatedAt || null };
     if (!capsNow) return base;
     const cl = F.effectiveAuthority(row, capsNow);
     return { ...base, authority: cl.authority, authorityStored: row.authority, authorityClamped: cl.clamped, authorityWhy: cl.why || null, authorityWhyCap: cl.whyCap || null };
   }
   function watcherView(w, t) {
     return {
-      principal: { kind: w.principal.kind, id: w.principal.id, name: w.principal.name || null },
+      principal: { kind: w.principal.kind, id: w.principal.id, name: w.principal.name || null, ...(w.principal.only === true ? { only: true } : {}) },   // the chain's cure (C)
       notify: w.notify, mode: w.mode, filterId: w.filterId || null, filter: w.filterId ? filterFor(w.filterId) : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, receiptWake: !!w.receiptWake,
       createdAt: w.createdAt || null, updatedAt: w.updatedAt || null, estimateAtSet: w.estimateAtSet || null, stats: ledgerView(w.stats, t),
       // lane channel-agent-watch: the row's delivery + who wrote it ride the view — a dialog's whole-list save sends
