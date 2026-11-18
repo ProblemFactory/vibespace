@@ -54,6 +54,7 @@ check('statuses kept (open count)', after.filter((b) => b.status === 'open').len
 // +1 on top of a big store: the new item is stored, everything else stays
 const plusOne = tasks.update(g.id, { backlog: [...after, { text: 'the 2001st', status: 'open', addedBy: 'claude:y', claimedBy: ['claude:y'], addedAt: Date.now() }] }).backlog;
 check('adding to a 2000-item store keeps 2001 (nothing sliced)', plusOne.length === N + 1 && plusOne[N].text === 'the 2001st');
+try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U5: task-groups.json is the store writer's — landed before the file is read
 const stored = JSON.parse(fs.readFileSync(path.join(tmp, 'task-groups.json'), 'utf8'));
 const onDisk = Object.values(stored.tasks).find((t) => t.id === g.id).backlog;
 check('the store on disk carries all 2001', onDisk.length === N + 1);

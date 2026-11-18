@@ -123,7 +123,7 @@ console.log('§5 the real stores record under their names');
     clearInterval(ut._expiryTimer); clearInterval(ut._sweepTimer);
     const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
     const tg = new TaskGroupManager({ dataDir: dir });
-    tg._save();
+    tg._save(); require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([path.join(dir, 'task-groups.json')]);   // lane lg-store-writes U5: the store writer records the write's time when it lands
     const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
     const cs = createChannelStore({ dir: path.join(dir, 'channels'), log: { log() {}, warn() {}, error() {} } });
     try { cs.close?.(); } catch { }

@@ -70,31 +70,34 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
   // before it reads a group (never «not found» for a store that is held, not empty); the list answers none, with `unread` saying why
   app.use('/api/tasks', (req, res, next) => { const held = req.method === 'GET' && (req.path === '/' || req.path === '') ? null : tasks.unreadRefusal?.('this request'); if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD', unread: tasks.unreadState() }); next(); });
   app.get('/api/tasks', (req, res) => { const at = taskFanout.mark(); const unread = tasks.unreadState?.() || null; res.json({ tasks: tasks.list(), ...at, ...(unread ? { unread } : {}) }); }); require('./task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
+  // lane lg-store-writes U5 (B-0248): an act's answer follows the STORE write (task-groups.json through the store writer — the
+  // loop never waits); a write not landed is SAID in the answer (notOnDisk: the act stays applied in memory, the writer retries)
+  const onDisk = (res, body) => { const p = typeof tasks.persisted === 'function' ? tasks.persisted() : Promise.resolve(true); p.then((saved) => { try { res.json(saved ? body : { ...body, notOnDisk: true }); } catch { } }, () => { try { res.json(body); } catch { } }); };
   app.post('/api/tasks', (req, res) => {
-    try { res.json({ success: true, task: tasks.create(req.body || {}) }); }
+    try { onDisk(res, { success: true, task: tasks.create(req.body || {}) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   app.patch('/api/tasks/:id', (req, res) => {
-    try { res.json({ success: true, task: tasks.update(req.params.id, req.body || {}) }); }
+    try { onDisk(res, { success: true, task: tasks.update(req.params.id, req.body || {}) }); }
     catch (e) { res.status(e.message === 'task not found' ? 404 : e.code === 'except_unnamed' ? 409 : 400).json({ error: e.message, ...(e.code === 'except_unnamed' ? { code: e.code } : {}) }); }   // lane held-except-doors: a 除了 left out unnamed
   });
   app.delete('/api/tasks/:id', (req, res) => {
-    try { tasks.remove(req.params.id); res.json({ success: true }); }
+    try { tasks.remove(req.params.id); onDisk(res, { success: true }); }
     catch (e) { res.status(404).json({ error: e.message }); }
   });
   // Granular tag ops (atomic server-side — concurrent clients can't clobber
   // each other's read-modify-write of the sessions array)
   const convOps = require('./conversation-ops.js'); convOps.provide({ tasks, spendGuard }); // lane automation-verbs: the conversation verbs' seams reach the task store + THE spend guard (an automation open is charged there)
   app.post('/api/tasks/:id/bind', (req, res) => {
-    try { res.json({ success: true, task: convOps.bindConversation({ sessionKey: req.body?.sessionKey }, req.params.id, { kind: 'human', actBy: require('../device-audit.js').byOfReq(req) }) }); }
+    try { onDisk(res, { success: true, task: convOps.bindConversation({ sessionKey: req.body?.sessionKey }, req.params.id, { kind: 'human', actBy: require('../device-audit.js').byOfReq(req) }) }); }
     catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
   });
   app.post('/api/tasks/:id/unbind', (req, res) => {
-    try { res.json({ success: true, task: tasks.unbind(req.params.id, req.body?.sessionKey) }); }
+    try { onDisk(res, { success: true, task: tasks.unbind(req.params.id, req.body?.sessionKey) }); }
     catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
   });
   app.post('/api/tasks/:id/progress', (req, res) => {
-    try { res.json({ success: true, task: tasks.addProgress(req.params.id, req.body || {}) }); }
+    try { onDisk(res, { success: true, task: tasks.addProgress(req.params.id, req.body || {}) }); }
     catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
   });
   // OLDER ACTIVITY (2.369.204): one page of a group's Activity log older than ?before=<ms> (≤ ?limit=200) — the live
@@ -123,7 +126,7 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
     catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
   });
   app.post('/api/tasks/import', (req, res) => {
-    try { res.json({ success: true, task: tasks.importFromFile(req.body?.path) }); }
+    try { onDisk(res, { success: true, task: tasks.importFromFile(req.body?.path) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   return { convOps };

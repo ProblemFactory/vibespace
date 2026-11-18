@@ -1382,6 +1382,8 @@ app.get('/api/agent/task', function taskShowRoute(req, res) {
     res.json({ success: true, you, task: taskShowAnswer(t, openSorted), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // verify r4 F1: every peer-written field through the belt
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
+// lane lg-store-writes U5 (B-0248): an agent's Task Group verb (progress, backlog, the group admin) hands the store to the
+// writer as an ACT (urgent — its next writes) and ANSWERS AT ONCE: the CLI's own bound stays the call's, never a disk's
 app.post('/api/agent/task-progress', function taskProgressRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -1395,7 +1397,7 @@ app.post('/api/agent/task-progress', function taskProgressRoute(req, res) {
     // `entry` = the one just written (addProgress is synchronous — the last entry IS it): its P- id
     // is what `vibespace-task progress-redact` names
     const kept = t.progress[t.progress.length - 1] || null;   // lane cli-one-text-arg: what the store KEPT (a note past 2000 / a detail past 6000 is cut), counted for the echo of the CLI
-    // lane cli-call-timeouts: the answer follows the STORE write; the shared folder's TASK.md is mirrored after it, bounded
+    // lane cli-call-timeouts: the answer follows the STORE's hand-off (lane lg-store-writes U5: to the store writer, as an act — on disk within its next writes); the shared folder's TASK.md is mirrored after it, bounded
     // (task-groups _queueMirror) — when that copy is behind (a write slower than its bound, or failed), the answer says so
     const mirror = tasks.mirrorStateOf ? tasks.mirrorStateOf(gid) : null;
     res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null), ...(kept ? { chars: cliText.chars(kept.note), ...(kept.detail ? { detailChars: cliText.chars(kept.detail) } : {}) } : {}), ...(mirror && mirror.behind ? { mirror: { behind: true, since: mirror.since, why: mirror.why } } : {}) });   // verify r4 F1: the last three entries are other sessions' too

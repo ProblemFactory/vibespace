@@ -372,7 +372,7 @@ const ROWS = [
   ["src/task-groups.js", "TaskGroupManager._readText", 1, "guarded", "a told Context file's read: a STORAGE file answers from its SafeFs fact (textHead) — this read runs for a local / home file only"],
   ["src/task-groups.js", "TaskGroupManager.exportToFile", 3, "guarded", "mkdir/write/rename at req.body.path — any absolute path the person/agent names (server.js export route)"],
   ["src/task-groups.js", "TaskGroupManager.importFromFile", 1, "guarded", "readFileSync of req.body.path — any absolute file the person/agent names (server.js import route)"],
-  ["src/task-groups.js", "*", 16, "local-only", "store + Activity-log archive under dataDir = <checkout>/data (server.js new TaskGroupManager): task-groups.json, tasks.json, task-groups-archive/<id>/<month>.ndjson"],
+  ["src/task-groups.js", "*", 14, "local-only", "store + Activity-log archive under dataDir = <checkout>/data (server.js new TaskGroupManager): task-groups.json, tasks.json, task-groups-archive/<id>/<month>.ndjson"],
   ["src/telemetry.js", "*", 6, "local-only", "this.dir = <dataDir>/telemetry (server.js new Telemetry({dataDir: <checkout>/data})): events-/central- shards and .instance-id"],
   ["src/transcript-service.js", "createTranscriptService > gapInfo", 1, "local-only", "fp = harness store.locate: ~/.claude/projects/*/<id>.jsonl, ~/.codex/sessions, or <checkout>/data/remote-jsonl cache (cwd only names the projdir)."],
   ["src/transcript-service.js", "createTranscriptService > rescue", 8, "local-only", "fp = localTranscriptPath (~/.claude/projects, ~/.codex/sessions, data/remote-jsonl) and its .pre-rescue-/.rescue-tmp siblings."],

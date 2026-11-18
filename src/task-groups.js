@@ -290,9 +290,10 @@ function sanitizeStrArray(arr, cap = 200) {
 const noneFitWords = (n, gid = '') => `none fit inline — ${n} line${n === 1 ? '' : 's'}; \`vibespace-task ${gid}show\` prints the newest`;
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir, unreadNotice = null, unreadRetry = null, hostRealOf = null }) {
+  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir, unreadNotice = null, unreadRetry = null, hostRealOf = null, writer = null }) {
     // B-16d7: (hostId, cwd) → the real path THAT machine resolved for a cwd it listed (src/hosts.js realCwdOf), or null
     this._hostRealOf = typeof hostRealOf === 'function' ? hostRealOf : () => null;
+    this._writerDep = writer;   // lane lg-store-writes U5: the store writer (a suite's stand-in), else the process's
     // lane grants-unify: the group's outside visibility is a ROW of the ONE grants store (door group-visibility) — the store (or
     // a getter); absent ⇒ none (every group opaque, a write refused by name)
     this._grants = typeof grants === 'function' ? grants : () => grants;
@@ -421,9 +422,9 @@ class TaskGroupManager {
       // One-time legacy Groups migration (file existence is the guard: once the
       // store exists, legacy sessionGroups in user-state stay dormant).
       try { this._migrateGroups(readUserState()); } catch { /* fresh install */ }
-      this._save();
+      this._save({ boot: true });
     } else if (migrated) {
-      this._save();
+      this._save({ boot: true });
     }
     // Regenerate every context folder's TASK.md at boot (state may have
     // changed while a previous server was down; the program is the ONLY
@@ -435,13 +436,16 @@ class TaskGroupManager {
     // Prefer the current file; fall back to the legacy tasks.json ONCE and migrate it forward (write the new file) — ONLY when
     // the current file is truly ABSENT (THE STORE READ, src/store-read.js). The legacy file is left in place (harmless) so an
     // older server build could still read it if rolled back. → true (read) · false (absent: empty) · null (HELD unread)
+    // lane lg-store-writes U5: A LOAD READS WHAT THIS PROCESS STILL OWES — a store made again in the same process (a suite's
+    // restart) lands the write the last one handed the writer before it reads (a hub's boot owes nothing: no wait)
+    try { const W = this._writer(); if (W.pending(this._file)) W.flushSync([this._file]); } catch { }
     const read = (f) => { try { return { text: timedSync('task-groups.read', () => fs.readFileSync(f, 'utf-8')) }; } catch (error) { return { error }; } };
     const a = SR.storeAnswer(read(this._file), { valid: STORE_SHAPE });
     if (a.state === 'data') { this._state = a.value; return true; }
     this._state = { version: 1, tasks: {} };
     if (a.state !== 'missing') { this._holdUnread(a, this._file); return null; } // NEVER written over: held
     const l = SR.storeAnswer(read(this._legacyFile), { valid: STORE_SHAPE });
-    if (l.state === 'data') { this._state = l.value; this._save(); return true; } // migrate tasks.json → task-groups.json
+    if (l.state === 'data') { this._state = l.value; this._save({ boot: true }); return true; } // migrate tasks.json → task-groups.json (lane lg-store-writes U5: a boot save, landed before the boot's migrations read the file)
     if (l.state === 'unreadable') { this._holdUnread(l, this._legacyFile); return null; } // the old file EXISTS and could not be read: held, never started over
     return false; // absent (an unparsable legacy file is an old build's, left in place as before)
   }
@@ -547,16 +551,37 @@ class TaskGroupManager {
    *  Task Groups half is valid only while it holds still (src/server/roster-pass.js) */
   rev() { return this._rev || 0; }
 
-  _save() {
+  /** the process's store writer (src/store-writer.js) — or a suite's */
+  _writer() { return this._writerDep || require('./store-writer.js').storeWriter(); }
+  /** the document on disk: the held old fields ride back beside each record (one release — see _holdLegacy) */
+  _docForDisk() { return !this._legacy.size ? this._state : { ...this._state, tasks: Object.fromEntries(Object.entries(this._state.tasks).map(([id, t]) => [id, this._legacy.has(id) ? { ...t, ...this._legacy.get(id) } : t])) }; }
+  /** THE ANSWER OF AN ACT WAITS FOR THE STORE (lane lg-store-writes U5): true once task-groups.json holds every change made so
+   *  far (false: a write failed or is still queued at the writer's bound — said by the writer); the loop never waits */
+  persisted() { try { return this._writer().durable(this._file, { timeoutMs: 20000 }).catch(() => false); } catch { return Promise.resolve(false); } }   // 20 s: under the CLI's 30 s write budget (src/cli-call.js), so a stalled mount answers «notOnDisk» in time, never «no answer»
+  /** THE STORE'S SAVE GOES THROUGH THE STORE WRITER (lane lg-store-writes, B-0248 U5): task-groups.json (every group's record,
+   *  its backlog and Activity log, pretty-printed) was written whole — temp + rename — on the main thread at every progress
+   *  note, bind and update (6.6 s of holds in five hours on the production hub, 3.1 s the longest). Now its bytes are handed
+   *  to the writer by name, made when the write is due (a burst of notes is one write), as an ACT (rank 0 + durable(): an
+   *  agent's note and a person's edit are the writer's next writes, and their routes answer once persisted() resolves). A
+   *  BOOT save (a legacy migration, a migrated record) lands before the boot's migrations read the file: `{ boot: true }`. */
+  _save({ boot = false } = {}) {
     if (this._unread) return false; // HELD unread: task-groups.json is never written over (THE STORE HELD UNREAD)
     this._rev = (this._rev || 0) + 1;
-    const tmp = this._file + '.tmp';
-    // the held old fields ride back into the file beside each record (one release — see _holdLegacy)
-    const doc = !this._legacy.size ? this._state : { ...this._state, tasks: Object.fromEntries(Object.entries(this._state.tasks).map(([id, t]) => [id, this._legacy.has(id) ? { ...t, ...this._legacy.get(id) } : t])) };
-    timedSync('task-groups.write', () => { fs.writeFileSync(tmp, JSON.stringify(doc, null, 2)); fs.renameSync(tmp, this._file); });
+    try {
+      const W = this._writer();
+      W.dirty(this._file, { name: 'task-groups.write', rank: 0, produce: () => JSON.stringify(this._docForDisk(), null, 2), onWritten: (ok, e) => this._storeWritten(ok, e) });
+      if (boot) { const r = W.flushSync([this._file]); const miss = r.left.find((x) => x.file === this._file); if (miss) console.warn(`[tasks] task-groups.json not on disk at the boot (${miss.why}) — kept in memory, the store writer retries`); }
+      else W.durable(this._file).catch(() => { });
+    } catch (e) { console.warn(`[tasks] save failed: ${e.message}`); }
     // Keep every context folder's generated TASK.md in lockstep with the
     // store (content-compare guard makes this a no-op for unchanged tasks)
     for (const t of Object.values(this._state.tasks)) this._syncTaskMd(t);
+  }
+
+  /** a store write's outcome (the writer's onWritten): a failure said once until one lands */
+  _storeWritten(ok, e) {
+    if (!ok) { if (!this._storeOwedSaid) { this._storeOwedSaid = true; console.warn(`[tasks] task-groups.json not written: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } return; }
+    if (this._storeOwedSaid) { this._storeOwedSaid = false; console.warn('[tasks] task-groups.json is on disk again'); }
   }
 
   // ── Context folder: generated TASK.md + injection payload (P2) ──
@@ -1292,7 +1317,7 @@ class TaskGroupManager {
       t.ctx = m.rows;
       rep.groups++; rep.rows += m.rows.length; rep.folders += m.folders; rep.notes += m.notes; rep.merged += m.merged; rep.nonRecursive += m.nonRecursive;
     }
-    if (rep.groups) { this._save(); this._notify(); }
+    if (rep.groups) { this._save({ boot: true }); this._notify(); }   // lane lg-store-writes U5: the boot migration's rows are on disk when it returns (the ledger records it next)
     return rep;
   }
 

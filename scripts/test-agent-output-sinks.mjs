@@ -94,6 +94,7 @@ todos._flush();
 const tg = new TaskGroupManager({ dataDir, onChange: () => {}, readUserState: () => ({}), getSetting: () => undefined, isPathShadowed: () => false });
 const grp = tg.create({ title: 'sink census', kind: 'task' });
 tg.addProgress(grp.id, { note: 'progress ' + SHAPE, detail: 'ctx ' + KV });
+try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U5: task-groups.json is the store writer's — landed before the file is read
 {
   const f = readFile('task-groups.json');
   ok(!leaks(f, SHAPEMAT) && !leaks(f, KVMAT), 'task-groups.json carries no raw secret material (note + detail belted)');

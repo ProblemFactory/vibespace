@@ -82,9 +82,14 @@ function noteReport(ledger, id, report) {
   return false;
 }
 
-function runMigrations({ ledgerPath, migrations, log = console.log, warn = console.warn, onLate = null, todos = null }) {
+// lane lg-store-writes (B-0248 U5): `landStores` (the hub's boot passes it — src/server/migrations.js runLocalMigrations) lands
+// what the migrations that ran handed the store writer BEFORE the ledger is stamped, and answers the writes that did NOT land
+// ([] = all landed); a reshape not on disk is not recorded — it runs again next boot (each migration is idempotent), said in
+// For you. Without it (a script, a suite, the vault's seal — none of them hands bytes to the writer) nothing waits.
+function runMigrations({ ledgerPath, migrations, log = console.log, warn = console.warn, onLate = null, todos = null, landStores = null }) {
   const ledger = readLedger(ledgerPath);
   const results = [];
+  const ranNow = [];
   for (const m of migrations) {
     if (!m || !m.id || typeof m.run !== 'function') continue;
     if (ledger.applied[m.id]) { results.push({ id: m.id, status: 'already' }); continue; }
@@ -110,7 +115,7 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
         });
         continue;
       }
-      ledger.applied[m.id] = Date.now();
+      ledger.applied[m.id] = Date.now(); ranNow.push(m.id);
       // A migration MAY return a plain object of counts (2.369.152): it rides
       // the ledger beside the timestamp (`reports[id]`), so "what did the
       // upgrade boot do" is answerable from the file after the journal rolled.
@@ -126,6 +131,18 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
       warn(`[migrate] ${m.id} FAILED (will retry next boot): ${e.message}`);
       results.push({ id: m.id, status: 'failed', error: e.message, ...(e && e.code ? { code: String(e.code) } : {}) });   // B-44f3: + the code
       sayFailed(todos, m.id, e, warn);
+    }
+  }
+  if (ranNow.length && typeof landStores === 'function') {
+    let left = []; try { left = landStores() || []; } catch (e) { left = [{ name: 'the store writer', why: e.message }]; }
+    if (left.length) {   // a reshape not on disk is not recorded: the migration runs again at the next boot (each is idempotent)
+      const why = `${left.map((x) => x.name).join(', ')} not on disk yet (${left[0].why})`;
+      warn(`[migrate] ${why} — ${ranNow.join(', ')} not recorded, they run again next boot`);
+      for (const id of ranNow) {
+        delete ledger.applied[id]; if (ledger.reports) delete ledger.reports[id];
+        const r = results.find((x) => x.id === id); if (r) { r.status = 'failed'; r.error = why; delete r.report; }
+        sayFailed(todos, id, new Error(why), warn);   // the For-you row the run had closed is opened again (the runner's no-silent-failure law)
+      }
     }
   }
   writeLedger(ledgerPath, ledger, warn);

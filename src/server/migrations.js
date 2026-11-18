@@ -1601,8 +1601,20 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     // lane hub-loop-stalls commit 2: the live ledger's cursors are written by the store writer — an owed write is settled
     // before any migration reads or rewrites _cursors.json (never an older state landing after a migration's own)
     try { const uh0 = typeof usageHistory === 'function' ? usageHistory() : usageHistory; if (uh0 && typeof uh0.settleCursors === 'function') uh0.settleCursors(); } catch { }
+    // lane lg-store-writes (B-0248 U5): what THESE migrations hand the store writer lands before the ledger is stamped — the stores
+    // dirtied while they ran (a store already owed before them is not theirs: never waited on here); a flush deferred by an exit
+    // counts as not landed
+    let SWm = null, owedBefore = new Set();
+    try { SWm = require('../store-writer.js').storeWriter(); owedBefore = new Set(SWm.stats().filter((s) => s.dirty || s.inflight).map((s) => s.file)); } catch { SWm = null; }
+    const landStores = () => {
+      if (!SWm) return [];
+      const owed = SWm.stats().filter((s) => (s.dirty || s.inflight) && s.file && !owedBefore.has(s.file)).map((s) => s.file);
+      if (!owed.length) return [];
+      const r = SWm.flushSync(owed);
+      return r.deferred ? owed.map((f) => ({ file: f, name: path.basename(f), why: 'the hub is exiting' })) : (r.left || []);
+    };
     // `todos` (r3, review F2b): a failed row is ONE For-you item keyed by its id, resolved by the run that succeeds (the runner's)
-    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, todos: userTodos, onLate: (r) => {
+    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, todos: userTodos, landStores, onLate: (r) => {
       // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's —
       // through the SAME door (B-44f3, the first read's should: a For-you refusal there waits for the read too, never «next restart»).
       // A toast reaches every client's screen: its error is the runner's failedLine — belted whole, then cut (r4, review N3)

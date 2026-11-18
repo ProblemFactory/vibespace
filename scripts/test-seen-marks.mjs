@@ -182,7 +182,7 @@ function mkStore(tag, { shapes = SHAPES, cwd, sessionKeys = [], settings = {} } 
     ids.push(t1.create({ title: sh.title, objective: textOf(sh.obj, gi), folders: [cwd], contextDir: ctx }).id);
   });
   // the long backlog + activity log go in through the store file (500 addProgress calls would rewrite TASK.md 500 times)
-  const file = path.join(dataDir, 'task-groups.json');
+  const file = landed(path.join(dataDir, 'task-groups.json'));   // lane lg-store-writes U5: the creates' write lands first (the fixture is written over the landed file, never under a queued one)
   const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
   shapes.forEach((sh, gi) => {
     const t = doc.tasks[ids[gi]];

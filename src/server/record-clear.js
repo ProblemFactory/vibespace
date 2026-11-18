@@ -72,6 +72,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       if (r.error) { for (const id of ids) res.refused.push({ kind, id, ...pick(r.error) }); continue; }
       res.cleared += r.cleared.length;
       res.already += r.already.length;
+      if (r.notOnDisk) res.notOnDisk = true;   // lane lg-store-writes U5: cleared in memory, its store's file not on disk yet (logged; the writer retries)
       res.ids.push(...r.cleared.map((id) => ({ kind, id: String(id) })));
       for (const id of r.unknown) res.unknown.push({ kind, id: String(id) });
       if (r.archiveUnread) res.archiveUnread = true;   // B-20b6: the job store could not reach its ARCHIVED records — their words were not cleared; said to the person
@@ -95,6 +96,9 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       let r;
       try { r = tasks.clearProgress(container, ids, { by, at, allow: verdictFor('activity', caller) }); }
       catch (e) { if (/not found/.test(e.message)) return { error: RC.refuse('not_found') }; throw e; }
+      // lane lg-store-writes U5: the answer waits until the cleared words are gone from the FILE (the store writer's write — the
+      // loop never waits); a write that did not land is SAID (logged and in the result), the clear stays applied in memory
+      if (typeof tasks.persisted === 'function' && !(await tasks.persisted())) { log(`[clear] activity ${ids.join(', ')}: cleared in memory, the Task Groups' store not on disk yet — the store writer retries`); return { ...r, notOnDisk: true }; }
       return r;
     }
     if (kind === 'todo') {
@@ -115,6 +119,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       if (userTodos && userTodos.isHeldUnread?.()) return { error: RC.refuse('todos_unread') };
       const r = jm.clearJobs(ids, { by, at, allow: verdictFor('job', caller) });
       if (r.error) { log(`[clear] job ${ids.join(', ')} — FAILED: ${r.error}`); return { error: RC.refuse('failed') }; }
+      if (typeof jm.persisted === 'function' && !(await jm.persisted())) { log(`[clear] job ${ids.join(', ')}: cleared in memory, the jobs store not on disk yet — the store writer retries`); r.notOnDisk = true; }   // lane lg-store-writes U4/U5: the cleared job's words gone from the FILE before the answer (said when not)
       // THE CASCADE: a job's For-you items carry its name ("<name> needs your input", "· via <name>",
       // the job's name in their label) — cleared through the For-you door under the same caller
       if (r.cleared.length && userTodos) {
