@@ -434,6 +434,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - test-oauth-loopback: the stopAll leg awaits the promise, then judges «free» by batch 29's bounded re-ask, as every release does (the close event is no proof the port is free — the listener was gone at close() already). CONTROL of the shape leg: a patched copy whose stopAll() only closes hands back no promise (its plant asserted first; the copy goes through copiesCensus like the file's others).
 - NOT A CAUSE: the .367 mirror's 112/1 stays unexplained; B-cabe stays open for a recurrence, as its line said.
 
+
 ### bl-vault — B-694d: a desktop app's keyring answers «stored» only over sealed bytes
 - THE READING (the row's question — the leg's missing wait, or the product answering before the seal?): the reply already waits for the atomic rename — CreateItem → Store.save() → subprocess.run(app-secrets-seal.js seal) writes the 0600 temp and renames it before ok() goes. The .390 cut's red was the LEG's: its «no plaintext» regex ran over the whole sealed file, whose ciphertext is base64, and «ann» turns up in random base64 — 438 of 200 000 correctly sealed files (0.22 %) red it.
 - THE LEG (test-app-display-secrets ③): the file judged by its shape — keys v/n/sealed, the iv.tag.data ciphertext, opens with the display's key to the two items — and plaintext looked for only outside the ciphertext; RED controls: a correct file whose ciphertext holds «ann» reds the old check and passes the new one; the items in cleartext (as the field, or beside it) red the new one.
