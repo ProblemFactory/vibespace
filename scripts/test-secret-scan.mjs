@@ -270,7 +270,7 @@ ok(/^\s*if ! node scripts\/secret-scan\.mjs --tree; then$/m.test(wf) && !wf.incl
 // THE HOSTED FAST JOB RUNS THE SECRET SCAN — the law, never the line's spelling (主开发 11:48Z, after B-7353 split the job in two):
 // the job's line runs scripts/ci.mjs, whole or as one part; EVERY part reaches the scan (fastGate calls it unconditionally, after the
 // build and before any lane, whatever part it runs); and the scan's own suite is a fast row the split puts in exactly one part
-const FAST_RUN = /^\s*- run: node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?\s*$/m;
+const FAST_RUN = /^\s*- run: node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?(?: --keep-going)?\s*$/m;
 ok(FAST_RUN.test(ciYml), '…and ci.yml\'s fast job runs scripts/ci.mjs — the whole tier or one part of it (--fast-part=${{ matrix.part }}/n) — caller 2 on the runner');
 const runLine = (ciYml.match(FAST_RUN) || [''])[0];
 ok(!!runLine && !FAST_RUN.test(ciYml.replace(runLine, runLine.replace('scripts/ci.mjs', 'scripts/other.mjs'))) && !FAST_RUN.test(ciYml.replace(runLine, runLine.replace('scripts/ci.mjs', 'scripts/ci.mjs --only=test-a'))),

@@ -261,8 +261,8 @@ console.log('\n§2 tier hygiene');
     'the tracked pre-push hook checks the heavy verdict AND launches the heavy tier');
   ok(hook.indexOf('--check-heavy') < hook.indexOf('node scripts/ci.mjs ||'),
     'the hook asks for the heavy verdict BEFORE it spends the fast tier');
-  ok(/node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2\s*$/m.test(wf) && wf.includes('node scripts/ci.mjs --heavy'),
-    'the Actions mirror runs BOTH tiers (the fast tier as its parts)');
+  ok(/node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2 --keep-going\s*$/m.test(wf) && wf.includes('node scripts/ci.mjs --heavy'),
+    'the Actions mirror runs BOTH tiers (the fast tier as its parts, each to its end: --keep-going names every red — B-d24c)');
   // THE FAST TIER IN PARTS (B-7353): the hosted fast job is a matrix of parts, each a cut of the tier by the rows' stated times
   { const C = await import('./ci.mjs');
     const fp = C.workflowFastPartsAt(wf), tierRows = fast;
@@ -680,7 +680,7 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
     `every npm install goes through scripts/ci-npm.sh (${v.doorSteps} steps: the claude CLI + npm ci in fast and heavy) and both scripts/ci.mjs steps are one plain line, once per job, after the door's npm ci (${v.suiteSteps})`, v.bad.join('\n'));
   // the controls: mutant copies of ci.yml, each RED for its own reason
   const ci = files.find(([f]) => f === 'ci.yml')[1];
-  const FAST_RUN = '      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2\n', HEAVY_RUN = /( {6}- run: )(node scripts\/ci\.mjs --heavy [^\n]*)/;
+  const FAST_RUN = '      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2 --keep-going\n', HEAVY_RUN = /( {6}- run: )(node scripts\/ci\.mjs --heavy [^\n]*)/;
   const MUTANTS = [
     ['the fast job\'s npm ci bare again', (t) => t.replace('run: bash scripts/ci-npm.sh ci', 'run: npm ci'), /an install outside the door: npm ci$/m],
     ['the claude CLI installed bare', (t) => t.replace('run: bash scripts/ci-npm.sh install -g', 'run: npm i -g'), /an install outside the door: npm i -g @anthropic-ai\/claude-code/],
@@ -690,7 +690,7 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
     ['an until loop in a run block', (t) => t.replace(FAST_RUN, '      - run: |\n          until node scripts/ci.mjs; do sleep 20; done\n'), /not ONE plain line: run: \| ⏎ until node scripts\/ci\.mjs/],
     ['a retry action around ci.mjs', (t) => t.replace(FAST_RUN, '      - uses: nick-fields/retry@v3\n        with:\n          max_attempts: 3\n          command: node scripts/ci.mjs\n'), /not ONE plain line: uses: nick-fields\/retry@v3/],
     ['a second ci.mjs step if: failure()', (t) => t.replace(FAST_RUN, FAST_RUN + '        env:\n          VIBESPACE_CI_OAT: x\n      - if: failure()\n        run: node scripts/ci.mjs\n'), /job 1: scripts\/ci\.mjs runs in 2 steps/],
-    ['continue-on-error on the suite step', (t) => t.replace(FAST_RUN, FAST_RUN + '        continue-on-error: true\n'), /not ONE plain line: run: node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2 ⏎ continue-on-error: true/],
+    ['continue-on-error on the suite step', (t) => t.replace(FAST_RUN, FAST_RUN + '        continue-on-error: true\n'), /not ONE plain line: run: node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2 --keep-going ⏎ continue-on-error: true/],
     ['ci.mjs handed to the door', (t) => t.replace(FAST_RUN, '      - run: bash scripts/ci-npm.sh node scripts/ci.mjs\n'), /not ONE plain line: run: bash scripts\/ci-npm\.sh node scripts\/ci\.mjs/],
     ['the door\'s npm ci moved after ci.mjs', (t) => t.replace(/( {6}- name: npm ci \(3 attempts on a registry blip\)\n(?: {8}.*\n)+)( {6}- run: node scripts\/ci\.mjs --fast-part=[^\n]*\n)/, '$2$1'), /job 1: scripts\/ci\.mjs with no `scripts\/ci-npm\.sh ci` before it/],
   ];
@@ -902,7 +902,7 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
     if (!fast || !heavy) return { bad: [`no ${fast ? 'heavy-shards' : 'fast'} job`] };
     const isUpload = (st) => /^actions\/upload-artifact@v\d+$/.test(st.action || '');
     const field = (st, k) => (new RegExp(`^\\s*${k}:\\s*(.+?)\\s*$`, 'm').exec(st.text) || [])[1] ?? null;
-    const suite = fast.findIndex((st) => /^node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?$/.test(st.run || '')), at = fast.findIndex((st) => isUpload(st) && st.text.split('\n').some((l) => l.trim() === `path: ${CI.FAST_FAIL_LOGS}/*.log`));
+    const suite = fast.findIndex((st) => /^node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?(?: --keep-going)?$/.test(st.run || '')), at = fast.findIndex((st) => isUpload(st) && st.text.split('\n').some((l) => l.trim() === `path: ${CI.FAST_FAIL_LOGS}/*.log`));
     const hu = heavy.find((st) => isUpload(st) && /data\/ci-heavy\/fail-logs\/\*\.log/.test(st.text));
     if (suite < 0) bad.push('the fast job runs no `node scripts/ci.mjs` (whole, or its part --fast-part=${{ matrix.part }}/n)');
     if (at < 0) { bad.push(`the fast job uploads no ${CI.FAST_FAIL_LOGS}/*.log`); return { bad }; }
