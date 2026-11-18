@@ -297,6 +297,24 @@ class JobManager {
     else if (owed) { this._onDisk(this.file, 'the store at shutdown'); this._onDisk(this.notifsFile, 'the notifications at shutdown'); }   // a shutdown outside the hub's exit (a suite's engine): they land now
     this._unlockNow();
   }
+  /** A REFUSED START COMES BACK BY ITSELF where the release's would have (lane lg-store-writes, the U4/U5 cure 2 — 主开发): a
+   *  start refused only because its run could not be recorded on disk — a restart policy's, the boot's replay, a vault
+   *  unlock's, an update's rerun — is made again once jobs.json lands (_storeWritten), judged as its own door judges it (a
+   *  service still down and wanted, a wait still live, an interrupted task's rerun); refused again it is recorded again (at
+   *  most 3 times in a row, then «start it again», said). Never during the exit. */
+  _retryRefused() {
+    let W = null; try { W = this._writer(); } catch { }
+    if (this.readOnly || !this._refusedForDisk || !this._refusedForDisk.size || (W && typeof W.exitStartedAt === 'function' && W.exitStartedAt() != null)) return;
+    const owed = [...this._refusedForDisk]; this._refusedForDisk.clear();
+    for (const [id, trigger] of owed) {
+      const job = this.jobs.get(id); if (!job) continue;
+      try {
+        if (job.state === 'waiting') { if (this._waitLive(job)) this._startAfter(job, trigger, () => this._waitLive(job)); }
+        else if (job.kind === 'service' && job.state === 'down' && job.desiredUp) this._startAfter(job, trigger, () => job.desiredUp && job.state === 'down');
+        else if (job.kind === 'task' && job.state === 'interrupted' && trigger === 'update-rerun') this._spawn(job, 'update-rerun');
+      } catch (e) { this.d.log(`[jobs] ${trigger} start of ${job.id} made again (its store on disk) refused:`, e.message); }
+    }
+  }
   /** the engine lock's ONE removal (test-job-logs-sweep counts jobs.js's removal calls by name) */
   _unlockNow() { try { fs.unlinkSync(this.lockFile); } catch { } }
   /** the process's store writer (src/store-writer.js) — or a suite's (deps.writer) */
@@ -331,7 +349,10 @@ class JobManager {
   /** a store write's outcome (the writer's onWritten): a failure said once until one lands; the exit's lock released once landed */
   _storeWritten(ok, e) {
     if (!ok) { if (!this._storeOwedSaid) { this._storeOwedSaid = true; this.d.log(`[jobs] save failed: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } return; }
-    this._intentHeldAt = null;   // the U4/U5 cure: a start refused for a held store may wait for its write again
+    this._intentHeld = null;   // the U4/U5 cure: a start refused for a held store may wait for its write again
+    // the U4/U5 cure 2: the starts refused only because their run was not on disk come back now — off this callback (the
+    // writer's own settle), never during the exit
+    if (this._refusedForDisk && this._refusedForDisk.size && !this._retryArmed) { this._retryArmed = true; setImmediate(() => { this._retryArmed = false; this._retryRefused(); }); }
     if (this._storeOwedSaid) { this._storeOwedSaid = false; this.d.log('[jobs] the store is on disk again'); }
     if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }   // armed only at the hub's exit (no other engine in this process)
   }
@@ -2545,11 +2566,6 @@ class JobManager {
     fs.chmodSync(ctl, 0o700); // the run's dir holds its spec file and its log — the owner's alone (mkdir's mode is umask-masked)
     const stateBefore = job.state;   // the U4/U5 cure: what a refused start (its run not on disk) gives back
     job.state = 'starting';
-    delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
-    delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
-    delete job._startAfterStop;   // B-cac2 (its read r2): a start asked during a stop is the next run's — any new run ends the ask (never a later run's end)
-    for (const t of job._killSteps || []) clearTimeout(t); // round 6: …nor does its kill timer — a new run disarms every timer of the last
-    delete job._killSteps;
     job.runs = job.runs || [];
     // THE MEMORY BOUND (lane jobs-memory-bound): THE LADDER's answer for THIS run (src/job-model.js memoryMbOf) rides the spec;
     // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
@@ -2566,23 +2582,44 @@ class JobManager {
     // While a refused intent's store is STILL owed (the storage holds its write), the next start is refused AT ONCE — never a
     // second wait of the writer's bound on the main thread for the same held write (the cure's own adversarial read); a
     // landed store clears it (_storeWritten)
+    // the U4/U5 cure 2 (its verdict's should): refused AT ONCE only while the SAME write is still held — the store the writer
+    // had in flight at the last refusal, still in flight with no write of it landed since (a new wait would wait on it again);
+    // any other case waits its own bound
     let W0 = null; try { W0 = this._writer(); } catch { }
-    const intent = this._intentHeldAt != null && W0 && W0.pending(this.file)
-      ? { ok: false, why: `the storage still holds the store's earlier write (${Math.round((now() - this._intentHeldAt) / 1000)} s since a start was refused for it)` }
+    const flying = () => { try { const x = (W0 && typeof W0.stats === 'function' ? W0.stats() : []).find((r) => r.inflight); return x ? { file: x.file, writes: x.writes } : null; } catch { return null; } };   // the store by its FILE (test-record-clear-census follows a `.name` into a sentence)
+    const held = this._intentHeld ? (() => { const f = flying(); return f && f.file === this._intentHeld.file && f.writes === this._intentHeld.writes ? f : null; })() : null;
+    const intent = held
+      ? { ok: false, why: `the storage still holds ${path.basename(held.file)}'s write (${Math.round((now() - this._intentHeld.at) / 1000)} s since a start was refused behind it)` }
       : this._onDisk(this.file, 'the run\'s intent');
     if (!intent.ok) {
-      if (this._intentHeldAt == null && !/deferred|stopping/.test(intent.why || '')) this._intentHeldAt = now();
+      if (!held && !/deferred|stopping/.test(intent.why || '')) { const f = flying(); this._intentHeld = f ? { ...f, at: now() } : null; }
       job.runs.pop();
       // a person's start, or a record that had no state before this start, is FAILED; a restart, a replay, a rerun or a
-      // schedule's existing child keeps what it was (a service stays 'down' — the boot's replay or a person's start starts
-      // it; an interrupted task stays 'interrupted') — said, with an alarm, either way
+      // schedule's existing child keeps what it was (a service stays 'down', an interrupted task 'interrupted', a vault wait
+      // 'waiting') — said, with an alarm, either way. A START THAT COMES BACK BY ITSELF (the U4/U5 cure 2 — 主开发): one the
+      // release would have made again (a restart policy's, the boot's replay, a vault unlock's, an update's rerun) is started
+      // again once the store lands (_retryRefused — at most 3 times in a row); a person's start answered its error; a schedule's
+      // child fires at its next time
       job.state = trigger === 'manual' || !stateBefore || stateBefore === 'starting' ? 'failed' : stateBefore;
-      const what = `not started (${trigger}): its run could not be recorded on disk first (${intent.why}) — no process was started`;
+      const comesBack = trigger !== 'manual' && !job.cronParent && job.state !== 'failed' && (job._diskRetries || 0) < 3;
+      if (comesBack) { job._diskRetries = (job._diskRetries || 0) + 1; (this._refusedForDisk || (this._refusedForDisk = new Map())).set(job.id, trigger); }
+      const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
+      const door = comesBack ? 'it starts again by itself once the store is on disk'
+        : parent ? (parent.schedule && parent.schedule.at ? 'a one-time schedule does not come back by itself: schedule it again (vibespace-job run … --at "+5m", or a new time) if it still matters' : 'its schedule runs it again at its next time')
+          : 'start it again once the storage answers';
+      const what = `not started (${trigger}): its run could not be recorded on disk first (${intent.why}) — no process was started; ${door}`;
       this._touch(job, { what, alarm: true });
       this._save();
       throw Object.assign(new Error(what), { code: 'EVSNOTONDISK' });
     }
+    delete job._diskRetries;
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);   // after the check: a refused start never costs the oldest run its entry
+    // the run-arming clears come AFTER the check (the U4/U5 cure 2): a refused start leaves the record as it was
+    delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
+    delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
+    delete job._startAfterStop;   // B-cac2 (its read r2): a start asked during a stop is the next run's — any new run ends the ask (never a later run's end)
+    for (const t of job._killSteps || []) clearTimeout(t); // round 6: …nor does its kill timer — a new run disarms every timer of the last
+    delete job._killSteps;
     // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
@@ -3408,7 +3445,7 @@ class JobManager {
           if (!e || e.code !== 'EVSNOTONDISK') throw e;
           // A REFUSED FIRE (the U4/U5 cure: its run could not be recorded on disk first — the child said why, with an alarm): a
           // recurring schedule moves to its NEXT slot (never a re-fire at every 30 s tick); a one-shot is parked, said
-          if (job.schedule.at) { job.state = 'failed'; job.desiredUp = false; job.nextFireAt = null; this._touch(job, { what: `its scheduled run was refused — ${e.message}`, alarm: true }); continue; }
+          if (job.schedule.at) { job.state = 'failed'; job.desiredUp = false; job.nextFireAt = null; this._touch(job, { what: `its scheduled run was refused — ${e.message}`, alarm: true }); continue; }   // the child's words name the door (schedule it again)
           job.nextFireAt = M.nextFire(job.schedule, now(), undefined, job.nextFireAt);
           this._touch(job);
           continue;

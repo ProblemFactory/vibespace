@@ -1217,24 +1217,27 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   // THE U4/U5 CURE (1) — A CHILD THE DISK DOES NOT HOLD IS NEVER STARTED: the run's intent not on disk inside the writer's
   // bound (a stalled mount), or deferred to the exit's flush ⇒ NO child; the start refused by name, the record failed
   const stalled = (how) => {
-    const r = standIn();
+    const r = standIn(), landing = r.flushSync;
+    r.unstall = () => { r.flushSync = landing; };   // the storage answers again: the next flush lands (and calls each store's onWritten)
+    // the writer's word on what it has IN FLIGHT: jobs.json's write, held (no write of it landed) — the cure 2's «same write» test
+    r.stats = () => [...r.owed.keys()].map((f) => ({ file: f, name: r.owed.get(f).name, inflight: path.basename(f) === 'jobs.json', writes: 0 }));
     r.flushSync = (files) => { r.flushes.push(files.map((f) => path.basename(f)).join('+')); return how === 'deferred' ? { written: [], left: [], deferred: true } : { written: [], left: files.map((f) => ({ file: f, name: 'jobs.write', why: 'its write was still held by the storage at the bound (30.0 s)' })) }; };
     return r;
   };
   const spawnScene = (JMod, tag, rec) => {
     const d = mkDir('jobs-triage-u4-spawn-' + tag), F = path.join(d, 'jobs.json');
-    fs.writeFileSync(F, JSON.stringify([{ ...seedRec('jb-0248a402'), cmd: { argv: ['/bin/true'], cwd: d } }]));
+    fs.writeFileSync(F, JSON.stringify([{ ...seedRec('jb-0248a402'), cmd: { argv: ['/bin/true'], cwd: d }, ack: 1234 }]));
     const said = [];
     const J = new JMod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...x) => said.push(x.join(' ')), archivePolicy: () => policy, writer: rec });
     J.init();
     const job = J.jobs.get('jb-0248a402'), runs0 = (job.runs || []).length;
     let threw = null; try { J._spawn(job, 'manual'); } catch (e) { threw = e.message; }
-    return { J, threw, state: job.state, proc: job.proc || null, runs: (job.runs || []).length - runs0, said: said.filter((l) => /the run's intent/.test(l)) };
+    return { J, threw, state: job.state, proc: job.proc || null, runs: (job.runs || []).length - runs0, said: said.filter((l) => /the run's intent/.test(l)), ack: job.ack };
   };
   for (const how of ['held', 'deferred']) {
     const s1 = spawnScene({ JobManager }, how, stalled(how));
-    ok(/^not started \(manual\): its run could not be recorded on disk first/.test(s1.threw || '') && s1.state === 'failed' && !s1.proc && s1.runs === 0 && s1.said.length === 1,
-      `U4 cure (1): the run's intent NOT on disk (${how === 'held' ? 'held past the writer\'s bound' : 'deferred to the exit\'s flush'}) ⇒ NO child — the start refused by name, the record failed, its run entry taken back, said once`, { threw: s1.threw, state: s1.state, proc: s1.proc, runs: s1.runs, said: s1.said });
+    ok(/^not started \(manual\): its run could not be recorded on disk first/.test(s1.threw || '') && /start it again once the storage answers$/.test(s1.threw || '') && s1.state === 'failed' && !s1.proc && s1.runs === 0 && s1.said.length === 1 && s1.ack === 1234,
+      `U4 cure (1): the run's intent NOT on disk (${how === 'held' ? 'held past the writer\'s bound' : 'deferred to the exit\'s flush'}) ⇒ NO child — the start refused by name and its door («start it again»), the record failed, its run entry taken back, its ack untouched (cure 2), said once`, { threw: s1.threw, state: s1.state, proc: s1.proc, runs: s1.runs, said: s1.said, ack: s1.ack });
     s1.J.shutdown();
   }
   const jsrcSp = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
@@ -1278,8 +1281,44 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     J.init();   // the boot's replay of a 'down' service: refused
     const svc = J.jobs.get('jb-0248a404'), st1 = svc.state, f1 = rec.flushes.length;
     let threw = null; try { J._spawn(svc, 'manual'); } catch (e) { threw = e.message; }
-    ok(st1 === 'down' && !svc.proc && /still holds the store's earlier write/.test(threw || '') && rec.flushes.length === f1 && svc.state === 'failed',
+    ok(st1 === 'down' && !svc.proc && /the storage still holds jobs\.json's write/.test(threw || '') && rec.flushes.length === f1 && svc.state === 'failed',
       'U4 cure (1): a refused boot replay keeps the service DOWN (said); while the store is still held the next start is refused AT ONCE — no second wait — and a person\'s start is failed', { st1, threw, flushes: rec.flushes.length - f1, state: svc.state });
+    J.shutdown();
+  }
+  // THE U4/U5 CURE 2 (主开发 12:19Z): A REFUSED START COMES BACK BY ITSELF where the release's would have — a supervised
+  // service whose boot replay was refused (its run not on disk) is started again once the store LANDS; its words name the
+  // door. RED: a mutant copy without the retry in _storeWritten ⇒ it stays down
+  const backScene = async (JMod, tag) => {
+    const d = mkDir('jobs-triage-u4-back-' + tag), F = path.join(d, 'jobs.json'), rec = stalled('held'), said = [];
+    fs.writeFileSync(F, JSON.stringify([{ id: 'jb-0248a405', kind: 'service', name: 'u4 back', state: 'down', desiredUp: true, owner: {}, access: ACC, cmd: { argv: ['/bin/true'], cwd: d }, runs: [], supervise: { consecutiveFails: 0, parkedAt: null }, createdAt: T0 - H }]));
+    const J = new JMod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: (...x) => said.push(x.join(' ')), archivePolicy: () => policy, writer: rec });
+    J.init();   // the boot's replay: refused (the store held)
+    const svc = J.jobs.get('jb-0248a405'), st1 = svc.state, words = (J.events.filter((e) => e.jobId === svc.id).pop() || {}).what || '';
+    rec.unstall(); rec.land();   // the storage answers: the store lands (its onWritten)
+    await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    return { J, st1, words, state: svc.state, proc: svc.proc || null };
+  };
+  const b1 = await backScene({ JobManager }, 'cure');
+  ok(b1.st1 === 'down' && /it starts again by itself once the store is on disk$/.test(b1.words) && b1.state === 'up' && !!b1.proc,
+    'U4/U5 cure 2: a service whose boot replay was refused (its run not on disk) says it comes back by itself — and IS started again once the store lands', { st1: b1.st1, words: b1.words, state: b1.state, proc: b1.proc });
+  try { if (b1.proc && b1.proc.pid) process.kill(b1.proc.pid, 'SIGKILL'); } catch { }
+  b1.J.shutdown();
+  const jsrcBk = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const aBk = "    if (this._refusedForDisk && this._refusedForDisk.size && !this._retryArmed) {";
+  ok(jsrcBk.split(aBk).length === 2, 'U4/U5 cure 2 ANCHOR: the retry armed when the store lands (_storeWritten)');
+  const NoBack = mutantCopies('jobs-triage-u4-back', ROOT).load('src/jobs.js', jsrcBk.replace(aBk, '    if (false) {'), 'no-retry');
+  const b2 = await backScene(NoBack, 'red');
+  ok(b2.state === 'down' && !b2.proc, 'U4/U5 cure 2 CONTROL: without the retry (a mutant copy) the refused service stays DOWN after the store lands', { state: b2.state, proc: b2.proc });
+  b2.J.shutdown();
+  // a refused ONE-SHOT's words name its door (a one-time schedule does not come back by itself — schedule it again)
+  {
+    const d = mkDir('jobs-triage-u4-at'), F = path.join(d, 'jobs.json'), rec = stalled('held');
+    fs.writeFileSync(F, JSON.stringify([{ id: 'jb-0248a406', kind: 'cron', name: 'u4 at', state: 'scheduled', desiredUp: true, owner: {}, access: ACC, schedule: { at: Date.now() - 1000 }, action: { type: 'spawn-task', task: { cmd: { argv: ['/bin/true'], cwd: d } } }, nextFireAt: Date.now() - 1000, runs: [], createdAt: T0 - H }]));
+    const J = new JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: rec });
+    J.init();
+    const cron = J.jobs.get('jb-0248a406'), words = (J.events.filter((e) => e.jobId === cron.id).pop() || {}).what || '';
+    ok(cron.state === 'failed' && cron.desiredUp === false && /a one-time schedule does not come back by itself: schedule it again \(vibespace-job run … --at "\+5m", or a new time\) if it still matters$/.test(words),
+      'U4/U5 cure 2: a refused ONE-SHOT is parked and its words name the door — schedule it again (vibespace-job run … --at)', { state: cron.state, desiredUp: cron.desiredUp, words });
     J.shutdown();
   }
   // RED CONTROL: the change removed — the old synchronous save (the writer bypassed)
