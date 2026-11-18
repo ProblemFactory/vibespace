@@ -116,6 +116,9 @@ router.use((req, res, next) => {
   if (!raw || req.query.host || req.body?.host) return next();
   let p; try { p = safePath(String(raw)); } catch { return next(); }
   if (mounts.pathBlocked(p)) {
+    // B-5ce7 cure: a PARKED mount says so and names its doors (nothing reconnects it by itself — «try again» would be false)
+    const pk = mounts.parkedAt?.(p);
+    if (pk) return res.status(503).json({ error: require('../mount-door.js').parkedSentence(pk.name), code: 'storage_parked', params: { name: pk.name } });
     return res.status(503).json({ error: 'This storage is connecting or not responding — try again in a moment.' });
   }
   // A registered storage that is NOT mounted: its mount point is a bare local
@@ -367,7 +370,7 @@ router.get('/api/file/raw', async (req, res) => {
   // can't be pooled without a rewrite); a missing file (non-503) falls through
   // to sendFile's own 404 so behaviour is unchanged for the normal cases.
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's)
   const named = contentDisposition(fileNameOf(filePath), 'inline');
   // dotfiles 'allow' (r2): without it send's LEGACY rule answered 404 for any basename starting
   // with '.', so `.env.png` could not be previewed — this route serves the paths the user opens
@@ -394,7 +397,7 @@ router.get('/api/download', async (req, res) => {
   if (R) return remoteStream(res, () => R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true }));
   const filePath = safePath(req.query.path);
   try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
-  catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.' }); }   // the door's own words (a parked mount's)
   try {
     res.download(filePath, { dotfiles: 'allow' }); // r2: a `.env` Download was send's legacy-dotfile 404
   } catch (err) { res.status(400).json({ error: err.message }); }

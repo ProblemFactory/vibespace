@@ -994,6 +994,7 @@ class MountManager {
     if (this.isMounted(m)) await this.unmount(id);
     if (m.parked) this._unpark(m, 'removed');   // B-5ce7: its For-you item resolves with it
     this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }
+    try { this.onRemoved?.(m); } catch { }   // its stranded-files notice too (the cap counts live records)
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
     this._errors.delete(id);
@@ -1627,7 +1628,7 @@ class MountManager {
   async _livenessApply(m, mp, w) {
     this._liveness = this._liveness || new Map();
     const v = LIVENESS.livenessStep(this._liveness.get(m.id)?.state, w, rowFor(this, m));
-    this._liveness.set(m.id, { state: v.state, verdict: v.verdict, strikes: v.strikes.n, lastMs: Math.round((w.list && w.list.state !== 'skipped' ? w.list.ms : w.attr?.ms) || 0) });
+    this._liveness.set(m.id, { state: v.state, verdict: v.verdict, strikes: v.strikes.n, lastMs: Math.round((w.list && w.list.state !== 'skipped' ? w.list.ms : w.attr?.ms) || 0), at: Date.now(), seq: (this._livenessSeq = (this._livenessSeq || 0) + 1) });   // `seq`: B-5ce7's Reconnect reads only a verdict of THIS connect (a counter, never the clock: two verdicts in one millisecond are told apart)
     if (v.verdict === 'alive') {
       if (v.unblock) this.unblockPath(mp);
       // B-5ce7 (B-f230): the stopped-process notice resolves itself at the answer — and the FIRST answer after a boot resolves one
@@ -1804,6 +1805,33 @@ class MountManager {
   // bounded, threadpool-safe. Auth-class failures are excluded: retrying a
   // revoked/expired credential just hammers the backend and OVERWRITES the
   // actionable error the user needs to see.
+  /** B-5ce7 cure: the PARKED record whose mount point holds p → {id, name, mp} | null — an array walk, no fs (the doors'
+   *  question: a parked mount's refusal names it and its doors, never «try again in a moment»). */
+  parkedAt(p) {
+    if (!p) return null;
+    const rp = String(p);
+    for (const m of this._state.mounts) {
+      if (!m.parked) continue;
+      let mp = m.parked.mp || ''; if (!mp) { try { mp = this.pathOf(m); } catch { continue; } }   // the path it was parked AT (an edit may move the record's)
+      if (mp && (rp === mp || rp.startsWith(mp + '/'))) return { id: m.id, name: m.name || m.id, mp };
+    }
+    return null;
+  }
+  /** B-5ce7 cure: THE Reconnect door's answer (POST /api/mounts/:id/reconnect): mount() — which ends the park and forgets the
+   *  last sweep's verdict — then {ok, state} as the For-you row's said words read: 'pass' only when the mount answers its
+   *  checks, 'checking' when it came up still being checked (or rebuilds its cache index), else {ok:false, error}. */
+  async reconnect(id) {
+    const s0 = this._livenessSeq || 0;   // the last verdict before the press (a counter: the clock cannot order two verdicts in one ms)
+    const ok = await this.mount(id);
+    const row = this.list().find((x) => x.id === id);
+    if (!(ok || (row && row.mounted))) return { ok: false, error: (row && row.error) || 'the storage did not connect' };
+    // 'pass' ONLY on THIS connect's own answer — the mount's first check said alive at or after the press (round 2 of the cure:
+    // a verdict from before the press, or none at all, is 'checking'; the sweep's verdicts are never deleted — the cache
+    // placement reads them); alive but the row says what is wrong (a sign-in that expired) is that error, never the success words
+    const lv = this._liveness && this._liveness.get(id);
+    if (ok !== 'starting' && lv && lv.verdict === 'alive' && lv.seq > s0) return row && row.error ? { ok: false, error: row.error } : { ok: true, state: 'pass' };
+    return { ok: true, state: 'checking' };
+  }
   /** B-5ce7 (B-f230): a stopped process is said once per episode (`onKilled`), resolved at its next answer. */
   _saidKilled(m) {
     (this._killedSaid = this._killedSaid || new Set()).add(m.id);
@@ -1816,23 +1844,24 @@ class MountManager {
    *  told (`onPark`, wired to src/server/mount-for-you.js). The record id in the journal, never its name. */
   _park(m, v, w) {
     const n = (v.strikes && v.strikes.n) || 0;
-    m.parked = { at: Date.now(), verdict: v.verdict, reason: String(v.reason || '').slice(0, 240), strikes: n };
+    let provider = ''; try { provider = String(this._sourceLabel(m) || ''); } catch { }
+    const mp = this.pathOf(m);
+    m.parked = { at: Date.now(), verdict: v.verdict, reason: String(v.reason || '').slice(0, 240), strikes: n, provider, mp };   // provider + path kept: the same at every re-filing, unblocked where blocked
     this._reconnects?.delete(m.id);
     this._save();
-    this.blockPath(this.pathOf(m), MountManager.PARK_BLOCK_MS);
+    this.blockPath(mp, MountManager.PARK_BLOCK_MS);
     if (this._killedSaid?.delete(m.id)) { try { this.onAnswered?.(m); } catch { } }   // r1 #8: a stopped-process notice ends with the park
     this._errors.set(m.id, this._parkedWords(m));
     console.warn(`[mounts] ${m.id} PARKED after the ${v.verdict} teardown (${n} strikes) — no automatic reconnect until the person's Reconnect`);   // the record id and the verdict only (the record-clear census)
-    let provider = ''; try { provider = String(this._sourceLabel(m) || ''); } catch { }
-    if (!provider) provider = String(m.type || '');
     try { this.onPark?.(m, { verdict: v.verdict, reason: m.parked.reason, strikes: n, provider }); } catch (e) { console.warn(`[mounts] ${m.id}: the parked notice was not filed: ${e.message}`); }
   }
   /** B-5ce7: END a park (the person's connect / Unmount, the record removed) — the For-you item resolves (`onUnpark`). */
   _unpark(m, why) {
     if (!m || !m.parked) return;
+    const parkedMp = m.parked.mp;
     delete m.parked;
     this._save();
-    try { this.unblockPath(this.pathOf(m)); } catch { }
+    try { this.unblockPath(parkedMp || this.pathOf(m)); } catch { }   // the path it was blocked at (an edit may have moved the record's)
     if (this._errors.get(m.id) === this._parkedWordsFor(m.id)) this._errors.delete(m.id);
     console.warn(`[mounts] ${m.id} park ended (${why})`);
     try { this.onUnpark?.(m, why); } catch (e) { console.warn(`[mounts] ${m.id}: the parked notice was not resolved: ${e.message}`); }
@@ -2268,14 +2297,16 @@ class MountManager {
 
   /** Boot: adopt live mounts, re-mount anything desired-but-dead. */
   async restore() {
-    this.maybeUpgradePinnedRclone(); // async, best-effort — see the pin note
+    this.maybeUpgradePinnedRclone(); // async, best-effort — see the pin note (first, as the release: test-mount-oauth-probe wires it)
+    // B-5ce7 cure round 2: every parked mount's path is BLOCKED and its words set at once, before any connect is awaited —
+    // the doors meet the parked words from the first request after a boot, not when the loop's turn comes
+    for (const m of this._state.mounts) if (m.parked) { try { this.blockPath(m.parked.mp || this.pathOf(m), MountManager.PARK_BLOCK_MS); this._errors.set(m.id, this._parkedWords(m)); } catch { } }
     // B-5ce7 (r1 #16): an item whose record is NOT parked any more (a crash between the park's end and its item's) resolves
     for (const m of this._state.mounts) if (!m.parked) { try { this.onUnpark?.(m, 'boot'); } catch { } }
     for (const m of this._state.mounts) {
       if (m.desired !== 'mounted') continue;
       if (m.parked) {   // B-5ce7: kept disconnected across a restart — said, its path blocked, its For-you item re-filed (merged)
-        this._errors.set(m.id, this._parkedWords(m)); this.blockPath(this.pathOf(m), MountManager.PARK_BLOCK_MS);
-        try { this.onPark?.(m, { verdict: m.parked.verdict, reason: m.parked.reason, strikes: m.parked.strikes, provider: String(m.type || '') }); } catch { }
+        try { this.onPark?.(m, { verdict: m.parked.verdict, reason: m.parked.reason, strikes: m.parked.strikes, provider: String(m.parked.provider || '') }); } catch { }
         continue;
       }
       if (m.expiresAt && Date.now() > m.expiresAt) { this._errors.set(m.id, 'credential expired'); continue; }

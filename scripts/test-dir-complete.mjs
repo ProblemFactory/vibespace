@@ -58,6 +58,7 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 const files = require('../src/routes/files.js');
+const fsr0 = read('src/routes/files.js');
 app.use(files);
 const server = http.createServer(app);
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -266,6 +267,31 @@ console.log('\n── ⑥ wiring pins ──');
   ok('SafeFs: dirSlice + dirIndex carry their deadlines (a stall is reclaimed, never answered on the loop)', /dirSlice: 15000, dirIndex: 15000/.test(sfsm), null);
 }
 
+console.log('\n── ⑦ B-5ce7 cure: a PARKED storage\'s folder is refused with ITS words and doors (the files router, for real) ──');
+{
+  const DOOR = require('../src/mount-door.js');
+  const PARK = path.join(HOME, 'vibespace-mounts', 'OneDrive'), SLOW = path.join(HOME, 'vibespace-mounts', 'Box');
+  const stand = { pathBlocked: (p) => (p === PARK || p.startsWith(PARK + '/')) ? PARK : (p === SLOW || p.startsWith(SLOW + '/')) ? SLOW : false,
+    parkedAt: (p) => (p === PARK || p.startsWith(PARK + '/')) ? { id: 'od', name: 'OneDrive', mp: PARK } : null, shadowedBy: () => null };
+  const askOn = async (router, p) => {
+    const app2 = express(); app2.use(express.json()); app2.locals.mounts = stand; app2.use(router);
+    const srv = http.createServer(app2); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try { const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/files?path=${encodeURIComponent(p)}`); return { status: r.status, body: await r.json() }; }
+    finally { srv.close(); }
+  };
+  const a = await askOn(files, PARK + '/Docs'), b = await askOn(files, SLOW);
+  ok('a parked storage\'s folder: 503 storage_parked, its name for the reader\'s language, the words naming Connect and Reconnect', a.status === 503 && a.body.code === 'storage_parked' && a.body.params && a.body.params.name === 'OneDrive' && a.body.error === DOOR.parkedSentence('OneDrive'), a);
+  ok('…a storage merely blocked (connecting, slow) keeps «try again in a moment»', b.status === 503 && b.body.error === DOOR.SENTENCE && !b.body.code, b);
+  // RED CONTROL: the files router's parked branch removed (a patched copy) — the parked folder says «try again» again
+  const from = "    const pk = mounts.parkedAt?.(p);\n    if (pk) return res.status(503).json(";
+  if (!fsr0.includes(from)) ok('CONTROL: the parked branch was found in src/routes/files.js', false, null);
+  else {
+    const MCx = mutantCopies('dir-complete-parked', REPO);
+    const noBranch = require(MCx.write('src/routes/files.js', fsr0.replace("    const pk = mounts.parkedAt?.(p);\n", '    const pk = null;\n'), 'noparked'));
+    const c = await askOn(noBranch, PARK + '/Docs');
+    ok('CONTROL (the parked branch removed): the parked folder answers «try again in a moment» (red)', c.status === 503 && c.body.error === DOOR.SENTENCE, c);
+  }
+}
 server.close();
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
 process.exit(bad ? 1 : 0);

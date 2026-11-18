@@ -687,7 +687,7 @@ try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync 
 // it returned the id — which is why an env-provisioned My storage (S3 or
 // CephFS) came up `desired: unmounted` on its very first boot.
 mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
-{ const fy = require('./mount-for-you.js').create({ getUserTodos: () => userTodos, log: (l) => console.warn(l) }); Object.assign(mounts, { onPark: (m, info) => fy.park(m, info), onUnpark: (m) => fy.unpark(m), onKilled: (m, info) => fy.killed(m, info), onAnswered: (m) => fy.answered(m), onStranded: (m, info) => fy.stranded(m, info) }); } // B-5ce7: the mounts' For-you items (a parked mount + its Reconnect door; B-f230: a stopped process, stranded files)
+{ const fy = require('./mount-for-you.js').create({ getUserTodos: () => userTodos, mountCount: () => mounts._state.mounts.length, log: (l) => console.warn(l) }); Object.assign(mounts, { onPark: (m, info) => fy.park(m, info), onUnpark: (m) => fy.unpark(m), onKilled: (m, info) => fy.killed(m, info), onAnswered: (m) => fy.answered(m), onStranded: (m, info) => fy.stranded(m, info), onRemoved: (m) => fy.removed(m) }); } // B-5ce7: the mounts' For-you items (a parked mount + its Reconnect door; B-f230: a stopped process, stranded files)
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
 vault.onUnlock(() => { try { instanceUrl?.restore?.({ ifFailed: true }); } catch (e) { console.error('[instance-url] restore after the vault unlocked:', e.message); } }); // lane fleet-instance-publish: a desired instance URL whose restore FAILED tries again once the vault opens — one cycle per unlock
@@ -909,15 +909,8 @@ app.post('/api/mounts/:id/mount', async (req, res) => {
 });
 // B-5ce7: the parked mount's Reconnect door (the For-you row `mount-reconnect` declares it — {ok, state} as the row's said words read)
 app.post('/api/mounts/:id/reconnect', async (req, res) => {
-  try {
-    const ok = await mounts.mount(req.params.id);
-    const row = mounts.list().find((x) => x.id === req.params.id);
-    // 'pass' only when the mount answers its checks (adversarial r1 #7): a mount that came up still hanging is 'checking'
-    const verdict = row && row.probe && row.probe.verdict;
-    if (ok === 'starting' || ((ok || (row && row.mounted)) && verdict && verdict !== 'alive')) return res.json({ ok: true, state: 'checking' });
-    if (ok || (row && row.mounted)) return res.json({ ok: true, state: 'pass' });
-    res.json({ ok: false, error: (row && row.error) || 'the storage did not connect' });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await mounts.reconnect(req.params.id)); }   // B-5ce7: MountManager.reconnect answers {ok, state} as the row's words read
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/mounts/:id/unmount', async (req, res) => {
   try { res.json({ success: await mounts.unmount(req.params.id) }); }

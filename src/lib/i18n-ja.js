@@ -8579,6 +8579,8 @@ export default {
   "The folder {mount} stopped answering ({n} checks over {s} s) — the most is open by {who}": "フォルダー {mount} が応答しなくなりました（{n} 回のチェックがいずれも {s} 秒超）——最も多く開いているのは{who}",
   "The folder {mount} stopped answering ({n} checks over {s} s)": "フォルダー {mount} が応答しなくなりました（{n} 回のチェックがいずれも {s} 秒超）",
   "Storage {name} is kept disconnected: its listing hung {n} times in a row while {provider} answered": "ストレージ {name} は切断したままです：{provider} は応答するのに一覧が {n} 回続けて止まりました",
+  "Storage {name} is kept disconnected: its listing hung {n} times in a row while its provider answered": "ストレージ {name} は切断したままです：プロバイダーは応答するのに一覧が {n} 回続けて止まりました",
+  "“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.": "「{name}」は切断したままです（一覧が止まり続けています）— その行の「接続」か、「あなたへ」の「再接続」を押してください。",
   "A reconnect usually hangs it again, so VibeSpace does not reconnect it by itself. Anything written into its folder meanwhile stays on this machine and is moved aside at the next connect. Press Reconnect when it should be tried again.": "再接続すると通常また止まるため、VibeSpace は自動では再接続しません。その間にフォルダーへ書き込まれた内容はこのマシンに残り、次の接続時に別の場所へ移動されます。もう一度試すときは「再接続」を押してください。",
   "Reconnect this storage now — this item goes away by itself once it is connected": "このストレージを今すぐ再接続 — 接続できるとこの項目は自動で消えます",
   "Reconnected — the storage answers again": "再接続しました — ストレージが再び応答します",

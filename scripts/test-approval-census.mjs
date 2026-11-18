@@ -530,6 +530,15 @@ const ROWS = [
   { id: 'agent-side', surface: 'an agent\'s own bearer routes (never a person\'s click)',
     doors: [['S', 'src/agent-routes.js', /^\/api\/agent\//], ['S', 'src/routes/browser.js', /^\/api\/agent\/browser\//], ['S', 'src/routes/window-targets.js', /^\/api\/agent\//]],
     a: [decl('the agent\'s own verbs; the approvals they lead to are the rows above')], b: [decl('—')], c: [decl('—')], d: [decl('—')], gate: [] },
+  // B-5ce7 (lane bl-machines-a): a PARKED mount — its listing kept hanging while its provider answered — ONE item per mount; its
+  // only door (Reconnect) runs the connect again on the record as it is now; nothing is granted
+  { id: 'mount-reconnect', surface: 'a parked storage — "Storage <name> is kept disconnected: its listing hung <n> times in a row while <provider> answered" (Reconnect in For you; one item per mount)',
+    doors: [['A', 'src/server/mount-for-you.js', /^mount-reconnect$/]],
+    a: [pin('src/server/mount-for-you.js', /const params = \{ name: String\(\(m && \(m\.name \|\| m\.id\)\) \|\| ''\), n: String\(Number\(info\.strikes\) \|\| 2\), \.\.\.\(provider \? \{ provider \} : \{\}\) \};/, 'the item\'s words ARE the parked record\'s facts: its name, the strikes the park counted, the provider label kept on the record at the park')],
+    b: [decl('its only door runs the connect again on the record as it is NOW (POST /api/mounts/:id/reconnect → MountManager.reconnect → mount(id): a removed record answers unknown); nothing is approved, so nothing is re-checked at execution — the park ends at any connect and the item resolves with it')],
+    c: [pin('src/foryou-actions.js', /\{ type: 'mount-reconnect', identity: 'mountId', producer: 'src\/server\/mount-for-you\.js',/, 'THE registry row: one producer, one identity (the mount), one door (a check: Reconnect)')],
+    d: [decl('no agent wrote words here to be read and approved: the item names a storage, a count and a provider label the record keeps')],
+    gate: [['scripts/test-mount-liveness.mjs', 'the cure: Reconnect on a parked mount whose storage answers']] },
 ];
 function approvalRows(read) {
   const hits = doorHits(read), unclaimed = [], wrong = [];

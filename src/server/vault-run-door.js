@@ -199,11 +199,13 @@ const STATUS = Object.freeze({
   too_many_askers: 429,   // B-4934
   scope_required: 400, command_unreadable: 400, command_has_hosts: 400, standing_bad_host: 400, command_not_pinnable: 400, standing_bad_tool: 400, tool_required: 400,   // lane vault-standing-request (+ r2)
 });
+// the door's sentence for the run's storage (a PARKED mount's own words when it is one — B-5ce7's cure), + where and that nothing ran
+const storageWords = (p) => `${DOOR.sentenceFor(p)} (the run's folder, its program or a template is on it) — nothing ran`;
 const MORE_WORDS = Object.freeze({
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
   card_too_long: `the card that shows this run to the user would be cut (over ${DETAIL_MAX} characters) — a shorter command or template`,
   unauthorized: 'only a conversation\'s own session token runs a command with a stored secret',
-  storage_blocked: `${DOOR.SENTENCE} (the run's folder, its program or a template is on it) — nothing ran`,
+  storage_blocked: storageWords(''),
   request_too_large: `the run's words are over ${ARGS_MAX} characters or its folder over ${CWD_MAX} — refused before anything is read`,
   failed: 'the run door failed — nothing ran',
   run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from — none is a root-owned system directory (every one is missing, or owned by this user, who could plant a program there) — nothing ran',   // round 11 (MAJOR 2) / round 12 (BLOCKER): a runSeal tool whose sealed PATH (ROOT-OWNED dirs only) came out empty
@@ -1788,7 +1790,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!String(v).startsWith('@')) continue;
       const p = String(v).slice(1);
       if (!p || Object.prototype.hasOwnProperty.call(out, p)) continue;
-      if (DOOR.blocked(path.resolve(cwd, p))) return named('storage_blocked', { template: p });
+      if (DOOR.blocked(path.resolve(cwd, p))) return named('storage_blocked', { template: p, words: storageWords(path.resolve(cwd, p)) });
       const abs = fenced(path.resolve(cwd, p), sessionCwd);
       if (!abs) return named('template_refused', { template: p });
       try { out[p] = readBounded(abs, VR.TEMPLATE_MAX).toString('utf8'); }   // one fd: never through a link swapped in, never a FIFO's wait
@@ -1922,7 +1924,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (caller.remote || req.on) { note('device_road_later'); return named('device_road_later'); }
     const all = [...req.argv, ...(req.env || []).flat(), ...(req.file || []).flat(), req.stdin || '', String(cwd || '')];   // the cwd too: the card prints it
     if (all.some((x) => HC.hiddenCharsOf(String(x), { max: 1 }).length)) return named('hidden_chars');
-    if (cwd && DOOR.blocked(String(cwd))) { note('storage_blocked'); return named('storage_blocked'); }
+    if (cwd && DOOR.blocked(String(cwd))) { note('storage_blocked'); return named('storage_blocked', { words: storageWords(String(cwd)) }); }
     const place = fenced(String(cwd || ''), caller.cwd);
     if (!place) { note('cwd_refused', { cwd: String(cwd || '').slice(0, 300) }); return named('cwd_refused'); }
     const base = agentEnv();

@@ -513,7 +513,7 @@ const serverRoot = require('../server-root');
 const { TMP_ROOTS } = require('../fixture-guard');
 const realOr = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
 function readRootFacts(root) {
-  if (DOOR.blocked(path.resolve(root))) return { root: path.resolve(root), gitDir: null, gitCommonDir: null, error: DOOR.SENTENCE };   // B-afc4
+  if (DOOR.blocked(path.resolve(root))) return { root: path.resolve(root), gitDir: null, gitCommonDir: null, error: DOOR.sentenceFor(path.resolve(root)) };   // B-afc4
   const facts = { root: realOr(path.resolve(root)), gitDir: null, gitCommonDir: null };
   const dotGit = path.join(facts.root, '.git');
   const errOf = (e) => (e && e.code) || (e && e.message) || String(e);

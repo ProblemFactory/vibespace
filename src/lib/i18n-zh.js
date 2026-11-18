@@ -8580,6 +8580,8 @@ export default {
   "The folder {mount} stopped answering ({n} checks over {s} s) — the most is open by {who}": "文件夹 {mount} 不再响应（{n} 次检查都超过 {s} 秒）——打开最多的是{who}",
   "The folder {mount} stopped answering ({n} checks over {s} s)": "文件夹 {mount} 不再响应（{n} 次检查都超过 {s} 秒）",
   "Storage {name} is kept disconnected: its listing hung {n} times in a row while {provider} answered": "存储 {name} 保持断开：{provider} 有回应，但列目录连续 {n} 次挂起",
+  "Storage {name} is kept disconnected: its listing hung {n} times in a row while its provider answered": "存储 {name} 保持断开：服务商有回应，但列目录连续 {n} 次挂起",
+  "“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.": "「{name}」保持断开（其列目录一直挂起）— 点它那一行的「连接」，或「待你处理」里的「重新连接」。",
   "A reconnect usually hangs it again, so VibeSpace does not reconnect it by itself. Anything written into its folder meanwhile stays on this machine and is moved aside at the next connect. Press Reconnect when it should be tried again.": "重新连接通常会再次挂起，所以 VibeSpace 不会自动重连。期间写入其文件夹的内容会留在本机，并在下次连接时被移到别处。需要再试时请点「重新连接」。",
   "Reconnect this storage now — this item goes away by itself once it is connected": "现在重新连接这个存储 — 连接成功后此项会自动消失",
   "Reconnected — the storage answers again": "已重新连接 — 存储重新响应",
