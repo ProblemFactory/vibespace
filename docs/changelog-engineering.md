@@ -908,6 +908,7 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-chat-b (the backlog push, batch 47) — small chat fixes
 - Batch 47's cure (主开发 09:09Z, «as if a must»; its reader showed the producer chain cuts at 300 too): the For-you row reads a field as the agent's whole words only for the agent's OWN ask (`isAsk` — via 'ask'); every producer's plain-words item keeps the conservative reading (a «…» ending a line or the text is a cut — a confirmation's target cut at 300 by the card, a script at 200), so a truncated address is plain words, never a link to a wrong page. The browser hand-back stops cutting again at 119, puts the category before the target, and ends the detail's target line. Gate: test-foryou-links «batch 47 cure» (the REAL chain: confirmationFromUpstream → noteConfirmation → the row's reading; an ask keeps B-3f50; RED: the old 119 cut read whole, the 300 cut read whole, the old detail).
 
+
 ## 2.369.409 — 2026-11-17
 
 ### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
