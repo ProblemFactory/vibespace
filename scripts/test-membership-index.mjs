@@ -22,11 +22,17 @@
 //   ⑨ B-df5f (a folder is resolved on the machine it belongs to, or not at all): a conversation of ANOTHER machine (hostId)
 //     whose cwd exists on the hub as a symlink into a discover folder is not that group's by the hub's real path; the same
 //     cwd of this machine is; another machine's cwd written inside the folder, or a real path that machine resolved, is —
-//     index ≡ walk; ⑨b every caller handing a conversation's cwd hands its machine (a census of src/ + server.js).
+//     index ≡ walk; ⑨b every caller handing a conversation's cwd hands its machine (a census of src/ + server.js; an
+//     argument handed as a VARIABLE is read at its nearest declaration before the call; one it cannot read — a spread, a
+//     parameter — is a red); ⑨c THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP: over rows built as the page's merge
+//     (sidebar _merge) builds them — a shared home's hub row of a remote live conversation + its host — task-membership
+//     membershipCwds (the page's cwds) agrees with the REAL groupsForSession (RED control: the hub's real path kept for every
+//     row); the row builder's guard (no hub real path on a row that names another machine; no producer makes one today).
 // Red controls: PATCHES THIS SUITE CARRIES on this tree's src/task-groups.js (master has no index to be red on) — the
 // signature check out (a rev change keeps a stale index), the identity check out, the 4 s bound out, the cap out, the
-// doubt's fallback out, another machine's path through the hub's realpath (B-df5f) — each RED at its own leg; an anchor no longer
-// in the file is a RED, never a skip.
+// doubt's fallback out, another machine's path through the hub's realpath (B-df5f) — each RED at its own leg; ⑨c carries two more
+// through mutant copies: task-membership's membershipCwds keeping the hub's real path for every row, the row builder without
+// its guard; an anchor no longer in the file is a RED, never a skip.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -319,7 +325,7 @@ const PATCHES = {
   'no-real-path': ["    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);\n    const key = ", "    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd].filter(Boolean);\n    const key = ", 'real-path', 'the cwds reduced to the cwd alone (主开发\'s mutant a)'],
   'no-real-in-key': ["const key = JSON.stringify([sessionKey || '', cwds, spawned]);", "const key = JSON.stringify([sessionKey || '', [cwd || ''], spawned]);", 'real-path', 'the result key built without the real path (主开发\'s mutant b)'],
   'cache-256': ["if (this._resCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._resCache.clear();", "if (this._resCache.size > 256) this._resCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
-  'hub-real-for-remote': ["    return hostId ? (realCwd || null) : this._realOf(cwd, realCwd);", "    return this._realOf(cwd, realCwd);", 'other-machine', 'another machine\'s path resolved by the hub\'s realpath (the checkpoint as it was, B-df5f)'],
+  'hub-real-for-remote': ["    return onOtherMachine(hostId) ? (realCwd || null) : this._realOf(cwd, realCwd);", "    return this._realOf(cwd, realCwd);", 'other-machine', 'another machine\'s path resolved by the hub\'s realpath (the checkpoint as it was, B-df5f)'],
   'no-fallback': ["try { ans = this._memberAnswer(args || {}); } catch { ans = null; }", 'ans = this._memberAnswer(args || {});', 'doubts', 'a throw of the index reaches the caller (the fallback out)'],
 };
 function patched(tag) {
@@ -346,20 +352,115 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
 // OWN argument is cut by bracket matching (multi-line calls included; a hostId of a later call on the same line never counts).
 {
   const CALLS = /\b(groupsForSession|taskGroupDefaultFor|taskGroupCapFor|stampGroupCap)\(/g;
-  const argOf = (t, open) => { let d = 0, q = null; for (let k = open; k < t.length; k++) { const ch = t[k];
+  const inside = (t, open, o, c) => { let d = 0, q = null; for (let k = open; k < t.length; k++) { const ch = t[k];
     if (q) { if (ch === '\\') { k++; continue; } if (ch === q) q = null; continue; }
     if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
-    if (ch === '(') d++; else if (ch === ')') { d--; if (d === 0) return t.slice(open + 1, k); } } return null; };
+    if (ch === o) d++; else if (ch === c) { d--; if (d === 0) return t.slice(open + 1, k); } } return null; };
+  const argOf = (t, open) => inside(t, open, '(', ')');
+  // the call's arguments split at its top-level commas; the FACTS are the first (stampGroupCap: the second, after the key)
+  const argsOf = (a) => { const out = []; let d = 0, q = null, from = 0; for (let k = 0; k < a.length; k++) { const ch = a[k];
+    if (q) { if (ch === '\\') { k++; continue; } if (ch === q) q = null; continue; }
+    if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
+    if ('([{'.includes(ch)) d++; else if (')]}'.includes(ch)) d--; else if (ch === ',' && d === 0) { out.push(a.slice(from, k).trim()); from = k + 1; } }
+    out.push(a.slice(from).trim()); return out; };
+  // the facts a call hands: its own object literal, or (cure, 主开发 09:43Z) a VARIABLE read at its object literal — its NEAREST
+  // declaration before the call in the same file (`const groupFacts = { cwd: …, hostId: … }` — the browser key's). A name with
+  // no declaration before the call, a literal holding a spread (`{ ...facts }`), or any other expression in the facts' place
+  // is UNSEEN — a red, never a pass; a default parameter (`facts = {}`) is a definition.
+  // → { facts } (text holding a cwd) · { unseen } · null (no cwd handed: a key-only ask, a definition)
+  const litOf = (x, via) => (/\.\.\./.test(x) ? { unseen: `${via || 'a literal'} holds a spread` } : /\bcwd\b/.test(x) ? { facts: x, via } : null);
+  const factsOf = (t, name, a, at = t.length) => {
+    const x = argsOf(a)[name === 'stampGroupCap' ? 1 : 0] || '';
+    if (x.startsWith('{')) return litOf(x);
+    if (/^[A-Za-z_$][\w$]*\s*=/.test(x) || x === '') return null;
+    if (!/^[A-Za-z_$][\w$]*$/.test(x)) return { unseen: x };
+    const re = new RegExp('\\b(?:const|let|var)\\s+' + x.replace(/\$/g, '\\$') + '\\s*=\\s*\\{', 'g');
+    let d = null, e; while ((e = re.exec(t)) && e.index < at) d = e;
+    if (!d) return { unseen: x };
+    const o = inside(t, d.index + d[0].length - 1, '{', '}');
+    return o == null ? { unseen: x } : litOf(o, x); };
+  // a machine HANDED: a hostId key whose value is not a literal null / undefined
+  const handsMachine = (f) => /\bhostId\b/.test(f) && !/\bhostId\s*:\s*(?:null|undefined)\s*[,}]/.test(f + '}');
   const missing = (t) => { const out = []; let m; CALLS.lastIndex = 0;
-    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a && /\{[^}]*\bcwd\b/.test(a) && !/\bhostId\b/.test(a)) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 100)})`); }
+    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
+      if (f.unseen) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 80)}) — «${f.unseen}» UNSEEN (no object literal of it in this file)`);
+      else if (!handsMachine(f.facts)) out.push(`${m[1]}(${(f.via ? f.via + ' = ' : '') + f.facts.replace(/\s+/g, ' ').slice(0, 100)})`); }
     return out; };
   const files = ['server.js'], walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) files.push(r); } };
   walk('src');
-  let calls = 0; const bad = [];
-  for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a && /\{[^}]*\bcwd\b/.test(a)) calls++; } for (const x of missing(t)) bad.push(`${f}: ${x}`); }
-  ok(calls >= 23 && bad.length === 0, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession and the create's Task-Group facts)${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
+  const bad = [];
+  let calls = 0, viaVar = 0;
+  for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t)) bad.push(`${f}: ${x}`); }
+  ok(calls >= 26 && viaVar >= 2 && bad.length === 0, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession and the create's Task-Group facts), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
   ok(missing("x = tasks.groupsForSession({\n  sessionKey: k,\n  cwd: s.cwd,\n  initialGroupId: s._initialGroupId,\n});").length === 1, 'CONTROL: a planted MULTI-LINE call that hands a cwd without its machine is caught');
   ok(missing("a = kc.taskGroupCapFor({ cwd, initialGroupId: g }); b = tasks.groupsForSession({ cwd: s.cwd, hostId: s.host || null });").length === 1, 'CONTROL: a hostId of a LATER call on the same line does not cover an earlier one');
+  ok(missing("const facts = { cwd: s.cwd, initialGroupId: g };\nconst d = kc.taskGroupDefaultFor(facts); kc.stampGroupCap(k, facts, {});").length === 2, 'CONTROL: a planted VARIABLE whose object literal hands a cwd without its machine is caught at each call that hands it');
+  ok(/UNSEEN/.test(missing("function f(a) { return tasks.groupsForSession(a); }").join('')), 'CONTROL: a variable the census cannot read at an object literal (a parameter) is UNSEEN — a red');
+  ok(missing("function g() { const facts = { cwd, hostId: h }; } function f(s) { const facts = { cwd: s.cwd }; return kc.taskGroupDefaultFor(facts); }").length === 1, 'CONTROL: the NEAREST declaration before the call judges it (another function\'s literal of the same name does not cover it)');
+  ok(/spread/.test(missing("x = tasks.groupsForSession({ ...facts, sessionKey: k });").join('')) && missing("x = tasks.groupsForSession({ sessionKey: k, cwd: s.cwd, hostId: null });").length === 1, 'CONTROL: a spread in the facts is UNSEEN; a literal `hostId: null` hands no machine');
+}
+
+// ⑨c B-df5f cure — THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP (主开发 09:43Z; its reader's must): the page's own copy
+// of the folder rule (src/lib/sidebar-tasks.js _sessionFolderMatch) matches a row's cwd and the realCwd the HUB stamped on
+// /api/sessions rows. The road where they disagreed is the page's own merge (src/lib/sidebar.js _merge): a shared home makes
+// the hub's discovery row of a REMOTE live conversation (no host, the hub's realCwd), and the merge lays the live session's
+// `host` over it. ONE rule now — task-membership membershipCwds (the page's cwds: a hub real path only for the hub's own) and
+// onOtherMachine (the server's _realHere, the row builder) — driven here over rows built as the merge builds them, against
+// the REAL groupsForSession; the page's code is held to calling it (text). RED control: a membershipCwds that keeps the hub's
+// real path for every row (the page before) — board member, server not. The row builder's guard (no hub real path on a row
+// that names another machine — no producer makes such a row today) with its own red control.
+{
+  const req = createRequire(import.meta.url);
+  const TM = req(path.join(REPO, 'src/task-membership.js'));
+  const SRC = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+  const PAGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-tasks.js'), 'utf8'), MERGE = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
+  const base = path.join(ROOT, 'board'), D = path.join(base, 'folder');
+  fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true });
+  fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'link'));   // base/link → folder/sub ON THE HUB (a shared home's link)
+  const linked = path.join(base, 'link', 'w'), rec = TM.folderOf(D), realW = fs.realpathSync(path.join(D, 'sub', 'w'));
+  const { tg } = manager(REPO); tg._state.tasks = { 'T-bd': { id: 'T-bd', title: 'bd', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } }; tg._save();
+  const serverSays = (row) => tg.groupsForSession({ sessionKey: row.sessionKey, cwd: row.cwd, hostId: row.host || null }).some((t) => t.id === 'T-bd');   // as every caller asks (no caller hands a realCwd)
+  const boardBy = (cwdsOf) => (row) => cwdsOf({ cwd: row.cwd, realCwd: row.realCwd, host: row.host }).some((c) => TM.insideFolder(c, rec));
+  ok(typeof TM.membershipCwds === 'function' && typeof TM.onOtherMachine === 'function', 'task-membership carries the ONE rule: membershipCwds (the page\'s cwds) and onOtherMachine (none and \'local\' are the hub)');
+  ok(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, host: s\.host \}\);/.test(PAGE) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && /host: wm\?\.host \|\| null,/.test(MERGE),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
+    'the page\'s folder match (sidebar-tasks _sessionFolderMatch) takes its cwds from membershipCwds with the row\'s host — the host the merge (sidebar _merge) lays over a hub row');
+  {   // (on a tree without membershipCwds the page's rule before is judged — the scene goes red BY NAME, never skipped)
+    const cwdsOf = typeof TM.membershipCwds === 'function' ? TM.membershipCwds : ({ cwd, realCwd }) => [cwd, realCwd].filter(Boolean);
+    // the hub's discovery row of the conversation (the route stamps the hub's real path), then the page's merge
+    const hubRow = { backend: 'claude', sessionId: 'bd-1', sessionKey: 'claude:bd-1', cwd: linked, realCwd: realW };
+    const mergedFar = { ...hubRow, host: 'host-dial-far', hostName: 'far' }, mergedHere = { ...hubRow, host: null }, mergedLocalWord = { ...hubRow, host: 'local' };
+    const board = boardBy(cwdsOf);
+    const seen = [mergedFar, mergedHere, mergedLocalWord].map((r) => `${r.host || 'none'}: board ${board(r)} / server ${serverSays(r)}`);
+    ok(board(mergedFar) === false && serverSays(mergedFar) === false && board(mergedHere) === true && serverSays(mergedHere) === true && board(mergedLocalWord) === true && serverSays(mergedLocalWord) === true,
+      `B-df5f cure: over rows built as the page's merge builds them, the board ≡ the server — another machine's conversation through the hub's link is a member of NEITHER, the hub's own of BOTH ('local' is the hub) — ${seen.join(' · ')}`);
+    // RED CONTROL: the page's rule before (the hub's real path for every row)
+    const TMS = fs.readFileSync(path.join(REPO, 'src/task-membership.js'), 'utf8');
+    const A = '  for (const c of [cwd, onOtherMachine(host) ? null : realCwd]) ';
+    let red = null;
+    if (ok(TMS.split(A).length === 2, 'the anchor of the control «hub-real-for-every-row» is in src/task-membership.js once')) {
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MUT = mutantCopies('member-index-board', REPO);
+      const TMr = req(MUT.write('src/task-membership.js', TMS.replace(A, '  for (const c of [cwd, realCwd]) '), 'hub-real-for-every-row'));
+      red = { board: boardBy(TMr.membershipCwds)(mergedFar), server: serverSays(mergedFar) };
+    }
+    ok(!!red && red.board === true && red.server === false, `RED CONTROL: the page's rule keeping the hub's real path for every row (the page before) — another machine's conversation: the board says member, the server not — ${JSON.stringify(red)}`);
+  }
+  // the row builder's guard: a row that names another machine is never stamped with the hub's real path
+  const { withSessionKey } = req(path.join(REPO, 'src/routes/sessions.js'));
+  if (ok(typeof withSessionKey === 'function', 'src/routes/sessions.js exports its row builder (withSessionKey)')) {
+    const rowsOf = (W) => [W({ backend: 'claude', sessionId: 'bd-far', cwd: linked, host: 'host-dial-far' }), W({ backend: 'claude', sessionId: 'bd-here', cwd: linked })];
+    const [far, here] = rowsOf(withSessionKey);
+    ok(!far.realCwd && here.realCwd === realW, `B-df5f cure: the row builder stamps no hub real path on a row that names another machine (${JSON.stringify(far.realCwd || null)}), a row of the hub keeps its own (${JSON.stringify(here.realCwd || null)}) — a guard: no producer of the route makes such a row today`);
+    const A = "const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);";
+    let red = null;
+    if (ok(SRC.split(A).length === 2, 'the anchor of the control «hub-real-on-remote-row» is in src/routes/sessions.js once')) {
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MUT = mutantCopies('member-index-rows', REPO);
+      const copy = MUT.write('src/routes/sessions.js', SRC.replace(A, 'const rc = realCwdOf(session.cwd);'), 'hub-real-on-remote-row');   // the checkpoint's line, on purpose — stale-pins: kept
+      red = rowsOf(req(copy).withSessionKey)[0].realCwd || null;
+    }
+    ok(red === realW, `RED CONTROL: the row builder without the guard (the checkpoint) stamps the hub's real path on another machine's row — ${JSON.stringify(red)}`);
+  }
 }
 const b = bench(REPO);
 say(`THE BENCH at the owner's shape (7 Task Groups × 200 bound conversations, 6 discover rows, 36 live, ${36 * 300} asks): the walk ${b.walk.toFixed(2)} µs per ask, the index ${b.index.toFixed(2)} µs; a store write that moves nothing membership reads costs the next ask ${b.sigUs.toFixed(0)} µs (the signature)`);

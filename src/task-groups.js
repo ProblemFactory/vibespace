@@ -50,7 +50,7 @@ const crypto = require('crypto');
 const os = require('os');
 const TC = require('./task-context.js'); // PURE: the Context table's rows, resolution, derivations, budget plan (lane task-group-context)
 const { pickColorSeq } = require('./task-color-seq');
-const { folderOf, insideFolder, membersWithout } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
+const { folderOf, insideFolder, membersWithout, onOtherMachine } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a progress note / detail a reader sees never carries a credential in the clear
 // lane cli-call-timeouts: one TASK.md mirror write's bound (each op through SafeFs / fs.promises) and the retry after a miss
 const MIRROR_BOUND_MS = 10000;
@@ -1874,9 +1874,10 @@ class TaskGroupManager {
   }
 
   /** B-df5f: the cwd's realpath — the hub's own (`_realOf`) for a conversation of THIS machine; for one of another machine
-   *  (`hostId`) only a `realCwd` that machine resolved itself, else none (the cwd is matched as written). */
+   *  (`hostId`, task-membership onOtherMachine: 'local' is the hub) only a `realCwd` that machine resolved itself, else none
+   *  (the cwd is matched as written). */
   _realHere(cwd, realCwd, hostId) {
-    return hostId ? (realCwd || null) : this._realOf(cwd, realCwd);
+    return onOtherMachine(hostId) ? (realCwd || null) : this._realOf(cwd, realCwd);
   }
 
   // Match a folder against the cwd AND its symlink-resolved realpath (a session

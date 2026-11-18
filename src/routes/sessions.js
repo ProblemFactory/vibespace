@@ -50,8 +50,14 @@ function realCwdOf(cwd) {
   if (_realCwdCache.size > 4096) _realCwdCache.delete(_realCwdCache.keys().next().value);
   return rp;
 }
+// B-df5f cure (THE BOARD AND THE SERVER ANSWER THE SAME MEMBERSHIP): the HUB's real path is a fact of the hub's own folders,
+// so a row that names another machine is never stamped with it. A GUARD: no producer of this route hands such a row today
+// (discovery rows are local, kept-stopped rows are local metas); the road where the page met another machine's conversation
+// with the hub's real path is its own merge, closed by task-membership membershipCwds
+const { onOtherMachine } = require('../task-membership.js');
+const namesOtherMachine = (s) => [s.host, s.hostId].some(onOtherMachine);
 function withSessionKey(session = {}) {
-  const rc = realCwdOf(session.cwd);
+  const rc = namesOtherMachine(session) ? null : realCwdOf(session.cwd);
   return {
     ...session,
     sessionKey: session.sessionKey || getSessionKey(session),
@@ -859,4 +865,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, sweepMerge, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
