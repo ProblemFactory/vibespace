@@ -3240,7 +3240,7 @@ class JobManager {
     // a live run whose stop reached no process yet (no pid stamp; its wrapper gone, not judged yet) still ends: the sweep honours
     // the stop once the stamp exists, or judges the run — the start waits for that end too (never «already running»)
     job._startAfterStop = true;
-    return { ok: true, pending: true, words: 'stopping — it starts again when the stop ends' };
+    return { ok: true, pending: true, words: 'stopping — it starts again when the stop ends (a VibeSpace restart before then forgets it: start it again)' };   // 主开发 21:46Z (b): the runtime-only ask SAID where the person is told
   }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
@@ -3281,7 +3281,7 @@ class JobManager {
       job._startAfterStop = true;
       this.d.log(`[jobs] ${job.id}: a start asked while its stop runs — it starts when the stop ends`);
       const left = job._termAt ? Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000)) : null;   // a forced / not-yet-reached stop has no grace clock
-      return { ok: true, pending: true, words: left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends' };
+      return { ok: true, pending: true, words: (left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends') + ' (a VibeSpace restart before then forgets it: start it again)' };   // 主开发 21:46Z (b): said where the person is told
     }
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };

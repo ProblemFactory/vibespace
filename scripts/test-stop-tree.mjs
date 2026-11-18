@@ -384,9 +384,9 @@ const svcScene = async (Mod, tag) => {
 {
   const S = await svcScene(require(path.join(ROOT, 'src/jobs.js')), 'job-start-during-stop');
   const sd = await S.press('start');
-  ok(S.up && sd.answer && sd.answer.pending === true && /^still stopping \(\d+ s left\) — it starts when the stop ends$/.test(sd.answer.words || '') && sd.comeback && sd.fails === 0 && sd.flagAfter && sd.flagAfter.inMemory && sd.flagAfter.plantRead && sd.flagAfter.onDisk.length === 0, 'B-cac2: a START pressed while the stop\'s grace runs answers «still stopping (k s left) — it starts when the stop ends» and DOES start when it ends (a new live run, no crash counted); the ask is runtime only — never in jobs.json (read r2)', sd);
+  ok(S.up && sd.answer && sd.answer.pending === true && /^still stopping \(\d+ s left\) — it starts when the stop ends \(a VibeSpace restart before then forgets it: start it again\)$/.test(sd.answer.words || '') && sd.comeback && sd.fails === 0 && sd.flagAfter && sd.flagAfter.inMemory && sd.flagAfter.plantRead && sd.flagAfter.onDisk.length === 0, 'B-cac2: a START pressed while the stop\'s grace runs answers «still stopping (k s left) — it starts when the stop ends» and DOES start when it ends (a new live run, no crash counted); the ask is runtime only — never in jobs.json (read r2)', sd);
   const rs = await S.press('restart');
-  ok(rs.answer && rs.answer.pending === true && /it starts again when the stop ends/.test(rs.answer.words || '') && rs.comeback && rs.fails === 0, 'B-cac2: restart = stop, wait, start — ONE answer, and a new live run after the stop ends (no crash counted)', rs);
+  ok(rs.answer && rs.answer.pending === true && /it starts again when the stop ends \(a VibeSpace restart before then forgets it: start it again\)$/.test(rs.answer.words || '') && rs.comeback && rs.fails === 0, 'B-cac2: restart = stop, wait, start — ONE answer, and a new live run after the stop ends (no crash counted)', rs);
   // the adversarial read r1 (MUST 1): stop, start (remembered), then STOP again — the person changed their mind: nothing starts
   const ss = await S.press('start-stop', { settle: true });
   ok(ss.answer && ss.answer.pending === true && ss.flagAfter === undefined && ss.ended && ss.state === 'down' && ss.newRuns === 0, 'B-cac2: a STOP pressed after the remembered start clears it — the service ends DOWN, no new run (the CLI\'s «stopped» is true)', ss);
@@ -409,7 +409,59 @@ const svcScene = async (Mod, tag) => {
   const cx = await C.press('start-stop');
   await C.end();
   ok(C.up && cx.answer && cx.answer.pending === true && cx.flagAfter === true, 'B-cac2 CONTROL (the clear cut, in a copy): the remembered start SURVIVES the second stop — it would start when the run ends', cx);
-  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 2, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // 主开发 21:46Z (a): the asked start's MEMORY-PARK road and its two GUARDS (a job removed meanwhile, the engine's end) —
+  // in-process, nothing spawned: the engine's own start / touch / owner message recorded on the instance
+  const guardScene = (Mod, tag) => {
+    const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), WRAP);
+    const J = new Mod.JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: () => { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
+    J.init();
+    const job = { id: 'jb-c4c20001', kind: 'task', name: 'asked start', state: 'up', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: Date.now() - 1000 }], createdAt: 1, cmd: { argv: ['true'] } };
+    J.jobs.set(job.id, job);
+    const out = { starts: 0, said: [], told: [], parked: 0 };
+    J.start = () => { out.starts++; return { ok: true }; };
+    J._touch = (j, ev) => { if (ev && ev.what) out.said.push(ev.what); };
+    J._notifyOwner = (j, ev) => { if (ev && ev.what) out.told.push(ev.what); };
+    J._countEnd = () => ({ count: 2, park: true });   // its run ends out of memory, the second time: the park law parks it
+    J._parkForMemory = () => { out.parked++; };
+    return { J, job, out };
+  };
+  const flush = () => new Promise((r) => setImmediate(r));
+  {
+    // the ROAD: a task whose run ends parked for memory while a start was asked — the park is never undone; it is SAID
+    const P = guardScene(require(path.join(ROOT, 'src/jobs.js')), 'cac2-park');
+    P.job._startAfterStop = true;
+    let threw = null; try { P.J._finalizeRun(P.job, P.job.runs[0], { code: 137, endedAt: Date.now() }, 'sweep'); } catch (e) { threw = String(e && e.message); }
+    await flush();
+    ok(!threw && P.out.parked === 1 && P.out.starts === 0 && P.out.said.some((w) => /the start asked during its stop was not done: it ended out of memory and is parked/.test(w)) && P.out.told.some((w) => /out of memory and is parked/.test(w)),
+      'B-cac2 (主开发 21:46Z a): an asked start that meets an OUT-OF-MEMORY PARK is not done — the park stands, the job\'s events and its owner are told why', { threw, ...P.out });
+    P.J.shutdown();
+    const PARKA = '      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked, PARKED_NO_START); return; }';
+    ok(JSRC.split(PARKA).length === 2, 'B-cac2 control setup: the anchor of the control «the park road» is in jobs.js');
+    const Px = guardScene(MJ9.load('src/jobs.js', JSRC.replace(PARKA, '      if (memPark && memPark.park) { this._parkForMemory(job, run); this._startAskedAtStop(job, startAsked); return; }   /* MUTANT: the park undone */'), 'park-undone'), 'cac2-park-mut');
+    Px.job._startAfterStop = true;
+    try { Px.J._finalizeRun(Px.job, Px.job.runs[0], { code: 137, endedAt: Date.now() }, 'sweep'); } catch { }
+    await flush();
+    ok(Px.out.starts === 1, 'B-cac2 CONTROL (the park road without its refusal, in a copy): the asked start UNDOES the park', Px.out);
+    Px.J.shutdown();
+    // the GUARDS: removed meanwhile, the engine's end
+    const G = guardScene(require(path.join(ROOT, 'src/jobs.js')), 'cac2-guards');
+    G.J._startAskedAtStop(G.job, true); G.J.jobs.delete(G.job.id); await flush();
+    const afterRemoved = G.out.starts;
+    G.J.jobs.set(G.job.id, G.job); G.J._startAskedAtStop(G.job, true); G.J._unreadStopped = true; await flush();
+    const afterEnd = G.out.starts;
+    G.J._unreadStopped = false; G.J._startAskedAtStop(G.job, true); await flush();
+    ok(afterRemoved === 0 && afterEnd === 0 && G.out.starts === 1, 'B-cac2 (主开发 21:46Z a): the asked start is NOT done for a job removed meanwhile nor after the engine\'s end — and is done otherwise', { afterRemoved, afterEnd, then: G.out.starts });
+    G.J.shutdown();
+    const GUARD = '      if (this._unreadStopped || this.jobs.get(job.id) !== job) return;   // the engine ended, or the job was removed meanwhile\n';
+    ok(JSRC.split(GUARD).length === 2, 'B-cac2 control setup: the anchor of the control «the two guards» is in jobs.js');
+    const Gx = guardScene(MJ9.load('src/jobs.js', JSRC.replace(GUARD, '      /* MUTANT: no guard */\n'), 'no-guard'), 'cac2-guards-mut');
+    Gx.J._startAskedAtStop(Gx.job, true); Gx.J.jobs.delete(Gx.job.id); await flush();
+    const xRemoved = Gx.out.starts;
+    Gx.J.jobs.set(Gx.job.id, Gx.job); Gx.J._startAskedAtStop(Gx.job, true); Gx.J._unreadStopped = true; await flush();
+    ok(xRemoved === 1 && Gx.out.starts === 2, 'B-cac2 CONTROL (no guard, in a copy): the asked start STARTS a removed job, and starts after the engine\'s end', { xRemoved, all: Gx.out.starts });
+    Gx.J._unreadStopped = false; Gx.J.shutdown();
+  }
+  for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 4, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
   ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
 }
