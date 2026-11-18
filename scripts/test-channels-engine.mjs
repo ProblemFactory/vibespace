@@ -2063,7 +2063,11 @@ function chainCensus(src) {
   ok(c5.violations.some((v) => /wakeNow\(\) called outside billedWake/.test(v)), `CONTROL: a section body called outside the door reddens (${c5.violations.join('; ')})`);
   const c6 = plant("    if (!per.length) await reserveWake(rec, convId, null, {});");
   ok(c6.violations.some((v) => /reserveWake\(\) called outside a section/.test(v)), `CONTROL: a reservation outside a section body reddens (${c6.violations.join('; ')})`);
-  const c7 = chainCensus(esrc12.replace('    let r = null;\n    if (!deliver || typeof deliver.deliverToConversation !== \'function\') {\n      r = { ok: false, reason: \'no delivery ladder wired\', refused: \'unwired\' };', '    let r = null; // if (!per.length) await deliver.deliverToConversation(\'x\', \'y\', { spendReason: \'channel-message\' });\n    if (!deliver || typeof deliver.deliverToConversation !== \'function\') {\n      r = { ok: false, reason: \'no delivery ladder wired\', refused: \'unwired\' };'));
+  // lane bl-msg B-84b4: the anchor follows wakeNow's lines as they are now (the press's stamp sits between `let r = null;` and the ladder
+  // check) — and a control whose anchor is gone fails BY NAME (RULES 06:25Z), never a census of the unchanged source
+  const C7A = "    if (r) { /* held: the stamp is the send's precondition */ } else if (!deliver || typeof deliver.deliverToConversation !== 'function') {";
+  ok(esrc12.split(C7A).length === 2, 'CONTROL (comment hygiene): its anchor is in the source exactly once (else the control would census the unchanged source)');
+  const c7 = chainCensus(esrc12.replace(C7A, C7A + " // if (!per.length) await deliver.deliverToConversation('x', 'y', { spendReason: 'channel-message' });"));
   ok(c7.violations.length === 0 && c7.rows.filter((r) => r.kind === 'ladder').length === 3, 'CONTROL (comment hygiene): a ladder call spelled inside an inline comment is not counted, and the real three still are');
 }
 
