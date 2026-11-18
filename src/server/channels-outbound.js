@@ -1331,8 +1331,9 @@ function create(engineCtx) {
     const vr = await OF.verify(store.dir, p.id, metas);   // r2: the bytes that leave are the bytes the person saw (sha256 + size), read off the loop
     if (!vr || !vr.ok) return { ok: false, code: 'rest-files-gone', error: `${(vr && vr.why) || 'a file is no longer stored'} — attach it again in a new reply` };
     const files = (vr.files || []).map((f) => ({ name: f.name, data: Buffer.from(f.data).toString('base64') }));
-    const input = { text: '', attachments: files, ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.placement && p.placement !== 'chat' ? { placement: p.placement } : {}), ...(p.why ? { why: p.why } : {}), ...(!agent ? { direct: true, ...(pressed ? { pressed } : {}) } : {}) };
-    const r = await propose(agent ? ctx : { kind: 'user' }, p.adapterId, p.convId, input, { ...guards, restOf: p.id, ...(agent ? { forceReview: true } : {}) });   // r2: the agent's rest is always the user's to approve
+    // restack-411 (the release's law, test-spend-paths §2b r3: THE PRESS IS NEVER KEPT — it rides ONE request's chain as a call's
+    // argument): the rest's input is built IN the propose call, never held in a variable
+    const r = await propose(agent ? ctx : { kind: 'user' }, p.adapterId, p.convId, { text: '', attachments: files, ...(p.replyTo ? { replyTo: p.replyTo } : {}), ...(p.placement && p.placement !== 'chat' ? { placement: p.placement } : {}), ...(p.why ? { why: p.why } : {}), ...(!agent ? { direct: true, ...(pressed ? { pressed } : {}) } : {}) }, { ...guards, restOf: p.id, ...(agent ? { forceReview: true } : {}) });   // r2: the agent's rest is always the user's to approve
     if (r && r.ok && r.proposal && r.proposal.id) notifyOutbox([p.id, r.proposal.id]);   // the cure: the stamp and the back-link were written with the rest (propose's create update)
     return r;
   }
