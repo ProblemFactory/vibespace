@@ -19,6 +19,12 @@ const versionInfo = { fetchedAt: 0, latest: null, commit: null };
 // a gate never reaches the network, and a file missing there answers 404 like
 // an older canonical without it.
 const CANONICAL_RAW = 'https://raw.githubusercontent.com/ProblemFactory/vibespace/master/';
+let saidOffline = false, tmpJudged = null;
+const realOr = (p) => fs.promises.realpath(p).catch(() => p);
+const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.all([realOr(rootDir), ...tmpRoots.map(realOr)]).then(([r, ...real]) => {
+  const t = [...new Set([...tmpRoots, ...real])].find((x) => isUnder(r, x) || isUnder(rootDir, x));
+  return t ? `the hub's root ${rootDir} lies under the temp folder ${t} (server-root rule 3: never a person's instance)` : null;
+}));
 async function canonicalFile(name, timeoutMs) {
   const fixtureDir = process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR;
   if (fixtureDir) {
@@ -31,7 +37,11 @@ async function canonicalFile(name, timeoutMs) {
   // suite's scratch hub, flag or not, the push gate and the mirror too) or that runs under VS_NO_REAL_CLI=1 (every lane env,
   // acceptance run, the test machine) answers offline (status 0: the menu shows the local version only); a suite that needs
   // the files hands the fixture dir above.
-  if (process.env.VS_NO_REAL_CLI === '1' || tmpRoots.some((t) => isUnder(rootDir, t))) return { ok: false, status: 0, text: null };
+  // B-9dd0 cure (the readers, 08:54Z): the root and the temp roots are judged as rule 3's real caller judges them — each realpath'd
+  // (agent-tool-generators realOr), so a scratch hub reached through a linked temp path is one too — read once, async; the first
+  // offline answer says why in one journal line (a person's hub under a temp folder sees no «latest» and is told so here)
+  const offline = process.env.VS_NO_REAL_CLI === '1' ? 'VS_NO_REAL_CLI=1' : await tmpRootOf();
+  if (offline) { if (!saidOffline) { saidOffline = true; console.log(`[version] the canonical repo is not asked (answered offline): ${offline}`); } return { ok: false, status: 0, text: null }; }
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {

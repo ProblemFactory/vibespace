@@ -125,6 +125,27 @@ console.log('\n§2 tier hygiene');
     const tok = ['sk', 'ant', 'oat01', 'Q'.repeat(40)].join('-');   // a token shape, built at run time
     const m = W.maskText(`invalid x-api-key ${tok} for someone@example.invalid on claude-haiku-4-5-20251001`);
     ok(!m.includes('Q'.repeat(20)) && !m.includes('@') && m.includes('claude-haiku-4-5-20251001'), `B-5a57: the mask takes token shapes and addresses, never a model id: ${m}`);
+    // B-5a57 cure (主开发 08:54Z): A SKIP IS NOT A GREEN AND ITS ROAD IS NARROW — only THIS turn's own failure skips
+    const SID = 'sess-e2e-1', mk = (o) => JSON.stringify(o);
+    const before = [mk({ type: 'created', sessionId: SID }), mk({ type: 'msg', sessionId: SID, op: 'create', message: { role: 'system', text: "You've hit your limit · resets 5pm" } })];   // an EARLIER turn's
+    const planted = [...before, mk({ type: 'usage-update', text: "You've hit your limit · resets 3pm" }), mk({ type: 'msg', sessionId: 'sess-other-2', op: 'create', message: { role: 'system', text: 'API Error: 529 overloaded' } }), mk({ type: 'msg', sessionId: SID, op: 'meta', subtype: 'turn_complete' })];
+    const red = W.skipVerdict({ frames: planted, buffer: '', sessionId: SID, from: before.length });
+    ok(red.skip === false && red.own === 1, `B-5a57 cure: a planted break (no reply, no failure of its own) beside a usage broadcast's limit, another conversation's API error and an earlier turn's limit stays RED (${JSON.stringify({ skip: red.skip, own: red.own, kind: red.kind })})`);
+    ok(planted.some((f) => OLD.test(f)), "B-5a57 cure CONTROL: the release's whole-frame classifier reads every frame — it would have skipped that break");
+    const ownLimit = W.skipVerdict({ frames: [...planted, mk({ type: 'msg', sessionId: SID, op: 'create', message: { role: 'system', text: "You've hit your limit · resets 7pm" } })], sessionId: SID, from: before.length });
+    const ownApi = W.skipVerdict({ frames: planted, sessionId: SID, from: before.length, buffer: mk({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: 529 Overloaded' }) + '\n' });
+    const bareErr = W.skipVerdict({ frames: planted, sessionId: SID, from: before.length, buffer: mk({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'spawn ENOENT' }) + '\n' });
+    ok(ownLimit.skip && ownLimit.kind === 'limit' && ownApi.skip && ownApi.kind === 'api' && !bareErr.skip && W.skipVerdict({ frames: planted, sessionId: SID, from: before.length, otelApiErrors: 1 }).skip && !W.skipVerdict({ frames: planted, from: 0 }).skip,
+      `B-5a57 cure: THIS turn's own limit frame skips (${ownLimit.kind}), its own buffer's API failure skips (${ownApi.kind}), the hub's api_error count skips; a bare is_error does not (${bareErr.kind}); no session id ⇒ nothing is its own`);
+    // …and the CLI ANSWERED (its own result record: is_error false) ⇒ a lost reply is ours, RED — whatever the hub counted (a retried
+    // 529, a background request) or a retry label of this session said (the reader's must, 09:2xZ)
+    const retried = [...planted, mk({ type: 'msg', sessionId: SID, op: 'meta', subtype: 'streaming-label', text: 'API retrying (1/10, 529 overloaded)…' })];
+    const answered = W.skipVerdict({ frames: retried, sessionId: SID, from: before.length, otelApiErrors: 1, buffer: mk({ type: 'result', subtype: 'success', is_error: false, num_turns: 1, result: 'CANARY_GREEN' }) + '\n' });
+    ok(answered.skip === false && /succeeded/.test(answered.evidence), `B-5a57 cure: the CLI answered (a success record), the hub counted an api_error and a retry label said «overloaded» — still RED: the reply was lost on our side (${JSON.stringify({ skip: answered.skip, evidence: answered.evidence })})`);
+    // the wiring: the real suite asks THIS verdict over THIS turn, counts every SKIP, and never prints ALL PASS over one
+    const e2e = src('test-chat-e2e'), fromIdx = e2e.indexOf('const turnFrom = frames.length;'), sendIdx = e2e.indexOf("ws.send(JSON.stringify({ type: 'chat-input'");
+    ok(e2e.includes('skipVerdict({ frames, buffer, sessionId: sid, from: turnFrom, otelApiErrors })') && fromIdx > 0 && fromIdx < sendIdx && !e2e.includes('frames.find((s) => /') && (e2e.match(/⚠ SKIP/g) || []).length === 1 && e2e.includes('else if (verdict.skip) skip(`') && e2e.includes("skipped ? `\\n${skipped} SKIPPED — not a pass"),
+      'B-5a57 cure: test-chat-e2e asks skipVerdict over its own session from its prompt on, keeps no whole-frame classifier, counts every SKIP and never closes ALL PASS over one');
   }
   const measured = fast.map((s) => fastRuleFindings(s, '').measuredMs || 0);
   const budget = measured.reduce((a, b) => a + b, 0);

@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, withoutVendorKeys, vncEnv } from './scratch.mjs';
 import { mintRoot, startHub } from './hub-boot.mjs';
-import { whyNoReply, maskText } from './chat-e2e-why.mjs';   // B-5a57: a missing reply says why (its legs: test-ci-gate)
+import { skipVerdict, maskText } from './chat-e2e-why.mjs';   // B-5a57: a missing reply says why — a SKIP only on THIS turn's own failure (its legs: test-ci-gate)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
@@ -93,6 +93,9 @@ const swept = [];
 // <<< real-home sweep
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 300) : ''}`); } };
+// B-5a57 cure: a SKIP is not a green — each is COUNTED and said in the closing line, which never reads ALL PASS over one
+let skipped = 0;
+const skip = (m) => { skipped++; console.log('  ⚠ SKIP: ' + m); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -146,6 +149,7 @@ check('chat session created through the real spawn path', !!sid, frames.slice(-3
 if (!sid) { console.log('FAIL'); process.exit(1); }
 
 // the magic word is DERIVED in the reply, so our own prompt echo can't match
+const turnFrom = frames.length;   // B-5a57 cure: the frames from here on are THIS turn's (the ones before are its creation's)
 ws.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Do not use any tools. Concatenate the words CANARY and GREEN with an underscore and reply with only that.', msgId: 'ci-m1' }));
 let replied = false;
 for (let i = 0; i < 180 && !replied; i++) {
@@ -160,18 +164,17 @@ for (let i = 0; i < 180 && !replied; i++) {
 // push while the owner's subscriptions were exhausted. Evidence, not a
 // guess: the ws frames carry the error result / API error text, and the
 // receiver counted the CLI's own api_error event.
-let apiErr = null;
-// B-5a57: the reason, kept — the CLI's result record from the session's buffer (the ws carries none), the frames' texts
-const why = replied ? null : whyNoReply({ frames, buffer: (() => { try { return fs.readFileSync(path.join(wt, 'data', 'session-buffers', `${sid}.buf`), 'utf8'); } catch { return ''; } })() });
-if (why) console.log(`  · the missing reply, read whole: ${JSON.stringify(why)}`);
-if (!replied) {
-  const hit = frames.find((s) => /"is_error":\s*true|API Error|rate.?limit|overloaded|"status":\s*(429|529)|usage limit|credit balance/i.test(s)) || (why.kind === 'limit' ? why.text || 'limit' : null);
-  let ev = null; try { ev = (await (await fetch(`http://127.0.0.1:${PORT}/api/otel-stats`)).json())?.events || null; } catch { }
-  if (hit || (ev && ev.api_error > 0)) apiErr = { frame: maskText(hit || '').slice(0, 220), otelApiErrors: ev?.api_error || 0 };
-}
+// B-5a57 cure (主开发 08:54Z): A SKIP IS NOT A GREEN AND ITS ROAD IS NARROW. Only THIS turn's own failure skips: its own frames
+// (they name its session, from its prompt on), its own buffer's result record, the hub's api_error count (this scratch hub runs
+// this one session). Limit words in any other frame (a usage broadcast, another conversation) never turn a break into a SKIP.
+const buffer = replied ? '' : (() => { try { return fs.readFileSync(path.join(wt, 'data', 'session-buffers', `${sid}.buf`), 'utf8'); } catch { return ''; } })();
+let otelApiErrors = 0;
+if (!replied) { try { otelApiErrors = Number((await (await fetch(`http://127.0.0.1:${PORT}/api/otel-stats`)).json())?.events?.api_error) || 0; } catch { } }
+const verdict = replied ? null : skipVerdict({ frames, buffer, sessionId: sid, from: turnFrom, otelApiErrors });
+if (verdict) console.log(`  · the missing reply, read whole: ${JSON.stringify(verdict.why)} — this turn's own frames: ${verdict.own}`);
 if (replied) check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', true);
-else if (apiErr) console.log(`  ⚠ SKIP: the billing account could not serve the haiku turn (API error / rate limit) — request sent, no reply to round-trip; nothing of ours disproven — ${JSON.stringify(apiErr)}`);
-else check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', false, `${why.kind}: ${JSON.stringify(why.result)} ${why.text} — last frames: ${maskText(frames.slice(-3).join('\n')).slice(0, 400)}`);
+else if (verdict.skip) skip(`the billing account could not serve the haiku turn (this turn's own ${verdict.kind}: ${verdict.evidence}) — request sent, no reply to round-trip; nothing of ours disproven`);
+else check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', false, `${verdict.kind}: ${JSON.stringify(verdict.why.result)} ${verdict.why.text} — last frames: ${maskText(frames.slice(-3).join('\n')).slice(0, 400)}`);
 
 // the turn must SETTLE (result processed — the /compact-class "stuck on thinking" regressions)
 let settled = false;
@@ -222,7 +225,7 @@ try {
     check('OTel truth stash captured the real api_request (env→receiver→parser E2E)', true);
   } else if (posts === 0 && rejected === 0) {
     // the runner's CLI exported nothing — nothing of ours is proven OR broken
-    console.log(`  ⚠ SKIP: this CLI/runner exported no OTLP logs at all — ${stat}`);
+    skip(`this CLI/runner exported no OTLP logs at all — ${stat}`);
   } else if (kept > 0 && (noOrg + noRid) >= kept) {
     // Everything of OURS worked: env injected → exporter posted → parser
     // understood the payload and found api_request records. They are dropped
@@ -240,7 +243,7 @@ try {
     // (2.369.71 gate: a single non-api_request post reached this box; the old
     // code hard-failed it. A parser regression on a REAL api_request instead
     // lands in the kept>0 branch below, which still FAILS.)
-    console.log(`  ⚠ SKIP: OTLP posted but no api_request record parsed in the window (posts=${posts}) — runner/timing, env→receiver proven — ${stat}`);
+    skip(`OTLP posted but no api_request record parsed in the window (posts=${posts}) — runner/timing, env→receiver proven — ${stat}`);
   } else {
     // api_request records parsed WITH usable identity, yet the stash is empty —
     // that IS our pipeline (parser→stash) breaking, and it stays a hard failure.
@@ -272,5 +275,5 @@ await sleep(1500);
     isoDirs.includes(cwdToProjectDir(cwd)), JSON.stringify(isoDirs.slice(0, 3)));
 }
 ws.close();
-console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
+console.log(failed ? `\n${failed} FAILED${skipped ? ` · ${skipped} SKIPPED` : ''}` : skipped ? `\n${skipped} SKIPPED — not a pass: what each skip names was not proven` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

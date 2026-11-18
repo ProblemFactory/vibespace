@@ -7,6 +7,10 @@
 // buffer file (<tree>/data/session-buffers/<sid>.buf — server.js BUFFERS_DIR — the CLI's stream-json lines). A limit is read in the product's own words
 // (src/adapters/claude-code.js parseLimitBanner, «You've reached / hit your … limit») plus the API's (rate / usage limit,
 // credit balance); the said text is masked for token shapes (never a model id) and bounded. NOT a test-*.mjs on purpose.
+// B-5a57 cure (主开发 08:54Z): A SKIP IS NOT A GREEN AND ITS ROAD IS NARROW — skipVerdict skips only on THIS turn's own failure:
+// its own frames (they name its session, from its prompt on), its own buffer's result record, the hub's api_error count (the
+// suite's scratch hub runs this one session). Words in any other frame (a usage broadcast, another conversation, an earlier
+// turn) never turn a break of the chat pipeline into a SKIP.
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');
@@ -32,6 +36,32 @@ export function classOf(text) {
   if (MODEL.test(t)) return 'model';
   if (API.test(t)) return 'api';
   return null;
+}
+
+/** THIS turn's own frames: those whose `sessionId` is the turn's session (a broadcast that names none — usage, state-sync —
+ *  and another conversation's frame are never its own), from index `from` on (the frames before its prompt are an earlier turn's). */
+export function turnFrames(frames = [], { sessionId = '', from = 0 } = {}) {
+  const out = [];
+  if (!sessionId) return out;
+  for (let i = Math.max(0, from); i < frames.length; i++) { let o = null; try { o = JSON.parse(frames[i]); } catch { continue; } if (o && o.sessionId === sessionId) out.push(frames[i]); }
+  return out;
+}
+
+const API_WORDS = /API Error|rate.?limit|overloaded|"status":\s*(?:429|529)|usage limit|credit balance/i;
+/** SKIP or RED for a turn with no reply → { skip, kind, evidence, own, why }. A SKIP only on THIS turn's own limit or API failure:
+ *  its own frames (turnFrames) or its own buffer's result record, read by whyNoReply, or the hub's api_error count. A bare
+ *  is_error is no reason (a tool's failure carries one too). And when the turn's own result record says it SUCCEEDED (is_error
+ *  false), the CLI answered: a reply that never reached the page is OUR break, a RED, whatever the hub counted (a retried 529, a
+ *  background request) or a retry label said. */
+export function skipVerdict({ frames = [], buffer = '', sessionId = '', from = 0, otelApiErrors = 0 } = {}) {
+  const own = turnFrames(frames, { sessionId, from });
+  const why = whyNoReply({ frames: own, buffer });
+  const hit = own.find((s) => API_WORDS.test(s)) || null;
+  const byClass = why.kind === 'limit' || why.kind === 'api';
+  const answered = !!(why.result && why.result.is_error === false);
+  const skip = !answered && !!(byClass || hit || Number(otelApiErrors) > 0);
+  const evidence = answered ? 'the CLI\'s own result record says the turn succeeded — the reply was lost on our side' : byClass ? why.text : hit ? maskText(hit).slice(0, 220) : Number(otelApiErrors) > 0 ? `the hub counted ${Number(otelApiErrors)} api_error event(s)` : '';
+  return { skip, kind: why.kind, evidence, own: own.length, why };
 }
 
 /** { kind, result, text, frames } — `frames` the suite's ws frames (strings), `buffer` the session's buffer text ('' if none).

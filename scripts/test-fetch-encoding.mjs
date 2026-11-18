@@ -146,6 +146,25 @@ ok(planted !== pi && red.some((l) => /plugin-install\.js: 1 fetch\(\) site/.test
     const before = asked.length; let out2 = null;
     await routes2['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out2 = o; } });
     ok(asked.length === before && out2 && out2.latest === null, `B-9dd0: a hub rooted under a temp root answers offline without the flag (${asked.length - before} request(s))`);
+    // B-9dd0 cure (the readers, 08:54Z): the root is judged as rule 3's real caller judges it — REALPATH'd — so a root reached
+    // through a LINK into a temp root is one too (red without the cure: its literal path lies outside that root); the first
+    // offline answer says why in ONE journal line
+    const T = path.join(root, 'troot'), L = path.join(root, 'link');   // inside this leg's own root (removed below)
+    fs.mkdirSync(path.join(T, 'hub'), { recursive: true }); fs.mkdirSync(L); fs.writeFileSync(path.join(T, 'hub', 'package.json'), JSON.stringify({ version: '1.0.0' }));
+    fs.symlinkSync(path.join(T, 'hub'), path.join(L, 'hub'));
+    const routes3 = {}; const app3 = { get: (p, h) => { routes3['GET ' + p] = h; }, post: () => {} };
+    const ops3 = OPS.create({ app: app3, rootDir: path.join(L, 'hub'), wss: { clients: new Set() }, WS_OPEN: 1, tmpRoots: [T] });
+    ops3.versionInfo.commit = '';
+    const said = [], log0 = console.log, before3 = asked.length; let out3 = null, out3b = null;
+    console.log = (...a) => { said.push(a.join(' ')); };
+    try {
+      await routes3['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out3 = o; } });
+      ops3.versionInfo.fetchedAt = 0;
+      await routes3['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out3b = o; } });
+    } finally { console.log = log0; }
+    const lines3 = said.filter((l) => l.startsWith('[version]'));
+    ok(asked.length === before3 && out3 && out3.latest === null && out3b && out3b.latest === null, `B-9dd0 cure: a root reached through a LINK into a temp root is judged by its real path and asks nothing (${asked.length - before3} request(s); its literal path lies outside ${T})`);
+    ok(lines3.length === 1 && lines3[0].includes(T) && /rule 3/.test(lines3[0]), `B-9dd0 cure: the first offline answer says why in ONE journal line, the second says nothing (${JSON.stringify(lines3)})`);
   } finally {
     globalThis.fetch = prev.fetch;
     if (prev.flag === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = prev.flag;

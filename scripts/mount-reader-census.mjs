@@ -180,7 +180,7 @@ export const ROWS = [
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 8, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir); lane key-file-law-stores: −2 — the key file reads through secret-box lawfulKey
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
   ['src/server/claude-signin.js', 'own-tree', 4, null, 'lane door-signin-card: the account\'s own pre-seeded creds dir (ensureSeed existsSync + the helper\'s .vibespace-login-status.json read — a member dir under data/subs) + the boot sweep of its own orphaned vs-signin-* scratch dirs (readdir + lstat of tmpRoot); nothing a person names'],
-  ['src/server/ops-routes.js', 'own-tree', 10, null, DATA],
+  ['src/server/ops-routes.js', 'own-tree', 11, null, `${DATA}; B-9dd0 cure +1: the realpath of the hub's root and the temp roots (the local temp folder), once, to judge rule 3's «under a temp root»`],
   ['src/server/otel-ingest.js', 'own-tree', 5, null, CLI], // B-1319: +1 = the stash replay's fs.promises read (the sync read stays, for a reader before the replay is done)
   ['src/server/permission-rules.js', 'own-tree', 3, null, CLI],
   ['src/server/plugin-install.js', 'own-tree', 17, null, DATA], // lane engine-distribution +1: the credential folder's mkdtemp inside the stage (data/plugins-staging)
