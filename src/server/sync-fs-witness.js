@@ -146,6 +146,8 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     return r;
   };
 
+  // test-fs-canary §10's red control rebuilds this function's old order from its exact lines (the clear, the CTX): reword
+  // them there too, or that control reads «not red»
   function refresh() {
     let mounts = [], reg = [], mi = '';
     try { mi = readMountinfo(); mounts = MPC.parseMountinfo(mi); } catch { }
@@ -153,6 +155,8 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     // the data dir's own mount, as a hit — ONE object shared by every call until the next refresh (kept verdicts hold it):
     // NEVER MUTATED (after() copies its fields into the ring's `mount`; guardError is never reached for kind 'home')
     ownHit = ownMount ? Object.freeze({ kind: 'home', root: ownMount.target, fstype: ownMount.fstype }) : null;
+    // (a throw in MPC.rootsOf below leaves this NEW hit with the OLD roots and CTX — mixed facts, as it always was, until the
+    // next refresh, ROOTS_EVERY_MS later, sets both; no verdict is kept across it)
     // the kept verdicts go with the facts they were judged by — BEFORE anything below may throw (a throw keeps the old
     // CTX, and a memo still matching it would keep the old own-mount verdict standing)
     rootMemo.clear(); memoCtx = null;
