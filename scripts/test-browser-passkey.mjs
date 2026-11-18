@@ -549,6 +549,40 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
     const kept = await legD(MD.load('src/server/browser-dialogs.js', ds.replace(wc, ''), 'cache-keeps'));
     ok(kept.rows === 2, 'CONTROL (B-d981 (3)): a store cache that keeps the unwritten row stores TWO keys after the retry — one the site never got (RED for the leg above)', kept);
   }
+  // B-d981 cure (主开发 09:07Z): the two give-back exits that had no leg — the vault locked when the key is made
+  // (webauthn_key_locked) and the kernel refusing the answer because the page's request is gone (KERNEL_GONE_CODES). Each
+  // gives the owner's «once» back: the retry meets the grant, never «no-grant», and no second card is asked
+  {
+    const lockedC = { seal: () => ({ ok: false, code: 'key-unreadable:vault_locked', file: 'browser-passkeys.key', words: 'the vault is locked' }), open: () => ({ ok: false, code: 'key-unreadable:vault_locked', file: 'browser-passkeys.key', words: 'the vault is locked' }) };
+    const grantOnce = async (y) => { const rr = await y.w.passkeyRegister({ ...T, rpId: 'example.test', user: 'alice' }); y.w.answerPasskey(rr.proposal.id, { choice: 'once', shown: rr.proposal.shown }); };
+    const legL = async (Dmod) => {
+      const y = await kworld({ Dmod, cipher: lockedC });
+      await grantOnce(y);
+      const c1 = create(y); await settled(c1); const r1 = y.last();
+      const c2 = create(y); await settled(c2); const r2 = y.last();
+      const out = { r1why: r1.why || null, r2why: r2.why || null, cards: y.cards().length }; await y.close(); return out;
+    };
+    const legG = async (Dmod) => {
+      const y = await kworld({ Dmod });
+      await grantOnce(y); y.k.refuseNextAnswer('no_such_request');
+      const c1 = create(y); const a1 = await settled(c1);
+      const c2 = create(y); const a2 = await settled(c2); const r2 = y.last();
+      const out = { a1: a1.error || a1.outcome, a2: a2.outcome === 'completed' ? 'completed' : a2.error || a2.outcome, r2why: r2.why || null, rows: y.rows().length, cards: y.cards().length }; await y.close(); return out;
+    };
+    const L1 = await legL(Dm), G1 = await legG(Dm);
+    ok(L1.r1why === 'webauthn_key_locked' && L1.r2why === 'webauthn_key_locked' && L1.cards === 1,
+      'B-d981 cure: the vault locked when the key is made (webauthn_key_locked) gives the «once» back — the retry meets the grant (locked again, never no-grant), no second card', L1);
+    ok(G1.a1 === 'AbortError' && G1.a2 === 'completed' && G1.rows === 1 && G1.cards === 1,
+      'B-d981 cure: the kernel refusing the answer because the page\'s request is gone (no_such_request) gives the «once» back — the page\'s retry registers with it, ONE row, no second card', G1);
+    const dsG = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const gbG = "    const giveBack = () => { if (taken && pkAnswered.get(gk) === taken && now() <= taken.expiresAt) { taken.used = false; pkGrants.set(gk, taken); } };";
+    if (!dsG.includes(gbG)) throw new Error('the anchor of the control «B-d981 cure: the grant burnt» is not in the source');
+    const MG = mutantCopies('browser-passkey-d981-cure', REPO);
+    const Mburn = MG.load('src/server/browser-dialogs.js', dsG.replace(gbG, '    const giveBack = () => {};'), 'burns-grant-2');
+    const L0 = await legL(Mburn), G0 = await legG(Mburn);
+    ok(L0.r2why === 'no-grant' && G0.r2why === 'no-grant' && G0.rows === 0,
+      'CONTROL (B-d981 cure): a gate that burns the grant at its verdict refuses both retries no-grant (RED for the two legs above)', { L0, G0 });
+  }
   // ⑧c register: ungranted ⇒ no-grant; granted ⇒ the row, sealed; the attestation the page got names the sealed key
   c = create(x); a = await settled(c); r = x.last();
   ok(a.error === 'NotAllowedError' && r.outcome === 'refused' && r.why === 'no-grant' && x.w.passkeyIn('bp-1', null).state === 'refused' && /passkey register example\.test/.test(x.w.passkeyIn('bp-1', null).text), '⑧c an ungranted create ⇒ refused no-grant (the page told NotAllowedError; the next verbs told how to ask)', { a, r });

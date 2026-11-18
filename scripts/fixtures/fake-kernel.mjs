@@ -27,7 +27,8 @@
 // `{outcome:'cancelled', error}`; `cancelSurface` (and any answerSurface) on it lands `{outcome:'cancelled', error:'NotAllowedError'}`
 // (Q4); `abortWebAuthn(requestId)` = the page's own abort (`AbortError`, the surface closed by the page). An unknown id answers
 // `no_such_request`. `spec.noClientDataJSON` sends the hash alone (a kernel that keeps the JSON); `mode.features` overrides the
-// three features (a kernel with surfaces but no `webauthn`). Hands: triggerWebAuthn, webauthnAnswers(), abortWebAuthn.
+// three features (a kernel with surfaces but no `webauthn`). Hands: triggerWebAuthn, webauthnAnswers(), abortWebAuthn, and
+// refuseNextAnswer(code) (B-d981 cure: the next answer meets a request the page just dropped — the page aborted, the answer refused by `code`).
 // lane browser-login (P3, design §4): THE CREDENTIAL LEGS in the kernel side's stub's field names (their main): `detectCredentialForm(spec)`
 // raises `VibeSpace.credentialFormDetected {surfaceId, formId, targetId, frameId, origin, pageOrigin, frameOrigin, actionOrigin, kind,
 // fields[{fieldId, type, role, name, label, constraints?}], hasSubmit}` on the tab's page sessions (`spec.kind` 'signup' ⇒ a user name +
@@ -85,6 +86,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const answered = [];        // every answerSurface / cancelSurface asked (the suites read it)
   const waPending = new Map(); // lane passkey-sink: surfaceId / requestId → the ceremony the page waits on
   const waAnswered = [];      // every webauthnAnswer asked
+  let waRefuseNext = null;    // B-d981 cure: the next answer meets a request the page already dropped (refuseNextAnswer)
   const forms = new Map();     // lane browser-login: surfaceId → the form as detected (+ what the page holds typed: never exposed)
   const filled = [];           // every fillCredential the kernel took: {surfaceId, count, expectedOrigin, submit} — never a value
   const submitted = [];        // lane engine-distribution: every credentialSubmitted sent: {surfaceId, hasPassword} — never a value
@@ -218,6 +220,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   function webauthnAnswer(p) {
     waAnswered.push({ ...p, at: Date.now() });
     const key = p.surfaceId || p.requestId;
+    if (waRefuseNext && waPending.get(key)) { const code = waRefuseNext; waRefuseNext = null; abortWebAuthn(key); return refuse(code, `No pending webauthn request: ${key}`); } // B-d981 cure: the page went away just before the answer
     const entry = waPending.get(key);
     if (!entry) return refuse('no_such_request', `No pending webauthn request: ${key}`);
     const ok = !!(p.get || p.create);
@@ -1021,6 +1024,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     mode, targets: () => [...targets.values()].map(info), addTarget: (url) => { const x = newTarget(url); all({ method: 'Target.targetCreated', params: { targetInfo: info(x) } }); return x.targetId; },
     openSurface, updateSurface, closeSurface, surfaces: () => [...surfaces.values()], answers: () => answered.slice(), failNext: (code) => failQueue.push(String(code)),
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
+    refuseNextAnswer: (code = 'no_such_request') => { waRefuseNext = String(code); }, // B-d981 cure: the next webauthnAnswer finds the page's request gone (the page aborts first) and is refused by `code`
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
     loaderIdOf: (targetId) => { const t = targets.get(targetId); return t ? loaderOf(t) : null; },   // (lane chrome-157: the id of a tab's present document, as Page.getFrameTree names it)
