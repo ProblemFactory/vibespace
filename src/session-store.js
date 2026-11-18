@@ -721,34 +721,10 @@ function extractSessionMeta(filePath, st0 = null) {   // st0 (B-891e): the walk'
   return meta;
 }
 
-function getSubagentMetas(claudeSessionId, cwd) {
-  const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-  const projDir = cwdToProjectDir(cwd || '');
-  const candidates = [];
-  if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId, 'subagents'));
-  try {
-    for (const dir of fs.readdirSync(projectsDir)) {
-      const fp = path.join(projectsDir, dir, claudeSessionId, 'subagents');
-      if (!candidates.includes(fp)) candidates.push(fp);
-    }
-  } catch {}
-  for (const subDir of candidates) {
-    try {
-      if (!fs.existsSync(subDir)) continue;
-      const metas = [];
-      for (const f of fs.readdirSync(subDir)) {
-        if (!f.endsWith('.meta.json')) continue;
-        try {
-          const meta = JSON.parse(fs.readFileSync(path.join(subDir, f), 'utf-8'));
-          const agentId = f.replace('agent-', '').replace('.meta.json', '');
-          metas.push({ agentId, description: meta.description || '', agentType: meta.agentType || '' });
-        } catch {}
-      }
-      return metas;
-    } catch {}
-  }
-  return [];
-}
+// getSubagentMetas — DELETED (B-299b A4, lane bl-loop-a — 1.4 s in one hold measured): at every chatStatus it listed
+// ~/.claude/projects and probed every project folder for <id>/subagents, then read each helper's meta, on the main thread —
+// for a field NOTHING reads (no client, CLI or doc reads chatStatus.subagentMetas since the unified chat view; the Agent View
+// Log finds its helper by its own record). The field stays, empty, as on every other harness.
 
 // ── Full-file task-tool event scan (2.180.1, real report: a long-completed
 // task showed as in_progress in Steps forever) ──
@@ -1147,7 +1123,7 @@ class SessionMessages {
       model, ...(lastAsked ? { lastAsked } : {}), lastUsage, contextWindow, total_cost_usd: totalCost, slashCommands, permissionMode, // lastAsked: the newest turn's asked model where its record states one (lane fable-52-cli-321 rounds 14–15)
       initFrame, // the widened claude init facts (§2.6): terminal-bound commands, memory dirs, health — null on every other harness / older CLI
       permissionModes: this._permissionModes,
-      subagentMetas: getSubagentMetas(getHistorySessionId(this._session), this._session.cwd),
+      subagentMetas: [], // B-299b A4: no reader (the walk that filled it held the loop)
     };
   }
 
@@ -1627,7 +1603,6 @@ module.exports = { claudeTranscriptIndex, stuckSaid,
   claimJsonls,
   findSessionJsonlPath,
   parseSessionJsonl,
-  getSubagentMetas,
   getHistorySessionId,
   SessionMessages,
   discoverClaudeSessions,

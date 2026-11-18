@@ -182,6 +182,33 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
   const warmedFirst = (b) => b.includes('await warmOf(r, ') && b.indexOf('await warmOf(r, ') < b.indexOf('createSessionMessages(');
   ok(warmedFirst(body('status')) && warmedFirst(body('taskState')) && /harnessOf\(r\.backend \|\| 'claude'\)\.store\?\.warmTranscript/.test(ts.slice(ts.indexOf('async function warmOf'))),
     'transcript-service status() and taskState() (GET /api/session-todos, the device ops) await the descriptor\'s warm before the reader answers');
+  console.log('⑥ the subagent metas (B-299b A4): chatStatus probes no project folder for a field nothing reads');
+  {
+    for (let k = 0; k < 30; k++) fs.mkdirSync(path.join(projects, `-tmp-other-${k}`), { recursive: true });   // the release listed them all, probed each
+    const sub = path.join(projDir, sid, 'subagents'); fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, 'agent-a1.meta.json'), JSON.stringify({ description: 'a helper', agentType: 'general-purpose' }));
+    fs.writeFileSync(fp, JSON.stringify({ uuid: 'm1', timestamp: T3, type: 'assistant', message: { role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 10, output_tokens: 2 } } }) + '\n');
+    await SS.warmSessionJsonlAsync(sid, cwd);
+    const PROBES = ['existsSync', 'readdirSync', 'readFileSync', 'statSync'];
+    const probing = (fn) => { let n = 0; const real = {}; for (const k of PROBES) { real[k] = fs[k]; fs[k] = function (p0, ...a) { if (typeof p0 === 'string' && /[/\\]subagents(?:[/\\]|$)/.test(p0)) n++; return real[k].call(this, p0, ...a); }; } try { fn(); } finally { for (const k of PROBES) fs[k] = real[k]; } return n; };
+    let st = null; const n = probing(() => { st = mk().chatStatus(); });
+    // RED: the release's walk, planted back into chatStatus (its text verbatim, 2.369.408)
+    // the release's text, verbatim at run time; split at its home spelling in the SOURCE only — test-fixture-isolation reads every
+    // suite's source for writes rooted at the real ~/.claude and would read this planted text's bindings as this suite's own
+    const RELEASE = "function getSubagentMetas(claudeSessionId, cwd) {\n  const projectsDir = path.join(os.homedir" + "(), '.claude', 'projects');\n  const projDir = cwdToProjectDir(cwd || '');\n  const candidates = [];\n  if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId, 'subagents'));\n  try {\n    for (const dir of fs.readdirSync(projectsDir)) {\n      const fp = path.join(projectsDir, dir, claudeSessionId, 'subagents');\n      if (!candidates.includes(fp)) candidates.push(fp);\n    }\n  } catch {}\n  for (const subDir of candidates) {\n    try {\n      if (!fs.existsSync(subDir)) continue;\n      const metas = [];\n      for (const f of fs.readdirSync(subDir)) {\n        if (!f.endsWith('.meta.json')) continue;\n        try {\n          const meta = JSON.parse(fs.readFileSync(path.join(subDir, f), 'utf-8'));\n          const agentId = f.replace('agent-', '').replace('.meta.json', '');\n          metas.push({ agentId, description: meta.description || '', agentType: meta.agentType || '' });\n        } catch {}\n      }\n      return metas;\n    } catch {}\n  }\n  return [];\n}"; // stale-pins: kept (the release's walk, planted back as the RED control)
+    const ssrc = fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), NOW_LINE = 'subagentMetas: [], // B-299b A4: no reader (the walk that filled it held the loop)';
+    const RS = mutantCopies('a4-release-metas', REPO).load('src/session-store.js', ssrc.replace(NOW_LINE, `subagentMetas: (${RELEASE.replace('function getSubagentMetas', 'function')})(getHistorySessionId(this._session), this._session.cwd),`), 'release');
+    const rsm = (id) => new RS.SessionMessages({ backend: 'claude', backendSessionId: id, claudeSessionId: id, cwd }, null, { buffersDir: path.join(os.homedir(), 'buf'), permissionModes: [] });
+    let rst = null; probing(() => { rst = rsm(sid).chatStatus(); });
+    // the usual conversation has NO helper folder: the release probed every project folder for it
+    const sid2 = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee2'; fs.writeFileSync(path.join(projDir, sid2 + '.jsonl'), fs.readFileSync(fp));
+    await SS.warmSessionJsonlAsync(sid2, cwd);
+    let st2 = null; const n2 = probing(() => { st2 = new SS.SessionMessages({ backend: 'claude', backendSessionId: sid2, claudeSessionId: sid2, cwd }, null, { buffersDir: path.join(os.homedir(), 'buf'), permissionModes: [] }).chatStatus(); });
+    const nRel = probing(() => { rsm(sid2).chatStatus(); });
+    ok(ssrc.split(NOW_LINE).length === 2 && st && st.subagentMetas.length === 0 && n === 0 && st.model === 'claude-opus-5-5' && st2 && st2.subagentMetas.length === 0 && n2 === 0,
+      `chatStatus after the warm: ${n} and ${n2} probes of a helper folder (a conversation with helpers, one without), the field empty as on every other harness (no client, CLI or doc reads it)`);
+    ok(nRel >= 31 && rst && rst.subagentMetas.length === 1 && rst.subagentMetas[0].agentId === 'a1', `RED CONTROL — the release's walk for a conversation with no helper folder: ${nRel} probes on the main thread (one per project folder), for a field nothing reads (with one, it carried ${rst && rst.subagentMetas.length} meta)`);
+  }
   console.log(fail ? `FAILED (${fail})` : `task-scan-loop test passed (${pass})`);
   process.exit(fail ? 1 : 0);
 }
