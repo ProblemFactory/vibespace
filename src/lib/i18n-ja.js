@@ -11794,6 +11794,7 @@ export default {
   "Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it and in its child groups — now or later; switch a group to «this group only» to leave its child groups out.": "「すべてのエージェント」、または会話とタスクグループを選びます。タスクグループはそのグループと子グループのすべての会話（今後も含む）を指します。子グループを除くには、そのグループを「このグループのみ」に切り替えます。",
   "every session in it and in its child groups, now or later": "グループと子グループのすべてのセッション（今後加わるものも）",
   "Could not change «this group only»": "「このグループのみ」を変更できませんでした",
+  "changed «this group only»": "「このグループのみ」を変更",
   "and its child groups": "子グループも含む",
   "and its child groups, always": "子グループも含む（常に）",
   "Only conversations in this group itself — its child groups are not included (press to include them)": "このグループ自身の会話のみ——子グループは含みません（押すと含めます）",

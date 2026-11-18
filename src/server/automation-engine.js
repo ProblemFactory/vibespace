@@ -213,7 +213,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  key-grant-everyone: every conversation here, the ones started later included) — `always` unless a card's once (a once
    *  grant to All agents is spent by the FIRST use, whoever makes it: one use, not one per conversation).
    *  `reach` (lane key-instance-scope): 'opened' (the default) | 'instance' | {taskGroups: [ids]} — PURE reachOf, refused by name. */
-  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened', except = [] } = {}) {
+  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened', except = [], only = [] } = {}) {   // the chain's cure (C): + only (the Task Group subjects marked «仅本组»)
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return named('key_revoked');
@@ -234,7 +234,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       // lane grants-unify: the grant's WHO and REACH are rows of the ONE store (the record keeps the rest)
       // «除了»: a Task Group grant — or one to All agents (lane key-grant-everyone) — may leave members out (a conversation
       // grant names no members — none ride it)
-      const use0 = A.useRowForSubject(s), use = use0 && (/^group:/.test(s) || s === A.EVERYONE_SUBJECT) ? { ...use0, except } : use0, reachRow = A.reachRowFor(rch);
+      const use0 = A.useRowForSubject(s), use1 = use0 && (/^group:/.test(s) || s === A.EVERYONE_SUBJECT) ? { ...use0, except } : use0, reachRow = A.reachRowFor(rch);
+      const use = use1 && /^group:/.test(s) && Array.isArray(only) && only.map(String).includes(s) ? { ...use1, to: use1.to.map((e) => (e.kind === 'group' ? { ...e, only: true } : e)) } : use1;   // the chain's cure (C)
       rows.push({ door: 'automation-key-use', resource: id, ...use });
       if (reachRow) rows.push({ door: 'automation-key-reach', resource: id, ...reachRow });
       const g = A.grantOf({ id, keyId: k.id, mode, at: t, by: String(by).slice(0, 60), spentAt: null, use: { door: 'automation-key-use', resource: id, ...use }, reachRow: reachRow ? { door: 'automation-key-reach', resource: id, ...reachRow } : null });
@@ -298,6 +299,25 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  absent = the row as it is); audited `key.except`. lane held-except-doors: `removeExcept` / `reachRemoveExcept` name each
    *  exception the dialog SAID it takes away (one left out unnamed ⇒ `except_unnamed`, 409, nothing written). → { ok, grant } |
    *  a named refusal. */
+  /** the chain's cure (C, U5c): the «仅本组» switch of a Task Group grant (the key's «Grant … to» dialog) — on narrows it to the group
+   *  itself, off includes its child groups again (said explicitly, only:false — the ONE writer widens only then). */
+  function setOnly(grantId, on, { by = 'user' } = {}) {
+    const g = db.grants.find((x) => x.id === grantId);
+    if (!g) return named('not_found');
+    const k = keyById(g.keyId);
+    if (!k || k.revokedAt) return named('key_revoked');
+    const n = g.use ? GM.normRow(g.use) : null;
+    if (!n || !n.ok) return named('failed', 'this grant\'s row cannot be read — take it back and grant it again');
+    if (!n.row.to.some((e) => e.kind === 'group')) return named('bad_args', '«this group only» is a switch of a Task Group grant');
+    const to = n.row.to.map((e) => (e.kind === 'group' ? { ...e, only: on === true } : e));
+    const w = writeRows([{ door: 'automation-key-use', resource: g.id, to, except: n.row.except }], by);
+    if (!w.ok) return named('failed', 'the grant could not be written — nothing changed');
+    const use = { door: 'automation-key-use', resource: g.id, to: to.map((e) => (e.only === false ? GM.bareOf(e) : e)), except: n.row.except };
+    const next = A.grantOf({ ...g, reach: undefined, use, reachRow: g.reachRow });
+    if (next) db = { ...db, grants: db.grants.map((x) => (x.id === g.id ? next : x)) };
+    audit({ keyId: g.keyId, subject: g.subject, verb: 'key.only', ok: true, by, args: { only: on === true } });
+    return { ok: true, grant: { id: g.id, subject: g.subject, only: on === true } };
+  }
   function setExcept(grantId, { except, reachExcept, removeExcept = [], reachRemoveExcept = [] } = {}, { by = 'user' } = {}) {
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
@@ -355,7 +375,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     db = read();
     // lane grants-unify: + each grant's exceptions (the members its Task Group grant / its reach leaves out), as the store keeps them
     const exceptOf = (row) => { const n = row ? GM.normRow(row) : null; return n && n.ok ? n.row.except : []; };
-    return { ok: true, state: vaultState(), keys: db.keys.map((k) => ({ ...A.publicKey(k), grants: db.grants.filter((g) => g.keyId === k.id).map((g) => ({ id: g.id, subject: g.subject, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt, reach: g.reach, except: exceptOf(g.use), reachExcept: exceptOf(g.reachRow) })) })), asks: listAsks() };
+    const onlyOf = (row) => { const n = row ? GM.normRow(row) : null; return !!(n && n.ok && n.row.to.some((e) => e.kind === 'group' && e.only === true)); };   // the chain's cure (C)
+    return { ok: true, state: vaultState(), keys: db.keys.map((k) => ({ ...A.publicKey(k), grants: db.grants.filter((g) => g.keyId === k.id).map((g) => ({ id: g.id, subject: g.subject, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt, reach: g.reach, except: exceptOf(g.use), reachExcept: exceptOf(g.reachRow), ...(onlyOf(g.use) ? { only: true } : {}) })) })), asks: listAsks() };
   }
   /** The Vault window's inventory rows (src/server/vault-contents.js, group «Automation keys»): one row per live key —
    *  names and dates only; `vaultReveal` = its value, ONE per reveal (the contents' door audits it `vault-reveal`). */
@@ -744,7 +765,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
 
   /** a key's name from the store this engine holds in memory (no file read — the end record names the key that ended a conversation) */
   const keyNameOf = (id) => { const k = db && Array.isArray(db.keys) ? db.keys.find((x) => x && x.id === id) : null; return k && typeof k.name === 'string' ? k.name : null; };
-  return { list, keyNameOf, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  return { list, keyNameOf, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, setOnly, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

@@ -42,7 +42,7 @@ export const VALUE_SETS = Object.freeze({
   'vault-act': Object.freeze({
     'key.mint': i18nKey('created this key'), 'key.revoke': i18nKey('revoked this key'), 'key.grant': i18nKey('granted this key'),
     'key.ungrant': i18nKey('took this key back'), 'key.scopes': i18nKey('changed what it may do'), 'key.limits': i18nKey('changed its limits'),
-    'key.reach': i18nKey('changed who may use it'), 'key.except': i18nKey('changed its exceptions'), 'key.prune': i18nKey('pruned its grants'),
+    'key.reach': i18nKey('changed who may use it'), 'key.except': i18nKey('changed its exceptions'), 'key.only': i18nKey('changed «this group only»'), 'key.prune': i18nKey('pruned its grants'),
   }),
   // the codes VibeSpace's own hints ask an agent to use when a site blocks a browser (src/browser-switch.js)
   'browser-claim': Object.freeze({ 'sign-in-refused': i18nKey('it refused to sign in in this browser') }),

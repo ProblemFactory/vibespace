@@ -603,7 +603,8 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const exRows = () => [...live, ...exPick.extra];
   picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => k === EVERYONE_SUBJECT || live.some((r) => r.key === k)), autofocus: true,
     placeholder: t('Search sessions and groups…'), label: t('Grant "{name}" to', { name: key.name }), emptyText: t('Nothing to pick: no conversation is running and there is no task group'),
-    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra, kept: false, onChange: () => onExceptEdit() }, onChange: () => sync() });   // r3: no kept line (below); r8: the person's 除了 edits change the set, a pick only re-draws it
+    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra, kept: false, onChange: () => onExceptEdit() }, onChange: () => sync(),
+    only: { keys: always.filter((g) => g.only === true && /^group:/.test(g.subject)).map((g) => g.subject) } });   // the chain's cure (C): «仅本组» on a Task Group grant   // r3: no kept line (below); r8: the person's 除了 edits change the set, a pick only re-draws it
   body.append(picker.el);
   // lane held-except-doors: the stored 除了 (`held`) rides while its row is not offered; each one this Save takes away is SAID
   // here and NAMED on the wire (`removeExcept` — the ONE writer refuses an unnamed drop)
@@ -752,7 +753,10 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     const reachUnused = !add.length && JSON.stringify(reach) !== JSON.stringify('opened');
     if (reachUnused && !drop.length && !exceptOn.length) { showToast(t('This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant\'s reach on its chip'), { type: 'error' }); return false; }
     let bad = null;
-    if (add.length) for (const l of lists) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: l.subjects, reach, except: l.except }); if (!r || !r.ok) bad = r || {}; }
+    // the chain's cure (C): a grant this Save adds carries «仅本组» (its subjects); a kept grant's flip is ONE call
+    const swK = typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null, onlyNow = new Set(Array.isArray(swK) ? swK : []);   // a switch it cannot read says nothing (kept)
+    if (add.length) for (const l of lists) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: l.subjects, reach, except: l.except, ...(Array.isArray(swK) ? { only: l.subjects.filter((s) => onlyNow.has(s)) } : {}) }); if (!r || !r.ok) bad = r || {}; }
+    if (Array.isArray(swK)) for (const g of always) if (/^group:/.test(g.subject) && !drop.includes(g.id) && (g.only === true) !== onlyNow.has(g.subject)) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/only`, { only: onlyNow.has(g.subject) }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
     for (const g of exceptOn) {   // lane held-except-doors: this grant's 除了 — what it loses NAMED (r4: per grant)
       const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except: g.next, ...(g.removeExcept.length ? { removeExcept: g.removeExcept } : {}) }); if (!r || !r.ok) bad = r || {};

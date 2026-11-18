@@ -114,10 +114,11 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   app.post('/api/automation/keys/:id/limits', person((req) => engine.setLimits(String(req.params.id), body(req).limits, { by: byOf(req) })));
   app.get('/api/automation/keys/:id/audit', person((req) => engine.auditOfKey(String(req.params.id), { limit: req.query && req.query.limit })));
   app.post('/api/automation/keys/:id/revoke', person((req) => engine.revoke(String(req.params.id), { by: byOf(req) })));
-  app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}), ...(body(req).except !== undefined ? { except: body(req).except } : {}) })));
+  app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req), ...(Array.isArray(body(req).only) ? { only: body(req).only } : {}), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}), ...(body(req).except !== undefined ? { except: body(req).except } : {}) })));
   app.delete('/api/automation/grants/:grantId', person((req) => engine.ungrant(String(req.params.grantId), { by: byOf(req) })));
   app.post('/api/automation/keys/:id/prune-ended', person((req) => engine.pruneEnded(String(req.params.id), liveOf(subjects()), { by: byOf(req) })));   // lane vault-key-row-compact: 清理已结束的授权
   app.post('/api/automation/grants/:grantId/reach', person((req) => engine.setReach(String(req.params.grantId), body(req).reach, { by: byOf(req) })));   // lane key-instance-scope: the key row's reach chip
+  app.post('/api/automation/grants/:grantId/only', person((req) => engine.setOnly(String(req.params.grantId), body(req).only === true, { by: byOf(req) })));   // the chain's cure (C, U5c): «仅本组» on a Task Group grant
   app.post('/api/automation/grants/:grantId/except', person((req) => engine.setExcept(String(req.params.grantId), { except: body(req).except, reachExcept: body(req).reachExcept, removeExcept: body(req).removeExcept, reachRemoveExcept: body(req).reachRemoveExcept }, { by: byOf(req) })));   // lane grants-unify: «除了» — a Task Group grant's members / its reach's conversations left out
   app.post('/api/automation/asks/:askId', person((req) => engine.answer(String(req.params.askId), { answer: body(req).answer, answeredBy: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
 

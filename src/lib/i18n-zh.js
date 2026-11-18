@@ -11795,6 +11795,7 @@ export default {
   "Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it and in its child groups — now or later; switch a group to «this group only» to leave its child groups out.": "选择“所有 agent”，或选择会话和任务组。任务组指其中以及其所有子组中的每个会话——现在及以后；把某个组切换为“仅本组”即可排除其子组。",
   "every session in it and in its child groups, now or later": "组内及其所有子组中的每个会话，现在或以后加入的",
   "Could not change «this group only»": "无法更改“仅本组”",
+  "changed «this group only»": "更改了“仅本组”",
   "and its child groups": "含子组",
   "and its child groups, always": "含子组（始终）",
   "Only conversations in this group itself — its child groups are not included (press to include them)": "只含本组自己的对话——不含子组（点按以包含子组）",

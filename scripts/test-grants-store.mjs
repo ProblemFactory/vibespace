@@ -660,6 +660,13 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       && (caS.match(/\.\.\.\((?:row|w)\.principal\.only === true \? \{ only: true \} : \{\}\)/g) || []).length === 2
       && /\.\.\.\(p\.kind === 'group' && typeof p\.only === 'boolean' \? \{ only: p\.only \} : \{\}\)/.test(cfS), 'the vault-use and channel dialogs offer the switch and carry it (the reach row, the access list, the watcher, the raw-API tiers); the views carry the stored flag back');
   }
+  // the chain's cure (C): «仅本组» on the automation key's «Grant … to» dialog — an added grant carries it, a kept one flips by ONE verb
+  {
+    const aeC = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf-8'), arC = fs.readFileSync(path.join(REPO, 'src/routes/automation.js'), 'utf-8'), vaC = fs.readFileSync(path.join(REPO, 'src/lib/vault-automation.js'), 'utf-8'), vwC = fs.readFileSync(path.join(REPO, 'src/lib/value-words.js'), 'utf-8');
+    ok(/const use = use1 && \/\^group:\/\.test\(s\) && Array\.isArray\(only\) && only\.map\(String\)\.includes\(s\)/.test(aeC) && /function setOnly\(grantId, on, \{ by = 'user' \} = \{\}\) \{/.test(aeC) && /const to = n\.row\.to\.map\(\(e\) => \(e\.kind === 'group' \? \{ \.\.\.e, only: on === true \} : e\)\);/.test(aeC) && /\.\.\.\(onlyOf\(g\.use\) \? \{ only: true \} : \{\}\)/.test(aeC)
+      && /app\.post\('\/api\/automation\/grants\/:grantId\/only', person\(\(req\) => engine\.setOnly\(/.test(arC) && /\.\.\.\(Array\.isArray\(body\(req\)\.only\) \? \{ only: body\(req\)\.only \} : \{\}\)/.test(arC)
+      && /only: \{ keys: always\.filter\(\(g\) => g\.only === true/.test(vaC) && /`\/api\/automation\/grants\/\$\{encodeURIComponent\(g\.id\)\}\/only`/.test(vaC) && /'key\.only': i18nKey\('changed «this group only»'\)/.test(vwC), 'automation (the cure (C)): the key dialog offers the switch; an added grant carries it, a kept grant flips by ONE verb (off said explicitly to the writer); the listing carries the stored flag; the audit line has its words');
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",
