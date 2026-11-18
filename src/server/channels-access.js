@@ -652,7 +652,7 @@ function create(engineCtx) {
       const visible = new Map(), kept = new Map();
       const counts = !msgAclAdapter(rec);
       let knows = false, scanned = 0;
-      for (const en of Object.values(store.index.live())) {
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows (was every account's, once per account)
         if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
         if (!en || en.adapterId !== rec.id) continue;
         const lv = reachOf(rec, en).level;
@@ -713,7 +713,7 @@ function create(engineCtx) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId) || !searchRowOf(registry.capsOf(rec.kind))) continue;
       const visible = new Map();
       let scanned = 0;
-      for (const en of Object.values(store.index.live())) {
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows only
         if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
         if (en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level)) visible.set(en.id, agentTitle(en, en.id));
       }
@@ -728,7 +728,7 @@ function create(engineCtx) {
     // from this search's row reads it there) and under 'all' when this agent sees every conversation of the account
     const scope = SR.memoScope(visible.keys());
     let total = 0;
-    for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) total++;
+    for (const en of store.index.rowsOf(rec.id)) if (en && en.adapterId === rec.id) total++;
     const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)), scope, covers: visible.size >= total });
     if (!r.ok) return { ok: false, code: r.code === 'search-floor' ? 'refresh-floor' : r.code === 'search-minute' ? 'vendor-budget' : r.code, error: r.error, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
     const results = [];
@@ -974,7 +974,7 @@ function create(engineCtx) {
     if (!ACL.canSee(acctReach.level) && !named) {
       // the account is named in nothing this agent sees ⇒ the uniform not-found; else it is told what it lacks
       const reachOf = reachWalkOf(ctx);
-      const seesSome = Object.values(store.index.live()).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
+      const seesSome = store.index.rowsOf(rec.id).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
       return seesSome ? { ok: false, code: 'no-access', error: `you do not have access to the whole account ${rec.id} — watch one conversation you can read (<adapter>/<conversation id>), or ask the user for the account` } : ACL.notFound();
     }
     return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => grainReadAt(rec.id, { kind: 'account' }) || { access: [], watchers: [] }, raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
@@ -1904,11 +1904,9 @@ function create(engineCtx) {
     const dead = adapterRecords().adapters.filter((r) => signinDead(r) && !msgAclAdapter(r));
     if (!dead.length) return [];
     const out = [];
-    const live = store.index.live();
     const reachOf = reachWalkOf(ctx);
     for (const rec of dead) {
-      for (const k in live) {
-        const en = live[k];
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: the dead account's own rows
         if (!en || en.adapterId !== rec.id || en.unlistedAt) continue;
         if (ACL.canSee(reachOf(rec, en).level)) { out.push(String(rec.label || rec.id).slice(0, 60)); break; }
       }
@@ -2131,7 +2129,7 @@ function create(engineCtx) {
     return { grain: kind, id, principal: pkOf(w.principal), who, where, inert: !!inert, words: `${who}'s wake on «${where}» ${state}`, agentWords: agentWakeWords(who, where, kind, state) };
   }
   /** The conversations of an account that store a notification row (a legacy assignment too) — the rows below its grains. */
-  const storingConvs = (adapterId) => Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && ((Array.isArray(en.watchers) && en.watchers.length) || (en.assignment && en.assignment.principal)));
+  const storingConvs = (adapterId) => store.index.rowsOf(adapterId).filter((en) => en && en.adapterId === adapterId && ((Array.isArray(en.watchers) && en.watchers.length) || (en.assignment && en.assignment.principal)));
   /** EVERY DOOR THAT CAN RE-ACTIVATE AN INERT ROW IS A WAKE DOOR (lane wake-approve-card r6 — 主开发: the r5 promise held only at
    *  the room's reach door: a bare curl / vsst_ `PUT …/adapters/A/access` re-adding Worker made the inert room wake live, and so
    *  did a bare `POST …/patterns {title, access:[Worker]}`). The STORED wake rows BELOW a grain whose state that grain's ACCESS
@@ -2273,7 +2271,7 @@ function create(engineCtx) {
   function wakeNamesFilter(adapterId, fid) {
     const names = (g) => !!g && wakesIn(g.stored).some((w) => w.mode === 'filtered' && w.filterId === fid);
     if (names(grainReadAt(adapterId, { kind: 'account' })) || rawPatternsOf(adapterId).some((pa) => names(grainReadAt(adapterId, { kind: 'pattern', id: pa.id })))) return true;
-    for (const x of Object.values(store.index.live())) {
+    for (const x of store.index.rowsOf(adapterId)) {   // B-dfa4 cut 1: this account's rows only
       if (!x || x.adapterId !== adapterId) continue;
       const mentions = (Array.isArray(x.watchers) && x.watchers.some((w) => w && w.filterId === fid)) || (x.assignment && x.assignment.filterId === fid);
       if (mentions && names(readGrainHolder(adapterId, 'conversation', x))) return true;
@@ -2602,7 +2600,7 @@ function create(engineCtx) {
   async function prunePending(adapterId, onlyKey = null) {
     await pruneHeld(adapterId);
     const drop = [];
-    for (const en of Object.values(store.index.live())) {
+    for (const en of store.index.rowsOf(adapterId)) {   // B-dfa4 cut 1: this account's rows only
       if (!en || en.adapterId !== adapterId || (onlyKey && en.key !== onlyKey)) continue;
       const hasTagged = Array.isArray(en.pending) && en.pending.some((x) => x && x.for);
       const hasElided = en.pendingElidedBy && Object.keys(en.pendingElidedBy).length;
@@ -2728,7 +2726,7 @@ function create(engineCtx) {
       const acct = accountGrainOf(rec.id);
       if (acct) push('account', heldRead(acct));
       for (const pa of patternsOf(rec.id)) push('pattern', heldRead(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
+      for (const en of store.index.rowsOf(rec.id)) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
     }
     return { ok: true, access: out };
   }
@@ -2757,7 +2755,7 @@ function create(engineCtx) {
       if (scope && scope.kind === 'account') return patternsOf(adapterId).some((pa) => heldRead(pa).watchers.some((w) => pkOf(w.principal) === pk) && F.matchConversation(pa.pattern, convFacts(en)).hit);
       return false;
     };
-    const convs = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !finer(en) && (!pat || F.matchConversation(pat, convFacts(en)).hit))
+    const convs = store.index.rowsOf(adapterId).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !finer(en) && (!pat || F.matchConversation(pat, convFacts(en)).hit))
       .sort((a, b) => (Number(b.lastAt) || 0) - (Number(a.lastAt) || 0));
     const PER_CONV = 400, MAX_CONVS = 200, TOTAL = 20000;
     const recs = [];
@@ -2938,7 +2936,7 @@ function create(engineCtx) {
       let pat = null;
       if (kind === 'pattern') { const pv = F.validatePattern(pattern); if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null }; pat = pv.pattern; }
       else if (kind !== 'account') return { ok: false, code: 'bad-request', error: 'scope.kind must be conversation|account|pattern' };
-      convIds = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && (!pat || F.matchConversation(pat, convFacts(en)).hit)).map((en) => String(en.id));
+      convIds = store.index.rowsOf(adapterId).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && (!pat || F.matchConversation(pat, convFacts(en)).hit)).map((en) => String(en.id));
     }
     const filter = { match: 'any', rules: [v.rule] };
     const own = ownRecordOf(rec);   // int229 (× channel-self-unread): the owner's own message never wakes a watcher — never a preview match

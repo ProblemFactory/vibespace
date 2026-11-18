@@ -1390,7 +1390,7 @@ function create(deps = {}) {
         // B-f32b: a read-only scan that marks the rows it unlists — reaching `ix.conversations` here made every
         // complete discovery's index write a whole one (0.5 s at 50 274 rows)
         const rows = store.index.rows();
-        for (const k of Object.keys(rows)) {
+        for (const k of store.index.keysOf(rec.id)) {   // B-dfa4 cut 1: this account's keys (inside an update: the kept set + what it touched)
           const en = rows[k];
           if (en && en.adapterId === rec.id && en.listedAt && en.listedAt < started && !en.unlistedAt) { en.unlistedAt = now(); store.index.touch(k); }
         }
@@ -3254,7 +3254,7 @@ function create(deps = {}) {
       if (s && !matches(rec, en)) return false;
       return view !== 'focus' || (FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, byId.get(en.adapterId))) && !!FO.statusTag(viewOf(en), t));
     };
-    const page = FO.selectPage(Object.values(liveIx), { before, limit: n, keep });
+    const page = FO.selectPage(only ? store.index.rowsOf(only) : Object.values(liveIx), { before, limit: n, keep });   // B-dfa4 cut 1: one account's card reads its own rows (keep() still tests the account)
     return { ok: true, rows: page.items.map(viewOf), next: page.next, total: page.total };
   }
   /** THE KEPT ROW FACTS (B-f32b, lane channel-index-copy): every partial broadcast (a window's watch, its mark-read)
@@ -3390,10 +3390,15 @@ function create(deps = {}) {
     let n = 0;
     try {
       await store.index.update(() => {
-        for (const en of Object.values(store.index.live())) {
+        // B-dfa4 cut 1: this account's keys, its rows read-only (`rows()`: never a touch), and a touch of the map's own key
+        // for each row it changes — `live()` inside an update was a whole-map touch (every account's rows re-written, every
+        // kept index rebuilt)
+        const rows = store.index.rows();
+        for (const k of store.index.keysOf(rec.id)) {
+          const en = rows[k];
           if (!en || en.adapterId !== rec.id || !en.convCaps) continue;
           const next = effectiveConvCaps(rec, en);
-          if (next !== en.convCaps) { en.convCaps = next; n++; }
+          if (next !== en.convCaps) { en.convCaps = next; store.index.touch(k); n++; }
         }
       });
     } catch (err) { log.warn(`[channels] ${rec.id}: re-judging the conversations after "${why}" failed: ${(err && err.message) || err} — each is re-judged as it is read`); return 0; }
@@ -4211,7 +4216,7 @@ function create(deps = {}) {
     if (!cx || cx.stale || cx.sig !== sig || t < cx.t || cx.dirty.size > (cx.rows.size >> 3) + 256) {
       const t0 = Date.now();
       cx = { sig, t, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false };
-      for (const en of Object.values(store.index.live())) {
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: the build reads this account's rows (at boot: once per account, each its own)
         censusIxStats.rowsRead++;
         if (!en || en.adapterId !== rec.id) continue;
         const j = censusJudge(rec, lane, en, t, T);
@@ -4508,7 +4513,7 @@ function create(deps = {}) {
     if (convId) e.dueNow.add(`${rec.id}/${convId}`);
     else {
       let best = null;
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && !en.unlistedAt && (!best || (Number(en.lastAt) || 0) > (Number(best.lastAt) || 0))) best = en;
+      for (const en of store.index.rowsOf(rec.id)) if (en && en.adapterId === rec.id && !en.unlistedAt && (!best || (Number(en.lastAt) || 0) > (Number(best.lastAt) || 0))) best = en;
       if (best) e.dueNow.add(best.key); else e.discoverSoon = true;
     }
     if (stopped || e.kickTimer) return;
@@ -8030,7 +8035,7 @@ function create(deps = {}) {
       const groups = [];
       const held = [];   // [{id, key, carried}]
       let others = null;
-      for (const en of Object.values(store.index.live())) {
+      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows only
         if (!en || en.adapterId !== rec.id || !Array.isArray(en.pending) || !en.pending.length) continue;
         const eff = wakeEffOf(en);
         const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;

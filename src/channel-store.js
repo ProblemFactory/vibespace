@@ -572,14 +572,27 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (next === '') oddKeys.add(key);
     else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Set())); set.add(key); }
   }
-  /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array; the caller
-   *  reads each row from `live()` and keeps its own test. Inside an update a row may be born or gone before its touch
-   *  fires, so there it is every key (the walk's old cost, never a missed row). */
+  /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array, in the
+   *  map's own order (a birth joins both at the end); the caller reads each row from `live()` and keeps its own test.
+   *  B-dfa4 cut 1: INSIDE an update a row may be born, moved or gone before its touch fires — there the kept set as it
+   *  stood at the update's start PLUS every key the update touched so far (a born or moved row is touched; a gone one
+   *  reads undefined), and every key once the update reached the whole map: a superset, never a missed row. */
   function keysOf(adapterId) {
-    if (curTouch) return Object.keys(ix.conversations);
+    if (curTouch && curTouch.all) return Object.keys(ix.conversations);
     if (!byAcct) { byAcct = new Map(); acctOfKey.clear(); oddKeys.clear(); acctStats.builds++; for (const k of Object.keys(ix.conversations)) acctPlace(k); }
     const set = byAcct.get(String(adapterId));
-    return oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
+    const out = oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
+    if (curTouch) for (const k of curTouch) if (!(set && set.has(k)) && !oddKeys.has(k)) out.push(k);
+    return out;
+  }
+  /** B-dfa4 cut 1: ONE account's rows for a READ-ONLY scan — keysOf's keys read off the map: the account's own rows in the
+   *  map's order, a row whose key is not its account's (only a damaged act line) and, inside an update, a row it touched
+   *  after them (a key gone meanwhile is skipped). Never a touch: a caller that CHANGES a row inside an update walks
+   *  `keysOf` + `rows()` and touches the MAP key, as a `rows()` scan does. Each caller keeps its own test. */
+  function rowsOf(adapterId) {
+    const out = [];
+    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en) out.push(en); }
+    return out;
   }
   const fire = (key) => {
     if (byAcct) { if (key === null) byAcct = null; else acctPlace(key); }   // B-dfa4 U2: before the hooks (a hook may walk an account)
@@ -1742,7 +1755,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     names = names.filter((n) => n.endsWith('.ndjson') && (!wanted || wanted.has(n)));
     // NEWEST CONVERSATION FIRST (design 010): the index's lastAt per log file, read-only (no copy, no touch)
     const lastAtOf = new Map(), titleOf = new Map();
-    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); }
+    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); } }   // B-dfa4 cut 1: this account's rows only
     names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));
     let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null, matched = 0;
     const hits = [];
@@ -2344,7 +2357,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     index: {
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixBlocked || null,
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
-      keysOf, keysStats: () => ({ ...acctStats, kept: !!byAcct, odd: oddKeys.size }),
+      keysOf, rowsOf, keysStats: () => ({ ...acctStats, kept: !!byAcct, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),
