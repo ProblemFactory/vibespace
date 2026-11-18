@@ -508,7 +508,12 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
       const log9 = { log() { }, error() { }, warn(m) { if (String(m).includes('still partial after 10 tries')) gaveUp(); } };
       const x9 = O.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-retry-')), homeDir: home, log: log9, exitHook: false, bootDelayMs: 1e9, clearedRetryMs: 1,
         clearedCopiesAll: async () => { asks++; if (asks === 3) { wholeSeen(); return { groups: {}, partial: [] }; } return { groups: {}, partial: ['g-unread'] }; } });
-      x9.start(); await Promise.race([third, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard); await x9.call('status', {});
+      x9.start(); await Promise.race([third, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard);
+      // the third answer's hand-over REACHES the worker before the restart, by two of the worker's own replies (FIFO), never a sleep:
+      // `third` fires when the ask is made — its delivery (addCleared) is posted in the microtasks after it, so the first reply lets
+      // it be posted and the second, queued behind it, comes only after the worker answered it. A delivery the closing worker
+      // never answered spent a try and ran a second retry chain on the same counter (the hosted fast job's try 1: 12 / 11 asks).
+      await x9.call('status', {}); await x9.call('status', {});
       await x9.close();          // a worker started again in the same process (an idle exit) hands the set over again
       x9.start();
       await Promise.race([done, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard);

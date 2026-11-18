@@ -1147,8 +1147,9 @@ if (!probe) {
   // control differs from the shipped module in the named dimension and in
   // nothing else, which is the whole point of a negative control.
   const mutated = src.replace('if (worked) noteFireOutcome(id, true, why);', 'noteFireOutcome(id, true, why);')
-    .replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`);
-  ok('MUTATION CONTROL: the guard is one identifiable line', mutated !== src && !/require\('\.\.\//.test(mutated));
+    .replace(/require\('\.\.\//g, `require('${path.join(REPO, 'src')}/`)
+    .replace(/require\('\.\//g, `require('${path.join(REPO, 'src/server')}/`);   // same-folder requires too (B-9a2e's lazy ./sent-record.js on the deliver road): the copy differs in the one named line ONLY
+  ok('MUTATION CONTROL: the guard is one identifiable line', mutated !== src && !/require\('\.\.?\//.test(mutated));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-armut-')); cleanup.push(dir);
   const modPath = path.join(dir, 'auto-resume-mutated.cjs');
   fs.writeFileSync(modPath, mutated);
