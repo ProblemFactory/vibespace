@@ -86,13 +86,13 @@ const isCompactSummaryText = (text) => String(text || '').trimStart().startsWith
 //   notice        a peer-path record VibeSpace speaks in (Background Work, a channel wake, the browser handback —
 //                 notification-senders isVibespaceNotice, judged by the record's PATH)
 //   peer          another session's message or a group report (originKind 'peer-message' = the CLI's origin.kind 'peer')
-//   notification  a background-task wake (originKind 'task-notification'), the CLI's own prompt (promptSource 'system' —
-//                 originKind 'wakeup' / 'system-prompt', B-3d90); for a record nobody marked typed: a CLI
+//   notification  a background-task wake (originKind 'task-notification'), the CLI's scheduler's own prompt
+//                 (wakeupSource ⇒ originKind 'wakeup', B-3d90); for a record nobody marked typed: a CLI
 //                 synthetic record, or one opening with a CLI / harness tag or a Stop hook's words
 //   command       THE PERSON'S — a slash command they ran (the TUI's own row; drawn as the command bubble)
 //   interrupt     the CLI's interrupt marker «[Request interrupted by user]» / «… for tool use]» (permission-outcome's
-//                 census rows Jw / Ud, the binary's user-message markers): the person pressed Stop, but the row is the
-//                 CLI's words — nobody typed it (r2; the chat still draws it as before, B-3d90)
+//                 census rows Jw / Ud, the binary's user-message markers): a turn was stopped (the person's press or the
+//                 product's own stop write the same marker) — the CLI's words, nobody typed it (r2; drawn «Turn stopped», B-3d90)
 //   compact       the CLI's compaction summary (isCompactSummaryText) — never a typed paste of its head (r2)
 //   tray-answer   THE PERSON'S — their answer from the For you tray (`[For you reply #ut-…]`, inbox-reply-text parseReply)
 //   typed         THE PERSON'S — everything else
@@ -112,7 +112,7 @@ function personRow(m) {
   const text = textOf(r);
   if (r.originKind === 'peer-message') return other(isVibespaceNotice(r.peerFrom, text, r.peerVia) ? 'notice' : 'peer');
   if (r.originKind === 'task-notification') return other('notification');
-  if (r.originKind === 'wakeup' || r.originKind === 'system-prompt') return other('notification'); // B-3d90 (3): the CLI's own prompt (promptSource 'system': a scheduled wake-up, a /loop fire)
+  if (r.originKind === 'wakeup') return other('notification'); // B-3d90 (3): the CLI's scheduler's own prompt (wakeupSource: a scheduled wake-up, a /loop fire)
   const s = text.trim();
   if (!r.typed) {
     if (r.originKind === 'local-command' || /^<command-name\b/.test(s)) return { person: true, why: 'command' };

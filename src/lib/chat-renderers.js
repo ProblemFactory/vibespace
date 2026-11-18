@@ -857,14 +857,14 @@ class ChatRenderers {
       return this._renderPeerMsg(msg, rawText);
     }
     if (isNotification) {
-      // B-3d90 (3): a scheduled wake-up / the CLI's own prompt says so — its words behind the expander, never a «You» bubble
-      if (msg.originKind === 'wakeup' || msg.originKind === 'system-prompt') return this._renderNotificationMsg(rawText, { label: msg.originKind === 'wakeup' ? t('Scheduled wake-up') : t('Sent automatically, not by you'), detail: rawText.trim() });
+      // B-3d90 (3): a scheduled wake-up says so — its words behind the expander, never a «You» bubble
+      if (msg.originKind === 'wakeup') return this._renderNotificationMsg(rawText, { label: t('Scheduled wake-up'), detail: rawText.trim() });
       return this._renderNotificationMsg(rawText);
     }
     // B-3d90 (1, 4): the CLI's compaction summary and its interrupt marker — records nobody typed (personRow) — are
-    // system cards: the summary behind the expander, the marker as one line (the person pressed Stop; the words are the CLI's)
+    // system cards: the summary behind the expander, the marker as one line (a stop happened — by the person or by the product; the words are the CLI's)
     if (origin.why === 'compact') return this._renderNotificationMsg(rawText, { label: t('Context compacted'), detail: rawText.trim() });
-    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Stopped by you'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the result row says «Interrupted»; words past the bare marker stay readable
+    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Turn stopped'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the marker says THAT a stop happened, never who pressed it (a stop the product sends writes the same marker); the result row says «Interrupted»
     // A FOR-YOU INBOX REPLY (design-user-inbox-reply D1.8): the user's own
     // message, sent from the inbox, opening with `[For you reply #<id>]` + the
     // quoted item. Recognised from the TEXT (the marker is a protocol value), so

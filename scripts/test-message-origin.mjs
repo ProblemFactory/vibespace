@@ -51,10 +51,11 @@ const RECS = fs.readFileSync(FIXTURE_SRC, 'utf8').trim().split('\n').map((l) => 
 // B-3d90 (3): two rows CONSTRUCTED (not copied from a transcript): no scheduled fire was found on this box. Their keys are
 // the CLI's own (Claude Code 2.1.322's bundle): a user record carries `wakeupSource` ('loop_wakeup' | 'schedule_wakeup')
 // on a scheduler fire, and `promptSource: 'system'` is its «other machine-injected turns (peer/channel messages, task
-// notifications, auto-continuation)». Every builder reads them: the normalizer from RECS, the scan from FIXTURE (the
+// notifications, auto-continuation)» — the follow-up: no 'system' record WITHOUT an origin was measured, so that one
+// keeps today's answer (typed); wakeupSource stays unmeasured on a real record (only the scheduler writes it). Every builder reads them: the normalizer from RECS, the scan from FIXTURE (the
 // verbatim file + these two, written in this run's scratch folder)
 RECS.push({ type: 'user', promptSource: 'sdk', wakeupSource: 'loop_wakeup', uuid: 'mo-notification-wakeup', message: { role: 'user', content: 'Check whether the CI run finished and report the result.' }, timestamp: '2026-11-04T20:00:30.000Z' },
-  { type: 'user', promptSource: 'system', uuid: 'mo-notification-sysprompt', message: { role: 'user', content: 'Continue with the plan from the last turn.' }, timestamp: '2026-11-04T20:00:31.000Z' });
+  { type: 'user', promptSource: 'system', uuid: 'mo-typed-sysprompt', message: { role: 'user', content: 'Continue with the plan from the last turn.' }, timestamp: '2026-11-04T20:00:31.000Z' });
 const MUTC = mutantCopies('message-origin', REPO);
 const FIXTURE = path.join(MUTC.dir, 'claude-user-records.jsonl');
 fs.writeFileSync(FIXTURE, RECS.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -201,7 +202,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
 }
 
 // B-3d90 (1, 3, 4): THE RENDERER draws the user records nobody typed as system cards — the compaction summary, the
-// interrupt marker, a scheduled wake-up and the CLI's own prompt — never a «You» bubble (a minimal DOM: the cards it
+// interrupt marker («Turn stopped»), a scheduled wake-up — never a «You» bubble; a «system» record with no origin stays typed (a minimal DOM: the cards it
 // writes are one element each) + a RED control (the branches removed: the same records reach the bubble path)
 {
   const { pathToFileURL } = await import('node:url');
@@ -210,13 +211,13 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
   // the modules load BEFORE the minimal DOM is set (utils.js listens on document at load; with no document it does not)
   const CR0 = await import(pathToFileURL(CRP).href);
   const CUT = ["    if (origin.why === 'compact') return this._renderNotificationMsg(rawText, { label: t('Context compacted'), detail: rawText.trim() });\n",
-    "    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Stopped by you'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the result row says «Interrupted»; words past the bare marker stay readable\n",
-    "      if (msg.originKind === 'wakeup' || msg.originKind === 'system-prompt') return this._renderNotificationMsg(rawText, { label: msg.originKind === 'wakeup' ? t('Scheduled wake-up') : t('Sent automatically, not by you'), detail: rawText.trim() });\n"];
+    "    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Turn stopped'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the marker says THAT a stop happened, never who pressed it (a stop the product sends writes the same marker); the result row says «Interrupted»\n",
+    "      if (msg.originKind === 'wakeup') return this._renderNotificationMsg(rawText, { label: t('Scheduled wake-up'), detail: rawText.trim() });\n"];
   ok('…the control\'s anchors are in chat-renderers.js once each', CUT.every((c) => CRS.split(c).length === 2));
   const CR1 = await import(pathToFileURL(MUTC.write('src/lib/chat-renderers.js', CUT.reduce((x, c) => x.replace(c, ''), CRS).replace("from 'marked';", `from ${JSON.stringify(import.meta.resolve('marked'))};`), 'no3d90', { esm: true })).href);
   const doc0 = globalThis.document;
   globalThis.document = { createElement: () => ({ className: '', innerHTML: '', title: '', classList: { add() { }, toggle() { } }, querySelector: () => null, appendChild() { }, setAttribute() { } }), addEventListener() { }, removeEventListener() { } };
-  const CASES = [['mo-compact-1', 'Context compacted'], ['mo-interrupt-1', 'Stopped by you'], ['mo-interrupt-tool', 'Stopped by you'], ['mo-notification-wakeup', 'Scheduled wake-up'], ['mo-notification-sysprompt', 'Sent automatically, not by you']];
+  const CASES = [['mo-compact-1', 'Context compacted'], ['mo-interrupt-1', 'Turn stopped'], ['mo-interrupt-tool', 'Turn stopped'], ['mo-notification-wakeup', 'Scheduled wake-up']];
   const drawAll = (CRm) => CASES.map(([uuid, label]) => {
     const R = Object.create(CRm.ChatRenderers.prototype);
     let el = null; try { el = R.renderUserMsg(byUuid.get(uuid)); } catch { el = null; }
@@ -228,7 +229,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
     const pre = drawAll(CR1);
     ok(`CONTROL (the three branches removed): none of the ${pre.length} records gets its card — the legs go RED`, pre.every((g) => !g.card), pre);
   } finally { globalThis.document = doc0; }
-  ok('B-3d90 (3): a prompt the CLI marks promptSource «system» is never typed — the normalizer stamps it', byUuid.get('mo-notification-wakeup')?.originKind === 'wakeup' && !byUuid.get('mo-notification-wakeup')?.typed && byUuid.get('mo-notification-sysprompt')?.originKind === 'system-prompt');
+  ok('B-3d90 (3): a record naming its wakeup is never typed; a «system» record with NO origin (unmeasured) keeps today\'s answer — typed, never «not by you» on a reading', byUuid.get('mo-notification-wakeup')?.originKind === 'wakeup' && !byUuid.get('mo-notification-wakeup')?.typed && byUuid.get('mo-typed-sysprompt')?.typed === true && !byUuid.get('mo-typed-sysprompt')?.originKind);
 }
 
 console.log('§3 MUTANTS — each kind taken out of a copy (in memory) reddens exactly its own rows, by name');
@@ -241,7 +242,7 @@ console.log('§3 MUTANTS — each kind taken out of a copy (in memory) reddens e
     ['auto-resume', ["  if (r.originKind === 'auto-resume') return other('auto-resume');\n"], ['auto-resume']],
     ['notice', [["isVibespaceNotice(r.peerFrom, text, r.peerVia) ? 'notice' : 'peer'", "'peer'"]], ['notice']],
     ['peer', ["  if (r.originKind === 'peer-message') return other(isVibespaceNotice(r.peerFrom, text, r.peerVia) ? 'notice' : 'peer');\n"], ['peer', 'notice']],
-    ['notification', ["  if (r.originKind === 'task-notification') return other('notification');\n", "  if (r.originKind === 'wakeup' || r.originKind === 'system-prompt') return other('notification'); // B-3d90 (3): the CLI's own prompt (promptSource 'system': a scheduled wake-up, a /loop fire)\n", "    if (r.synthetic || CLI_TAG_RE.test(s) || STOP_HOOK_RE.test(s)) return other('notification');\n"], ['notification']],
+    ['notification', ["  if (r.originKind === 'task-notification') return other('notification');\n", "  if (r.originKind === 'wakeup') return other('notification'); // B-3d90 (3): the CLI's scheduler's own prompt (wakeupSource: a scheduled wake-up, a /loop fire)\n", "    if (r.synthetic || CLI_TAG_RE.test(s) || STOP_HOOK_RE.test(s)) return other('notification');\n"], ['notification']],
     ['command', ["    if (r.originKind === 'local-command' || /^<command-name\\b/.test(s)) return { person: true, why: 'command' };\n"], ['command']],
     ['interrupt', ["    if (INTERRUPT_RE.test(s)) return other('interrupt');\n"], ['interrupt']],
     ['compact', ["    if (isCompactSummaryText(s)) return other('compact');\n"], ['compact']],

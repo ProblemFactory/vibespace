@@ -1378,8 +1378,9 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
       _fetchMessages: async () => missed, _onCreateMessage() { }, _updatePosIndicator() { }, _showHistoryStatus() { }, _trace() { },
       _chatMinimap: { addTurn() { calls.add++; }, appendFullTurn(t, o) { calls.full.push({ t, o }); }, setViewport() { } },
     });
-    CV.prototype._reattachCatchUp.call(v);
-    await new Promise((r) => setTimeout(r, 700)); // the catch-up's own stagger is ≤ 400 ms
+    const rnd = Math.random; Math.random = () => 0;   // the catch-up's own stagger (Math.random() × 400 ms) at 0: the leg awaits the work, never a sleep
+    try { CV.prototype._reattachCatchUp.call(v); for (let i = 0; i < 20 && !calls.add && !calls.full.length; i++) await new Promise((r) => setTimeout(r, 5)); } // the turns are handed in ONE synchronous pass
+    finally { Math.random = rnd; }
     return calls;
   };
   const on = await catchUp(ChatView, true), off = await catchUp(ChatView, false);
@@ -1393,7 +1394,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   ok('…the control\'s anchor is in chat-view.js once', cv.split(LINE).length === 2);
   const { pathToFileURL } = await import('node:url');
   const pre = await import(pathToFileURL(MUT.write('src/lib/chat-view.js', cv.replace(LINE, ''), 'nofull', { esm: true })).href);
-  ok('CONTROL (the catch-up line removed): no missed turn reaches the full-extent minimap — the leg goes RED', (await catchUp(pre.ChatView, true)).full.length === 0);
+  { const c = await catchUp(pre.ChatView, true); ok(`CONTROL (the catch-up line removed): the catch-up ran (${c.add} turns through addTurn) and no missed turn reaches the full-extent minimap — the leg goes RED`, c.add === 2 && c.full.length === 0, c); }
   // the minimap's own once: a turn it already holds (by instant) is not drawn twice; a live append is unchanged
   const { ChatMinimap } = await import(path.join(REPO, 'src/lib/chat-minimap.js'));
   const doc0 = globalThis.document;
