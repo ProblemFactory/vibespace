@@ -62,6 +62,31 @@ try {
     ok(rThrow.length === 1 && rThrow[0].status === 'failed' && /^the store writer not on disk yet \(the writer is gone\)/.test(rThrow[0].error), 'U4/U5 cure: a landing that THREW counts as a store not on disk (failed by name, not recorded)', rThrow);
     const rNoRun = runMigrations({ ledgerPath: lsl, migrations: mig2, log: () => { }, warn: () => { }, landStores: () => { asked.push(2); return []; } });
     ok(rNoRun.every((x) => x.status === 'already') && !asked.includes(2), 'U4/U5 cure: a boot where no migration ran asks the store writer nothing', { rNoRun, asked });
+    // the U5b cure's ORDER LAW (both readers of lg-store-writes-u5b-keeper-cure): a migration that threw EVSNOTONDISK (a store
+    // reshaped in memory, its write not on disk) HOLDS the pass — the migration after it (it may read that store's FILE, as
+    // grants-unify reads browser-profiles.json) neither runs nor is recorded this boot; any OTHER failure keeps going, as before
+    {
+      const orderMigs = (ran) => [
+        { id: 'ord-reshape', run: () => { throw Object.assign(new Error('browser-profiles.json: the reshape is in memory and not on disk yet'), { code: 'EVSNOTONDISK' }); } },
+        { id: 'ord-reader', run: () => { ran.push('ord-reader'); } },
+      ];
+      const appliedOf = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).applied || {}; } catch { return {}; } };
+      const ranH = [], lh = path.join(tmp, 'ledger-order.json');
+      const rH = runMigrations({ ledgerPath: lh, migrations: orderMigs(ranH), log: () => { }, warn: () => { }, landStores: () => [] });
+      ok(rH.length === 2 && rH[0].status === 'failed' && rH[1].status === 'held' && /ord-reshape's write is not on disk yet/.test(rH[1].why || '') && !ranH.length && !appliedOf(lh)['ord-reader'] && !appliedOf(lh)['ord-reshape'],
+        'U5b cure ORDER LAW: a migration whose write is NOT ON DISK (EVSNOTONDISK) holds the pass — the reader after it neither runs nor is recorded this boot (the next boot runs both, in order)', { rH, ranH, applied: appliedOf(lh) });
+      const ranP = [];
+      const rP = runMigrations({ ledgerPath: path.join(tmp, 'ledger-order-plain.json'), migrations: [{ id: 'ord-plain', run: () => { throw new Error('a plain failure'); } }, { id: 'ord-next', run: () => { ranP.push('ord-next'); } }], log: () => { }, warn: () => { }, landStores: () => [] });
+      ok(rP.length === 2 && rP[0].status === 'failed' && rP[1].status === 'ran' && ranP.length === 1, 'U5b cure ORDER LAW: any OTHER failure keeps the pass going, as before', rP);
+      // RED: a runner copy without the hold runs the reader over the older bytes and records it
+      const runSrc = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src/migration-runner.js'), 'utf8');
+      const aHold = "    if (held) { results.push({ id: m.id, status: 'held', why: held }); continue; }\n";
+      ok(runSrc.split(aHold).length === 2, 'U5b cure ANCHOR: the runner\'s hold');
+      const NoHold = mutantCopies('migrations-order', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/migration-runner.js', runSrc.replace(aHold, ''), 'no-hold');
+      const ranM = [], lm = path.join(tmp, 'ledger-order-red.json');
+      NoHold.runMigrations({ ledgerPath: lm, migrations: orderMigs(ranM), log: () => { }, warn: () => { }, landStores: () => [] });
+      ok(ranM.length === 1 && !!appliedOf(lm)['ord-reader'], 'U5b cure CONTROL: a runner without the hold runs the reader after a write not on disk AND records it — the check above would be red', { ranM, applied: appliedOf(lm) });
+    }
     // which stores the hub's boot lands (src/server/migrations.js storesToLand — the selector runLocalMigrations' landStores uses)
     const { storesToLand } = require('../src/server/migrations.js');
     const before = new Map([['/d/owed-touched.json', 3], ['/d/owed-untouched.json', 5], ['/d/clean-touched.json', 1]]);

@@ -90,9 +90,15 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
   const ledger = readLedger(ledgerPath);
   const results = [];
   const ranNow = [];
+  // THE ORDER LAW (lane lg-store-writes U5b cure's readers): a migration that threw EVSNOTONDISK left a store reshaped in memory
+  // and NOT on disk — a later migration may read that store's FILE (2026-10-grants-unify reads browser-profiles.json) and be
+  // recorded over the older bytes. So the pass HOLDS there: nothing after it runs this boot (unrecorded: the next boot runs them,
+  // in order, the reshape first)
+  let held = null;
   for (const m of migrations) {
     if (!m || !m.id || typeof m.run !== 'function') continue;
     if (ledger.applied[m.id]) { results.push({ id: m.id, status: 'already' }); continue; }
+    if (held) { results.push({ id: m.id, status: 'held', why: held }); continue; }
     try {
       const report = m.run();
       if (report && typeof report.then === 'function') {
@@ -131,6 +137,7 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
       warn(`[migrate] ${m.id} FAILED (will retry next boot): ${e.message}`);
       results.push({ id: m.id, status: 'failed', error: e.message, ...(e && e.code ? { code: String(e.code) } : {}) });   // B-44f3: + the code
       sayFailed(todos, m.id, e, warn);
+      if (e && e.code === 'EVSNOTONDISK') { held = `${m.id}'s write is not on disk yet`; warn(`[migrate] the migrations after ${m.id} are HELD until the next boot (a later one may read the store it reshaped)`); }
     }
   }
   if (ranNow.length && typeof landStores === 'function') {

@@ -799,9 +799,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  read the FILE (2026-10-grants-unify reads browser-profiles.json from disk), so a reshape is on disk before it returns.
    *  false: it did not land — held past the writer's bound, failed, or DEFERRED by the exit (the exit's flush writes it; until
    *  then it is not on disk, so a move waiting on it is refused) */
-  function landNow() { try { const r = writerOf().flushSync([storeKey]); return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
+  let landDeferred = false;   // the last landNow() was refused because the hub is STOPPING (the exit's flush writes it) — a refusal's words
+  function landNow() { landDeferred = false; try { const W = writerOf(); if (!W.pending(storeKey)) return true; const r = W.flushSync([storeKey]); landDeferred = !!r.deferred; return !r.deferred && !r.left.some((x) => x.file === storeKey); } catch { return false; } }
   /** a MIGRATION's reshape that did not land fails that migration BY NAME (not recorded: it runs again next boot — the bytes stay
-   *  in memory and the writer retries); the boot's next migration then never reads the older file as if it were the reshape's */
+   *  in memory and the writer retries), and the runner HOLDS the migrations after it to the next boot (EVSNOTONDISK: a later one
+   *  may read this file) — src/migration-runner.js, the order law */
   const landedOrThrow = () => { if (!landNow()) throw Object.assign(new Error(`${STORE_FILE}: the reshape is in memory and not on disk yet (the storage still holds the write) — not recorded, it runs again at the next boot`), { code: 'EVSNOTONDISK' }); };
   function notify() {
     try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); }
@@ -2421,7 +2423,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const t = dirKeyOf(to); if (!t || t === f) return { ok: true, moved: false, key: null, error: null };
     const before = reg.dirHosts;
     reg.dirHosts = B.rekeyDirHosts(reg.dirHosts, f, t); dirty = true;
-    if (!saveNow()) { reg.dirHosts = before; dirty = true; lineageLedger('rekey-refused', { from: f, to: t }); log.warn?.(`[browser] the launch-host lineage of ${f} could not be written under ${t} (${STORE_FILE} unwritable) — the directory is NOT moved`); return { ok: false, moved: false, key: null, error: `${STORE_FILE} could not be written` }; }
+    landDeferred = false; if (!saveNow()) { reg.dirHosts = before; dirty = true; lineageLedger('rekey-refused', { from: f, to: t }); log.warn?.(`[browser] the launch-host lineage of ${f} could not be written under ${t} (${landDeferred ? 'the hub is stopping — the exit\'s flush writes the registry' : STORE_FILE + ' unwritable'}) — the directory is NOT moved`); return { ok: false, moved: false, key: null, error: landDeferred ? 'the hub is stopping' : `${STORE_FILE} could not be written` }; }
     lineageLedger('rekeyed-by-move', { from: f, to: t });
     log.log?.(`[browser] the launch-host lineage of ${f} follows its directory to ${t} (written before the move)`);
     return { ok: true, moved: true, key: t, error: null };
