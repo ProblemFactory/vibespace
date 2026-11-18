@@ -745,17 +745,22 @@ export async function runR29LoginNails({ repoDir, ok }) {
         await dialogs.arm(profShop.id);
         dialogs.noteActiveTab({ profileId: profShop.id, browserKey: KEY_AGENT }, tid);
         const medCdp = await openCdpWs(WebSocket, atShop2.cdpUrl, tid);
+        // B-518e (also — the read's neighbour): the in-flight read resolves on the leg's WORD (a flag on the document both worlds
+        // share), never on a 120 ms page timer raced against the HTTP fill; a word that never comes resolves it after a bounded
+        // count of ticks. It is IN FLIGHT upstream before the fill starts (the relay saw it), never a 20 ms sleep
         const medPollP = medCdp.evalInDom(
-          'new Promise((r) => setTimeout(() => r(document.querySelector("#otp")?.value || ""), 120))',
+          'new Promise((r) => { let n = 0; const t = () => ((document.__r29GoPos || ++n > 2000) ? r(document.querySelector("#otp")?.value || "") : setTimeout(t, 5)); t(); })',
           { awaitPromise: true },
         );
-        await sleep(20);
+        const sentUp = (mark) => relay.state.upstreamCalls.some((c) => c.method === 'Runtime.evaluate' && String(c.params?.expression || '').includes(mark));
+        const posInFlight = await until(() => sentUp('__r29GoPos'));
         const posFillRes = await fetch(`${baseMed}/api/agent/browser/fill-vault`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${TOK_EPH}` },
           body: JSON.stringify({ profile: profShop.id, target: '#otp', spec: 'chanr29.example.test#alice/otp' }),
         });
         const posFillJson = await posFillRes.json();
+        { const rawGo = await openCdpWs(WebSocket, relay.wsUrl, tid); await rawGo.evalInDom('document.__r29GoPos = true'); rawGo.close(); }   // the word: the fill has returned
         const medPollReply = await medPollP;
         medCdp.close();
 
@@ -791,7 +796,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         )
           && p5RemoteDirect && p5RemoteDirect.ok === false && p5RemoteDirect.code === 'login_channel_unmediated'
           && p5ExtDirect && p5ExtDirect.ok === false && p5ExtDirect.code === 'login_channel_unmediated';
-        const posControlOk = posFillRes.status === 200
+        const posControlOk = posInFlight && posFillRes.status === 200
           && posFillJson.ok === true
           && Boolean(medPollReply?.error && /login_fill_live/.test(String(medPollReply.error.message || '')))
           && !JSON.stringify(medPollReply).includes(OTP_VAL);
@@ -799,7 +804,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         ok(
           allRefusedCleanly && posControlOk,
           'R29-1f (Channel Law 1-6 real keeper P5 scene): concurrent raw-WS read + fill-vault across ephemeral, child-handle, paired-remote, external-cdp, remote-session, and no-proxy all refuse 409 login_channel_unmediated with 0 Input.insertText, while local mediated profile fills (200) and aborts concurrent mediated read with login_fill_live',
-          { unmediatedProbes, posFillStatus: posFillRes.status, posFillJson, medPollReply },
+          { unmediatedProbes, posInFlight, posFillStatus: posFillRes.status, posFillJson, medPollReply },
         );
       } finally {
         if (srvBare) await new Promise((r) => srvBare.close(() => r()));
@@ -1220,15 +1225,18 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
         // M10: Start pre-fill in-flight Runtime.evaluate (180ms), then run a pre-insert FAILING fill (`#missing_m10` -> target_not_found, so armLiveFillOnTab never runs!).
         // Entry `bumpFillEpoch` MUST cut off the in-flight read with `login_fill_live`!
+        // (B-518e, also: the in-flight read resolves on the leg's WORD after the failing fill, never on a 180 ms page timer raced
+        // against it; it is IN FLIGHT upstream before the fill starts — the relay saw it — never a 25 ms sleep)
         const inflightM10P = wsFull.evalInDom(
-          'new Promise((r) => setTimeout(() => r("M10_SURVIVED"), 180))',
+          'new Promise((r) => { let n = 0; const t = () => ((document.__r29GoM10 || ++n > 2000) ? r("M10_SURVIVED") : setTimeout(t, 5)); t(); })',
           { awaitPromise: true },
         );
-        await sleep(25);
+        const m10InFlight = await until(() => relay.state.upstreamCalls.some((c) => c.method === 'Runtime.evaluate' && String(c.params?.expression || '').includes('__r29GoM10')));
         const failFillM10 = await dialogs.fillVaultField(
           { profileId: PID, browserKey: KEY },
           { target: '#missing_m10', spec: 'muta29.example.test#alice/password', targetId: tid, facts: { conversationKeys: [KEY] } },
         );
+        { const rawGo = await openCdpWs(WebSocket, relay.wsUrl, tid); await rawGo.evalInDom('document.__r29GoM10 = true'); rawGo.close(); }   // the word: the fill has returned
         const m10Res = await inflightM10P;
 
         // M01: Arm fence on `tid`, then send inbound `Runtime.evaluate({ expression: '"M01_INBOUND_PROBE"' })` — MUST be refused on INBOUND (0 upstream forwarding to `relay`!)
@@ -1248,12 +1256,12 @@ export async function runR29LoginNails({ repoDir, ok }) {
             && !JSON.stringify(m02Res).includes('M02_LEAK')
             && Boolean(m03Res?.error && /login_fill_live/.test(String(m03Res.error.message || '')))
             && !JSON.stringify(m03Res).includes('M03_LEAK')
-            && failFillM10.ok === false && failFillM10.code === 'target_not_found'
+            && m10InFlight && failFillM10.ok === false && failFillM10.code === 'target_not_found'
             && Boolean(m10Res?.error && /login_fill_live/.test(String(m10Res.error.message || '')))
             && !JSON.stringify(m10Res).includes('M10_SURVIVED')
             && okFill.ok === true,
           'R29-5a (Reader A mutants M01, M02, M03, M10): inbound fence forwards 0 Runtime.evaluate calls upstream (M01), reply epoch & liveFill gates each refuse independently (M02, M03), and entry bumpFillEpoch aborts pre-fill in-flight reads even on pre-insert target_not_found (M10)',
-          { upDeltaM01: upAfterM01 - upBeforeM01, m01Res, m02Res, m03Res, failFillM10, m10Res },
+          { upDeltaM01: upAfterM01 - upBeforeM01, m01Res, m02Res, m03Res, m10InFlight, failFillM10, m10Res },
         );
       } finally {
         try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
