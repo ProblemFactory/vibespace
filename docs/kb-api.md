@@ -48,6 +48,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - `POST /api/chat-attachments/orphans/remove` `{files, bytes}` — removes exactly what /orphans named; other numbers ⇒ 409 `changed` (+ `now`), nothing removed.
 - `GET /api/file/serve/*` — path-based raw file serving (was the HTML preview's `<base href>`; no client caller since lane frame-host-preview — the preview's folder is `/frame-host/f/<token>/`)
 - `POST /api/file/write` — write file
+- `POST /api/file/temp` — `{ name, content }` → `{ success, path }`: a temp file the HUB names, in its own temp folder (src/server/hub-tmp.js, `<tmp>/vibespace-<uid>-<data hash>/editor`) — «open in editor» on a chat block (B-3767); a plain file name only (400 `bad_name`), a folder it cannot use = 500 `hub_tmp_refused` with the path and why
 - `POST /api/mkdir` — create directory
 - `POST /api/rename` — rename
 - `DELETE /api/file?path=` — delete

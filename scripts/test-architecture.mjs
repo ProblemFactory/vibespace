@@ -7722,6 +7722,142 @@ await section(async () => {
     `§109 NEG: ${next} in full form is named (at a sentence's end too), and a later minor; ${CUR}, an older release, a Claude Code build (${cMaj}.1.322), the «.${cPat + 1}» short form, a number inside a longer one are not`);
 });
 
+// §110 THE HUB'S TEMP FOLDERS ARE ITS OWN (B-3767, lane bl-scratch, 2026-11-18). The hub made FIXED machine-wide folders under the
+// temp folder — /tmp/claude-webui-uploads (the chat uploads' multer dest), <tmp>/vibespace-plugin-uploads, /tmp/claude-webui (the
+// client's «open in editor»), <tmp>/vibespace-window (the window CLI's shots), run.sh's /tmp/vs-server.log — and on the second
+// test machine another user's hub owned them: EACCES, and a hang. THE CENSUS (derived over the tracked product files — src,
+// server.js, data/bin and the shell the product ships — and printed): every CODE line that names the temp folder (a /tmp,
+// /var/tmp or /private/tmp path wherever it starts, its regex spelling, os.tmpdir() / tmpdir()) is a ROW [file, a fixed needle
+// of that line, kind, why]. Kinds: per-data / per-user (keyed — src/server/hub-tmp.js for the hub's own), unique (mkdtemp /
+// random / pid), system (not ours), read (a judgment or a read — nothing is made), words (a message naming the place), by-hand
+// (a fallback the hub never reaches). A new line is red until it is a row; a row it no longer finds is red. Known narrow: a
+// fixed name joined through a PARAMETER (`path.join(tmpRoot, …)`) is seen only where the parameter's default names the folder.
+await section(async () => {
+  console.log('\n§110 the hub\'s temp folders are its own (B-3767)');
+  const ROWS110 = [
+    ["data/bin/acp-wrapper.js", "bufferFile || '/tmp/acp-wrapper'", "by-hand", "the log beside the buffer; /tmp only when the wrapper is started by hand with no buffer (the hub always hands one)"],
+    ["data/bin/agy-wrapper.js", "'agy-wrapper.log'", "by-hand", "the same: the log beside the buffer"],
+    ["data/bin/agy-wrapper.js", "'agy-conversation-modes'", "by-hand", "the conversation modes beside the buffer; /tmp only by hand"],
+    ["data/bin/chat-wrapper.js", "process.argv[2] || '/tmp/chat-wrapper'", "by-hand", "the log beside the buffer; /tmp only by hand"],
+    ["data/bin/codex-chat-wrapper.js", "bufferFile || '/tmp/codex-chat-wrapper'", "by-hand", "the log beside the buffer; /tmp only by hand"],
+    ["data/bin/pty-wrapper.js", "process.argv[2] || '/tmp/pty-wrapper'", "by-hand", "the log beside the buffer; /tmp only by hand"],
+    ["data/bin/agy-wrapper.js", "const TEMP_ROOTS = [", "read", "which cwd is temporary (a judgment, nothing made)"],
+    ["data/bin/vibespace-browser", "const allow = [os.tmpdir(),", "read", "an allow list for an upload path the agent names"],
+    ["data/bin/vibespace-browser", "tmpdirs: [os.tmpdir(), '/tmp']", "read", "the daemon cwd judgment (browser-verbs ensureDaemonCwd)"],
+    ["data/bin/vibespace-channels", "const roots = [process.cwd(), os.tmpdir(),", "read", "an allow list for an attachment path"],
+    ["data/bin/vibespace-usage-scan", "const TMP_ROOTS = ['/tmp', '/var/tmp'];", "read", "the walk skips scratch roots"],
+    ["server.js", "const throwawayRoot = [os.tmpdir(),", "read", "is this checkout a throwaway (a judgment)"],
+    ["src/agentd/agentd.js", "[os.tmpdir(), '/tmp'].some(", "read", "is the daemon root a throwaway (a judgment)"],
+    ["src/agentd/agentd.js", "const bridgeSock = () =>", "per-user", "the same socket rule"],
+    ["src/agentd/agentd.js", "root: ROOT, platform: process.platform, tmpdir: os.tmpdir()", "per-user", "sock-path picks a per-user rung (vs-dev-<uid>)"],
+    ["src/agentd/client.js", "SP.witnessOrRule({ root: this._root", "per-user", "the same socket rule"],
+    ["src/browser-attach.js", "function attachSocketDir({ base = '/tmp'", "per-user", "the attach socket dir is keyed by uid and profile"],
+    ["src/browser-attach.js", "String(base).replace(/\\/+$/, '') : '/tmp'", "per-user", "the same"],
+    ["src/browser-display.js", "const X11_DIR = '/tmp/.X11-unix';", "system", "the X server's own socket dir"],
+    ["src/browser-facts.js", "tmpdirs: [os.tmpdir(), '/tmp']", "read", "the daemon cwd judgment"],
+    ["src/browser-facts.js", "fallback: require('os').tmpdir()", "per-user", "browserTmpDir: <base>/vibespace-<uid>/browser-tmp"],
+    ["src/browser-profiles.js", "const SOCKET_DIR_BASE = '/tmp';", "per-user", "the socket dir is vs-ab-<uid>"],
+    ["src/browser-profiles.js", "const BROWSER_TMP_SHORT_BASE = '/var/tmp';", "per-user", "vibespace-<uid>/browser-tmp"],
+    ["src/browser-profiles.js", "fallback = '/tmp' } = {}", "per-user", "the same verdict"],
+    ["src/claude-oat-probe.js", "`/tmp/vs-hotsw-${process.pid}`", "unique", "a probe's default root, per process"],
+    ["src/exit-proxy.js", "allow: [os.tmpdir(),", "read", "an allow list"],
+    ["src/fixture-guard.js", "const TMP_ROOTS = ['/tmp', '/var/tmp'];", "read", "THE ONE declaration of what a fixture looks like"],
+    ["src/adapters/codex.js", "`vibespace-zst-${uid}`", "per-user", "the zst cache is keyed by uid"],
+    ["src/hosts.js", "`vs-cm-${process.getuid", "per-user", "the ssh ControlMaster dir is keyed by uid"],
+    ["src/hosts.js", "'vs-agentd-stage-'", "unique", "mkdtemp"],
+    ["src/local-index.js", "varTmp = '/var/tmp'", "read", "the index's place verdict (keyed by uid where it is used)"],
+    ["src/memory-pressure.js", "tmpfs.mount || '/tmp'} is in RAM", "read", "words about a tmpfs"],
+    ["src/memory-pressure.js", "mount: tmpfs.mount || '/tmp'", "read", "the same"],
+    ["src/mount-argv.js", "tmpBase = '/tmp'", "per-user", "rcSocketPath: vs-mounts-<uid>"],
+    ["src/mounts.js", "`vs-policy-${crypto.randomBytes(4)", "unique", "a random name"],
+    ["src/opencode-serve.js", "if (p === path.resolve(os.tmpdir())) return false;", "read", "a judgment"],
+    ["src/routes/files.js", "'webui-remote-'", "unique", "mkdtemp"],
+    ["src/routes/files.js", "const TEMP_ROOTS = () =>", "read", "which cwd is temporary"],
+    ["src/routes/files.js", "const rTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));", "unique", "mkdtemp"],
+    ["src/routes/files.js", "const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));", "unique", "mkdtemp"],
+    ["src/server/agent-tool-generators.js", "tmpRoots: [realOr(os.tmpdir())", "read", "a judgment"],
+    ["src/server/claude-signin.js", "tmpRoot = os.tmpdir(),", "unique", "its scratch is a mkdtemp under it"],
+    ["src/server/cli-env.js", "fs.readdirSync('/tmp/.X11-unix')", "system", "reads the X server's socket dir"],
+    ["src/server/cli-self-measure.js", "scratchBases = () =>", "unique", "its run root is a per-run name"],
+    ["src/server/hub-tmp.js", "function hubTmpRoot({ dataDir, tmpRoot = os.tmpdir()", "per-data", "THE hub's own folder: vibespace-<uid>-<8 hex of the data folder>"],
+    ["src/server/hub-tmp.js", "async function hubTmpDir(purpose, { dataDir, tmpRoot = os.tmpdir()", "per-data", "the same"],
+    ["src/server/local-index.js", "varTmp = '/var/tmp' } = {})", "read", "the index's place verdict"],
+    ["src/server/memory-pressure-watch.js", "async function tmpfsOf(dir = '/tmp')", "read", "reads a tmpfs"],
+    ["src/server/memory-pressure-watch.js", "async function tmpRoots(dir = '/tmp')", "read", "the same"],
+    ["src/server/memory-pressure-watch.js", "tmpfsOf('/tmp'), tmpRoots('/tmp')", "read", "the same"],
+    ["src/server/oat-mint.js", "tmpRoot = os.tmpdir(), ttlMs", "unique", "its scratch is a mkdtemp under it"],
+    ["src/server/runtime-boot.js", "const throwaway = [os.tmpdir(),", "read", "a judgment"],
+    ["src/server/vault-run-door.js", "runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir()", "unique", "its run dir is a mkdtemp under it"],
+    ["src/sock-path.js", "const TMP_BASE = '/tmp';", "per-user", "vs-dev-<uid>"],
+    ["src/spawn/ssh.js", "'vs-tok-'", "unique", "mkdtemp"],
+    ["src/ssh-key.js", "'vs-key-'", "unique", "mkdtemp"],
+    ["src/usage-routes.js", "function probeCwdOf(probeConfigDir)", "read", "a cwd, nothing made"],
+    ["data/bin/vibespace-window", "`vibespace-window-${typeof process.getuid", "per-user", "the window CLI's shot folder, this user's (B-3767)"],
+    ["src/routes/files.js", "sweepDir(os.tmpdir());", "read", "the paste sweep's legacy root: this user's old claude-paste-* files (new pastes live in the hub's own folder, B-3767)"],
+    ["src/server/agent-tool-generators.js", "mktemp -u \"\\${TMPDIR:-/tmp}/claude-webui-edit-signal-", "unique", "the Ctrl+G helper's signal file: a fresh random name (B-3767; a reused pid met an old signal)"],
+    ["editor-helper.sh", "mktemp -u \"${TMPDIR:-/tmp}/claude-webui-edit-signal-", "unique", "the same, in the shipped helper"],
+    ["data/bin/vibespace-browser", "const d = path.join(os.tmpdir(), `vibespace-browser-${", "per-user", "the browser CLI's default shot folder, this user's and private (B-3767; it sat in the shared root)"],
+    ["run.sh", "${TMPDIR:-/tmp}/vs-server-$(id -u).log", "per-user", "the supervisor's log, this user's (B-3767; a second user met the first one's /tmp/vs-server.log)"],
+    ["data/bin/vibespace-browser", "(files are written under the project, /tmp or ~/Downloads only)", "words", "the help text naming where a write may land"],
+    ["data/bin/vibespace-browser", "to a path outside the project, /tmp", "words", "the same"],
+    ["data/bin/vibespace-browser", "code: 'write_path_refused'", "words", "a refusal naming the allowed places"],
+    ["data/bin/vibespace-design", "vibespace-browser screenshot /tmp/", "words", "a suggested command the agent may run (its own picture, by the agent's own name)"],
+    ["data/bin/vibespace-exit", "under the project, /tmp or ~/Downloads;", "words", "the help text"],
+    ["data/bin/vibespace-window", "code: 'write_path_refused'", "words", "a refusal naming the allowed places"],
+    ["src/agent-tool-rules.js", "`printf -v PATH /tmp/evil`", "words", "a comment beside code: an example of a planted path"],
+    ["src/agent-tool-rules.js", "`PATH=/tmp/evil`", "words", "the same"],
+    ["src/agent-tool-rules.js", "sample: \"cd /tmp && python3", "words", "a vendor table's sample command"],
+    ["src/browser-verbs.js", "R('write_path_refused'", "words", "a refusal naming the allowed places"],
+    ["src/browser-verbs.js", "(${clip(root, 80)}), /tm", "words", "the same"],
+    ["src/browser-verbs.js", "this Background Work job's working directory is not known", "words", "the same"],
+    ["src/browser-verbs.js", "no session directory is known here", "words", "the same"],
+    ["src/browser-verbs.js", "save under ${place}, /tmp or ~/Downloads", "words", "the same"],
+    ["src/exit-reach.js", "local_path_refused: 'the local path is outside the project, /tmp and ~/Downloads'", "words", "a refusal"],
+    ["src/harness-settings.js", "VibeSpace's own agent tools", "words", "a setting description"],
+    ["src/install-slot.js", "T=/tmp/vibespace-$u;", "per-user", "the install slot: $XDG_RUNTIME_DIR, else /tmp/vibespace-<uid> checked -O (owned)"],
+    ["src/install-slot.js", "an old lock file in an aged /tmp", "words", "a comment beside code"],
+    ["src/lib/chat-renderers.js", "const TEMP_PATH_RE = /^", "read", "which path is temporary (a judgment)"],
+    ["src/lib/i18n-ja.js", "\"Where files dropped or attached in chat are saved.", "words", "the setting's description, translated"],
+    ["src/lib/i18n-ja.js", "\"VibeSpace's own agent tools", "words", "the same"],
+    ["src/lib/i18n-zh.js", "\"Where files dropped or attached in chat are saved.", "words", "the same"],
+    ["src/lib/i18n-zh.js", "\"VibeSpace's own agent tools", "words", "the same"],
+    ["src/lib/settings-schema.js", "Where files dropped or attached in chat are saved.", "words", "a setting's description"],
+    ["src/lib/stage-manager.js", "/^\\/tmp\\//.test(spec.path", "read", "a judgment"],
+    ["src/mic-install.js", "mktemp -d /private/tmp/vibespace-mic.XXXXXX", "unique", "mktemp"],
+    ["src/routes/files.js", "const REMOTE_TEMP_RE = /^", "read", "a judgment"],
+    ["src/server/browser-keeper.js", "const daemonTmp = () =>", "per-data", "the daemon's TMPDIR is the data folder's browser-env/tmp"],
+    ["src/spawn/ssh.js", "`dtach -A /tmp/vs-${id}", "unique", "a remote session's dtach socket, keyed by the session id (owned by the user who made it)"]
+  ];
+  const KINDS110 = new Set(['per-data', 'per-user', 'unique', 'system', 'read', 'words', 'by-hand']);
+  // a /tmp, /var/tmp or /private/tmp path wherever it starts (a quote, a shell word, `:-` of a parameter), its regex spelling (\/tmp), os.tmpdir()
+  const NAMES110 = /os\.tmpdir\(\)|\btmpdir\(\)|(?<![\w.$])\/(?:var\/|private\/)?tmp(?![\w-])|\\\/(?:var\\\/)?tmp(?![\w-])/;
+  const linesOf110 = (src) => src.split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*|#)/.test(l) && NAMES110.test(l));
+  const judge110 = (filesWithText) => {
+    const used = new Set(), fresh = [];
+    for (const [f, text] of filesWithText) for (const l of linesOf110(text)) {
+      const i = ROWS110.findIndex(([rf, needle]) => rf === f && l.includes(needle));
+      if (i < 0) fresh.push(`${f}: ${l.trim().slice(0, 120)}`); else used.add(i);
+    }
+    return { fresh, stale: ROWS110.filter((_, i) => !used.has(i)).map(([f, n]) => `${f} «${n}»`) };
+  };
+  // the product: its code, its CLIs, and the shell it ships (the supervisor, the installers, the docker entry, the Ctrl+G helper)
+  const product110 = trackedFiles(REPO, 'src', 'server.js', 'data/bin', 'run.sh', 'install.sh', 'editor-helper.sh', 'deploy/docker', 'scripts/update.sh', 'scripts/install-service.sh', 'scripts/vibespace-agentd-install.sh')
+    .filter((f) => /\.(?:js|mjs|cjs|sh)$/.test(f) || /^data\/bin\/[^.]+$/.test(f) || f === 'server.js');
+  const read110 = (f) => { try { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); return t.includes('\0') ? '' : t; } catch { return ''; } };
+  const texts110 = product110.map((f) => [f, read110(f)]);
+  const j110 = judge110(texts110);
+  const byKind = [...KINDS110].map((k) => `${k} ${ROWS110.filter((r) => r[2] === k).length}`).join(', ');
+  console.log(`  · ${ROWS110.length} rows over ${product110.length} product files — ${byKind}`);
+  ok(ROWS110.every((r) => r.length === 4 && KINDS110.has(r[2]) && String(r[3]).length > 3), '§110 every row names its kind (per-data / per-user / unique / system / read / by-hand) and its reason');
+  ok(!j110.fresh.length && !j110.stale.length, `§110 every product line naming the temp folder is a row, and every row still finds its line${j110.fresh.length ? ' — NEW: ' + j110.fresh.join(' | ') : ''}${j110.stale.length ? ' — STALE: ' + j110.stale.join(' | ') : ''}`);
+  const files110 = texts110.find(([f]) => f === 'src/routes/files.js')?.[1] || '';
+  const plug110 = texts110.find(([f]) => f === 'src/server/plugin-loader.js')?.[1] || '';
+  const back = judge110([['src/routes/files.js', files110 + "\nconst upload = multer({ dest: '/tmp/claude-webui-uploads/' });\n"], ['src/server/plugin-loader.js', plug110 + "\n      const up = multer({ dest: path.join(os.tmpdir(), 'vibespace-plugin-uploads') });\n"]]);   // stale-pins: kept — the release's two upload lines, planted on purpose (§110's red control)
+  ok(back.fresh.length === 2 && back.fresh.every((x) => /claude-webui-uploads|vibespace-plugin-uploads/.test(x)), `§110 RED CONTROL: the release's two machine-wide upload folders are new, unrowed lines (red): ${back.fresh.join(' | ')}`);   // stale-pins: kept — the planted lines' names (§110's red control)
+  ok(judge110([['src/x.js', "// a comment naming '/tmp/x'\nconst b = path.join(os.homedir(), 'y');\n"]]).fresh.length === 0 && judge110([['src/x.js', "const d = path.join(os.tmpdir(), 'fixed-name');\n"]]).fresh.length === 1, '§110 CONTROL: a whole-line comment and a home path are not temp names; a new fixed name is');
+});
+
 await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -46,7 +46,8 @@ function createEditorHelper() {
 # WebUI editor disguised as "code" so Claude Code treats it as GUI (no screen clear).
 # Parse args: skip flags, last arg is the file
 FILE="\${@: -1}"
-SIGNAL="/tmp/claude-webui-edit-signal-\$\$"
+# B-3767: a fresh random name (a pid comes back, and an old signal left under it made Ctrl+G return at once)
+SIGNAL="\$(mktemp -u "\${TMPDIR:-/tmp}/claude-webui-edit-signal-XXXXXXXXXX")"
 PORT="\${CLAUDE_WEBUI_PORT:-${port}}"
 SESS="\${CLAUDE_WEBUI_SESSION_ID}"
 curl -sf -X POST "http://localhost:\${PORT}/api/editor/open" \\

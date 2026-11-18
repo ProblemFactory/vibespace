@@ -3363,17 +3363,17 @@ class ChatRenderers {
 
   openInTempEditor(text) {
     const tmpName = `chat-block-${Date.now()}.txt`;
-    const tmpPath = `/tmp/claude-webui/${tmpName}`;
-    fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: '/tmp/claude-webui' }) }).catch(() => {});
-    fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: tmpPath, content: text }) })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(() => {
+    // B-3767: the HUB picks the folder — its own temp folder (src/server/hub-tmp.js), never a machine-wide /tmp name another
+    // user may own — and answers the path; a failure reaches the person (it was silent)
+    fetch('/api/file/temp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: tmpName, content: text }) })
+      .then((r) => r.json().catch(() => ({})).then((j) => { if (!r.ok || !j.path) throw new Error(j.error || `HTTP ${r.status}`); return j.path; }))
+      .then((tmpPath) => {
         this.app.openEditor(tmpPath, tmpName, {
           _tempFile: true,
           _onCloseDelete: () => fetch(`/api/file?path=${encodeURIComponent(tmpPath)}`, { method: 'DELETE' }).catch(() => {}),
         });
       })
-      .catch(() => {});
+      .catch((e) => showToast(t('Could not open the block in an editor: {error}', { error: e.message }), { type: 'error' }));
   }
 
   addOpenInEditorBtn(el) {

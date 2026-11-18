@@ -495,8 +495,9 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     let uploadMw = (req, res, next) => next();
     try {
       const multer = require('multer');
-      const up = multer({ dest: path.join(os.tmpdir(), 'vibespace-plugin-uploads'), limits: { fileSize: require('./plugin-install.js').MAX_ZIP_BYTES, files: 1 } }).single('file');
-      uploadMw = (req, res, next) => up(req, res, (err) => (err ? res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'the .vsp is larger than 50 MB' : err.message }) : next()));
+      // B-3767: the .vsp lands in THIS hub's own temp folder (src/server/hub-tmp.js), never a machine-wide name; a refusal is said
+      const up = multer({ storage: require('./hub-tmp.js').hubTmpStorage(multer, 'plugin-uploads', { dataDir: path.join(rootDir, 'data') }), limits: { fileSize: require('./plugin-install.js').MAX_ZIP_BYTES, files: 1 } }).single('file');
+      uploadMw = (req, res, next) => up(req, res, (err) => (err ? res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : (err.status || 400)).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'the .vsp is larger than 50 MB' : err.message, code: err.code || undefined }) : next()));
     } catch (e) { log.warn?.('[plugins] multer unavailable — .vsp uploads disabled: ' + e.message); }
     app.post('/api/plugins/install', uploadMw, async (req, res) => {
       // lane engine-distribution: a git install's `ref` + `credential` (null | 'plugin-git' — a person never types a token here)

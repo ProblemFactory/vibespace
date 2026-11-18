@@ -602,7 +602,10 @@ export class ChatInput {
       if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);
       const kept = uploaded.find((f) => f && f.keptDir);   // lane chat-attachments-persist: said, never silent
       if (kept) showToast(t('Kept with this conversation in {dir} — {from} is a temporary folder', { dir: kept.keptDir, from: kept.keptFrom }), { duration: 8000 });
-      if (failed.length) {
+      if (failed.length && !uploaded.length && failed[0].error) {
+        // B-3767: nothing landed — the server's own reason, by name (a temp folder the hub cannot use names its path)
+        this._uploadToast(t('Upload failed: {msg}', { msg: failed[0].error }), true);
+      } else if (failed.length) {
         this._uploadToast(t("Uploaded {n}, {failed} couldn't be read (e.g. {name})", { n: uploaded.length, failed: failed.length, name: failed[0].name }), true);
       } else if (!uploaded.length) {
         this._uploadToast(t('Upload failed — no files could be read'), true);

@@ -12,7 +12,8 @@
 #   OOMScoreAdjust=-500  (systemd unit)  — or run:  choom -n -500 -- ./run.sh
 set -u
 cd "$(dirname "$0")"
-LOG="${VIBESPACE_LOG:-/tmp/vs-server.log}"
+# B-3767: the log is THIS user's (a second user's run.sh met the first one's /tmp/vs-server.log and could not open it)
+LOG="${VIBESPACE_LOG:-${TMPDIR:-/tmp}/vs-server-$(id -u).log}"
 # scripts/update.sh restarts a supervised server by killing its pid — the
 # loop below respawns it on the new code (same contract as the container
 # entrypoint's supervisor).

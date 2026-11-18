@@ -964,6 +964,7 @@ export default {
   "Open": "開く",
   "Open Login Terminal": "ログインターミナルを開く",
   "Open in editor": "エディタで開く",
+  "Could not open the block in an editor: {error}": "このブロックをエディタで開けませんでした：{error}",
   "Open link": "リンクを開く",
   "Open login terminal": "ログインターミナルを開く",
   "Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.": "任意——このサーバーに到達できる人は誰でもフルシェルアクセスを得ます。パスワードはページ・API・ターミナルへのアクセスを制限します。",

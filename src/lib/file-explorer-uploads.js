@@ -1,4 +1,4 @@
-import { escHtml, createPopover, formatSize, uploadFilesBatched, getStateSync } from './utils.js';
+import { escHtml, createPopover, formatSize, uploadFilesBatched, getStateSync, showToast } from './utils.js';
 import { getFileIcon } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
@@ -228,6 +228,8 @@ export function installExplorerUploads(FileExplorer) {
         setTimeout(() => { this._activeUploads.delete(uploadId); this._updateUploadRing(); this.refresh(); }, failed.length ? 3000 : 800);
       } else {
         this._saveUploadHistory(files.map((f, i) => ({ name: names[i], size: f.size })), 'fail');
+        // B-3767: nothing landed — the server's own reason reaches the person (a temp folder the hub cannot use names its path)
+        if (failed[0]?.error) showToast(t('Upload failed: {msg}', { msg: failed[0].error }), { type: 'error' });
         upload.status = 'error';
         for (const ref of upload.domRefs.values()) { ref.row.classList.add('file-upload-error'); ref.pctLabel.textContent = t('Failed'); }
         setTimeout(() => { this._activeUploads.delete(uploadId); this._updateUploadRing(); if (this.currentPath === destDir) this._renderItems(); }, 3000);

@@ -965,6 +965,7 @@ export default {
   "Open": "打开",
   "Open Login Terminal": "打开登录终端",
   "Open in editor": "在编辑器中打开",
+  "Could not open the block in an editor: {error}": "无法在编辑器中打开这段内容：{error}",
   "Open link": "打开链接",
   "Open login terminal": "打开登录终端",
   "Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.": "可选——任何能访问此服务器的人都可获得完整的 shell 访问权限。密码会保护页面、API 和终端。",
