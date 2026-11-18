@@ -239,6 +239,8 @@ module.exports = {
     // so both env doors strip an ambient copy (src/harness-env.js)
     keyEnvVars: [PROVIDER_KEY_VAR],
     providerSpawn: codexProviderSpawn,
+    // THE PROVIDER TEST's own words (lane lg-providers U4): `codex exec` once, read-only, no repository needed
+    providerTest: { argv: (model) => ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', ...(model ? ['--model', String(model)] : []), 'ok'] },
     loginLabel: 'ChatGPT',
     defaultIdField: 'defaultCodexAccountId',
     spawnForm: 'isolated-home',                // accounts.resolveForSpawn: spawnEnvVar = the account's own dir (a pool = its symlink); no API keys, no oat

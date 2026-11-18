@@ -28,6 +28,11 @@
 //      locked ⇒ nothing written, rekey / patch / remove / keyOf), the doors (a person's only, 201 / 400 / 423 / 404), the
 //      refresh's key resolver; RED controls: a fits without the wire rule lets DeepSeek into codex; a key rule without
 //      the subscription refusal takes a Claude login; a store that skips the seal writes a record while the vault is locked
+//   ⑮ THE PROVIDER TEST (lane lg-providers U4): a FAKE CLI (scripts/fixtures/provider-test/fake-cli.js) reports what it was
+//      handed — its homes all fresh and EMPTY (the machine's planted login unreachable), every credential name stripped, the
+//      key only where the harness reads it, nothing in argv; the verdicts; the redaction; every refusal by name with NOTHING
+//      spawned (a vendor's own host, no address, the vault locked, the key gone, not a person, unfit, in flight); the door;
+//      RED controls: the runner without its fresh homes / its address verdict / its key check / its person check
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -92,7 +97,7 @@ ok(eq(M.PRESETS.map(M.listerOf), ['claude', 'gemini', 'claude', 'codex']) && M.l
 
 // ── ③ the record shape ────────────────────────────────────────────────────────────────────────────────────
 console.log('③ the record shape');
-ok(eq(M.PROVIDER_FIELDS, ['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt', 'tail', 'createdAt', 'wire']), 'PROVIDER_FIELDS = §1\'s record, field for field (+ tail, createdAt and a self-hosted one\'s wire, lane lg-providers U1)');
+ok(eq(M.PROVIDER_FIELDS, ['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt', 'tail', 'createdAt', 'wire', 'tested']), 'PROVIDER_FIELDS = §1\'s record, field for field (+ tail, createdAt, a self-hosted one\'s wire — U1 — and the Test\'s verdicts per harness — U4)');
 const planted = M.normalizeProvider({ ...recordOf(M.kindOf('openrouter')), key: 'sk-or-v1-planted', apiKey: 'x', token: 'y', models: [{ id: 'a/b', secret: 'z' }] });
 ok(eq(Object.keys(planted), M.PROVIDER_FIELDS) && !JSON.stringify(planted).includes('planted') && eq(Object.keys(planted.models[0]), M.MODEL_FIELDS), 'normalizeProvider keeps EXACTLY the closed fields: a planted key / apiKey / token (and a row\'s extra field) never survive');
 ok(eq(M.MODEL_FIELDS, ['id', 'label', 'context', 'caps']) && eq(M.normalizeModelRow({ id: 'gpt-5.5', label: ' ', context: '1M', caps: ['1m', 'tools', 'nope'] }), { id: 'gpt-5.5', label: 'gpt-5.5', context: 1000000, caps: ['tools', '1m'] }), 'a row = id · label (defaults to the id) · context (200k / 1M parsed) · caps (CAPS order, unknown dropped once valid)');
@@ -401,6 +406,140 @@ const mstore = PSm.create({ dataDir: MDIR, catalogOf, vault: () => vault, log: (
 const ma1 = mstore.add({ preset: 'glm', key: KEY });
 ok(ma1.ok && fs.existsSync(mstore.file) && mstore.keyOf(ma1.provider.id).code === 'vault_locked', 'CONTROL: a store that skips the seal WRITES a record while the vault is locked (a provider whose key was never kept) ⇒ RED (the real one refuses vault_locked with the file untouched)');
 fs.rmSync(PDIR, { recursive: true, force: true }); fs.rmSync(MDIR, { recursive: true, force: true });
+
+// ── ⑮ THE PROVIDER TEST (lane lg-providers, B-d578 U4 — the coordinator's five musts, 2026-11-17T23:24Z) ──────────────
+console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only, a key or nothing, a person\'s press');
+{
+  const PTM = require(path.join(ROOT, 'src/provider-test-model.js'));
+  const PTRF = path.join(ROOT, 'src/server/provider-test.js');
+  const PTR = require(PTRF);
+  const TDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvtest-suite-'));
+  const tvault = VE.create({ dataDir: TDIR, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false });
+  await tvault.setup(PW, {});
+  const tstore = PS.create({ dataDir: TDIR, vault: () => tvault, log: () => {} });
+  const TKEY = ['sk-', 'third', '-party-', 'test-', '9b1e5a'].join('');
+  const addOther = (host, wire, label) => tstore.add({ preset: 'other', key: TKEY, baseUrl: `https://${host}/v1`, model: 'm-1', wire, label }).provider;
+  const P = { ok: addOther('llm.example.test', 'anthropic-messages', 'Good'), refuse: addOther('refuse.example.test', 'anthropic-messages', 'Refuse'), down: addOther('down.example.test', 'anthropic-messages', 'Down'),
+    nomodel: addOther('nomodel.example.test', 'anthropic-messages', 'NoModel'), slow: addOther('slow.example.test', 'anthropic-messages', 'Slow'), leak: addOther('leak.example.test', 'anthropic-messages', 'Leak'),
+    codex: addOther('llm.example.test', 'openai-responses', 'GoodCodex') };
+  // THE MACHINE'S OWN SIGN-IN, planted exactly where an unguarded child would find it (its HOME, its config variables)
+  const MACHINE = path.join(TDIR, 'machine-home');
+  fs.mkdirSync(path.join(MACHINE, '.claude'), { recursive: true }); fs.writeFileSync(path.join(MACHINE, '.claude', '.credentials.json'), '{"claudeAiOauth":{}}');
+  fs.mkdirSync(path.join(MACHINE, '.codex')); fs.writeFileSync(path.join(MACHINE, '.codex', 'auth.json'), '{}');
+  const FAKE = path.join(TDIR, 'fake-cli.js');
+  fs.copyFileSync(path.join(ROOT, 'scripts/fixtures/provider-test/fake-cli.js'), FAKE); fs.chmodSync(FAKE, 0o755);
+  const REPORT = path.join(TDIR, 'report.json');
+  const AMB = { PATH: process.env.PATH, FAKE_REPORT: REPORT, HOME: MACHINE, CLAUDE_CONFIG_DIR: path.join(MACHINE, '.claude'), CLAUDE_SECURESTORAGE_CONFIG_DIR: path.join(MACHINE, '.claude'), CODEX_HOME: path.join(MACHINE, '.codex'),
+    CLAUDE_CODE_OAUTH_TOKEN: 'ambient-oat', ANTHROPIC_API_KEY: 'ambient-console', ANTHROPIC_AUTH_TOKEN: 'ambient-token', OPENAI_API_KEY: 'ambient-openai', VIBESPACE_PROVIDER_KEY: 'ambient-provider',
+    CLAUDE_CODE_USE_FOUNDRY: '1', ANTHROPIC_CUSTOM_HEADERS: 'x-planted: 1', AWS_SECRET_ACCESS_KEY: 'ambient-aws', LANG: 'C.UTF-8' };
+  const mk = (Mod = PTR, o = {}) => Mod.create({ providers: tstore, cliFor: async () => FAKE, agentEnv: () => ({ ...AMB }), scratchRoot: TDIR, timeoutMs: 8000, ...o });
+  const slowRunner = mk(PTR, { timeoutMs: 400 });   // only the timeout leg runs on a short bound (a loaded machine never flakes the rest)
+  const runner = mk();
+  const report = () => { try { return JSON.parse(fs.readFileSync(REPORT, 'utf8')); } catch { return null; } };
+  const fresh = () => { try { fs.rmSync(REPORT); } catch { } };
+  const scratchLeft = () => fs.readdirSync(TDIR).filter((n) => n.startsWith('vs-pvtest-'));
+  const run = async (Mod, id, harness, by = 'human') => { fresh(); const r = await Mod.runProviderTest(id, harness, { by }); return { r, rep: report() }; };
+
+  const c1 = await run(runner, P.ok.id, 'claude');
+  const homes1 = c1.rep ? c1.rep.homes : {};
+  ok(c1.r.ok && c1.r.verdict === 'ok' && c1.r.detail === '' && tstore.get(P.ok.id).tested.claude.verdict === 'ok' && tstore.get(P.ok.id).lastTestAt === c1.r.at, 'claude, a good third party: verdict ok, kept on the record (tested.claude + lastTestAt)', c1.r);
+  ok(!!c1.rep && ['HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CODEX_HOME'].every((h) => homes1[h] && !homes1[h].dir.startsWith(MACHINE) && homes1[h].files.length === 0), 'MUST 1 — as the fake saw it: HOME, XDG_CONFIG_HOME and EVERY harness\'s config variable are fresh EMPTY folders of the run\'s own (no sign-in file, no stored credential; the machine\'s planted login reachable from none)', homes1);
+  ok(!!c1.rep && !c1.rep.envNames.includes('CLAUDE_CODE_OAUTH_TOKEN') && !c1.rep.envNames.includes('OPENAI_API_KEY') && c1.rep.keyVars.ANTHROPIC_API_KEY === null && !c1.rep.envNames.includes('VIBESPACE_PROVIDER_KEY') && c1.rep.keyVars.ANTHROPIC_AUTH_TOKEN === TKEY && c1.rep.base === 'https://llm.example.test/v1', 'MUST 1/4 — the sanitized env with every credential name stripped (the ambient OAuth token, Console key, OpenAI key, provider key gone); the provider\'s key ONLY in the variable the harness reads; the third party\'s address', c1.rep && { names: c1.rep.envNames.filter((n) => /KEY|TOKEN|OAUTH/.test(n)), base: c1.rep.base });
+  const a1 = c1.rep ? c1.rep.argv : [];
+  ok(!!c1.rep && !a1.some((a) => a.includes(TKEY)) && a1[0] === '-p' && a1[1] === 'ok' && !a1.includes('--bare') && a1.join(' ').includes('--max-turns 1 --settings {"apiKeyHelper":""} --disallowedTools Bash,') && a1.slice(-2).join(' ') === '--model m-1' && scratchLeft().length === 0, 'MUST 4 — nothing of the key in argv (claude: -p ok, one turn, a machine-wide apiKeyHelper neutralized, no tools, --model <the provider\'s row>; not --bare: it would take ANTHROPIC_API_KEY only); the scratch folder removed after the run', a1);
+  ok(!!c1.rep && ['CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_CUSTOM_HEADERS', 'AWS_SECRET_ACCESS_KEY'].every((n) => !c1.rep.envNames.includes(n)) && c1.rep.envNames.includes('LANG'), 'MUST 1 — every vendor-family name the env doors do not know is gone too (Foundry, custom headers, cloud credentials); an ordinary name (LANG) stays', c1.rep && c1.rep.envNames.filter((n) => /^(AWS|ANTHROPIC|CLAUDE)/.test(n)));
+  const c2 = await run(runner, P.codex.id, 'codex');
+  const ix = c2.rep ? c2.rep.argv.indexOf('exec') : -1;
+  ok(c2.r.verdict === 'ok' && ix > 0 && c2.rep.argv.slice(0, ix).includes(`model_providers.pv_${P.codex.id.slice(3)}.base_url="https://llm.example.test/v1"`) && c2.rep.argv.slice(ix).join(' ') === 'exec --skip-git-repo-check --sandbox read-only --model m-1 ok' && c2.rep.keyVars.VIBESPACE_PROVIDER_KEY === TKEY && c2.rep.homes.CODEX_HOME.files.length === 0 && !c2.rep.homes.CODEX_HOME.dir.startsWith(MACHINE) && !c2.rep.argv.some((a) => a.includes(TKEY)), 'codex: its -c provider table ahead of `exec … ok`, its key in VIBESPACE_PROVIDER_KEY only, CODEX_HOME an empty folder of the run (no auth.json), nothing of the key in argv', c2.rep && c2.rep.argv);
+  const V = {};
+  for (const w of ['refuse', 'down', 'nomodel', 'slow', 'leak']) V[w] = (await run(w === 'slow' ? slowRunner : runner, P[w].id, 'claude')).r;
+  ok(V.refuse.verdict === 'key-refused' && V.down.verdict === 'unreachable' && V.nomodel.verdict === 'not-served' && V.slow.verdict === 'timeout' && V.leak.verdict === 'failed' && scratchLeft().length === 0, 'the verdict a person reads: a 401 ⇒ key-refused · ECONNREFUSED ⇒ unreachable · a 404 not_found_error ⇒ not-served · no end within the bound ⇒ timeout (the child killed) · anything else ⇒ failed; every scratch folder removed', Object.fromEntries(Object.entries(V).map(([k, v]) => [k, v.verdict])));
+  ok(!V.leak.detail.includes(TKEY) && V.leak.detail.includes('••••') && V.leak.detail.length <= PTM.DETAIL_MAX && V.refuse.detail.includes('401'), 'the child\'s words are REDACTED before anyone reads them (the key the CLI printed ⇒ ••••), cut to 300 characters', V.leak.detail);
+  const SS = require(path.join(ROOT, 'src/secret-shapes.js'));
+  const shaped = PTM.redact(`request failed: key ${['sk-', 'or-v1-', 'f'.repeat(40)].join('')} was rejected`, 'no-such-key-here', SS.redactSecrets);
+  ok(typeof V.leak.detail === 'string' && V.leak.detail.includes('request failed') && typeof shaped === 'string' && !shaped.includes('f'.repeat(40)) && shaped.includes('rejected'), 'the detail is TEXT through the real redactSecrets (it answers { text, redacted }): a person reads the words with every secret shape masked — never «[object Object]»', { leak: V.leak.detail, shaped });
+  const cut = PTM.redact(`head ${TKEY.slice(0, 11)}|${TKEY.slice(11)} tail`, TKEY);
+  ok(!cut.includes(TKEY.slice(0, 8)) && !cut.includes(TKEY.slice(-8)) && cut.includes('head') && cut.includes('tail'), 'a key CUT in two (a chunk\'s edge) leaves no piece of 8 characters or more', cut);
+  // THE REFUSALS — by name, NOTHING spawned (the fake writes no report)
+  const putRec = (id, baseUrl) => { const r = tstore.put({ id, kind: 'self-hosted', label: id, preset: 'other', baseUrl, keyRef: M.keyRefOf(id), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] }); tvault.secretPut(M.keyEntryOf(id), TKEY); return r; };
+  putRec('pv-vendor1', 'https://api.anthropic.com'); putRec('pv-vendor2', 'https://claude.ai./x'); putRec('pv-noaddr1', null); putRec('pv-vendor3', 'https://API.ANTHROPIC.COM/v1');
+  const nomod = tstore.add({ preset: 'other', key: TKEY, baseUrl: 'https://llm.example.test/v1', wire: 'anthropic-messages', label: 'NoRows' }).provider;
+  const refusals = [];
+  const refuse = async (what, Mod, id, harness, code, by) => { const x = await run(Mod, id, harness, by); refusals.push([what, x.r.code]); ok(!x.r.ok && x.r.code === code && x.rep === null, `REFUSED BY NAME (${code}), NOTHING SPAWNED — ${what}`, x.r); };
+  await refuse('MUST 2: an address on the vendor\'s own hosts (api.anthropic.com)', runner, 'pv-vendor1', 'claude', 'vendor-own');
+  await refuse('MUST 2: claude.ai. (a trailing dot is the same host)', runner, 'pv-vendor2', 'claude', 'vendor-own');
+  await refuse('MUST 2: no address («use the default»)', runner, 'pv-noaddr1', 'claude', 'no-address');
+  await refuse('MUST 2: the vendor\'s host in capitals', runner, 'pv-vendor3', 'claude', 'vendor-own');
+  await refuse('no model to ask with (never the CLI\'s own default id at a third party)', runner, nomod.id, 'claude', 'model-none');
+  const bypass = ['https://api.anthropic.com\\x.test/v1', 'https://api%2Eanthropic%2Ecom/v1', 'https://api\uff0eanthropic\uff0ecom/v1'];
+  ok(bypass.every((u) => !PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: u }).ok) && bypass.every((u) => codes(M.validateProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm' }), id: 'pv-x8', keyRef: M.keyRefOf('pv-x8'), baseUrl: u })).includes('base-url')) && PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: 'https://api.anthropic.com/v1' }).code === 'vendor-own', 'MUST 2 — the addresses a regex and the CLIs\' URL parser read differently (a backslash, %2E, full-width dots — each reaches api.anthropic.com) are refused, by the Test AND by the record rules', bypass.map((u) => PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: u })));
+  tvault.lock('door');
+  await refuse('MUST 3: the vault locked (the key cannot be read — it never runs without one)', runner, P.ok.id, 'claude', 'vault_locked');
+  await tvault.unlock(PW, {});
+  tvault.secretDrop(M.keyEntryOf(P.down.id));
+  await refuse('MUST 3: the key entry gone', runner, P.down.id, 'claude', 'no-key');
+  await refuse('MUST 5: not a person\'s press (no by: human)', runner, P.ok.id, 'claude', 'human_only', 'timer');
+  await refuse('a harness the provider does not serve (Anthropic-compatible under Codex)', runner, P.ok.id, 'codex', 'unfit');
+  await refuse('a built-in record (the first-party Console key) is never a third-party test', runner, 'pv-anthropic-api', 'claude', 'unknown');
+  ok(eq([...PTM.VENDOR_OWN_HOSTS], ['anthropic.com', 'claude.ai', 'claude.com', 'openai.com', 'chatgpt.com']) && PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: 'https://eu.api.openai.com/v1' }).code === 'vendor-own' && PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: 'https://api.anthropic.com.evil.test/v1' }).ok && PTM.addressVerdict({ id: 'pv-x9', kind: 'self-hosted', baseUrl: 'https://user@api.openai.com/v1' }).code === 'vendor-own', 'the vendor hosts by suffix (eu.api.openai.com is OpenAI\'s; api.anthropic.com.evil.test is not; a user@ in front changes nothing)');
+  const p1 = slowRunner.runProviderTest(P.slow.id, 'claude', { by: 'human' });
+  const p2 = await slowRunner.runProviderTest(P.slow.id, 'claude', { by: 'human' });
+  await p1;
+  ok(p2.code === 'in-flight', 'one test per provider × harness at a time (a second press while one runs ⇒ in-flight)', p2);
+  fresh();
+  const cm = await mk(PTR, { cliFor: async () => null }).runProviderTest(P.ok.id, 'claude', { by: 'human' });
+  ok(cm.ok && cm.verdict === 'cli-missing' && report() === null, 'no CLI on this machine ⇒ verdict cli-missing, nothing spawned');
+
+  // MUST 5 — the person's door
+  const tapp = express(); tapp.use(express.json());
+  require(path.join(ROOT, 'src/routes/providers.js')).registerProviderRoutes(tapp, { providers: tstore, tester: runner });
+  const tsrv = await new Promise((res) => { const s2 = tapp.listen(0, '127.0.0.1', () => res(s2)); });
+  const tbase = `http://127.0.0.1:${tsrv.address().port}`;
+  const tpost = async (id, body, headers) => { fresh(); const r = await fetch(`${tbase}/api/providers/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); return [r.status, await r.json(), report()]; };
+  try {
+    const [s1, j1, r1] = await tpost(P.ok.id, { harness: 'claude' }, { 'Sec-Fetch-Site': 'same-origin' });
+    const [s2, j2, r2] = await tpost(P.ok.id, { harness: 'claude' }, { 'Sec-Fetch-Site': 'same-origin', Authorization: 'Bearer vsst_planted' });
+    const [s3, j3, r3] = await tpost(P.ok.id, { harness: 'claude' }, { 'Sec-Fetch-Site': 'cross-site' });
+    const [s4, j4] = await tpost('pv-vendor1', { harness: 'claude' }, { 'Sec-Fetch-Site': 'same-origin' });
+    ok(s1 === 200 && j1.verdict === 'ok' && j1.words === 'Works' && r1 !== null && s2 === 403 && j2.code === 'human_only' && r2 === null && s3 === 403 && j3.code === 'cross_site' && r3 === null && s4 === 409 && j4.code === 'vendor-own', 'MUST 5 — the door: a person\'s press on the page runs it (200, its words); an agent\'s bearer or another site ⇒ 403, nothing spawned; a vendor\'s own address ⇒ 409 by name');
+  } finally { tsrv.close(); }
+
+  console.log('⑮ RED controls — each refusal and each home taken out of a patched copy of the runner');
+  const RSRC = fs.readFileSync(PTRF, 'utf-8');
+  const runnerMutant = (pairs) => { let t = RSRC; for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error('mutant anchor missing: ' + from.slice(0, 80)); t = t.replace(from, to); } const m = new Module(PTRF); m.filename = PTRF; m.paths = Module._nodeModulePaths(path.dirname(PTRF)); m._compile(t, PTRF); return m.exports; };
+  const noHomes = mk(runnerMutant([["      for (const v of [c.homeEnvVar, c.spawnEnvVar]) if (typeof v === 'string' && /^[A-Z_][A-Z0-9_]*$/.test(v)) env[v] = await fresh(v);\n", ''], ["    env.HOME = await fresh('HOME');\n", '']]));
+  const xa = await run(noHomes, P.ok.id, 'claude');
+  ok(xa.rep && xa.rep.homes.HOME && xa.rep.homes.HOME.files.includes('.claude/.credentials.json'), 'CONTROL MUST 1: a runner without the fresh homes hands the child the MACHINE\'S HOME — its sign-in file reachable ⇒ the empty-homes leg goes RED', xa.rep && xa.rep.homes);
+  const noAddr = mk(runnerMutant([['    if (!a.ok) return { ok: false, code: a.code };\n', '']]));
+  const xb = await run(noAddr, 'pv-vendor1', 'claude');
+  ok(xb.rep !== null && xb.rep.base === 'https://api.anthropic.com', 'CONTROL MUST 2: a runner without the address verdict RUNS a print-mode child at the vendor\'s own host ⇒ the vendor-own leg goes RED', xb.r);
+  tvault.lock('door');
+  const noKey = mk(runnerMutant([["    if (!k.ok || !k.value) return { ok: false, code: k.ok ? 'no-key' : k.code };\n", '']]));
+  const xc = await run(noKey, P.ok.id, 'claude');
+  await tvault.unlock(PW, {});
+  ok(xc.rep !== null && !xc.rep.keyVars.ANTHROPIC_AUTH_TOKEN, 'CONTROL MUST 3: a runner without the key check RUNS with no key at all («see what happens») ⇒ the vault-locked leg goes RED', xc.r);
+  const noPerson = mk(runnerMutant([["    if (by !== 'human') return { ok: false, code: 'human_only' };\n", '']]));
+  const xd = await run(noPerson, P.ok.id, 'claude', 'timer');
+  ok(xd.rep !== null, 'CONTROL MUST 5: a runner without the person check runs for a timer ⇒ the human_only leg goes RED', xd.r);
+  const noStrip = mk(runnerMutant([['    for (const n of credentialEnvNames(ds)) delete env[n];\n', '']]));
+  const xe = await run(noStrip, P.ok.id, 'claude');
+  ok(xe.rep && xe.rep.envNames.includes('CLAUDE_CODE_OAUTH_TOKEN') === false && xe.rep.envNames.includes('VIBESPACE_PROVIDER_KEY'), 'CONTROL MUST 1: without the credential strip an ambient VIBESPACE_PROVIDER_KEY rides into the child (the vendor-family strip still takes the CLAUDE_ ones) ⇒ the strip leg goes RED', xe.rep && xe.rep.envNames.filter((n) => /KEY|TOKEN/.test(n)));
+  const noFamily = mk(runnerMutant([['    for (const n of Object.keys(env)) if (VENDOR_FAMILY.test(n)) delete env[n];\n', '']]));
+  const xf = await run(noFamily, P.ok.id, 'claude');
+  ok(xf.rep && xf.rep.envNames.includes('CLAUDE_CODE_USE_FOUNDRY') && xf.rep.envNames.includes('AWS_SECRET_ACCESS_KEY'), 'CONTROL MUST 1: without the vendor-family strip an ambient Foundry switch and a cloud credential reach the child ⇒ the vendor-family leg goes RED');
+  const noXdg = mk(runnerMutant([["    env.XDG_CONFIG_HOME = await fresh('XDG_CONFIG_HOME');\n", '']]));
+  const xg = await run(noXdg, P.ok.id, 'claude');
+  ok(xg.rep && !xg.rep.homes.XDG_CONFIG_HOME, 'CONTROL MUST 1: without the fresh XDG_CONFIG_HOME the child has none of its own (a CLI reading it falls back to the machine\'s ~/.config) ⇒ the empty-homes leg goes RED');
+  const noFit = mk(runnerMutant([["    if (!MP.fitsHarness(p, harness) || !h || !h.creds || typeof h.creds.providerSpawn !== 'function' || !h.creds.providerTest || typeof h.creds.providerTest.argv !== 'function') return { ok: false, code: 'unfit' };\n", "    if (!h || !h.creds) return { ok: false, code: 'unfit' };\n"]]));
+  const xh = await run(noFit, P.ok.id, 'codex');
+  ok(xh.rep !== null, 'CONTROL: without the fit check an Anthropic-compatible provider is run under Codex ⇒ the unfit leg goes RED');
+  const noSlot = mk(runnerMutant([["    if (inFlight.has(slot)) return { ok: false, code: 'in-flight' };\n", '']]), { timeoutMs: 400 });
+  const q1 = noSlot.runProviderTest(P.slow.id, 'claude', { by: 'human' });
+  const q2 = await noSlot.runProviderTest(P.slow.id, 'claude', { by: 'human' });
+  await q1;
+  ok(q2.ok && q2.verdict === 'timeout', 'CONTROL: without the in-flight slot a second press runs a second child (spends the key twice) ⇒ the in-flight leg goes RED', q2);
+  fs.rmSync(TDIR, { recursive: true, force: true });
+}
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

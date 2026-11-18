@@ -10365,6 +10365,21 @@ export default {
   "Model provider key": "模型提供方密钥", // lane lg-providers
   "VibeSpace hands it to the agent CLI it starts for this provider": "VibeSpace 把它交给为这个提供方启动的 agent CLI", // lane lg-providers
   "Put the key in the key field — not in the address": "请把密钥填在密钥框里——不要写进地址", // lane lg-providers
+  "Pick a model first — the test asks the provider with it": "请先选一个模型——测试要用它向提供方发问", // lane lg-providers
+  "Works": "可用", // lane lg-providers
+  "The key was refused — check it in the provider’s console": "密钥被拒绝——去提供方的控制台看看", // lane lg-providers
+  "This provider does not serve the model, or not what this agent needs": "这个提供方不提供这个模型，或者不提供这个 agent 需要的接口", // lane lg-providers
+  "The address did not answer — check it in the technical details": "地址没有回应——在技术细节里检查一下", // lane lg-providers
+  "No answer within a minute": "一分钟内没有回应", // lane lg-providers
+  "The test did not succeed — see the details": "测试没有成功——看看详情", // lane lg-providers
+  "This agent’s program was not found on this machine": "这台机器上找不到这个 agent 的程序", // lane lg-providers
+  "This is not a third-party provider": "这不是第三方提供方", // lane lg-providers
+  "This provider has no address — set it first": "这个提供方没有地址——请先设置", // lane lg-providers
+  "This address is the agent’s own vendor — a third-party test never runs on it": "这个地址是这个 agent 自家厂商的——第三方测试绝不会在上面运行", // lane lg-providers
+  "This provider does not offer what this agent needs": "这个提供方不提供这个 agent 需要的接口", // lane lg-providers
+  "This provider has no key — paste it again": "这个提供方没有密钥——请重新粘贴", // lane lg-providers
+  "A test of this provider is running already": "这个提供方的测试已经在运行", // lane lg-providers
+  "Only a person on this page can run a test": "只有在此页面上的人才能运行测试", // lane lg-providers
   "Remove the model provider \"{name}\"?": "移除模型提供方「{name}」？", // lane lg-providers
   "Its key leaves the vault and the provider leaves every agent's account list. Conversations already running on it keep working until they restart.": "它的密钥会离开保险库，这个提供方也会从每个 agent 的账号列表里消失。已经在用它的对话会继续工作，直到重启。", // lane lg-providers
   "Always for this pool": "一直（这个池）",

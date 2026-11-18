@@ -183,6 +183,14 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       if (!keyDropped) log(`[providers] ${id}: its vault entry could not be dropped — the record is gone all the same`);
       return { ok: true, id, keyDropped };
     },
+    /** THE TEST'S RESULT (lane lg-providers U4, src/server/provider-test.js): the verdict per harness + lastTestAt */
+    noteTested(id, harness, verdict, at) {
+      const p = thirdParty(id);
+      if (!p) return { ok: false, code: 'unknown' };
+      const next = MP.normalizeProvider({ ...p, lastTestAt: at, tested: { ...(p.tested || {}), [harness]: { verdict, at } } });
+      const w = commit(records.map((r) => (r.id === id ? next : r)));
+      return w.ok ? { ok: true, provider: filled(next) } : w;
+    },
     /** THE ONE READER of a provider's key value (the spawn road, the Test, the listed-model refresh) → { ok, value } |
      *  { ok: false, code: 'unknown' | 'no-key' | 'vault_locked' | 'vault_not_set_up' | 'key-unreadable' }. The value is
      *  the caller's to use once; it is never logged, answered or written. */

@@ -13,6 +13,11 @@
  *   POST   /api/providers/:id/key  { key }           → { ok, provider } (a new key sealed over the old) | 400 · 404 · 423 · 409
  *   PATCH  /api/providers/:id      { label?, defaultModel?, baseUrl? + wire? + key } → { ok, provider } | 400 · 404 — a new
  *         address (a self-hosted one only) is taken only with the key pasted again (`base-url-fixed` elsewhere)
+ *   POST   /api/providers/:id/test { harness } → { ok, harness, verdict, detail, at } — THE TEST (lane lg-providers U4,
+ *         src/server/provider-test.js): the harness's own CLI says «ok» to the third party, once, in a child with empty homes;
+ *         refused by name before anything spawns (403 human_only / cross_site · 404 unknown · 409 built-in / no-address /
+ *         vendor-own / unfit / in-flight / no-key / key-unreadable / vault_not_set_up · 423 vault_locked); spends one short
+ *         request of the person's own key — a person's press only, never a timer, never an agent
  *   DELETE /api/providers/:id      → { ok, id, keyDropped, orphan? } (the record, then its vault entry; an entry whose record
  *         is gone is dropped too — the Vault row's Remove is this door) | 404
  *
@@ -24,7 +29,9 @@ const MP = require('../model-providers.js');
 const { personVerdict } = require('./vault.js');
 const anyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || ''));
 
-const STATUS = Object.freeze({ invalid: 400, unknown: 404, 'built-in': 409, vault_locked: 423, vault_not_set_up: 409, 'key-unreadable': 409, 'write-failed': 500 });
+const PT = require('../provider-test-model.js');
+const STATUS = Object.freeze({ invalid: 400, unknown: 404, 'built-in': 409, vault_locked: 423, vault_not_set_up: 409, 'key-unreadable': 409, 'write-failed': 500,
+  'no-address': 409, 'vendor-own': 409, unfit: 409, 'in-flight': 409, 'no-key': 409, failed: 500 });
 const WORDS = Object.freeze({
   invalid: 'some fields are not valid', unknown: 'unknown provider', 'built-in': 'a built-in provider is not changed here',
   vault_locked: 'unlock the vault first — the provider’s key is kept there', vault_not_set_up: 'set up the vault first — the provider’s key is kept there',
@@ -34,7 +41,7 @@ const WORDS = Object.freeze({
 const pub = (p) => { if (!p) return null; const { keyRef, ...rest } = p; return { ...rest, hasKey: !!keyRef, fits: MP.fits(p) }; };
 const shippedPub = (s) => ({ ...s, fits: MP.fits({ kind: s.kind }) });
 
-function registerProviderRoutes(app, { providers, onChange = () => { } }) {
+function registerProviderRoutes(app, { providers, tester = null, onChange = () => { } }) {
   const refuse = (res, r) => res.status(STATUS[r.code] || 400).json({ ok: false, code: r.code, error: WORDS[r.code] || r.code, ...(r.errors ? { errors: r.errors } : {}) });
   const person = (req, res) => {
     const who = personVerdict(req);
@@ -70,6 +77,15 @@ function registerProviderRoutes(app, { providers, onChange = () => { } }) {
     if (!r.ok) return refuse(res, r);
     changed('patch', r.provider.id);
     res.json({ ok: true, provider: pub(r.provider) });
+  });
+  app.post('/api/providers/:id/test', async (req, res) => {
+    if (!person(req, res)) return;
+    if (!tester) return res.status(409).json({ ok: false, code: 'unfit', error: 'the provider test is not available on this hub' });
+    let r;
+    try { r = await tester.runProviderTest(String(req.params.id), String((req.body || {}).harness || ''), { by: 'human' }); } catch (e) { r = { ok: false, code: 'failed', error: e.message }; }
+    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ ok: false, code: r.code, error: PT.REFUSAL_WORDS[r.code] || WORDS[r.code] || r.error || r.code });
+    if (r.verdict !== 'cli-missing') changed('test', String(req.params.id));
+    res.json({ ok: true, harness: r.harness, verdict: r.verdict, words: PT.VERDICT_WORDS[r.verdict], detail: r.detail, at: r.at });
   });
   app.delete('/api/providers/:id', (req, res) => {
     if (!person(req, res)) return;

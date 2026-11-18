@@ -64,7 +64,8 @@ const CAP_WORDS = Object.freeze({ tools: i18nKey('Tools'), vision: i18nKey('Imag
 // ── THE RECORD (§1) — closed fields; nothing else is kept ──
 // `tail` = the key's last four characters (the roster's ••••1234, as an API-key account shows it); `createdAt` = when it was added
 // `wire` = the interface a SELF-HOSTED one speaks, as the person said (null for every other kind: its kind says it)
-const PROVIDER_FIELDS = Object.freeze(['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt', 'tail', 'createdAt', 'wire']);
+// `tested` (lane lg-providers U4) = the last Test's verdict per harness { <harness>: { verdict, at } }
+const PROVIDER_FIELDS = Object.freeze(['id', 'kind', 'label', 'preset', 'baseUrl', 'auth', 'keyRef', 'models', 'defaultModel', 'aliases', 'modelsSource', 'listedBy', 'fetchedAt', 'lastTestAt', 'tail', 'createdAt', 'wire', 'tested']);
 const MODEL_FIELDS = Object.freeze(['id', 'label', 'context', 'caps']);
 
 // ── THE BUILT-IN RECORDS: the two first-party subscription presets §1 names (anthropic-subscription = claude's OAuth,
@@ -196,7 +197,19 @@ function normalizeProvider(raw) {
     fetchedAt: when(r.fetchedAt), lastTestAt: when(r.lastTestAt),
     tail: typeof r.tail === 'string' && TAIL_RE.test(r.tail) ? r.tail : null, createdAt: when(r.createdAt),
     wire: WIRES.includes(r.wire) ? r.wire : null,
+    tested: testedOf(r.tested),
   };
+}
+/** the kept Test verdicts: harness id → { verdict, at } — a verdict word, an instant; anything else dropped */
+function testedOf(t) {
+  const out = {};
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return out;
+  for (const [h, v] of Object.entries(t)) {
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(h) || !v || typeof v !== 'object') continue;
+    const at = Number(v.at);
+    if (/^[a-z][a-z-]{1,23}$/.test(String(v.verdict || '')) && Number.isFinite(at) && at > 0) out[h] = { verdict: String(v.verdict), at };
+  }
+  return out;
 }
 /** the interfaces a provider may speak — a self-hosted one's `wire` is one of them (lane lg-providers U1) */
 const WIRES = Object.freeze(['anthropic-messages', 'openai-responses', 'openai-chat']);
@@ -223,7 +236,7 @@ function validateProvider(raw) {
   if (!p.label || p.label.length > LABEL_MAX) errors.push({ field: 'label', code: 'label-long' });
   if (k && !k.auths.includes(p.auth)) errors.push({ field: 'auth', code: 'auth-kind' });
   if (p.keyRef !== null && !KEY_REF.test(p.keyRef)) errors.push({ field: 'keyRef', code: 'key-ref' });
-  if (p.baseUrl !== null && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url' });
+  if (p.baseUrl !== null && (!/^https?:\/\/[^\s/]+(\/\S*)?$/.test(p.baseUrl) || /[\\%]/.test(p.baseUrl) || /[^\x21-\x7e]/.test(p.baseUrl))) errors.push({ field: 'baseUrl', code: 'base-url' });   // `\` / `%` / non-ASCII: a host the CLIs' URL parser reads otherwise (lane lg-providers U4 r1)
   // a user:password@ in the address would ride the command line (codex's -c table) and every log — the key has its own place
   else if (p.baseUrl !== null && /^https?:\/\/[^/]*@/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-credentials' });   // lane lg-providers U2
   // …nor a query or a fragment on a keyed record's address (a `?api-key=` would ride the command line too — r1)

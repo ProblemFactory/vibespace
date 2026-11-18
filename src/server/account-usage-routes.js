@@ -55,7 +55,9 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   require('../routes/account-models.js').registerAccountModelRoutes(app, { accounts, providers });
   // THE THIRD-PARTY PROVIDERS (lane lg-providers, B-d578 U1): the wizard's doors — add from a shipped preset (the key sealed
   // in the vault first), a new key, rename / address / default, remove; each write re-announces the account lists
-  require('../routes/providers.js').registerProviderRoutes(app, { providers, onChange: ({ what, id }) => { try { broadcastAll({ type: 'providers-changed', what, id }); } catch { } try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } } });
+  // THE PROVIDER TEST (lane lg-providers U4): the harness's own CLI, once, at a person's press — empty homes, a third party only
+  const tester = require('./provider-test.js').create({ providers, cliFor: async (be) => { const c = getCliCmds(); if (c && typeof c.check === 'function') return c.check(be, { force: true }); return c && typeof c.current === 'function' ? c.current(be) : null; }, agentEnv: () => require('../ws-handler').agentEnv() });   // cliFor: the CLI the login shell finds now (as the usage door)
+  require('../routes/providers.js').registerProviderRoutes(app, { providers, tester, onChange: ({ what, id }) => { try { broadcastAll({ type: 'providers-changed', what, id }); } catch { } try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } } });
   // MODELS AT A SESSION (q-053 §3, lane models-at-session): a new / running conversation's menu = its account's provider's rows
   // (GET /api/available-models?session= | ?backend=&account=), and the listed-provider refresh — a person's press, the vault
   // open, once a minute, cached on the record (src/server/provider-models.js: THE one new vendor request)

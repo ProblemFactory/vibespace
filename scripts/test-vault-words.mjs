@@ -75,6 +75,9 @@ const ROWS = {
   'src/server/provider-spawn.js': [
     ['the vault is locked — unlock it to start a conversation on', 'carried', 'the provider spawn road\'s refusal in the create\'s own error (lane lg-providers U2): the key read went through the vault, whose blocked() puts it on THE STRIP, which says both', { via: 'src/lib/vault-unlock.js' }],
   ],
+  'src/provider-test-model.js': [
+    ['Unlock the vault first — the provider’s key is kept there', 'label', 'the provider Test\'s refusal words on a person\'s press in the wizard or the roster (lane lg-providers U4) — a verdict shown where the person pressed, not a background tool refusal'],
+  ],
   'src/model-providers.js': [
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
   ],

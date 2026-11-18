@@ -306,6 +306,11 @@ module.exports = {
     keyEnvVars: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
     // a third-party provider (an Anthropic-compatible address + its own key): the spawn plan (lane lg-providers U2)
     providerSpawn: claudeProviderSpawn,
+    // THE PROVIDER TEST's own words (lane lg-providers U4, src/server/provider-test.js): one non-interactive «ok», one turn —
+    // ONLY ever with a third party's address and key, in a child whose homes are empty (never a subscription: §ban-safety)
+    // (not --bare: its own help says Anthropic auth there is ANTHROPIC_API_KEY or apiKeyHelper only — the presets' bearer key
+    // would read as refused; the empty homes keep the run as bare as --bare would; adversarial read r1)
+    providerTest: { argv: (model) => ['-p', 'ok', '--max-turns', '1', '--settings', '{"apiKeyHelper":""}', '--disallowedTools', 'Bash,Read,Edit,Write,WebFetch,WebSearch,Glob,Grep,NotebookEdit,Task', ...(model ? ['--model', String(model)] : [])] },
     loginLabel: 'Claude',
     defaultIdField: 'defaultAccountId',
     spawnForm: 'securestorage',                // accounts.resolveForSpawn: subscription (pool link / oat) or API key; spawnEnvVar relocates the secret store

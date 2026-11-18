@@ -387,6 +387,9 @@ const PRIMITIVES = [
   // the owner's create handler against a headless socket for a caller with no window; every call site is a conversation
   // nobody typed into and must ask the authorizer first (reason automation-open)
   { id: 'headless-open', re: /\bcreateHeadless\s*\(/g, why: 'opens a conversation for an AUTOMATION (no window, nobody typing) — the headless create of src/server/conversation-ops.js' },
+  // lane lg-providers U4 (B-d578): THE PROVIDER TEST — one non-interactive run of a harness's CLI that spends one short request
+  // of a THIRD PARTY's own key; the census must SEE every caller (a timer or an agent calling it would be a spend nobody pressed)
+  { id: 'provider-test', re: /\brunProviderTest\s*\(/g, why: 'runs a harness CLI once against a third-party provider with its own key (src/server/provider-test.js) — one short billed request' },
 ];
 // GATED = the file ASKS THE GATE. It must be a CALL, never a mention: r2 found
 // `src/server/usage-pool-engine.js` reported GATED because it CONSTRUCTS the
@@ -406,6 +409,8 @@ const HEADER_NAME = /(?:function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za
 // round closed — a new `formatChatInput` in src/jobs.js must still be caught by
 // the row that excuses its `deliverToConversation` call.
 const ALLOW = [
+  { file: 'src/server/provider-test.js', prim: 'provider-test', why: "the PRIMITIVE's definition (lane lg-providers U4): it refuses any caller but by: 'human', a third party's address only, a key read from the vault, a child with empty homes — policy lives at its one caller, the route" },
+  { file: 'src/routes/providers.js', prim: 'provider-test', why: "THE HUMAN PATH (lane lg-providers U4): POST /api/providers/:id/test asks personVerdict first (any Bearer ⇒ 403, another site ⇒ 403) — a person's press on the page, attended, never a timer, never an agent" },
   { file: 'src/ws-handler.js', prim: 'typed-send', why: "the ws chat-input case: the OWNER typing in a chat window (a per-occurrence owner action — never counted, D6)" },
   { file: 'src/routes/user-todos-reply.js', prim: 'typed-send', why: "the For-you Reply route: the OWNER clicking Reply (owner-only, agent tokens refused — design-user-inbox-reply D1.1)" },
   { file: 'src/server/design-engine.js', prim: 'typed-send', why: "the Design window's comment: the OWNER's click on an artboard element + their words (POST /api/design/comment — ownerOnly, an agent's bearer refused by name), typed as the owner's own message (origin design-comment, never counted) — lane design-chrome L4 B③, composed with lane worker-dispatch's typed-send row at the 2.369.202 integration" },
