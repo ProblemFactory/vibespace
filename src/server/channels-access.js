@@ -974,7 +974,7 @@ function create(engineCtx) {
     if (!ACL.canSee(acctReach.level) && !named) {
       // the account is named in nothing this agent sees ⇒ the uniform not-found; else it is told what it lacks
       const reachOf = reachWalkOf(ctx);
-      const seesSome = store.index.rowsOf(rec.id).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
+      const seesSome = store.index.rowsOf(rec.id).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachOf(rec, en).level));   // B-f32b: never a copy of the index; B-dfa4 cut 1: this account's rows only (rowsOf), never the whole map
       return seesSome ? { ok: false, code: 'no-access', error: `you do not have access to the whole account ${rec.id} — watch one conversation you can read (<adapter>/<conversation id>), or ask the user for the account` } : ACL.notFound();
     }
     return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => grainReadAt(rec.id, { kind: 'account' }) || { access: [], watchers: [] }, raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };

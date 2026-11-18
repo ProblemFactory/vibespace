@@ -154,7 +154,7 @@ const ctl = await world('control', { control: true });
 ok(kept.setup.access === true && kept.setup.watcher === true, 'setup: the account shared with the agent, then its wake set (Grant access…, Notify…)', kept.setup);
 // the re-judge's walk runs in the callback its index update runs a turn later (no named frame of it on the stack): it is
 // judged by EVERY whole-map iteration the door causes, but the full digest's first read the disconnect broadcasts (cut 2's)
-const BESIDE = new Set(['firstRead', 'attnCount', 'buildLayout', 'sweep']);   // the full digest's own walks (its first read, the badge's attention rows rebuilt: cut 2's); the store writer's own timers
+const BESIDE = new Set(['firstRead', 'firstFacts', 'attnCount', 'buildLayout', 'sweep']);   // B-dfa4 cut 2: the kept first read's build walks in firstFacts   // the full digest's own walks (its first read, the badge's attention rows rebuilt: cut 2's); the store writer's own timers
 const sum = (seen, keep) => Object.entries(seen || {}).filter(([n]) => keep(n)).reduce((a, [, v]) => a + v, 0);
 for (const d of kept.doors) {
   const c = ctl.doors.find((x) => x.name === d.name);

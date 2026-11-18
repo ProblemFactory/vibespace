@@ -129,6 +129,14 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     return { p: base ? base.p : null, clauses: base ? base.clauses : [], source: label === 'needs' ? 'you' : 'judge', rubricV: M.RUBRIC.version, lastAt, threshold: threshold(), ...(label ? { label } : {}) };
   }
   const viewOf = (en, rec = null) => { const j = judgedFor(en, rec); return j ? { judged: j } : {}; };
+  /** B-dfa4 cut 2: every row key the judge holds a verdict or a label for — `judgedFor` is null for any other row (the
+   *  engine's kept first read reads exactly these fresh each time, never every row). Empty while the judge is off. */
+  function judgedKeys() {
+    if (!decision || !on()) return [];
+    const out = new Set(verdicts.keys());
+    for (const e of examples) if (e && typeof e.key === 'string' && e.key) out.add(e.key);
+    return [...out];
+  }
 
   /** The rows a read built: queue the candidates (cheap — no I/O here; the drain runs after a short delay). */
   function note(views) {
@@ -286,7 +294,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   }
 
   const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold(), today: { ...todayNow() } });
-  return { note, viewOf, judgedFor, walk, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
+  return { note, viewOf, judgedFor, judgedKeys, walk, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
 }
 
 module.exports = { create, CONCURRENCY, PER_HOUR, STOP, LEARN_EVERY_MS };

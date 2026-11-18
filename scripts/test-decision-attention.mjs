@@ -437,13 +437,17 @@ console.log('⑬ B-dfa4 (verdict): the law through the engine\'s OWN roads — a
     ok(ESRC.split(wrap).length === 2, `control setup: ${road}'s walk wrapper is present once`);
     const c = await roadRig(MR.load('src/server/channels-engine.js', ESRC.replace(wrap, bare), `no-${road}-walk`), `no-${road}`);
     const n = road === 'digest' ? c.digest : c.focus;
-    ok(n >= N, `RED CONTROL: ${road}'s walk wrapper removed — one ${road} reads the plugin's settings ${n} times over ${N + 6} rows (per row)`, c);
+    // B-dfa4 cut 2: a digest's first read is KEPT — it judges the kept candidates and the judge's own rows, never every row —
+    // so unwrapped it reads the settings once per row it JUDGES (more than once), where rows() still judges every row
+    const need = road === 'digest' ? c.single + 2 : N;
+    ok(n >= need, `RED CONTROL: ${road}'s walk wrapper removed — one ${road} reads the plugin's settings ${n} times over ${N + 6} rows (${road === 'digest' ? 'once per row it judges' : 'per row'})`, c);
   }
   // THE CENSUS: every engine function that reads the judge (attention.judgedFor / viewOf / on) or builds a row view
   // (rowView, which reads it) is a row of this table — a walk its road marks, a step reached only inside digest's walk
   // (its callers checked), or one row. A new reader is red until it says which.
-  const ROADS = { digestWalk: 'walk', rowsWalk: 'walk', attnCount: 'in-digest', firstRead: 'in-digest', attnRederive: 'in-digest', rowView: 'one-row', viewNow: 'one-row', conversationView: 'one-row', labelJudged: 'one-row' };
-  const INSIDE = new Set(['digestWalk', 'attnCount', 'attnPatch', 'totalsNow', 'attnRederive', 'firstRead']);
+  const ROADS = { digestWalk: 'walk', rowsWalk: 'walk', attnCount: 'in-digest', firstRead: 'in-digest', firstReadWalk: 'in-digest', firstReadOf: 'in-digest', attnRederive: 'in-digest', rowView: 'one-row', viewNow: 'one-row', conversationView: 'one-row', labelJudged: 'one-row' };
+  // B-dfa4 cut 2: the kept first read and its definition (the walk) share firstReadOf; the gates' parity hook is a walk itself
+  const INSIDE = new Set(['digestWalk', 'attnCount', 'attnPatch', 'totalsNow', 'attnRederive', 'firstRead', 'firstReadWalk', 'firstReadParity']);
   const census = (src) => {
     const L = src.split('\n');
     const owner = (i) => { for (let j = i; j >= 0; j--) { const m = /^  (?:async )?function (\w+)\(/.exec(L[j]) || /^    (\w+): (?:async )?\(/.exec(L[j]); if (m) return m[1]; } return '?'; };

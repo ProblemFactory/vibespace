@@ -3125,9 +3125,84 @@ function create(deps = {}) {
    * watcher — at most FO.ATTENTION_MAX, drawn newest first; past it the LEAST urgent (FO.TAG_ORDER), then the oldest,
    * are cut (`attention.cut`, counted).
    */
+  // ── B-dfa4 CUT 2: THE FIRST READ KEPT (主开发 2026-11-18; measured: a full digest = ONE walk of every row, 146 ms on a
+  // stand-in store of the owner's shape — the panel's open, a broadcast naming nothing). What the walk chose is KEPT and moved
+  // by what changes it: (1) every account's listed rows in the first screen's order (FO.pageOrder) — a touched row moves in
+  // its account's array (binary search), the heads are their first FO.HEAD_ROWS; (2) the rows whose FACTS make them an
+  // attention candidate (FO.candidateOf with no verdict) — re-judged at every read: the kept ones (a clock window only ever
+  // closes as time runs, so a candidate the clock ends drops here), the rows touched since, the rows whose outbox counts
+  // moved; (3) the judge's own rows (`attention.judgedKeys()`: judgedFor is null for any other) read fresh each time. A
+  // whole-map touch or a clock gone back rebuilds by the walk. A row whose key is not its own `key` (only a damaged act line)
+  // is re-read every time. The touch signal is read LAZILY at the next read (a row's touch may fire before its write).
+  // The answer is the walk's own (firstReadWalk, the gates' definition — test-channel-first-kept holds them equal).
+  const firstKept = { built: false, t: -Infinity, facts: new Set(), dirty: new Set(), ob: new Map(), heads: new Map(), at: new Map(), odd: new Set(), stats: { builds: 0, rechecked: 0 } };
+  store.index.onTouch((k) => { if (k === null) firstKept.built = false; else if (firstKept.built) firstKept.dirty.add(k); });
+  const numOf = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+  const headCmp = (p, q) => (q.a - p.a) || (p.k < q.k ? -1 : p.k > q.k ? 1 : 0) || (p.mk < q.mk ? -1 : p.mk > q.mk ? 1 : 0);
+  const headAt = (arr, e) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (headCmp(arr[m], e) < 0) lo = m + 1; else hi = m; } return lo; };
+  function headMove(mk, en) {
+    const fk = firstKept, was = fk.at.get(mk);
+    if (was) { const arr = fk.heads.get(was.acct); const i = arr ? headAt(arr, was.e) : -1; if (arr && arr[i] === was.e) arr.splice(i, 1); fk.at.delete(mk); }
+    fk.odd.delete(mk);
+    if (!en) return;
+    if (String(en.key) !== mk) fk.odd.add(mk);
+    if (en.unlistedAt || en.adapterId == null) return;
+    const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };
+    let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = []));
+    arr.splice(headAt(arr, e), 0, e);
+    fk.at.set(mk, { acct, e });
+  }
+  const obFact = (ob) => (ob ? `${ob.awaiting}|${ob.unknown}|${ob.ownSentAt}|${ob.latestAt}` : '');
+  /** The keys whose facts may make them a candidate at `ctx.t` — a SUPERSET (each is judged by candidateOf at the read). */
+  function firstFacts(liveIx, ctx) {
+    const fk = firstKept, t = ctx.t;
+    // rebuilt by the walk: none kept yet / a whole-map touch, the clock gone back (NaN-safe), or a MASS write (a burst of moved
+    // rows costs more in its accounts' arrays than one walk — the due index's rule)
+    if (!fk.built || !(t >= fk.t) || fk.dirty.size > (fk.at.size >> 3) + 256) {
+      fk.facts = new Set(); fk.dirty.clear(); fk.heads = new Map(); fk.at = new Map(); fk.odd = new Set(); fk.ob = new Map();
+      for (const mk in liveIx) {
+        const en = liveIx[mk];
+        if (!en) continue;
+        if (String(en.key) !== mk) fk.odd.add(mk);
+        if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
+        if (FO.candidateOf(en, ctx.outbox.get(en.key), t, null)) fk.facts.add(mk);
+      }
+      for (const arr of fk.heads.values()) arr.sort(headCmp);
+      for (const [k, ob] of ctx.outbox) fk.ob.set(k, obFact(ob));
+      fk.built = true; fk.stats.builds++;
+    } else {
+      const again = new Set(fk.facts);
+      for (const mk of fk.dirty) { again.add(mk); headMove(mk, liveIx[mk]); }
+      fk.dirty.clear();
+      const seen = new Set();   // the outbox's counts that moved (a proposal, a send, an unknown, a prune)
+      for (const [k, ob] of ctx.outbox) { seen.add(k); const f = obFact(ob); if (fk.ob.get(k) !== f) { fk.ob.set(k, f); again.add(k); } }
+      for (const k of [...fk.ob.keys()]) if (!seen.has(k)) { fk.ob.delete(k); again.add(k); }
+      for (const mk of again) { const en = liveIx[mk]; if (en && FO.candidateOf(en, ctx.outbox.get(en.key), t, null)) fk.facts.add(mk); else fk.facts.delete(mk); }
+      fk.stats.rechecked += again.size;
+    }
+    fk.t = t;
+    return fk.facts;
+  }
   function firstRead(byId, liveIx, ctx) {   // B-dfa4: reached only inside digest's walk — test-decision-attention ⑬'s census holds it
     const t = ctx.t;
     viewStats.firstReads++;
+    const keys = new Set(firstFacts(liveIx, ctx));
+    for (const k of attention.judgedKeys()) keys.add(k);   // the judge's rows (a verdict or a label: judgedFor is null without one)
+    for (const mk of firstKept.odd) keys.add(mk);
+    const cands = [];
+    for (const k of keys) {
+      const en = liveIx[k];
+      const rec = en && byId.get(en.adapterId);
+      if (!rec || en.unlistedAt) continue;
+      if (listedAccount(rec) && FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, rec))) cands.push(en);
+    }
+    const heads = new Map();
+    for (const id of byId.keys()) { const arr = firstKept.heads.get(String(id)) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && String(en.adapterId) === String(id)) out.push(en); } heads.set(id, out); }   // the walk's own grouping, held at the read (a row the touch signal has not moved yet is never drawn under the wrong account)
+    return firstReadOf(byId, ctx, cands, heads, true);
+  }
+  /** THE WALK — the first read's DEFINITION (every row, every call): the gates hold the kept read to it (firstReadParity). */
+  function firstReadWalk(byId, liveIx, ctx) {
+    const t = ctx.t;
     const listed = new Map();   // adapterId → its listed entries (the heads are chosen per account)
     const cands = [];
     for (const k in liveIx) {
@@ -3139,11 +3214,18 @@ function create(deps = {}) {
       l.push(en);
       if (listedAccount(rec) && FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, rec))) cands.push(en);
     }
+    const heads = new Map();
+    for (const id of byId.keys()) heads.set(id, FO.selectPage(listed.get(id) || [], { limit: FO.HEAD_ROWS }).items);
+    return firstReadOf(byId, ctx, cands, heads, false);
+  }
+  /** The first screen from its candidates and each account's head rows (the walk's and the kept read's common half). */
+  function firstReadOf(byId, ctx, cands, headRows, attn) {
+    const t = ctx.t;
     const views = new Map();
     const viewOf = (en) => { let v = views.get(en.key); if (!v) { v = rowView(byId.get(en.adapterId), en, ctx); views.set(en.key, v); } return v; };
     const tagged = [];
     for (const en of cands) { const v = viewOf(en); const tag = FO.statusTag(v, t); if (tag) tagged.push({ v, rank: FO.TAG_ORDER.indexOf(tag.code), p: tag.p || 0 }); }
-    attnFromFirst(tagged.map((x) => x.v), t);   // lane attention-predicate-shared: the Channels badge's kept rows, re-derived by the walk it does anyway
+    if (attn) attnFromFirst(tagged.map((x) => x.v), t);   // lane attention-predicate-shared: the Channels badge's kept rows, re-derived by the read it does anyway
     // verify r1 (C): 300 newer "replied" rows used to push an old draft awaiting approval off the first screen — the cut
     // keeps statusTag's own order of urgency first, then the newest
     tagged.sort((a, b) => (a.rank - b.rank) || (b.p - a.p) || FO.pageOrder(a.v, b.v));   // lane decision-attention: judged rows by p
@@ -3151,12 +3233,12 @@ function create(deps = {}) {
     for (const { v } of tagged.slice(0, FO.ATTENTION_MAX)) out.set(v.key, v);
     const heads = {};
     // EVERY account has a head — an empty one too (a complete list the broadcast's new rows join)
-    for (const id of byId.keys()) heads[id] = FO.selectPage(listed.get(id) || [], { limit: FO.HEAD_ROWS }).items.map((en) => { const v = viewOf(en); out.set(v.key, v); return v.key; });
+    for (const id of byId.keys()) heads[id] = (headRows.get(id) || []).map((en) => { const v = viewOf(en); out.set(v.key, v); return v.key; });
     // verify r1 (C): `cut` = the tagged rows this answer does NOT carry — a tagged row past the cut that rides as an
     // account's head is on the client's first screen already (the panel draws `held + cut`; it was counted twice)
     let carried = 0;
     for (const x of tagged) if (out.has(x.v.key)) carried++;
-    return { conversations: [...out.values()].sort(FO.pageOrder), heads, attention: { total: tagged.length, cut: tagged.length - carried } };
+    return { conversations: [...out.values()].sort(FO.pageOrder), heads, attention: { total: tagged.length, cut: tagged.length - carried }, cands };   // `cands`: the gates' parity only (digest picks its three fields)
   }
   /**
    * EVERY OTHER ROW, BY KEY (design 008 §2, GET /api/channels/rows): one pass selecting the next `limit` rows after
@@ -4173,7 +4255,8 @@ function create(deps = {}) {
    *  watch start) and the rows whose instant the clock passed (`order`, soonest first) — O(touched + crossed), never
    *  O(rows). Built in ONE O(rows) pass when absent / stale (a whole-map write) / its shared inputs changed (the tier
    *  settings; the lane — the due index's signature) / the clock went back / a mass write (as the due index). */
-  // `rowsRead` = every row a census looked at, either path (the walk below counts too — the gates' work meter)
+  // `rowsRead` = every row a census looked at, either path (the build counts too — the gates' work meter); since B-dfa4 cut 1 a
+  // build reads its OWN account's rows (rowsOf), so it counts those, never another account's
   const censusIxStats = { builds: 0, rejudged: 0, rowsRead: 0, lastBuildMs: 0 };
   function censusJudge(rec, lane, en, t, T) {
     if (!en || en.adapterId !== rec.id || en.unlistedAt) return null;
@@ -8952,6 +9035,13 @@ function create(deps = {}) {
       return e.adapter.live.deliver(ev);
     },
     // B-f32b r2: the census's definition (every row at `t`) and the paced census's clock walks, for the gates
+    // B-dfa4 cut 2: the gates' oracle — the KEPT first read and the WALK (its definition) over the same instant and outbox
+    firstReadParity: () => attention.walk(() => {
+      const t = now(), recs = adapterRecords(), byId = new Map(recs.adapters.map((r) => [r.id, r])), liveIx = store.index.live(), ctx = viewCtx(t);
+      const kept = firstRead(byId, liveIx, ctx), walk = firstReadWalk(byId, liveIx, ctx);
+      const shape = (r) => ({ conversations: r.conversations, heads: r.heads, attention: r.attention, cands: r.cands.map((en) => en.key).sort() });
+      return { kept: shape(kept), walk: shape(walk), stats: { ...firstKept.stats, facts: firstKept.facts.size } };
+    }),
     schedulerExact: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerScan(rec, t) : null; },
     censusStats: () => Object.fromEntries(censusCount),
     // lane scheduler-census-index: the census index's work — O(rows) builds, rows re-judged, rows read in all
