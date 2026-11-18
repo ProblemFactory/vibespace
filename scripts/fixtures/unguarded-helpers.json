@@ -717,6 +717,7 @@
   "test-plugins-grammar.mjs": 1,
   "test-pool-link-notify.mjs": 1,
   "test-pool-placement-ui.mjs": 1,
+  "test-pool-pass-reads.mjs": 1,
   "test-pool-signed-out.mjs": 1,
   "test-popover-frame-close.mjs": 1,
   "test-port-forward.mjs": 1,
