@@ -75,7 +75,7 @@ const SECRET_ROWS = Object.freeze([   // the entry name's shape → its row's fi
   { re: /^totp:([\w.-]{1,120})$/, field: 'seed', kind: 'totp', label: (rest) => rest, detail: '' },
   // lane lg-providers (B-d578): a third-party model provider's key — its record (data/providers.json) names it; the row names
   // the provider (its label, through `machineName`'s twin `providerName` — the hub's provider store), never a character of it
-  { re: /^provider:(pv-[a-z0-9][a-z0-9-]{0,63})$/, field: 'key', kind: 'api-key', label: (rest, nameOf, providerName) => `Model provider key · ${providerName(rest)}`, detail: 'VibeSpace hands it to the agent CLI it starts for this provider' },
+  { re: /^provider:(pv-[a-z0-9][a-z0-9-]{0,63})$/, field: 'key', kind: 'api-key', label: (rest, nameOf, providerName) => `Model provider key · ${providerName(rest)}`, detail: 'VibeSpace hands it to the agent CLI it starts for this provider' },   // ui-words: the Vault window words a hub secret's head and detail through t() (labelWord, t(row.detail)); zh / ja rows exist
 ]);
 /** lane vault-mint-put (design q-043 §9): an `agent:<scope>/<name>` entry's provenance — the Vault window v2's provenance
  *  chip renders `row.provenance` (SEAM: the integrator wires the chip onto the v2 window, lane vault-window-v2; this base

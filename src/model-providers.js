@@ -430,8 +430,8 @@ const ship = (o) => Object.freeze({ ...o, ...(o.wires ? { wires: Object.freeze([
 const SHIPPED = Object.freeze([
   ship({ id: 'deepseek', label: 'DeepSeek', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('DeepSeek’s models, paid by use with your own key'),
     console: 'https://platform.deepseek.com', bases: [{ region: 'global', url: 'https://api.deepseek.com/anthropic' }],
-    models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', context: 128000, caps: ['tools'] }, { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', context: 128000, caps: ['tools', 'reasoning'] }], defaultModel: 'deepseek-chat' }),
-  ship({ id: 'kimi', label: 'Kimi', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('Moonshot’s Kimi models, paid by use with your own key'),
+    models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', context: 128000, caps: ['tools'] }, { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', context: 128000, caps: ['tools', 'reasoning'] }], defaultModel: 'deepseek-chat' }),   // ui-words: the vendors' own product names (never translated)
+  ship({ id: 'kimi', label: 'Kimi', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('Moonshot’s Kimi models, paid by use with your own key'),   // ui-words: the vendor's own product name (never translated)
     console: 'https://platform.moonshot.ai', bases: [{ region: 'global', url: 'https://api.moonshot.ai/anthropic' }, { region: 'cn', url: 'https://api.moonshot.cn/anthropic' }],
     models: [{ id: 'kimi-k2-0905-preview', label: 'Kimi K2', context: 256000, caps: ['tools'] }, { id: 'kimi-k2-turbo-preview', label: 'Kimi K2 Turbo', context: 256000, caps: ['tools'] }], defaultModel: 'kimi-k2-0905-preview' }),
   ship({ id: 'glm', label: 'GLM', kind: 'anthropic-compatible', auth: 'bearer', blurb: i18nKey('Zhipu’s GLM models, paid by use with your own key'),

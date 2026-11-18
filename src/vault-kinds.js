@@ -87,7 +87,7 @@ const FAMILIES = Object.freeze([
       delete: { method: 'DELETE', path: '/api/accounts/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/accounts', 'DELETE /api/accounts/:id'], words: NONE('its account card names it (the account\'s own name) — no words of the vault\'s'), doc: 'API keys and tokens (accounts)' } }),
   // lane lg-providers (B-d578, q-045 §2.6 law 1): a THIRD-PARTY MODEL PROVIDER's key — a hub secret `provider:<record id>`,
   // pasted in the provider wizard (Manage agents), used only by the spawn road and the provider Test
-  fam({ id: 'provider-key', label: 'A third-party model provider\'s key', category: 'accounts', stores: ['secrets'], entryRe: /^provider:/, sample: 'provider:pv-census', confirmKey: 'provider',
+  fam({ id: 'provider-key', label: 'A third-party model provider\'s key', category: 'accounts', stores: ['secrets'], entryRe: /^provider:/, sample: 'provider:pv-census', confirmKey: 'provider',   // ui-words: the registry's own name of the family, printed by its census, never drawn on a page
     surfaces: { request: NONE('a provider\'s key is pasted in its own wizard in Manage agents — an agent asks for none'), list: true, row: 'base', add: NONE('added in Manage agents — the third-party model wizard, with the provider it belongs to'), reveal: true,
       use: SYSTEM('VibeSpace hands it to the agent CLI it starts for that provider — never to an agent'), delete: { method: 'DELETE', path: '/api/providers/' },
       cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/providers', 'DELETE /api/providers/:id'], words: NONE('its provider names it (the provider\'s own name in Manage agents)'), doc: '**Third-party model providers**' } }),
