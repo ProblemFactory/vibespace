@@ -114,7 +114,7 @@ const fileItem = (item) => todos.add('browser', { origin: 'browser', kind: 'noti
 const forYou = {
   add: (pid, item) => { const r = fileItem(item); const id = r && typeof r === 'object' ? r.id : r; fy.stored.push(todos.get(id) || r); fy.added.push(item); return id; },
   resolve: (id) => { fy.resolved.push(id); if (todos.get(id)?.status === 'open') todos.setStatus(id, 'done', 'browser'); },
-  sweep: (prefix) => { const ids = todos.idsWhere((i) => i.status === 'open' && i.sessionKey === 'browser' && typeof i.itemKey === 'string' && i.itemKey.startsWith(String(prefix))); for (const id of ids) todos.setStatus(id, 'done', 'browser'); return ids.length; },
+  sweep: (prefix, { status = 'done', by = 'browser' } = {}) => { const ids = todos.idsWhere((i) => i.status === 'open' && i.sessionKey === 'browser' && typeof i.itemKey === 'string' && i.itemKey.startsWith(String(prefix))); for (const id of ids) todos.setStatus(id, status, by); return ids.length; },
 };
 const ch = await fakeChrome().listen();
 const w = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
@@ -167,12 +167,21 @@ const r4 = fy.stored[fy.stored.length - 1]; const r4Item = r4 && todos.get(r4.id
 const r4Open = !!(r4Item && r4Item !== signIn && r4Item.status === 'open' && String(r4Item.itemKey || '').startsWith(`prompt-auth:${NAMED}:`));
 const said0 = lines.length;
 const wNext = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: false }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
-ok(r4Open && todos.get(r4.id).status === 'done' && lines.slice(said0).filter((l) => /sign-in For-you item\(s\) of a past hub life resolved/.test(l)).length === 1, '…its item is KEYED (prompt-auth:<profile>:…) and the next hub life\'s watch resolves a past life\'s open sign-in item, said once', { r4Open, now: r4 && todos.get(r4.id) && todos.get(r4.id).status, said: lines.slice(said0) });
+ok(r4Open && todos.get(r4.id).status === 'dismissed' && todos.get(r4.id).resolvedBy === 'hub-restart' && lines.slice(said0).filter((l) => /sign-in For-you item\(s\) of a past hub life resolved/.test(l)).length === 1, '…its item is KEYED (prompt-auth:<profile>:…) and the next hub life\'s watch closes a past life\'s open sign-in item — DISMISSED by «hub-restart», never «done» (nobody answered it), said once', { r4Open, now: r4 && todos.get(r4.id) && { status: todos.get(r4.id).status, by: todos.get(r4.id).resolvedBy }, said: lines.slice(said0) });
 wNext.shutdown();
+{ // …the tray says who closed it in words (zh / ja with it), and the hub's own wiring passes the close through
+  const { resolvedByText } = await import('../src/lib/user-todos-row.js');
+  const W0 = 'VibeSpace restarted before it was answered';
+  const zhD = (await import('../src/lib/i18n-zh.js')).default, jaD = (await import('../src/lib/i18n-ja.js')).default;
+  ok(resolvedByText('hub-restart', (k) => k) === W0 && typeof zhD[W0] === 'string' && zhD[W0] !== W0 && typeof jaD[W0] === 'string' && jaD[W0] !== W0, 'the tray\'s closer words: «VibeSpace restarted before it was answered» (zh / ja in the dictionaries)');
+  const wiring = read('src/server/mounts-plugins-wiring.js'), dsrcW = read('src/server/browser-dialogs.js');
+  ok(/sweep: \(prefix, \{ status = 'done', by = 'browser' \} = \{\}\) => \{[^\n]*userTodos\.setStatus\(id, status, by\); return ids\.length; \}/.test(wiring) && dsrcW.includes("forYou.sweep(PROMPT_FY_KEY, { status: 'dismissed', by: 'hub-restart' })") && dsrcW.includes("forYou.sweep('pk-left:')"),
+    'the hub\'s wiring: the sweep takes the close\'s status and closer (the passkey sweep keeps its own «done» by default)');
+}
 { // CONTROL: a watch copy WITHOUT the sweep leaves a past life's sign-in item open for good
   const MUTP = mutantCopies('uiprompts-sweep', REPO);
   const dsrc0 = read('src/server/browser-dialogs.js');
-  const sweepNeedle = "try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep(PROMPT_FY_KEY) : 0;";
+  const sweepNeedle = "try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep(PROMPT_FY_KEY, { status: 'dismissed', by: 'hub-restart' }) : 0;";
   ok(dsrc0.split(sweepNeedle).length === 2, 'control setup: the sign-in sweep is found once in src/server/browser-dialogs.js');
   const past = forYou.add(NAMED, { text: 'past', detail: 'past', i18n: { text: { key: 'A page in the agent browser asks you to sign in ({host})', params: { host: 'x' } } }, itemKey: `prompt-auth:${NAMED}:prm-past-1:1` });
   const Dm = MUTP.load('src/server/browser-dialogs.js', dsrc0.replace(sweepNeedle, 'try { const n = 0;'), 'nosweep');

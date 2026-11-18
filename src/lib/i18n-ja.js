@@ -6217,6 +6217,7 @@ export default {
   "denied": "拒否済み",
   "access removed": "アクセスが取り消されました",
   "the conversation ended before you answered": "回答する前に会話が終了しました",
+  "VibeSpace restarted before it was answered": "回答される前に VibeSpace が再起動しました",
   "running again": "再び実行中",
   "running again (resumed {time})": "再び実行中（{time} に再開）",
   "Nothing runs until you answer. After 60 s it is refused.": "回答するまで何も実行されません。60 秒で拒否されます。",

@@ -117,6 +117,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
   if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
+  if (by === 'hub-restart') return t('VibeSpace restarted before it was answered'); // B-ebb7: a past hub life's sign-in ask (browser-dialogs' sweep)
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
   if (by === 'delivered') return t('delivered') + heldDropTail(item, t); // r6: a held digest the owner released (Deliver) — r12: the part dropped before, said
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r9: no watcher left to deliver to

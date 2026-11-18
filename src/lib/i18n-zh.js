@@ -6218,6 +6218,7 @@ export default {
   "denied": "已拒绝",
   "access removed": "权限已撤销",
   "the conversation ended before you answered": "在你回答之前该对话已结束",
+  "VibeSpace restarted before it was answered": "回答之前 VibeSpace 已重启",
   "running again": "已重新运行",
   "running again (resumed {time})": "已重新运行（{time} 恢复）",
   "Nothing runs until you answer. After 60 s it is refused.": "你回答之前什么都不会运行。60 秒后自动拒绝。",
