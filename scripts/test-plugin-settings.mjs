@@ -97,7 +97,7 @@ const decisionApi = require(path.join(repo, 'src/plugins/llm.js'));
 console.log('④ the engines read the settings rows — a plugins.json config plant is not seen');
 const plantRec = { enabled: true, config: { attention: true, rules: true, dailyBudgetCents: 900 } };
 const plant = { llm: plantRec };
-const decisionOf = (plugin, settings) => {   // the plant sits under the plugin's OWN id (the base control's plugin has its old one)
+const decisionOf = (plugin, settings) => {   // the plant sits under the plugin's OWN id (the re-planted copy keeps today's, llm)
   const pm = new PluginManager({ dataDir: mkData({ [plugin.id]: plantRec }), plugins: [plugin], settings: store(settings) });
   return pm._verbs.get(plugin.id).status().decision;
 };
@@ -105,12 +105,24 @@ let d = decisionOf(decisionApi, {});
 ok(d.attention === false && d.rules === false && d.dailyBudgetCents === 100, `④ plant in plugins.json config, nothing in settings → the plugin reads defaults (attention ${d.attention}, budget ${d.dailyBudgetCents}¢)`);
 d = decisionOf(decisionApi, { 'plugin.llm.attention': true, 'plugin.llm.dailyBudgetUsd': 0.5, 'decision.threshold': 0.85 });
 ok(d.attention === true && d.dailyBudgetCents === 50 && d.threshold === 0.85, '④ the settings rows drive it (attention on, $0.50 → 50¢, decision.threshold 0.85 — the one threshold)');
-const baseFile = path.join(tmp, 'base-plugin.js'); // the base's file in the scratch dir (never beside the live plugins — a census reads that folder)
+// B-43a0 (lane bl-tests-e): the control read 7b6fa3c7b's src/plugins/decision-api.js — a lane commit master never held — so it ran
+// only at the push gate and SKIPPED everywhere else. The base's SECOND truth is ONE line of that file (its cfg read
+// `...(h.peek().config || {})`, data/plugins.json), frozen in scripts/fixtures/off-master/7b6fa3c7b-plugins.json; re-planted into
+// TODAY's plugin (a scratch copy, never beside the live plugins — a census reads that folder) it sees the plugins.json plant again.
+const FX43 = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/off-master/7b6fa3c7b-plugins.json'), 'utf8'));
+const SECOND_TRUTH = (FX43.pluginCfg.match(/\.\.\.\(h\.peek\(\)\.config \|\| \{\}\)/) || [])[0] || null;   // read OFF the frozen line, never typed here
+const baseFile = path.join(tmp, 'base-plugin.js'); // the re-planted copy in the scratch dir
 try {
-  fs.writeFileSync(baseFile, execFileSync('git', ['-C', repo, 'show', '7b6fa3c7b:src/plugins/decision-api.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).replace("require('../decision-model.js')", `require(${JSON.stringify(path.join(repo, 'src/decision-model.js'))})`));
+  const live = fs.readFileSync(path.join(repo, 'src/plugins/llm.js'), 'utf8');
+  const A_CFG = '      const v = h.settings();', A_REQ = "require('../decision-model.js')";   // the control's anchors — each fails BY NAME when gone (rule 06:25Z)
+  for (const a of [A_CFG, A_REQ]) ok(live.includes(a), `④ the anchor of the RED CONTROL is in the source (src/plugins/llm.js): ${a.trim()}`);
+  const planted = live.replace(A_CFG, `      const v = { ...h.settings(), ${SECOND_TRUTH} }; // the base's second truth (7b6fa3c7b, frozen)`)
+    .replace(A_REQ, `require(${JSON.stringify(path.join(repo, 'src/decision-model.js'))})`);
+  ok(!!SECOND_TRUTH && planted !== live, `④ the base's cfg line (frozen) carries its second truth ${SECOND_TRUTH} — the expression re-planted below is that line's own`);
+  fs.writeFileSync(baseFile, planted);
   const bd = decisionOf(require(baseFile), {});
-  ok(bd.attention === true, `④ RED CONTROL: the base's plugin (7b6fa3c7b) sees the plugins.json plant (attention ${bd.attention}) — the two-truths bug this lane closes`);
-} catch (e) { if (/7b6fa3c7b|git|Command failed/.test(e.message)) console.log('  SKIP ④ RED CONTROL — the base object 7b6fa3c7b is not in this clone'); else ok(false, '④ RED CONTROL could not run: ' + e.message); } finally { try { fs.unlinkSync(baseFile); } catch { } }
+  ok(bd.attention === true, `④ RED CONTROL: today's plugin with the base's second truth re-planted (7b6fa3c7b) sees the plugins.json plant (attention ${bd.attention}) — the two-truths bug this lane closes`);
+} catch (e) { ok(false, '④ RED CONTROL could not run: ' + e.message); } finally { try { fs.unlinkSync(baseFile); } catch { } }
 const engine = require(path.join(repo, 'src/server/decision-engine.js')).create({ dataDir: fs.mkdtempSync(path.join(tmp, 'e-')), integrations: null });
 const pmE = new PluginManager({ dataDir: mkData(plant), plugins: [decisionApi], settings: store({ 'plugin.llm.rules': true }), decisionEngine: engine });
 const es = engine.status();

@@ -1,0 +1,90 @@
+{
+ "//": "FROZEN (B-43a0, lane bl-tests-e, 2026-11-17) from 7b6fa3c7b (2026-10-12, the LLM plugin's base — a lane commit master never held): the few lines test-plugin-settings ④ and test-plugins-grammar ② / ④ assert on. pluginCfg = src/plugins/decision-api.js:33, the base's SECOND truth (h.peek().config — data/plugins.json); pluginNames = its old id and label; panelLines = every line of the base's src/lib/plugins-ui.js panel (helpers + the list) a control census counts (inputs, checkboxes, the key-box mounts); configReadLines = every line of the base's seven readers that reads a plugin's data/plugins.json configuration. The legs read THIS file, never the object.",
+ "from": "7b6fa3c7b",
+ "pluginCfg": "const cfg = () => ({ ...Object.fromEntries(M.FEATURES.map((f) => [f, false])), dailyBudgetCents: M.DAILY_BUDGET_CENTS_DEFAULT, threshold: M.THRESHOLD_DEFAULT, ...(h.peek().config || {}) });",
+ "pluginNames": [
+  "id: 'decision-api',",
+  "label: 'Decision API',"
+ ],
+ "panelLines": [
+  "import { renderDictationCard } from './voice-plugin-card.js';",
+  "import { mountIntegrationCard } from './integrations-window.js';",
+  "mountIntegrationCard(app, integ, 'decision-api');",
+  "const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = d[key] === true; cb.dataset.decisionFeature = key;",
+  "const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags decision-budget'; inp.type = 'number'; inp.min = '0'; inp.step = '0.01';",
+  "renderDictationCard({ p, actions, cfgBox, api, rerender: render });",
+  "const cb = document.createElement('input');",
+  "cb.type = 'checkbox'; cb.checked = !!p.enabled; cb.disabled = locked || !p.installed;",
+  "const cb = document.createElement('input');",
+  "cb.type = 'checkbox'; cb.checked = !!p.enabled;",
+  "const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags'; inp.type = isPw ? 'password' : 'text';",
+  "const modeSel = document.createElement('select');",
+  "const flagInput = document.createElement('input');"
+ ],
+ "configReadLines": [
+  {
+   "file": "src/server/decision-engine.js",
+   "line": "const c = rec.config || {};"
+  },
+  {
+   "file": "src/server/voice-teach-engine.js",
+   "line": "const settings = () => model.settingsOf(((plugin.peek() || {}).config) || {});"
+  },
+  {
+   "file": "src/server/voice-teach-engine.js",
+   "line": "rec.config = rec.config || {};"
+  },
+  {
+   "file": "src/server/voice-teach-engine.js",
+   "line": "if (typeof patch.teach === 'boolean') rec.config.teach = patch.teach;"
+  },
+  {
+   "file": "src/server/voice-teach-engine.js",
+   "line": "if (typeof patch.context === 'boolean') rec.config.context = patch.context;"
+  },
+  {
+   "file": "src/server/voice-teach-engine.js",
+   "line": "const cur = model.settingsOf(rec.config).autoProjects.filter((c) => c !== ap.cwd);"
+  },
+  {
+   "file": "src/server/voice-teach-engine.js",
+   "line": "rec.config.autoProjects = ap.on ? [...cur, ap.cwd.slice(0, 4096)].slice(-model.TEACH_LIMITS.projectsMax) : cur;"
+  },
+  {
+   "file": "src/plugins/decision-api.js",
+   "line": "const cfg = () => ({ ...Object.fromEntries(M.FEATURES.map((f) => [f, false])), dailyBudgetCents: M.DAILY_BUDGET_CENTS_DEFAULT, threshold: M.THRESHOLD_DEFAULT, ...(h.peek().config || {}) });"
+  },
+  {
+   "file": "src/plugins/decision-api.js",
+   "line": "rec.config = configPatch(cfg(), patch || {});"
+  },
+  {
+   "file": "src/plugins/decision-api.js",
+   "line": "return { ok: true, config: rec.config };"
+  },
+  {
+   "file": "src/plugins/voice-input.js",
+   "line": "rec.config = rec.config || {};"
+  },
+  {
+   "file": "src/plugins/voice-input.js",
+   "line": "rec.config.language = patch.language;"
+  },
+  {
+   "file": "src/plugins/voice-input.js",
+   "line": "return { config: rec.config };"
+  },
+  {
+   "file": "src/plugins/voice-input.js",
+   "line": "language: VM.languageOf(rec.config && rec.config.language), integration: 'dropline',"
+  },
+  {
+   "file": "src/plugins/frp.js",
+   "line": "const c = h.peek().config || {};"
+  },
+  {
+   "file": "src/plugins/frp.js",
+   "line": "const c = rec.config = rec.config || {};"
+  }
+ ]
+}

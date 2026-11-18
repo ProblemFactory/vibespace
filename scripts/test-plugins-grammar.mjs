@@ -25,9 +25,10 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 const PS = require(path.join(repo, 'src/plugin-settings.js'));
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8');
-// the base object (7b6fa3c7b) may be absent (a shallow clone): the RED controls then say SKIP by name
-const base = (rel) => { try { return execFileSync('git', ['-C', repo, 'show', `7b6fa3c7b:${rel}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
-const skip = (m) => console.log(`  SKIP ${m} — the base object 7b6fa3c7b is not in this clone`);
+// THE BASE (7b6fa3c7b, the LLM plugin's base — a lane commit master never held): B-43a0 (lane bl-tests-e) — the RED controls
+// below ran only where that branch was fetched (the push gate) and SKIPPED everywhere else. The few lines each control counts are
+// FROZEN once (scripts/fixtures/off-master/7b6fa3c7b-plugins.json) and read on every checkout, the runner's depth-1 clone too.
+const FX43 = JSON.parse(read('scripts/fixtures/off-master/7b6fa3c7b-plugins.json'));
 
 console.log('① every plugin file has a settings table or a reason');
 const files = fs.readdirSync(path.join(repo, 'src/plugins')).filter((f) => f.endsWith('.js')).sort();
@@ -77,24 +78,21 @@ const factIsReadout = (src, fn) => /main: \[fact\]/.test(fn) && /for \(const x o
 ok(factIsReadout(listSrc(now), rowFn), '② the row\'s second line (plugin-row-fact) is a readout in the name+description block: a div, painted from decisionTodayLine, no handler');
 const asButton = listSrc(now).replace("fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' });", () => "fact = Object.assign(document.createElement('button'), { className: 'plugin-row-fact' }); fact.onclick = () => {};");
 ok(asButton !== listSrc(now) && !factIsReadout(asButton, rowFn), '② RED CONTROL: the same line drawn as a button with a handler is refused by the census');
-const b = base('src/lib/plugins-ui.js');
-const cb = b === null ? null : controls(helpersSrc(b) + listSrc(b));
-if (!cb) skip('② RED CONTROL (the base card)'); else ok(cb.inputs > 1 && cb.checkbox >= 3 && cb.integrationCard > 0, `② RED CONTROL: the base's panel (7b6fa3c7b) draws ${cb.inputs} inputs, ${cb.checkbox} checkboxes, a key box (${cb.integrationCard} card mounts) — this census refuses it`);
+const cb = controls(FX43.panelLines.join('\n'));
+ok(FX43.panelLines.length > 5 && cb.inputs > 1 && cb.checkbox >= 3 && cb.integrationCard > 0, `② RED CONTROL: the base's panel (7b6fa3c7b, its control lines frozen) draws ${cb.inputs} inputs, ${cb.checkbox} checkboxes, a key box (${cb.integrationCard} card mounts) — this census refuses it`);
 const voiceCard = read('src/lib/voice-plugin-card.js');
 ok(!/createElement\('(input|select)'\)/.test(voiceCard) && /renderVoiceSheet/.test(voiceCard), '② the Voice sheet holds actions only (Connect + proposal cards) — no key box, no language select');
 
 console.log('③ nobody reads a plugin\'s configuration from plugins.json config');
 const READERS = ['src/server/decision-engine.js', 'src/server/voice-teach-engine.js', 'src/routes/voice.js', 'src/plugins/llm.js', 'src/plugins/voice-input.js', 'src/plugins/tailscale.js', 'src/plugins/frp.js'];
-const BASE_PATH = { 'src/plugins/llm.js': 'src/plugins/decision-api.js' };   // the base (7b6fa3c7b) knew the LLM plugin by its old file name
 const code = (src) => src.split('\n').map((l) => l.replace(/\s\/\/ .*$/, '')).filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l)).join('\n'); // comments may say "never rec.config"
 const configReads = (src) => (code(src).match(/(peek\(\)|rec)\.config\b|\.config \|\| \{\}|\(\(plugin\.peek\(\) \|\| \{\}\)\.config\)/g) || []).length;
 const hits = READERS.map((f) => [f, configReads(read(f))]).filter(([f, n]) => n && f !== 'src/plugins/frp.js');
 ok(!hits.length, `③ no config reads in ${READERS.length - 1} engines / plugins / routes${hits.length ? ' — ' + JSON.stringify(hits) : ''}`);
 const frp = read('src/plugins/frp.js');
 ok(/token: c\.token \|\| FRPS_TOKEN/.test(frp) && /serverAddr: v\.serverAddr \|\| FRPS_ADDR/.test(frp) && /subDomainHost: v\.subDomainHost/.test(frp), '③ frp reads only its relay TOKEN (a secret) from its record; the address / port / subdomain host are settings rows');
-const baseSrcs = READERS.map((f) => base(BASE_PATH[f] || f));
-const baseHits = baseSrcs.includes(null) ? null : baseSrcs.map(configReads).reduce((a, x) => a + x, 0);
-if (baseHits === null) skip('③ RED CONTROL (the base config reads)'); else ok(baseHits >= 4, `③ RED CONTROL: the base reads plugin configuration from plugins.json ${baseHits} times`);
+const baseHits = FX43.configReadLines.map((x) => configReads(x.line)).reduce((a, x) => a + x, 0);
+ok(FX43.configReadLines.length > 3 && baseHits >= 4, `③ RED CONTROL: the base (7b6fa3c7b, its seven readers' config lines frozen) reads plugin configuration from plugins.json ${baseHits} times`);
 
 console.log('④ the old plugin name is gone from every file an owner or an agent reads (lane llm-plugin-rename)');
 // the needles: the id, the English name, the zh / ja names, the old env prefix; the design docs keep their FILE names
@@ -106,8 +104,9 @@ const ALLOWED = {
   'src/integration-registry.js': 'the LLM row\'s declared legacy spellings (clusterEnv.legacy) — the fleet\'s presets still carry them',
   'scripts/test-migrations.mjs': 'the stores of a pre-rename instance the migration moves (fixtures)',
   'scripts/test-cluster-presets.mjs': 'the legacy env leg (the old prefix alone resolves; both set ⇒ the new one wins)',
-  'scripts/test-plugin-settings.mjs': 'its RED control reads the base\'s plugin file at its old path (git show 7b6fa3c7b)',
-  'scripts/test-plugins-grammar.mjs': 'this census\'s own needles + the base file\'s old path',
+  'scripts/test-plugin-settings.mjs': 'its RED control re-plants the base\'s second truth, frozen from the plugin\'s old file (7b6fa3c7b)',
+  'scripts/test-plugins-grammar.mjs': 'this census\'s own needles',
+  'scripts/fixtures/off-master/7b6fa3c7b-plugins.json': 'the base\'s frozen lines (B-43a0): its old id and label ARE what ④\'s RED control reads',
   'scripts/test-settings-view.mjs': 'its §9b word needle + the base\'s row words as that needle\'s RED control',
 };
 const nameCensus = (files, readOf) => {
@@ -133,8 +132,7 @@ else {
   ok(plant('src/lib/i18n-zh.js', '"Judging model": "判断模型",', '"Judging model": "决策 API 判断模型",'), '④ RED CONTROL: a zh word planted back as 「决策 API」 is caught');
   ok(plant('src/lib/settings-ui.js', "pluginCategoryOf('llm')", "pluginCategoryOf('decision-api')"), '④ RED CONTROL: the old id planted back into a client door is caught');
   ok(!OLD_NAME.test('see docs/design-decision-api.zh.md §2.2'.replace(DOC_NAME, '')), '④ the design doc\'s FILE name is not a hit (its head note says the plugin is the LLM plugin now)');
-  const was = base(BASE_PATH['src/plugins/llm.js']);
-  if (was === null) skip('④ RED CONTROL (the base plugin file)'); else ok(OLD_NAME.test(was), '④ RED CONTROL: the base\'s plugin file (7b6fa3c7b) names the old plugin — the needle reads it');
+  ok(FX43.pluginNames.length === 2 && FX43.pluginNames.every((l) => OLD_NAME.test(l)), '④ RED CONTROL: the base\'s plugin file (7b6fa3c7b, its id and label frozen) names the old plugin — the needle reads it');
 }
 
 // ⑤ lane engine-plugin (design-custom-browser-plugin §1.1): the capability word `browser-engine` — the built-in family's half of
