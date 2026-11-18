@@ -882,7 +882,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const dropL = "        for (const [id, j] of this.jobs) if (LS.isSkeleton(j)) this.jobs.delete(id);   // the skeletons of an earlier answer: the new answer rebuilds its own, or has the records\n";
   const adoptL = "        if (!this._unread.store && !this.readOnly) { this._adoptAndReplay(); this._dirty = true; }   // the boot's adoption, late: the records are this process's now\n";
   const armL = "    this._unreadRetrySoon(which);   // the next try first: whatever this one does\n";
-  const liftL = "      this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));\n";
+  const liftL = "      if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));\n      else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));\n";   // cure 2: the lift ONLY on a whole read
   ok([dropL, adoptL, armL, liftL].every((x) => jsrc.split(x).length === 2), 'B-f276 cure control setup: the drop, the late adoption, the armed next try and the lift are each one line');
   const JC = MJ.load('src/jobs.js', jsrc.replace(dropL, '        // MUTANT: no drop\n').replace(adoptL, '        // MUTANT: no late adoption\n').replace(armL, '    // MUTANT: the next try only after an answer\n').replace(liftL, '      // MUTANT: no lift\n'), 'cure');
   const drx = await dropScene(JC, 'jobs-triage-reread-drop-mut');
@@ -903,14 +903,61 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const lf = await liftScene({ JobManager }, 'jobs-triage-reread-lift');
   const lfx = await liftScene(JC, 'jobs-triage-reread-lift-mut');
   ok(lf.wrote && !lf.noteLeft && !lf.held && lfx.wrote && lfx.noteLeft && lfx.held, 'B-f276 cure (the ruling) + CONTROL (no lift, in a copy): a folder fault writes the note; the read again that loads lifts it — without the lift it holds the clean-up for good', { lf, lfx });
-  const preL = "    const pre = await this._unreadPrefetch(which, a, file);\n";
+  const preL = "      return { a, pre: await this._unreadPrefetch(which, a, file) };   // cure r2: what the late load reads, off the loop\n";   // cure 2: inside the one in-flight slot
   ok(jsrc.split(preL).length === 2, 'B-f276 cure r2 control setup: the late load\'s prefetch is one line');
-  const JP = MJ.load('src/jobs.js', jsrc.replace(preL, '    const pre = null; // MUTANT: the late load reads on the loop\n'), 'prefetch');
+  const JP = MJ.load('src/jobs.js', jsrc.replace(preL, '      return { a, pre: null };   // MUTANT: the late load reads on the loop\n'), 'prefetch');
   const lsx = await loopScene(JP, 'jobs-triage-reread-loop-mut');
   ok(lsx.dataCalls.length > 0 && lsx.tornCalls.length > 0, 'B-f276 cure r2 CONTROL (no prefetch, in a copy): the late load makes synchronous file calls on the data folder', { data: lsx.dataCalls.length, torn: lsx.tornCalls.length });
   const hgx = await hangScene(JC, 'jobs-triage-reread-hang-mut');
   ok(!hgx.armed || hgx.triesAt < 4, 'B-f276 cure CONTROL (the next try only after an answer, in a copy): a hung read STOPS the tries', hgx);
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 3, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // ── CURE 2 (主开发 09:20Z, THE LAW): the hold is LIFTED — «nothing was lost», the note marked done, the clean-up resumed — ONLY on a
+  // WHOLE read. A file GONE, or torn bytes, end the hold with THEIR own true sentence, and the clean-up stays held
+  const notWhole = async (Mod, name, after) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json'), note = path.join(d, 'jobs.json.corrupt-unread'), b = JSON.stringify([rec('jb-f2760g01')]);
+    fs.mkdirSync(path.join(d, 'job-logs', 'jb-f2760g01'), { recursive: true });   // a job's logs: the clean-up's matter
+    plant(F, b, 'folder');
+    const lg = [], f0 = filed.length, r0 = resolved.length;
+    const J = engine(Mod, d, lg, { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    if (J._logsNoteP) await J._logsNoteP;
+    const wrote = fs.existsSync(note);
+    fs.rmdirSync(F); if (after === 'torn') fs.writeFileSync(F, '[{"id":"jb-f2760g01",');   // gone: nothing there at all
+    await J._unreadRetry('store'); await new Promise((r) => setTimeout(r, 80));
+    const mine = filed.slice(f0), fact = (k) => mine.find((n) => n && n.fact === k) || null;
+    const out = { wrote, ended: !J._unread.store, noteLeft: fs.existsSync(note), done: fs.readdirSync(d).some((n) => /^jobs\.json\.unread-done-\d+$/.test(n)), held: J._logsUnread.store, readAgain: !!fact('records-read-again'), gone: fact('records-gone'), corrupt: fact('store-corrupt'), resolved: resolved.length - r0, asides: asides(d, 'jobs.json'), skel: J.jobs.has('jb-f2760g01'), said: lg.filter((l) => /read again after/.test(l)).join(' | ') };
+    J.shutdown(); return out;
+  };
+  const LIFT_ANY = "      if (a.state === 'data') this._unreadLift(which, was)";
+  ok(jsrc.split(LIFT_ANY).length === 2, 'B-f276 cure 2 control setup: the lift asks the answer\'s state on one line');
+  const JL = MJ.load('src/jobs.js', jsrc.replace(LIFT_ANY, "      if (true) this._unreadLift(which, was)"), 'lift-any');   // MUTANT: r2 — the lift on ANY answer that clears the hold
+  const gn = await notWhole({ JobManager }, 'jobs-triage-reread-gone', 'gone'), gnx = await notWhole(JL, 'jobs-triage-reread-gone-mut', 'gone');
+  ok(gn.wrote && gn.ended && gn.noteLeft && !gn.done && gn.held && !gn.readAgain && gn.resolved >= 1 && gn.gone && gn.gone.urgency === 'high' && /the file was gone — the jobs it listed are not in VibeSpace now/.test(gn.gone.words.key) && gn.gone.words.params.note === 'jobs.json.corrupt-unread' && Number.isFinite(gn.gone.words.params.when.at) && Number.isFinite(gn.gone.words.params.until.at) && /the file is GONE/.test(gn.said), 'cure 2: a read again that finds the file GONE ends the hold with ITS OWN sentence (what is gone, the note that keeps the logs) — the note STANDS, the clean-up stays held, never «nothing was lost»', gn);
+  ok(gnx.readAgain && !gnx.noteLeft && !gnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of a GONE file, its note is marked done and the clean-up resumes over jobs whose records are not there', gnx);
+  const tn = await notWhole({ JobManager }, 'jobs-triage-reread-torn', 'torn'), tnx = await notWhole(JL, 'jobs-triage-reread-torn-mut', 'torn');
+  ok(tn.ended && tn.asides.length === 1 && tn.skel && tn.corrupt && tn.corrupt.words.params.file === tn.asides[0] && !tn.readAgain && tn.held && tn.done && tn.resolved >= 1 && /torn bytes, set aside as jobs\.json\.corrupt-\d+/.test(tn.said), 'cure 2: a read again that finds TORN bytes ends the hold as a boot would — set aside (named in its item), rebuilt from the job logs; the set-aside holds the clean-up, the failure\'s note is done, never «nothing was lost»', tn);
+  ok(tnx.readAgain && !tnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of TORN bytes and the clean-up resumes', tnx);
+  // CURE 2: ONE IN FLIGHT A STORE covers the read AND its prefetch — a SLOW prefetch with a second try: one read, one file at a time, one load
+  const prefScene = async (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json'), b = JSON.stringify([rec('jb-f2760p01', { state: 'up', runs: [{ startedAt: T0 - 1000 }] })]);
+    plant(F, b, 'folder');
+    const lp = [];
+    const J = engine(Mod, d, lp, { unreadRetry: { firstMs: 5, maxMs: 10, readMs: 30 } });
+    unplant(F, b, 'folder');
+    const prf = fs.promises.readFile; let storeReads = 0, ctlReads = 0, release = null;
+    const gate = new Promise((r) => { release = r; });
+    fs.promises.readFile = function (f, ...a) { const p = String(f); if (p === F) storeReads++; if (p.includes(`${path.sep}job-logs${path.sep}`)) { ctlReads++; return gate.then(() => prf.call(this, f, ...a)); } return prf.call(this, f, ...a); };
+    let during = null;
+    try { await until(() => J._unreadTries.store >= 5, 3000); during = { storeReads, ctlReads, tries: J._unreadTries.store, held: !!J._unread.store }; release(); await until(() => !J._unread.store, 3000); }
+    finally { release(); fs.promises.readFile = prf; }
+    const out = { during, back: !J._unread.store && J.jobs.has('jb-f2760p01'), storeReads, said: lp.filter((l) => /did not answer in/.test(l)).length, loads: lp.filter((l) => /read again after/.test(l)).length };
+    if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
+  };
+  const SLOT_A = "      const a = SR.storeAnswer(read, { valid: which === 'store' ? STORE_SHAPE : Array.isArray });\n";
+  ok(jsrc.split(SLOT_A).length === 2, 'B-f276 cure 2 control setup: the read again\'s answer is one line inside its slot');
+  const JS2 = MJ.load('src/jobs.js', jsrc.replace(SLOT_A, SLOT_A + "      if (this._unreadP[which]) this._unreadP[which] = null;   // MUTANT: r2 — the slot covers the read only\n"), 'slot-read-only');
+  const pf = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch'), pfx = await prefScene(JS2, 'jobs-triage-reread-prefetch-mut');
+  ok(pf.during && pf.during.tries >= 5 && pf.during.storeReads === 1 && pf.during.ctlReads === 1 && pf.during.held && pf.back && pf.said === 1 && pf.loads === 1, 'cure 2: a SLOW prefetch holds the one slot — the tries go on, ONE read of the store, ONE control file in flight at a time, said once, ONE load once it answers', pf);
+  ok(pfx.during && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 5, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
