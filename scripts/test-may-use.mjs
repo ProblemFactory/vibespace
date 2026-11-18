@@ -251,7 +251,7 @@ console.log('— ⑧ THE FORM\'S ROWS, BYTE FOR BYTE: the shared renderers draw 
   }
   ok(diffs.length === 0 && same === 16, `⑧ ${same} renders compared — card rows, accordion lines (open and shut), doors, an account granted through two Task Groups with its 「除了」, one granted to every agent, a tick row on and off: every one byte for byte`, diffs);
   const form = fs.readFileSync(path.join(REPO, 'src/lib/new-session-form.js'), 'utf8');
-  ok(/const prov = provRow;/.test(form) && /const acc = \(r\) => accLine\(r, !!this\._ns\.open\[r\.key\]\);/.test(form) && /grantedAccountHtml\(r, \{/.test(form) && /tickAccountHtml\(r, \{ ticked, words: \[t\('Written into the channel assignment at create/.test(form) && !/const doorBtn = \(door, label/.test(form),
+  ok(/const prov = provRow;/.test(form) && /const acc = \(r\) => accLine\(r, !!this\._ns\.open\[r\.key\]\);/.test(form) && /grantedAccountHtml\(r, \{/.test(form) && /tickAccountHtml\(r, \{ ticked, words: \[t\('Written into the channel assignment at create/.test(form) && !/const doorBtn = \(door, label/.test(form),   // stale-pins: kept — a deliberate absence check: the form no longer holds the renderer that moved
     '⑧ the form draws through the shared module (no twin left in new-session-form.js)');
 }
 
@@ -365,7 +365,7 @@ console.log('— ⑭ THE KEY DOOR, LIVE (restack onto 2.369.410): a once-grant f
   // RED CONTROL — it proves its plant first: the walk over liveGrants() is in the lister once, and the copy walks the raw store
   const ENGS = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf8');
   const LIVE = "      for (const g of liveGrants()) {\n        if (g.keyId !== k.id || g.subject === 'external' || (g.mode === 'once' && g.spentAt)) continue;";
-  const STORE = LIVE.replace('for (const g of liveGrants()) {', 'for (const g of db.grants) {');
+  const STORE = LIVE.replace('for (const g of liveGrants()) {', 'for (const g of db.grants) {');   // stale-pins: kept — the RED control plants the walk the release's key door left
   const planted = ENGS.split(LIVE).length === 2 ? ENGS.replace(LIVE, STORE) : null;
   ok(!!planted && planted.split(STORE).length === 2 && planted.split(LIVE).length === 1, '⑭ CONTROL plant: the lister\'s walk over liveGrants() stands once in automation-engine.js, and the copy walks the raw store there instead');
   const MC14 = mutantCopies('may-use-keys', REPO);
