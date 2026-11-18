@@ -1030,7 +1030,7 @@ console.log('— §5 wiring');
     /accounts\.loginStateOf\(a\.id, t\)/.test(fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8')));
   ck('the harness descriptor is the one place that touches the credential FILE (it also reports the last write)', (() => {
     const cl = fs.readFileSync(path.join(REPO, 'src/harnesses/claude.js'), 'utf8');
-    return /writtenAt = fs\.statSync\(fp\)\.mtimeMs/.test(cl) && /return \{ \.\.\.loginState\(raw, now\), writtenAt \}/.test(cl);
+    return /writtenAt = fx && Number\.isFinite\(fx\.mtimeMs\) \? fx\.mtimeMs : null/.test(cl) && /fx = RR\.facts\(fp\)/.test(cl) && /return \{ \.\.\.loginState\(raw, now\), writtenAt \}/.test(cl);   // B-403e: the write time from the SAME open the read made (src/run-reads.js facts)
   })());
 
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');

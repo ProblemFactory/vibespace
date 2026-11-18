@@ -24,7 +24,12 @@
  *     write or a descriptor call, and an unclassed one is red) is wrapped ONCE PER PROCESS: the wrapper is found by a
  *     process-wide key (never by a mark on a function — the loop witness copies a wrapped function's own properties onto
  *     its own wrapper), and it drops the memo of EVERY copy of this module loaded in the process. A wrapper another module
- *     puts around it later (the loop witness re-installing) keeps it inside. No module of the tree holds an fs write
+ *     puts around it later (the loop witness re-installing) keeps it inside; one put on BEFORE the first watch and taken
+ *     off after it (the boot trace's window) restores only while it is still the outermost, so the helper's wrappers stay
+ *     (src/server/boot-trace.js; a child-process leg). THE HOLDERS BY DESIGN are three, each rowed with its undo by the
+ *     suite's census of every site that assigns into fs: this helper (never undone), the loop witness (never undone) and
+ *     the boot trace (its pass-through keeps the original inside the helper's chain for the hub's life); a fourth is red.
+ *     No other module of the tree holds an fs write
  *     function from before the wrap (a census derived by search in the suite). A write through a DESCRIPTOR is seen too: a
  *     write-flagged open under a watched folder marks its descriptor until its closeSync, and every write through it drops
  *     the memo (FD_WRITES). This process writes nothing under the watched folders through a synchronous child (searched at
@@ -74,7 +79,7 @@ function ask(kind, p, fn) {
   if (!watched(p)) return fn();
   const m = scope(), k = kind + '\0' + path.resolve(p);
   const hit = m.get(k);
-  if (hit) { if (hit.err) throw hit.err; return hit.val; }
+  if (hit) { if ('err' in hit) throw hit.err; return hit.val; }
   let val;
   try { val = fn(); } catch (err) { m.set(k, { err }); throw err; }
   m.set(k, { val });
@@ -112,6 +117,21 @@ function facts(p) {
     } finally { try { fs.closeSync(fd); } catch { } }
   });
   return { ...f };
+}
+/** a file's SIGNATURE ({mtimeMs, size}) — the answer of this run's content ask of it (facts) when there is one, so no new ask,
+ *  else ONE stat, the run's answer from then on: never more than the release's lone stat (memberLoginState's cross-run
+ *  signature). A content ask that failed with the file's stat attached answers with that stat; one without it throws its error */
+function signature(p) {
+  if (run && watched(p)) {
+    const f = run.get('facts\0' + path.resolve(p));
+    if (f) {
+      if (!('err' in f)) return { mtimeMs: f.val.mtimeMs, size: f.val.size };
+      if (f.err && Number.isFinite(f.err.mtimeMs)) return { mtimeMs: f.err.mtimeMs, size: f.err.size };
+      throw f.err;
+    }
+  }
+  const st = stat(p);
+  return { mtimeMs: st.mtimeMs, size: st.size };
 }
 /** A LOOK-AGAIN READ: forget what this run knows of `p` and of everything under it — the next ask of it asks the mount, and
  *  that answer is the run's from then on */
@@ -185,4 +205,4 @@ function dropRun() {
   self.clear();
 }
 
-module.exports = { watch, watched, readText, readlink, entryExists, readdir, facts, stat, forget, dropRun, WRITES, FD_WRITES };
+module.exports = { watch, watched, readText, readlink, entryExists, readdir, facts, stat, signature, forget, dropRun, WRITES, FD_WRITES };

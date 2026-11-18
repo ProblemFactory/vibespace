@@ -165,6 +165,9 @@ const settle = async () => { for (const u of ALL_UH) if (typeof u.holdsSettled =
 // r8: a fault a leg injects into a SYNC fs call (fs.unlinkSync = …) reaches the hold's async road too: while fs.<x>Sync is
 // not the original, fs.promises.<x> runs the replacement (on a tree whose hold is synchronous it is never consulted)
 {
+  // B-403e: src/run-reads.js installs process-wide write wrappers at its first watch() — installed HERE, before the originals
+  // are taken, so a wrapper of the helper is never mistaken for an injected fault
+  require(REPO + '/src/run-reads.js').watch(fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lwl-rr-')));
   const PAIRS = { appendFile: 'appendFileSync', truncate: 'truncateSync', unlink: 'unlinkSync', readdir: 'readdirSync', stat: 'statSync', writeFile: 'writeFileSync', rename: 'renameSync', mkdir: 'mkdirSync' };
   for (const [a, sy] of Object.entries(PAIRS)) {
     const orig = fs[sy], pa = fs.promises[a];

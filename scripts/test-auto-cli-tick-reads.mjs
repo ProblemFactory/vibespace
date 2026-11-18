@@ -248,24 +248,28 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
 // ── §4 the WORK and the LOOP ──
 console.log('§4 work linear in conversations and members, the loop ≤ 1/5 of the reverted tick at 150 µs per fs call');
 const FS_CALLS = ['readFileSync', 'statSync', 'lstatSync', 'readlinkSync', 'existsSync', 'readdirSync', 'realpathSync', 'openSync'];
-// B-403e: the run's memo (src/run-reads.js) answers a file asked twice in ONE synchronous run from its first ask, so the
-// reverted tick's members × accounts × conversations reads would collapse to one ask per file and the regression this leg
-// holds would no longer show. THE REVERTED TICK IS THE RELEASE'S: the fix reverted AND every routed ask going to the mount (a
-// copy of the helper whose ask is the call itself, swapped in for that tick); the fixed tick runs the tree as it is.
+// (B-403e) an ASK of the mount names a path: a read through a descriptor follows its open and is counted there — the
+// helper reads a sign-in file's stat and text through ONE open (src/run-reads.js facts), where the release made a stat and a read
+// B-403e: the run's memo (src/run-reads.js) answers a file asked twice in ONE synchronous run from its first ask, so a tick's
+// members × accounts × conversations reads would collapse to one ask per file — on BOTH sides: the old tick put back into the
+// tree would read green. A LEG THAT GUARDS THE CODE'S OWN WORK COUNTS THE CODE: both ticks run with every routed ask going to
+// the mount (a copy of the helper whose ask is the call itself, swapped in for the measurement); the memo's own law is
+// test-pool-pass-reads'.
 const RR = require(path.join(REPO, 'src/run-reads.js'));
 const RR_OFF = (() => { const src = fs.readFileSync(path.join(REPO, 'src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scratchDir, 'run-reads-off.cjs'); fs.writeFileSync(f, src.replace(needle, needle + '  return fn();\n')); return require(f); })();
+// §4's ONE instant, taken before any of its worlds is built (their readings are stamped a minute before it, every time)
+const T4 = Date.now();
 async function measureTick(shape, opts = {}) {
-  if (!opts.pre) return measureTick0(shape, opts);
   const saved = {};
-  for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat']) { saved[k] = RR[k]; RR[k] = RR_OFF[k]; }
+  for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature']) { saved[k] = RR[k]; RR[k] = RR_OFF[k]; }
   try { return await measureTick0(shape, opts); } finally { Object.assign(RR, saved); }
 }
 async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
   const w = mkWorld({ ...shape, engine: pre ? PRE_ENGINE : engMod });
-  const orig = {}; let calls = 0;
+  const orig = {}; let calls = 0, counting = true;   // B-403e: the count is the TICK's work — it ends when the tick's own promise settles
   for (const k of FS_CALLS) {
     orig[k] = fs[k];
-    fs[k] = function (...a) { calls++; if (slowUs) { const end = performance.now() + slowUs / 1000; while (performance.now() < end); } return orig[k].apply(this, a); };
+    fs[k] = function (...a) { if (counting && typeof a[0] !== 'number') calls++; if (slowUs) { const end = performance.now() + slowUs / 1000; while (performance.now() < end); } return orig[k].apply(this, a); };
   }
   let gap = 0, last = performance.now();
   const probe = setInterval(() => { const t = performance.now(); gap = Math.max(gap, t - last); last = t; }, 1);
@@ -275,12 +279,14 @@ async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
     const loop = (pre ? PRE_LOOP : { createAutoCliLoop }).createAutoCliLoop({
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined), accounts: w.am, autoCliReady: () => true,
       USAGE_CACHE_DIR: w.cacheDir, usageIdentityGroupsCached: () => w.eng.usageIdentityGroupsCached(), usageEstimator: { estimateFor: () => null },
-      projectionRereadFor: w.eng.projectionRereadFor, projectionBillingIndex: w.eng.projectionBillingIndex, lastMemberReadAt: () => Date.now(),
+      projectionRereadFor: w.eng.projectionRereadFor, projectionBillingIndex: w.eng.projectionBillingIndex, lastMemberReadAt: () => T4,
       usage: { refreshViaCliPanel: async () => false }, onMemberReadingFresh() { }, dataDir: path.join(w.root, 'loop'), log() { }, warn() { },
+      now: () => T4, rand: () => 0.5,   // B-403e: what §3 hands the tick — a count no clock or die can move
     });
     calls = 0;
     const t0 = performance.now(); const p = loop.tick(); syncMs = performance.now() - t0;
     await p;
+    counting = false;   // the 5 ms below is the loop-gap probe's, never the count's
     await new Promise((r) => setTimeout(r, 5));
   } finally { clearInterval(probe); for (const k of FS_CALLS) fs[k] = orig[k]; }
   return { calls, syncMs: Math.round(syncMs), gap: Math.round(gap) };
@@ -292,9 +298,11 @@ async function measureTick0(shape, { slowUs = 0, pre = false } = {}) {
   const preBase = await measureTick({ members: 13, pooled: 25 }, { pre: true });
   const preTwoM = await measureTick({ members: 26, pooled: 25 }, { pre: true });
   console.log(`    fs calls per tick — fixed: ${base.calls} (×2 conversations ${twoS.calls}, ×2 members ${twoM.calls}); reverted: ${preBase.calls} (×2 members ${preTwoM.calls})`);
-  ok(`§4 WORK: production's shape (13 members, 25 pooled conversations) costs ${base.calls} synchronous fs calls a tick (bound 600; the reverted tick: ${preBase.calls})`, base.calls <= 600, String(base.calls));
-  ok(`§4 WORK: ×2 conversations ⇒ ×${(twoS.calls / base.calls).toFixed(2)}, ×2 members ⇒ ×${(twoM.calls / base.calls).toFixed(2)} — linear in each, never the product (bound 2.2)`, twoS.calls / base.calls <= 2.2 && twoM.calls / base.calls <= 2.2, `${twoS.calls}/${twoM.calls} vs ${base.calls}`);
-  ok(`§4 WORK control: the reverted tick reads RED — ${preBase.calls} calls (≥ 10× the fixed ${base.calls}), ×2 members ⇒ ×${(preTwoM.calls / preBase.calls).toFixed(2)} (members × accounts × conversations)`, preBase.calls >= 10 * base.calls && preTwoM.calls / preBase.calls > 3, `${preBase.calls} / ${preTwoM.calls}`);
+  // B-403e: EXACT — the tick's own work with the clock and rand fixed, the memo off, path-named asks: one number per shape
+  // (measured alone on the test machine, both zones: 395 / 520 / 625; reverted 11073 / 41500)
+  ok(`§4 WORK: production's shape (13 members, 25 pooled conversations) costs ${base.calls} synchronous fs calls a tick — exactly 395 (the release's bound 600; the reverted tick: ${preBase.calls})`, base.calls === 395, String(base.calls));
+  ok(`§4 WORK: ×2 conversations ⇒ ×${(twoS.calls / base.calls).toFixed(2)}, ×2 members ⇒ ×${(twoM.calls / base.calls).toFixed(2)} — linear in each, never the product (bound 2.2)`, twoS.calls / base.calls <= 2.2 && twoM.calls / base.calls <= 2.2 && twoS.calls === 520 && twoM.calls === 625, `${twoS.calls}/${twoM.calls} vs ${base.calls} (exactly 520 / 625)`);
+  ok(`§4 WORK control: the reverted tick reads RED — ${preBase.calls} calls (≥ 10× the fixed ${base.calls}), ×2 members ⇒ ×${(preTwoM.calls / preBase.calls).toFixed(2)} (members × accounts × conversations)`, preBase.calls >= 10 * base.calls && preTwoM.calls / preBase.calls > 3 && preBase.calls === 11073 && preTwoM.calls === 41500, `${preBase.calls} / ${preTwoM.calls} (exactly 11073 / 41500)`);
   const slow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150 });
   const preSlow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150, pre: true });
   console.log(`    150 µs per fs call — fixed: sync ${slow.syncMs} ms, longest loop gap ${slow.gap} ms; reverted: sync ${preSlow.syncMs} ms, gap ${preSlow.gap} ms`);

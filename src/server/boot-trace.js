@@ -184,7 +184,7 @@ function sitesOf(ops, w, top = 3) {
 }
 function wrapSync({ ops, now, turn = () => 0 }) {
   const root = path.join(__dirname, '..', '..') + path.sep, undo = [];
-  let depth = 0, openTurn = null;
+  let depth = 0, openTurn = null, off = false;   // off: the window closed — a wrapper another module put AROUND ours stays (B-403e)
   const open = new Map(); // site line → (`${depth} ${call} ${path | fd}` → the op its next call may join) — this turn only
   let openN = 0;
   const sites = new Map(); // r11: a caller's code location — its file → (its position → its site line); each line formatted once
@@ -198,7 +198,7 @@ function wrapSync({ ops, now, turn = () => 0 }) {
     for (const c of Array.isArray(cs) ? cs : []) {
       const f = (c.getFileName && c.getFileName()) || '';
       let mine = repoFile.get(f);
-      if (mine === undefined) { mine = typeof f === 'string' && f.includes(root) && !f.includes('node_modules') && !f.includes('boot-trace.js'); if (repoFile.size < SITES_MAX) repoFile.set(f, mine); }
+      if (mine === undefined) { mine = typeof f === 'string' && f.includes(root) && !f.includes('node_modules') && !f.includes('boot-trace.js') && !f.includes('run-reads.js') /* B-403e: the run's one asker is never the site */; if (repoFile.size < SITES_MAX) repoFile.set(f, mine); }
       if (!mine) continue;
       const pos = typeof c.getPosition === 'function' ? c.getPosition() : c.getLineNumber() * 1e5 + c.getColumnNumber();
       let byPos = sites.get(f), line = byPos && byPos.get(pos);
@@ -216,6 +216,7 @@ function wrapSync({ ops, now, turn = () => 0 }) {
     const orig = obj[name];
     if (typeof orig !== 'function') return;
     const w = obj[name] = function (...a) {
+      if (off) return orig.apply(this, a);
       const t0 = now(); depth++;
       try { return orig.apply(this, a); } finally {
         depth--; const ms = now() - t0;
@@ -234,13 +235,16 @@ function wrapSync({ ops, now, turn = () => 0 }) {
         }
       }
     };
-    undo.push(() => { obj[name] = orig; });
+    // the window's end puts the original back ONLY while ours is still the outermost: a wrapper installed after ours (the
+    // run-reads helper's write wrappers, at its first watch) keeps its place, and ours turns into a pass-through instead —
+    // restoring under it would strip it for the life of the hub
+    undo.push(() => { if (obj[name] === w) obj[name] = orig; });
   };
   for (const n of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync', 'writeFileSync', 'appendFileSync', 'renameSync', 'readSync', 'openSync', 'realpathSync']) wrap(fs, n, 'fs.' + n);
   const cp = require('child_process');
   for (const n of ['execFileSync', 'execSync', 'spawnSync']) wrap(cp, n, n);
   wrap(JSON, 'parse', 'JSON.parse', (a) => typeof a[0] === 'string' && a[0].length >= BIG_PARSE);
-  return () => { for (const u of undo.splice(0)) u(); };
+  return () => { off = true; for (const u of undo.splice(0)) u(); };
 }
 
 /** r12: THE CPU SAMPLER — the main thread's stack every CPU_SAMPLE_US (the in-process inspector's profiler; its sample times

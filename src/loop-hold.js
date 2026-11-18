@@ -245,7 +245,9 @@ function readLen(t, i) {
  *  (src/server/loop-blame.js, src/server/sync-fs-witness.js) and the node frames among them, so the time lands on the
  *  JavaScript CALLER that made the call, as for any native call. A stack that is the instrument's alone (its own work, a
  *  timer of the witness) is kept whole: that time IS the instrument's. */
-const INSTRUMENT_FILES = Object.freeze(['src/server/loop-blame.js', 'src/server/sync-fs-witness.js']);
+// B-403e: + src/run-reads.js — its process-wide write wrappers and its asks sit between a caller and the fs call: the hold is
+// the caller's (the pass, a record, a broadcast, a store's write), exactly as before the helper existed
+const INSTRUMENT_FILES = Object.freeze(['src/server/loop-blame.js', 'src/server/sync-fs-witness.js', 'src/run-reads.js']);
 /** the capture's frame for time ASLEEP in a wrapped synchronous fs call (the watchdog read the call from the live slot at
  *  its post): `fn` = the call (one of loop-blame's SYNC_FNS), never a path */
 const SYNC_FS_URL = 'vibespace:sync-fs';

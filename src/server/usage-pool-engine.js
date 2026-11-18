@@ -1448,6 +1448,7 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
     // it, and a witness run would otherwise stamp a 'model cap' family into the
     // sidecar that the naming ladder then reads back as a NAMED cap
     if (ev.kind === 'scoped' && String(ev.scopedName).toLowerCase() === String(quotaModel.MODEL_CAP_PLACEHOLDER.name).toLowerCase()) return null;
+    RR.forget(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)));   // B-403e: a read before the sidecar is REWRITTEN looks again
     const raw = readApiWitnessFile(key) || {};
     const ring = (Array.isArray(raw.ring) ? raw.ring.filter((e) => e && Number(e.resetsAt) > 0) : []).slice(-(API_WITNESS_RING - 1));
     const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome, ...(producer ? { producer } : {}) };
@@ -1766,10 +1767,10 @@ function memberLoginState(id) {
     fp = accounts.subCredsPath(id);
   } catch { return null; }
   let sig = 'none';
-  // B-403e: the run's ONE ask of the file (its read rides it). THE SIGNATURE IS THE FILE'S STAT WHENEVER A STAT ANSWERS, as at
-  // the release: a read that fails while the stat answers (the mount's moment) keeps the stat's signature — and so the state
-  // remembered for it — and «present but unreadable» never shares «missing»'s signature
-  try { const st = RR.facts(fp); sig = `${st.mtimeMs}:${st.size}`; } catch (e) { if (e && Number.isFinite(e.mtimeMs)) sig = `${e.mtimeMs}:${e.size}`; }
+  // B-403e: THE SIGNATURE IS THE FILE'S STAT, as at the release — answered by this run's read of the file when one was made (no
+  // new ask), else by ONE stat (never more than the release's): a read that fails while the stat answers keeps the stat's
+  // signature, and «present but unreadable» never shares «missing»'s
+  try { const st = RR.signature(fp); sig = `${st.mtimeMs}:${st.size}`; } catch (e) { if (e && Number.isFinite(e.mtimeMs)) sig = `${e.mtimeMs}:${e.size}`; }
   const hit = _loginStateMemo.get(id);
   if (hit && hit.sig === sig) return hit.st;
   let st = null;

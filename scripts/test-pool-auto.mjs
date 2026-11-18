@@ -3742,7 +3742,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
   // test-pool-pass-reads'.
   const RRm = require(path.resolve('src/run-reads.js'));
   const RR_OFF = (() => { const src = fs.readFileSync(path.resolve('src/run-reads.js'), 'utf8'); const needle = 'function ask(kind, p, fn) {\n'; if (src.split(needle).length !== 2) throw new Error('the run-reads ask needle moved'); const f = path.join(scr, 'run-reads-off.cjs'); fs.writeFileSync(f, src.replace(needle, needle + '  return fn();\n')); return require(f); })();
-  const memoOff = (fn) => { const saved = {}; for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat']) { saved[k] = RRm[k]; RRm[k] = RR_OFF[k]; } try { return fn(); } finally { Object.assign(RRm, saved); } };
+  const memoOff = (fn) => { const saved = {}; for (const k of ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature']) { saved[k] = RRm[k]; RRm[k] = RR_OFF[k]; } try { return fn(); } finally { Object.assign(RRm, saved); } };
   const probe = await world(engMod);
   if (!probe) ck('r2 roster SKIP — pools unsupported on this platform', true);
   else {

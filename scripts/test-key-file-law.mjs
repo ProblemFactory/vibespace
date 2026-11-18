@@ -366,11 +366,12 @@ const KEYPATH_RE = /(^\.[A-Za-z0-9][A-Za-z0-9._-]*-key|\.key)$/;
 const BELT = { paused: 0, lawful: 0, hits: [], seen: new Set() };
 const SELF = new URL(import.meta.url).pathname;
 const SB_FILE = path.join(REPO, 'src/secret-box.js'), KF_FILE = path.join(REPO, 'src/key-file.js');
+const RR_FILE = path.join(REPO, 'src/run-reads.js');   // B-403e: its process-wide write wrappers sit between a caller and the belt — never the caller
 const keyArgs = (args) => args.filter((x) => (typeof x === 'string' || Buffer.isBuffer(x) || x instanceof URL) && KEYPATH_RE.test(path.basename(x instanceof URL ? x.pathname : String(x))));
 function beltJudge(door, args) {
   if (BELT.paused || !keyArgs(args).length) return;
   const lim = Error.stackTraceLimit; Error.stackTraceLimit = 40; const stack = String(new Error().stack); Error.stackTraceLimit = lim;
-  const frames = stack.split('\n').slice(1).map((x) => x.trim()).filter((x) => x.startsWith('at ') && !/\(node:|^at node:/.test(x) && !/\b(beltWrap|beltJudge|injectedRead)\b/.test(x));
+  const frames = stack.split('\n').slice(1).map((x) => x.trim()).filter((x) => x.startsWith('at ') && !/\(node:|^at node:/.test(x) && !/\b(beltWrap|beltJudge|injectedRead)\b/.test(x) && !x.includes(RR_FILE));
   const caller = frames[0] || '?';
   if (caller.includes(SELF) && !/eval at /.test(caller)) return; // the suite's own fixture work (copies, renames, chmods)
   if (caller.includes(SB_FILE) && frames.some((f) => f.includes(KF_FILE))) { BELT.lawful++; return; }

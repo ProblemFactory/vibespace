@@ -13,7 +13,7 @@ if (OUT && TAG && require('worker_threads').isMainThread) {
   const now = () => Number(process.hrtime.bigint()) / 1e6;
   const sites = new Map(), calls = [], fdPath = new Map(), gaps = [];
   let lastBeat = now(), loopStartAt = null;
-  const SKIP = /node:|store-slow-preload|loop-blame\.js|sync-fs-witness\.js|timed-sync\.js|store-timing\.js|safe-fs\.js|fs-canary\.js/;
+  const SKIP = /node:|store-slow-preload|loop-blame\.js|sync-fs-witness\.js|run-reads\.js|timed-sync\.js|store-timing\.js|safe-fs\.js|fs-canary\.js/;
   const siteOf = () => { const lim = Error.stackTraceLimit; Error.stackTraceLimit = 40; const st = new Error().stack.split('\n').slice(3); Error.stackTraceLimit = lim;
     for (const l of st) { if (SKIP.test(l)) continue; const m = /\((\/.*):(\d+):\d+\)$/.exec(l) || /at (\/.*):(\d+):\d+$/.exec(l); if (m) return m[1].replace(TREE + '/', '') + ':' + m[2]; } return '?'; };
   const rel = (p) => String(p).replace(TREE + '/', '');
