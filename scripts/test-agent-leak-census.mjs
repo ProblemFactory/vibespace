@@ -61,6 +61,7 @@
 //      used where the boot never runs, a site that starts a program ⇒ each RED. A site runs without the try / if around
 //      it in the wiring: the world shows what the boot CAN mount (it errs toward more routes, never fewer).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -362,8 +363,18 @@ const overlay = (over) => (f) => (has(over, f) ? over[f] : readRepo(f));
 // A construction with no row, a stand-in member nobody gave, a program started, a row nothing touched = RED.
 console.log('⑤ the world (the hub\'s real wiring, evaluated in-process over a scratch root)');
 const WIRING = new Set(FILES.filter((f) => f === 'server.js' || /^src\/server\/[a-z0-9-]+-wiring\.js$/.test(f)));
+// A FIXTURE CARRIER RE-HOMES ITS OWN PROCESS (test-fixture-isolation (c): this suite mints session ids with fixtureSid): the
+// real home's project list is read BEFORE the re-home, HOME and os.homedir point at a scratch home before any product code
+// loads, a signal ends the run through 'exit' (the scratch dirs' own removal), and the last leg proves the real
+// ~/.claude/projects gained no fixture entry
+const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
+const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 const HOME = scratchHome('agent-leak-home');
 const ROOT = scratch('agent-leak'); fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
+const cleanup = () => { for (const d of [HOME, ROOT]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } };
+process.on('exit', cleanup);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
+os.homedir = () => HOME;
 process.env.HOME = HOME; process.env.XDG_RUNTIME_DIR = path.join(HOME, '.run'); fs.mkdirSync(process.env.XDG_RUNTIME_DIR, { recursive: true, mode: 0o700 });
 process.env.VIBESPACE_SKIP_AGENT_HOOKS = '1'; process.env.VS_NO_REAL_CLI = '1';
 // NO PROGRAM RUNS: every child_process door refuses and is counted (a world that starts one is RED)
@@ -1120,6 +1131,15 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
   const e = again({ 'server.js': spawny });
   ok(SPAWNED.length > sp0 && e.B.threw.some((t) => /no program runs/.test(t)), 'CONTROL: a site that starts a program is refused and RED (the world starts none)', e.B.threw);
   SPAWNED.length = sp0;
+}
+
+// ── the REAL home is untouched (this process was re-homed before the world loaded) ──
+{
+  const { fixtureLitter } = require(path.join(REPO, 'src/fixture-guard.js'));
+  const after = (() => { try { return fs.readdirSync(REAL_PROJECTS, { withFileTypes: true }); } catch { return []; } })();
+  const added = after.filter((d) => !realBefore.has(d.name)).map((d) => ({ name: d.name, mtimeMs: (() => { try { return fs.statSync(path.join(REAL_PROJECTS, d.name)).mtimeMs; } catch { return Date.now(); } })() }));
+  const lit = fixtureLitter(added);
+  ok(lit.offenders.length === 0, `the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, lit.offenders.slice(0, 3));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
