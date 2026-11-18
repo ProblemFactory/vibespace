@@ -230,13 +230,16 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
   // r2: STOP → TERM → CONT a minute later — the TERM is delivered at the CONT; the CONT re-stamps the mark
   {
     const UX = require(path.join(REPO, 'src/server/unexpected-exit.js'));
-    let clock = t0; const sx = { _childPid: 4242 }, other = { _childPid: 5151 };
+    // the session pids sit ABOVE the kernel's ceiling (pid_max is at most 2^22 = 4194304): markAskedByPid reads /proc for a pid's
+    // children, so no real process on the machine can ever change this leg (the verdict's should, follow-up of part one)
+    const NO_PID = 4194304;
+    let clock = t0; const sx = { _childPid: NO_PID + 4242 }, other = { _childPid: NO_PID + 5151 };
     UX.install({ activeSessions: new Map([['sx', sx], ['so', other]]), now: () => clock, log: { log() { }, warn() { } } });
-    UX.markAskedByPid(4242, 'user-signal');                         // the panel's TERM while the CLI is STOPped
+    UX.markAskedByPid(NO_PID + 4242, 'user-signal');                         // the panel's TERM while the CLI is STOPped
     clock += 60000;
     ok(AA(sx._exitAsked, clock) === null, 'r2 control: a minute later the TERM mark alone is stale (the CONT would kill a "crash")');
-    UX.markAskedByPid(4242, 'user-signal', { refreshOnly: true });  // the panel's CONT delivers the pending TERM
-    UX.markAskedByPid(5151, 'user-signal', { refreshOnly: true });  // a CONT of a session nobody signalled
+    UX.markAskedByPid(NO_PID + 4242, 'user-signal', { refreshOnly: true });  // the panel's CONT delivers the pending TERM
+    UX.markAskedByPid(NO_PID + 5151, 'user-signal', { refreshOnly: true });  // a CONT of a session nobody signalled
     ok(AA(sx._exitAsked, clock) === 'user-signal' && UV({ mode: 'chat', midTurn: true, facts: { code: null, signal: 'SIGTERM', wrapperFate: 'finalized' }, conversationId: 'cx', askedBy: AA(sx._exitAsked, clock), now: clock }).action === null,
       'r2: the CONT re-stamps the mark — the TERM it delivers is the user\'s kill, never respawned');
     ok(other._exitAsked === undefined, 'r2: a CONT marks nothing new (a session never signalled stays unmarked)');
@@ -251,6 +254,8 @@ console.log('— the resume words and the one heal entry point (source pins + ce
   const srv = read('server.js');
   const builder = srv.split('function activeSessionsPayload() {')[1] || '';
   ok(/^\s*try \{ require\('\.\/src\/server\/unexpected-exit'\)\.healResumed\(\); \}/.test(builder), 'PIN: server.js activeSessionsPayload (the publish every create / resume / restore passes through) runs the heal pass first');
+  // (git grep over the checkout: this census needs a .git checkout — in an exported tree `callers` is empty and the leg fails
+  // CLOSED, a false red, never a false green)
   const callers = spawnSync('git', ['-C', REPO, 'grep', '-l', 'healResumed(', '--', 'src', 'server.js'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).sort();
   ok(callers.join(',') === 'server.js,src/server/unexpected-exit.js', 'census: healResumed is called from the ONE entry point only (never per call site)', callers);
 }

@@ -239,6 +239,8 @@ console.log('— ③ THE AGENT CAN NEVER REACH THE PERSON’S BROWSING');
   ok(agentPart.length > 5000 && !FORBID.test(agentPart), 'no /api/agent/browser/* handler names their key, their routes or their verbs');
   const agentRoutes = [...routes.matchAll(/router\.(?:get|post|patch|delete)\('(\/api\/agent\/[^']+)'/g)].map((m) => m[1]);
   ok(agentRoutes.length > 8 && !agentRoutes.some((p) => /\/browse(\/|$)|human/.test(p)) && /router\.post\('\/api\/browser\/profiles\/:id\/browse'/.test(routes) && ![...routes.matchAll(/router\.\w+\('([^']+)'/g)].some((m) => /^\/api\/agent\/.*\bbrowse\b/.test(m[1])), 'their four routes are /api/browser/* (cookie only) — no /api/agent/… twin');
+  // (a walk built by path.join names no file the affected rule sees: this suite's ci.mjs row declares reads: ['data/bin/'], so a
+  // new data/bin/vibespace-* CLI selects it in a lane's affected list too)
   const clis = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => /^vibespace-/.test(n) && fs.statSync(path.join(REPO, 'data/bin', n)).isFile());
   const hits = clis.filter((n) => /\bhu-[0-9a-f]|\/api\/browser\/browse|profiles\/[^'"`]*\/browse|humanKeyFor/.test(fs.readFileSync(path.join(REPO, 'data/bin', n), 'utf8')));
   ok(clis.length > 5 && hits.length === 0, `no agent CLI (${clis.length} data/bin/vibespace-*) names their key or their routes`, hits);

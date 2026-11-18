@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// THE DESKTOP-SERVE SOURCE CENSUSES AND PINS (fast, text only — lane text-legs, B-94d3). MOVED VERBATIM from the heavy
+// THE DESKTOP-SERVE SOURCE CENSUSES AND PINS (fast — source text, plus the op tables read off src/desktop-serve.js and src/app-serve.js
+// loaded in-process; no browser, server or hub — lane text-legs, B-94d3). MOVED VERBATIM from the heavy
 // scripts/test-desktop-serve.mjs (its runner, keeper, bridge, routes and every mutant-copy CONTROL stay there): §1 the runner answers
 // every op of its table BY NAME (src/desktop-serve.js, src/app-serve.js) with the census's own CONTROL, the src/ callers' op census,
 // §3 the daemon wiring and the shared tier (src/agentd/agentd.js, src/agentd/client.js, src/app-system-serve.js, data/bin/
