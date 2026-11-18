@@ -6613,6 +6613,13 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .jobs-name { font-weight: 600; }
 .jobs-state { color: var(--text-dim); font-size: 11px; }
 .jobs-card-l2 { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+/* lane vault-job-approval: a job's vault line — what it uses, and while it waits, why and its door (wraps on a phone: never a cut chip) */
+.jobs-card-vault { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; min-width: 0; }
+.jobs-vault-head { color: var(--text-dim); font-size: 11px; }
+.jobs-chip-vault { font-family: inherit; white-space: normal; overflow-wrap: anywhere; display: inline-flex; align-items: center; gap: 4px; }
+.jobs-vault-x { flex: none; border: none; background: none; color: var(--text-dim); cursor: pointer; padding: 0 2px; font-size: 10px; }
+.jobs-vault-x:hover { color: var(--red); }
+.jobs-vault-wait { color: var(--yellow); font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
 .jobs-chip { font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-family: monospace; }
 .jobs-chip-prog { color: var(--accent); border-color: var(--accent-dim); }
 .jobs-chip-grp { border-radius: var(--radius-sm); }
@@ -9892,6 +9899,13 @@ button.vw-chip { cursor: pointer; }
 .vw-ak-grants { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .vw-ak-to, .vw-ak-none, .vw-ak-used { color: var(--text-dim); }
 .vw-ak-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); }
+/* lane vault-job-approval: an entry's Background jobs — one chip each, its ✕ always in view (the words wrap, never the ✕ cut) */
+.vw-job-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; min-width: 0; }
+.vw-job-chip { max-width: 100%; }
+.vw-job-chip-words { min-width: 0; overflow-wrap: anywhere; }
+.vw-job-chip .vw-job-x { flex: none; }
+.vw-job-waiting-vault .vw-job-chip-words, .vw-job-waiting-approval .vw-job-chip-words { color: var(--yellow); }
+.vw-job-stopped .vw-job-chip-words { color: var(--text-dim); }
 .vw-ak-x { border: 0; background: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; font: inherit; }
 .vw-ak-x:hover { color: var(--bad-text); }
 /* the owner 2026-11-17: a WIDER grant reaching a login — «through», no ✕, its door; what the login holds besides its secret */

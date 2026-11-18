@@ -506,6 +506,56 @@ async function legPasteDelete(pasteSrc = null) {
   W.release(); W.end();
   return rows;
 }
+// ── ⑪ WHAT THE OWNER SEES (lane vault-job-approval L2): the Vault row's jobs, a job's uses, its starts counted ────────────────
+async function legSurfaces(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(doorSrc ? 'surfm' : 'surf', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 });
+  const { job, a, ok: up } = await approvedService(W, 'surf');
+  const f1 = W.door.rowFacts({ id: a.entry }) || [];
+  const u1 = W.door.usesOf(job), lbl = W.jm.labelOf(job);
+  rows.starts = (f1[0] || {}).starts;
+  if (doorSrc) { W.release(); W.end(); return rows; }
+  row(up && f1.length === 1 && f1[0].id === job.id && f1[0].name === lbl && f1[0].kind === 'service' && f1[0].state === 'running' && f1[0].starts === 1,
+    'the Vault row\'s job facts (door rowFacts → the contents list\'s `jobs`): the approved job, its BELTED name (labelOf), a state CODE (running) and its starts counted from the audit (1) — never a value', f1);
+  row(u1.length === 1 && u1[0].name === 'TOK' && u1[0].id === a.entry && u1[0].approved === true && typeof u1[0].label === 'string' && u1[0].label.length > 0 && JSON.stringify(W.jm.vaultUsesOf(job)) === JSON.stringify(u1),
+    'a job\'s uses as its PERSON\'s card names them (usesOf / the engine\'s vaultUsesOf → GET /api/jobs `vaultUses`): the NAME, the entry\'s row id, its Vault name, approved', u1);
+  const counted = W.vault.useCounts()['agent:conv-a/tok'] || {};
+  row(counted.jobs && counted.jobs[job.id] === 1 && counted.uses >= 1, 'the use tally counts per job (src/vault-use.js countsOf `jobs`): the start that was handed the entry', counted);
+  W.jm.stop(job);
+  await W.untilMs(() => !['up', 'starting'].includes(job.state), 3000);
+  const f2 = W.door.rowFacts({ id: a.entry }) || [];
+  row(f2.length === 1 && f2[0].state === 'stopped', 'stopped, its chip says so (state code `stopped`) — still on the row: the approval stands until the ✕', f2);
+  W.release(); W.end();
+  const W2 = await world('surf2');
+  W2.put(SENT('own2')); W2.release();
+  const own = W2.jm.jobs.get(W2.create({ name: 'own2' }).job.id);
+  const u2 = W2.door.usesOf(own);
+  row(u2.length === 1 && u2[0].approved === false && W2.door.rowFacts({ id: 'secrets:agent:conv-a/tok#secret' }) === null, 'a value the conversation PUT: no approval (approved false — its card draws no ✕) and no chip on the Vault row', { u2, facts: W2.door.rowFacts({ id: 'secrets:agent:conv-a/tok#secret' }) });
+  W2.end();
+  return rows;
+}
+// the Vault row's chips (src/lib/vault-job-row.js) drawn under a minimal DOM — the words from the codes, the ✕ on every chip
+async function legChips() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const noop = () => { };
+  const mk = (tag) => { const e = { tagName: tag, className: '', textContent: '', title: '', type: '', children: [], attrs: {}, dataset: {}, style: {}, append(...xs) { for (const x of xs) this.children.push(x); }, appendChild(x) { this.children.push(x); return x; }, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener: noop, classList: { add: noop, remove: noop, toggle: noop } }; return e; };
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mk, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mk('body'), head: mk('head') };
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const VJR = await import(pathToFileURL(path.join(REPO, 'src/lib/vault-job-row.js')).href);
+    const r = { id: 'secrets:secret:k1#secret', jobs: [{ id: 'jb-0000aaaa', name: 'tg-bot', kind: 'service', state: 'running', starts: 3 }, { id: 'jb-0000bbbb', name: 'nightly', kind: 'cron', state: 'waiting-vault', starts: 0 }, { id: 'not-a-job', name: 'x', state: 'running' }] };
+    const box = VJR.jobExtras(r, { refresh: noop }).box;
+    const chips = box.children, words = chips.map((c) => c.children[0].textContent), xs = chips.map((c) => c.children[1]);
+    row(chips.length === 2 && words[0] === 'Background job: tg-bot · running · started 3×' && words[1] === 'Background job: nightly · waiting for the unlock' && /vw-job-running/.test(chips[0].className) && /vw-job-waiting-vault/.test(chips[1].className),
+      'one chip per approved job — «Background job: <name> · <state in words> · started N×» from the codes (an id that is no job id is never drawn)', words);
+    row(xs.every((x) => x && x.tagName === 'button' && x.textContent === '✕' && x.type === 'button' && /the job stops now/.test(x.title) && x.attrs['aria-label'] === x.title && typeof x.onclick === 'function'), 'every chip carries its ✕ (a real button, its title and label say the job stops now)', xs.map((x) => x && x.title));
+  } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+  return rows;
+}
 async function legCronStopped(jobs = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world(jobs ? 'cronm' : 'cron', { jobs }), S = SENT('cron');
@@ -704,6 +754,8 @@ const MUT_LOCK = dmut('  const bindJobs = (engine) => { jm = engine || null; };'
 const MUT_PASTE = (() => { const at = '    if (vaultJob) { try { vaultJob.entryGone(rowId, { label }); }'; return PASTE_SRC.split(at).length === 2 ? PASTE_SRC.replace(at, '    if (false) { try { vaultJob.entryGone(rowId, { label }); }') : null; })();
 const [revoke, gone, jgone, lockRuns, pdel, revokeMut, goneMut, lockMut, pdelMut] = await Promise.all([legRevoke(), legEntryGone(), legGone(), legLockRuns(), legPasteDelete(),
   MUT_REVOKE ? legRevoke(MUT_REVOKE) : {}, MUT_GONE ? legEntryGone(MUT_GONE) : {}, MUT_LOCK ? legLockRuns(MUT_LOCK) : {}, MUT_PASTE ? legPasteDelete(MUT_PASTE) : {}]);
+const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
+const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
 const print = (title, rows) => { console.log(title); for (const [c, n, e] of rows) ok(c, n, e); };
@@ -733,6 +785,8 @@ ok(!!MUT_REVOKE && revokeMut.state === 'up', 'CONTROL — a ✕ that leaves the 
 ok(!!MUT_GONE && goneMut.state === 'up', 'CONTROL — a deleted entry that leaves its job running (the stop removed): still up — RED on the copy', MUT_GONE ? goneMut.state : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_PASTE && pdelMut.state === 'up', 'CONTROL — the Vault window\'s delete that never tells the job door (vault-paste-door\'s entryGone call removed): the job runs on — RED on the copy', MUT_PASTE ? pdelMut.state : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_LOCK && lockMut.state !== 'up', 'CONTROL — a lock that stops the jobs (an onLock road planted): the service is stopped — RED on the copy', MUT_LOCK ? lockMut.state : 'the copy could not be built (its anchor is missing)');
+print('⑪ WHAT THE OWNER SEES (L2) — the Vault row\'s jobs, a job\'s uses, the starts counted, the chips', [...surfaces, ...chips]);
+ok(!!MUT_STARTS && surfacesMut.starts === 0, 'CONTROL — the Vault row\'s starts never counted (the door\'s tally removed): «started 0×» for a job that started — RED on the copy', MUT_STARTS ? surfacesMut.starts : 'the copy could not be built (its anchor is missing)');
 console.log('⑦ MUTANTS');
 ok(!bootMut.waited, 'CONTROL — a locked boot starts it (the gate skipped at the replay): RED on the copy');
 ok(mutLock[0], mutLock[1]);

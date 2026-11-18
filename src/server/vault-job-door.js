@@ -393,8 +393,47 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     return n;
   }
 
+  // ── WHAT THE OWNER SEES (lane vault-job-approval, L2 — design-vault-service-secret) ─────────────────────────────────────────
+  // a job's state as the Vault row's chip words it — CODES (the client words them in the viewer's language), never a sentence
+  const stateCodeOf = (j) => (['up', 'starting', 'awaiting-user'].includes(j.state) ? 'running' : j.state === 'waiting' ? (j.waitFor === 'vault' ? 'waiting-vault' : 'waiting-approval') : j.state === 'scheduled' ? 'scheduled' : 'stopped');
+  /** A Vault row's Background jobs (src/server/vault-contents.js list — the row's `jobs`): every job its vault-job row approves,
+   *  each `{id, name (the engine's belted label — §93), kind, state (a code), starts (the starts it was handed the entry, the
+   *  audit's tally — a cron's: its runs')}` | null when none. Ids, codes, counts and the belted name — never a value. */
+  function rowFacts(row) {
+    const id = String((row && row.id) || ''), entry = VJ.entryOfRow(id);
+    if (!entry || !jm) return null;
+    const r = rowsFor(id)[0] || null;
+    const ids = [...new Set((r && Array.isArray(r.to) ? r.to : []).flatMap((m) => (m && Array.isArray(m.jobs) ? m.jobs.map(String) : [])))];
+    if (!ids.length) return null;
+    let counts = {};
+    try { counts = (typeof vault.useCounts === 'function' && vault.useCounts()) || {}; } catch { counts = {}; }
+    const per = (counts[entry] && counts[entry].jobs) || {};
+    const out = [];
+    for (const j of ids) {
+      const job = jm.jobs.get(j);
+      if (!job) continue;   // removed meanwhile — its id leaves the row at rm (jobGone)
+      let label = j;
+      try { label = jm.labelOf(job) || j; } catch { }
+      const starts = Object.entries(per).reduce((n, [k, v]) => { const c = k === j ? null : jm.jobs.get(k); return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0); }, 0);
+      out.push({ id: j, name: String(label).slice(0, 160), kind: job.kind, state: stateCodeOf(job), starts });
+    }
+    return out.length ? out : null;
+  }
+  /** A job's vault values as its card names them (the person's GET /api/jobs — never an agent's view): `[{name, ref, id, label,
+   *  approved}]` — the --vault NAME, its reference, the entry's row id, its Vault name (the owner's own words) and whether a
+   *  vault-job row approves THIS job on it (the card's ✕ takes that back; a value the conversation put needs none — no ✕) */
+  function usesOf(job) {
+    const jid = VJ.askJobIdOf(job);
+    return VJ.refsOf(job).map((x) => {
+      const p = VR.parseRef(x.ref);
+      const row = p ? rowsFor(p.id)[0] || null : null;
+      const approved = (Array.isArray(row && row.to) ? row.to : []).some((m) => m && Array.isArray(m.jobs) && m.jobs.map(String).includes(jid));
+      return { name: x.name, ref: x.ref, id: p ? p.id : null, label: p ? entryLabelOf(p.entry) : x.ref, approved };
+    });
+  }
+
   const bindJobs = (engine) => { jm = engine || null; };
-  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, bindJobs };
+  return { gate, payload, noteUses, blocked, onChange, ask, answer, askOver, revoke, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs };
 }
 
 module.exports = { create };

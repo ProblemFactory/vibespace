@@ -281,6 +281,7 @@ function askCardOf({ who = '', job = {}, entry = {}, program = {}, script = null
     { key: i18nKey('Command: {command}'), params: { command: f.command } },
     { key: i18nKey('Where it sends the secret: unknown — VibeSpace cannot read where a program connects.') },
     { key: i18nKey('Locking the vault stops nothing that runs; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it.') },
+    { key: i18nKey('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') },   // lane vault-job-approval L2: the ✕ exists (both surfaces)
   ];
   const text = { key: i18nKey('{who} asks to let the Background job «{name}» use a stored secret'), params: { who: f.who || 'a conversation', name: f.job.name } };
   return { text: fillLine(text), detail: lines.map(fillLine).join('\n'), i18n: { text, detail: lines }, facts: f };

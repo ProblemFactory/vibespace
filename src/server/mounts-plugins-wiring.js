@@ -119,7 +119,7 @@ const vaultSources = {
   passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
   automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
 };
-const vaultContents = require('./vault-contents.js').create({ vault, sources: vaultSources, runFacts: (row) => vaultRun.rowFacts(row) });   // lane vault-run-door: each row's «Usable by agent runs»
+const vaultContents = require('./vault-contents.js').create({ vault, sources: vaultSources, runFacts: (row) => vaultRun.rowFacts(row), jobFacts: (row) => (vaultJob ? vaultJob.rowFacts(row) : null) });   // lane vault-run-door: each row's «Usable by agent runs»   // lane vault-job-approval: + its approved Background jobs (read at the list — vaultJob is wired below)
 // lane vault-run-door (design q-043 §8 P0-f): `vibespace-vault run` — the HUB spawns an agent's command with a stored value
 // injected (env / a 0600 file / stdin — never argv) and answers its output SCRUBBED; the owner opens each entry for runs and
 // answers each new command shape (src/server/vault-run-door.js over PURE src/vault-run.js); a lock stops every run

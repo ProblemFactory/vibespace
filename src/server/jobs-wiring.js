@@ -267,7 +267,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       return res.json({ archived: true, jobs: jm.archivedList().map((r) => ({ ...jm.snapshotArchived(r), access: r.access, ownerSession: ownerOf(r), runs: runsOf(r) })) });
     }
     res.json({
-      jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], ownerSession: ownerOf(j), runs: runsOf(j) })),
+      jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], ownerSession: ownerOf(j), runs: runsOf(j), vaultUses: typeof jm.vaultUsesOf === 'function' ? jm.vaultUsesOf(j) : [] })),   // vaultUses: lane vault-job-approval — the card's «Uses from the vault» (the entries' Vault names: the person's view only)
       archivedCount: jm.archivedCount(),
       held: jm.heldDigest(),
     });

@@ -151,7 +151,10 @@ function usesOf(text, conv, limit = USES_MAX) {
 /** lane vault-use-grants: THE COUNTS over the audit tail `text` — `vault-use` lines that OPENED (outcome ok), each reference's
  *  count ENDED by a person's delete line naming it (B-3fb5: a value minted again under the name starts at 0) → { <entry>:
  *  { uses, convs, grants: { <grant id>: { uses, convs } } } } (`convs` = how many conversations; a line with no conversation
- *  counts as a use only). Each line re-checked (a line the file holds is read, never trusted whole). */
+ *  counts as a use only). Each line re-checked (a line the file holds is read, never trusted whole). lane vault-job-approval
+ *  (L2): + `jobs: { <job id>: starts }` — the Background-job starts that were handed the entry (door `service`, its purpose
+ *  `Background job <id>` — src/server/vault-job-door.js noteUses), only when there are any («started N×» on the Vault row). */
+const JOB_PURPOSE_RE = /^Background job (jb-[0-9a-f]{8})$/;
 function countsOf(text) {
   const acc = new Map();
   for (const l of String(text == null ? '' : text).split('\n')) {
@@ -170,8 +173,10 @@ function countsOf(text) {
     const entry = clean(o.entry, 200), conv = clean(o.conv, 160);
     if (!entry) continue;
     let e = acc.get(entry);
-    if (!e) acc.set(entry, (e = { uses: 0, convs: new Set(), grants: new Map() }));
+    if (!e) acc.set(entry, (e = { uses: 0, convs: new Set(), grants: new Map(), jobs: new Map() }));
     e.uses++; if (conv) e.convs.add(conv);
+    const jm = o.door === 'service' ? JOB_PURPOSE_RE.exec(String(o.purpose || '')) : null;
+    if (jm) e.jobs.set(jm[1], (e.jobs.get(jm[1]) || 0) + 1);
     if (GRANT_ID_RE.test(String(o.grant || ''))) {
       let g = e.grants.get(o.grant);
       if (!g) e.grants.set(o.grant, (g = { uses: 0, convs: new Set() }));
@@ -179,7 +184,7 @@ function countsOf(text) {
     }
   }
   const out = {};
-  for (const [k, e] of acc) out[k] = { uses: e.uses, convs: e.convs.size, grants: Object.fromEntries([...e.grants].map(([id, g]) => [id, { uses: g.uses, convs: g.convs.size }])) };
+  for (const [k, e] of acc) out[k] = { uses: e.uses, convs: e.convs.size, grants: Object.fromEntries([...e.grants].map(([id, g]) => [id, { uses: g.uses, convs: g.convs.size }])), ...(e.jobs.size ? { jobs: Object.fromEntries(e.jobs) } : {}) };
   return out;
 }
 

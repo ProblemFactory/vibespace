@@ -34,6 +34,7 @@ import { removeAccount, showReauthAccountDialog } from './channel-account-dialog
 import { passkeyDeleteWords } from './browser-panel-model.js';
 import { namedLiveRows, providerRemoveWords } from './provider-roster.js';   // the Vault window's provider Remove says which conversations run on it (one wording with the roster)
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf, SEARCHED_FIELDS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
+import { jobExtras } from './vault-job-row.js'; // lane vault-job-approval: the Background jobs an entry is approved for — one chip each, ✕ = take back + stop
 import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-grants: «Who may use it» — the members (hosts, end, uses) + 「Who may use it…」
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
 import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — what it holds, who may have it filled + 用于… + 网站登录…
@@ -453,6 +454,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     let wide = null;   // lane vault-key-row-compact: an automation key's head chips count, its limits line + grants fold sit UNDER the head (full width)
     if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); chips.append(...(ex.chips || [])); wide = ex.box; doors.append(...ex.doors); }
     if (row.run && row.run.use) { const ux = useExtras(row, { app, refresh }); main.append(ux.box); doors.append(...ux.doors); x.use = ux; x.useSig = useSigOf(row); }   // lane vault-use-grants: who may use it with no card
+    if (Array.isArray(row.jobs) && row.jobs.length) main.append(jobExtras(row, { refresh }).box);   // lane vault-job-approval: its Background jobs' chips (each ✕ stops it)
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
     if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show, doors: LOGIN_DOORS }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
     if (words) { const b = btnEl(t('Edit…'), 'vw-words-edit', { title: t('Its name and description') }); b.onclick = () => showWordsEditDialog({ row, refresh }); doors.append(b); }   // lane vault-entry-description

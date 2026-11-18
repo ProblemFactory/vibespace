@@ -1167,7 +1167,7 @@ function jobCardOf(item, { t = fmt } = {}) {
       ...(script ? [[{ mono: str(script.path) }], ...(script.writable === true ? [[{ text: t('An agent can change this script.') }]] : [])] : [])] },
     { key: 'folder', lines: [[{ mono: str(f.folder) }]] },
     { key: 'hosts', lines: [[{ text: t('unknown — VibeSpace cannot read where a program connects') }]] },
-    { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }]] },
+    { key: 'lock', lines: [[{ text: t('it keeps running; a new start waits for the unlock. A value the program has read cannot be taken back — rotate the key at its provider to end it') }], [{ text: t('Taking it back — ✕ on its Vault row or on the job card — stops it at once.') }]] },
   ].map((r) => ({ key: r.key, label: t(JOB_LABEL[r.key]), lines: r.lines, warn: false }));
   const fold = [...(str(entry.ref) ? [{ label: t('Reference'), lines: [[{ code: str(entry.ref) }]] }] : [])];   // a vault reference is never a link: code, under the fold
   return { headline: t('{who} asks to let the Background job «{name}» use a stored secret', { who, name: title }), cmd: str(f.command), cut: null, again: null, rows, changes: null, always: { offered: false, hint: null }, fold };

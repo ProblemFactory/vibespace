@@ -2840,6 +2840,12 @@ class JobManager {
     if (job.state === 'waiting') { this._vaultRefuse(job, { code: 'entry_unknown', words: VJ.WORDS.entry_unknown }, 'vault-entry-deleted'); return true; }
     return this.vaultRevoked(job.id, words);
   }
+  /** lane vault-job-approval (L2): a job's vault values as its PERSON's card names them — [{name, ref, label}] (the door's) | [] */
+  vaultUsesOf(job) {
+    const door = this._vaultJob || this.d.vaultJob || null;
+    if (!VJ.refsOf(job).length || !door || typeof door.usesOf !== 'function') return [];
+    try { return door.usesOf(job); } catch { return []; }
+  }
   /** is anything of this job running or meant to run (what a revoke stops) */
   _vaultLive(job) {
     if (['up', 'starting', 'waiting', 'scheduled', 'awaiting-user'].includes(job.state)) return true;

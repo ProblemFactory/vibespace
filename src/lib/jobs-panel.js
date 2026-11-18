@@ -8,6 +8,8 @@ import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // 
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
 import { grantByWords } from './wake-grant-rows.js'; // the manager design's piece 7: who allowed a job's grant, and when
 import { t } from './i18n.js';
+import { showUnlock } from './vault-unlock.js'; // lane vault-job-approval: a job waiting for the vault offers the unlock
+import { takeBackJob } from './vault-job-row.js'; // …and its card's ✕ on an approved entry = the Vault row's (take back + stop)
 import { stampAt as when, clockOf, ago, stampAt, durationMark, markAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: a job's state / access / end / start in words (the walk's jobs-2 / jobs-6)
 import { marked } from 'marked';
@@ -337,6 +339,8 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
     if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
     if (l2.childNodes.length) el.appendChild(l2);
   }
+  const vx = vaultLine(app, j, { compact });   // lane vault-job-approval: what it uses from the vault, and — waiting — the door that ends the wait
+  if (vx) el.appendChild(vx);
   // one interaction everywhere (owner verdict 2.357.0: a click that
   // spawned a WINDOW from the sidebar was jarring): expand inline, in
   // the rail panel and the fallback window alike
@@ -354,6 +358,43 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   };
   root.appendChild(el);
   if (EXPANDED.has(j.id)) expandDetail(app, el, j, refresh);
+}
+/** lane vault-job-approval (design-vault-service-secret L2): a job's vault values on its card — «Uses from the vault: <the
+ *  entries' Vault names>» (the person's list carries them: `vaultUses`; never the reference alone) — and, while it WAITS, what
+ *  for and the ONE door that ends the wait, in the viewer's language (the hub's `waitWords` are the agent's sentence, never
+ *  drawn here): the vault locked ⇒ «waiting for the vault to be unlocked» + Unlock…; an approval ⇒ «waiting for your
+ *  approval» + Open For you (its card is there). → the row | null */
+function vaultLine(app, j, { compact = false } = {}) {
+  const uses = Array.isArray(j.vaultUses) ? j.vaultUses.filter((x) => x && typeof x === 'object') : [];
+  const waits = j.state === 'waiting' && (j.waitFor === 'vault' || j.waitFor === 'approval') ? j.waitFor : null;
+  if (!waits && (compact || !uses.length)) return null;
+  const row = document.createElement('div'); row.className = 'jobs-card-vault';
+  if (uses.length && !compact) {
+    const head = document.createElement('span'); head.className = 'jobs-vault-head'; head.textContent = t('Uses from the vault:');
+    row.appendChild(head);
+    for (const x of uses) {
+      const u = document.createElement('span'); u.className = 'jobs-chip jobs-chip-vault';
+      const label = String(x.label || x.name || '');
+      u.textContent = label; u.title = `${String(x.name || '')} ← ${String(x.ref || '')}`;
+      if (x.approved === true && typeof x.id === 'string' && !j.cronParent) {   // its approval — the ✕ takes it back and stops the job (a schedule's run: its schedule's card has it)
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'jobs-vault-x'; b.textContent = '✕';
+        b.title = t('Take it back — the job stops now'); b.setAttribute('aria-label', b.title);
+        const entry = x.id, id = String(j.id);
+        b.onclick = (ev) => { ev.stopPropagation(); takeBackJob(entry, id, label, null); };
+        u.appendChild(b);
+      }
+      row.appendChild(u);
+    }
+  }
+  if (waits) {
+    const w = document.createElement('span'); w.className = 'jobs-vault-wait';
+    w.textContent = waits === 'vault' ? t('waiting for the vault to be unlocked') : t('waiting for your approval — its card is in For you');
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'jobs-btn jobs-vault-door';
+    b.textContent = waits === 'vault' ? t('Unlock…') : t('Open For you');
+    b.onclick = (ev) => { ev.stopPropagation(); if (waits === 'vault') showUnlock({ opener: 'person' }); else if (app && typeof app.openInbox === 'function') app.openInbox({}); };
+    row.append(w, b);
+  }
+  return row;
 }
 function rmButton(app, j, refresh) { const b = document.createElement('button'); b.className = 'jobs-btn'; b.textContent = '✕'; b.onclick = (ev) => { ev.stopPropagation(); jobAction(app, j, 'rm', refresh); }; return b; }
 
