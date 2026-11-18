@@ -63,6 +63,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A conversation VibeSpace is still checking is never resumed by Resume all or a restored layout; resuming it yourself asks you first.
 - In a Claude chat, when a Stop comes too late to keep a message you sent into the turn from reaching the model, the chat now says so, and that it may be billed.
 - Channels: opening the panel, and a refresh of its whole list, no longer reads every conversation of every account.
+- A job started while its stop is still ending now starts once the stop ends (unless VibeSpace restarts first); vibespace-job restart does both.
 - On a workspace with sign-in, the welcome tour's first screen waits up to 3 seconds for the server, so it usually starts at three steps, not four.
 - In Diagnostics, a new kind of record from a Codex conversation is no longer counted as Claude Code's, and no longer counted twice.
 - An agent running many commands on a paired machine no longer slows the whole workspace: each command's record is written in the background.
@@ -123,7 +124,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
 - A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
 - A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
-- A job started while its stop is still ending now starts once the stop ends (unless VibeSpace restarts first); vibespace-job restart does both.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
