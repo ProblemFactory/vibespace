@@ -467,7 +467,7 @@ if (!HAVE_BASE) skip('r2: an old agent whose `sh` RAN but failed gets the outdat
 // item 2: the Files view's refusals as CODES, worded client-side (zh / ja)
 const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
 const opsSrc = fs.readFileSync(path.join(REPO, 'src/lib/file-explorer-ops.js'), 'utf8');
-const fnSrc = opsSrc.slice(opsSrc.indexOf('const WIN_UNSUPPORTED = {'), opsSrc.indexOf('export function installExplorerOps')).replace('export function fsErrorText', 'function fsErrorText');
+const fnSrc = opsSrc.slice(opsSrc.indexOf('const WIN_UNSUPPORTED = {'), opsSrc.indexOf('export function installExplorerOps')).replace(/^export /gm, ''); // every export of the slice is a plain declaration inside the Function body (B-bd27 put the door action fsErrorAction beside fsErrorText)
 const tOf = (dict) => (k, p = {}) => String(dict[k] || k).replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m));
 const wordIn = (dict) => new Function('t', fnSrc + '\nreturn fsErrorText;')(tOf(dict));
 // no base tree (depth 1): an agent too old for fs-portable whose `sh` probe fails stands in for the old agent's hello
