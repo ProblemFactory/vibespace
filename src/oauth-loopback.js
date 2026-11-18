@@ -207,7 +207,12 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   /** Release the port (if held) and the timer — on EVERY exit. B-cabe: `st.closing` is a promise of the server's own 'close'
    *  event. server.close() stops the LISTENER at once (the port is not held by it after that); the close EVENT lands once the
    *  connections it still holds have ended — so the promise is about connections, not the listener. `drop` (the shutdown road)
-   *  ends those connections first, so the promise cannot wait on a lingering one */
+   *  ends those connections first, so the promise cannot wait on a lingering one — TRUE ONLY for a flow still running at the
+   *  stop (cancel() releases it with the drop) and on a Node that has closeAllConnections (≥ 18.2; without it the drop is
+   *  skipped and the promise waits for the connections' own end). A flow that had ended before the stop released its server
+   *  without the drop: its promise is the close of whatever connection it still held (Node ≥ 19's close() ends the IDLE
+   *  ones itself; one whose response is still being written ends when it is written). The promise is made on EVERY release
+   *  (a cancel, a timeout, a finished exchange) and read only by stopAll(): a promise nobody awaits holds nothing — harmless */
   function release(st, { drop = false } = {}) {
     if (st.server) {
       const srv = st.server;
