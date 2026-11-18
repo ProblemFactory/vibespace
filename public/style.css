@@ -9421,7 +9421,8 @@ button.vw-chip { cursor: pointer; }
 .vw-ak-x { border: 0; background: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; font: inherit; }
 .vw-ak-x:hover { color: var(--bad-text); }
 /* the owner 2026-11-17: a WIDER grant reaching a login — «through», no ✕, its door; what the login holds besides its secret */
-.vw-ak-chip-through { border-style: dashed; color: var(--text-dim); padding-right: 6px; }
+.vw-ak-chip-through { border-style: dashed; color: var(--text-dim); padding-right: 6px; max-width: 100%; min-width: 0; flex-wrap: wrap; }
+.vw-ak-chip-through > span { min-width: 0; overflow-wrap: anywhere; }   /* a long «through» chip wraps inside itself on a phone, never past its row */
 .vw-ak-door { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0 2px; font: inherit; }
 .vw-ak-door:hover, .vw-ak-door:focus-visible { text-decoration: underline; outline: none; }
 .vw-login-held { font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 2px; min-width: 0; }

@@ -217,6 +217,8 @@ for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { v
     `${tag}: what the login holds comes FIRST — its two-step code by name with «更改…», the kept previous password WITH WHEN; a login without one says «无» with «绑定…»`, r);
   ok(r.through.length === 2 && r.through.every((x) => /经由/.test(x)) && r.throughX === 0 && r.throughDoors === 2 && r.ownX === 1,
     `${tag}: the wider grants show «经由» with NO ✕ and their door; this login's own grant keeps its ✕`, r);
+  const inRow = await p.ev(`[...document.querySelectorAll('.vw-row')].every((row) => { const rr = row.getBoundingClientRect(); return [...row.querySelectorAll('.vw-ak-chip')].every((c) => { const b = c.getBoundingClientRect(); return b.left >= rr.left - 0.5 && b.right <= rr.right + 0.5; }); })`);
+  ok(inRow, `${tag}: every chip stays inside its row — a long «经由» chip wraps inside itself, never past the row (the 390 picture showed one running off)`);
   await p.shot('.vw-rows', `rows-${tag}-zh.png`);
   p.close();
 }
