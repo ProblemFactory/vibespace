@@ -406,7 +406,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   // (lane grants-unify: its own conversation, one of its Task Groups, All agents — minus the members the owner left out) — never the other's
   const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], inheritedGroupIds: subjectInherited, groupsUnreadable: !!subjectGroupsUnreadable };   // lane lg-group-parents U3d: + the caller's lineage
   const cands = [];
-  let excepted = false, could = null;
+  let excepted = false, could = null, onlyHeld = null;   // the chain's cure (B): the «仅本组» entry that held this caller (a child) out
   for (const g of (Array.isArray(grants) ? grants : []).map(grantOf)) {
     if (!g || g.keyId !== k.id) continue;
     if (external) { if (g.subject === 'external') cands.push({ g, via: 'external' }); continue; }
@@ -414,12 +414,13 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
     const v = GM.admits([useRowOf(g)].filter(Boolean), facts);
     const canAdmit = !(g.mode === 'once' && g.spentAt);   // B-3190 follow-up: a spent once-grant can never admit — it decides nothing, excepted or undecided
     if (v.ok) cands.push({ g, via: v.via, inherited: v.inherited === true }); else if (v.code === 'excepted' && canAdmit) excepted = true;
+    else if (v.code === 'not_granted' && v.only && canAdmit && !onlyHeld) onlyHeld = { kind: 'group', id: v.only.id };   // the chain's cure (B)
     // B-3190 r1: a grant a Task Group decides, not judged (the groups unreadable), counts only when it COULD be used — a spent
     // once-grant could not, read or not; `could` = the best of them (how specific it could be, its mode) — pickKey's question
     else if (v.code === 'groups_unreadable' && canAdmit) { const c = { spec: viaRank(undecidedVia(g)), always: g.mode === 'always' }; if (!could || c.spec > could.spec || (c.spec === could.spec && c.always && !could.always)) could = c; }
   }
   const unreadable = !!could, cx = could ? { could } : {};
-  if (!cands.length) return { ok: false, code: unreadable ? 'groups_unreadable' : excepted ? 'excepted' : 'not_granted', ...cx };
+  if (!cands.length) return { ok: false, code: unreadable ? 'groups_unreadable' : excepted ? 'excepted' : 'not_granted', ...cx, ...(!unreadable && !excepted && onlyHeld ? { only: onlyHeld } : {}) };
   // B-3190: the MOST SPECIFIC grant is the one this use rides — the caller's own › a Task Group's › All agents' (a stable sort:
   // the store's order breaks a tie). A released once-grant to All agents is no longer spent by the call the owner's «Allow once»
   // answered (key-grant-everyone r2's minor: the grant the answer wrote stayed unspent, the next open ran with no card)

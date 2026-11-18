@@ -1807,7 +1807,7 @@ function exceptedRefusal({ label = '' } = {}) {
  *   an owner shape this release cannot judge ⇒ not_owner (fail closed)
  * A PIN IS NEVER AN INPUT HERE — the user's pick wrote the list (keeper.setPin); ruling A (4)'s dated pin is gone.
  */
-function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [], inheritedTaskIds = [], groupsUnreadable = false } = {}) {   // lane lg-group-parents U3b: + the ancestors of taskIds
+function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [], inheritedTaskIds = [], groupsUnreadable = false, nameOf = null } = {}) {   // the chain's cure (B): + nameOf (the store's belted name door)   // lane lg-group-parents U3b: + the ancestors of taskIds
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   const K = parentKeyOf(String(browserKey || ''));
   const U = whoMayUse(profile);
@@ -1822,11 +1822,13 @@ function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [],
   // and its live Task Groups, minus the members the user left out
   const keys = (Array.isArray(conversationKeys) ? conversationKeys : []).filter(Boolean).map(String);
   const v = GM.admits([row], { conversationKeys: keys.length ? keys : [K || 'unknown-caller'], groupIds: Array.isArray(taskIds) ? taskIds : [], inheritedGroupIds: Array.isArray(inheritedTaskIds) ? inheritedTaskIds : [], groupsUnreadable: !!groupsUnreadable });
-  if (v.ok) return v.via === 'everyone' ? { ok: true, via: 'all' } : v.via === 'conversation' ? { ok: true, via: 'conversation' } : { ok: true, via: 'task', taskId: v.entry.id };
+  if (v.ok) return v.via === 'everyone' ? { ok: true, via: 'all' } : v.via === 'conversation' ? { ok: true, via: 'conversation' } : { ok: true, via: 'task', taskId: v.entry.id, ...(v.inherited ? { inherited: true, through: GM.lineageWords(v, nameOf) } : {}) };   // the chain's cure (B): «through its parent Task Group X»
   if (v.code === 'groups_unreadable') return groupsUnreadableRefusal({ label: profile.label });
-  if (v.code === 'excepted') return exceptedRefusal({ label: profile.label });
+  // the chain's cure (B): a refusal the lineage decided says so — an exception reached through a parent, a «仅本组» entry that held a child out
+  const lw = GM.lineageWords(v, nameOf), withLw = (r) => (lw ? { ...r, error: `${r.error}; ${lw}`, ...(v.only ? { only: { kind: 'group', id: v.only.id } } : {}), ...(v.inherited ? { inherited: true } : {}) } : r);
+  if (v.code === 'excepted') return withLw(exceptedRefusal({ label: profile.label }));
   if (v.code === 'unknown_shape') return { ok: false, code: 'not_owner', unknown: true, error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
-  return notOwnerRefusal({ label: profile.label });
+  return withLw(notOwnerRefusal({ label: profile.label }));
 }
 /**
  * What the AGENT is told about a profile (`GET /api/agent/browser/profiles`, the CLI's `used by:` line): only whether
@@ -1840,7 +1842,7 @@ function agentUseOf(p, facts = {}) {
   const v = mayAttach(p, facts);
   // lane grants-unify: under All agents a conversation the user LEFT OUT is not "you" (it is told it was left out)
   if (U.mode === 'all') return v.ok ? { mode: 'all', you: true, via: 'all' } : { mode: 'all', you: false, via: null, ...(v.code === 'excepted' ? { excepted: true } : {}), ...(v.code === 'groups_unreadable' ? { unreadable: true } : {}) };
-  if (v.ok) return { mode: 'only', you: true, via: v.via === 'task' ? 'task' : 'conversation' };
+  if (v.ok) return { mode: 'only', you: true, via: v.via === 'task' ? 'task' : 'conversation', ...(v.through ? { through: v.through } : {}) };   // the chain's cure (B)
   if (v.code === 'groups_unreadable') return { mode: 'only', you: false, via: null, unreadable: true };
   if (v.code === 'excepted') return { mode: 'only', you: false, via: null, excepted: true };
   return { mode: 'only', you: false, via: null };

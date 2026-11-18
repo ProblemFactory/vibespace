@@ -579,6 +579,13 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ok(rx({ inherited: ['tg-p'] }).code === 'excepted' && rx({ inherited: [] }).ok && rx({ inherited: [], groupsUnreadable: true }).code === 'groups_unreadable' && rx({ inherited: 'tg-p' }).code === 'groups_unreadable', 'automation-key-reach: «everyone except the parent» leaves the child\'s conversation out; a target whose lineage could not be read (or is no list) is refused groups_unreadable, never reached', [rx({ inherited: ['tg-p'] }), rx({ inherited: [], groupsUnreadable: true }), rx({ inherited: 'tg-p' })]);
     const ux = (inh) => AK2.useVerdict({ key: key2, grants: [g2([EV], [P])], subject: 'session:k1', subjectGroups: ['tg-c'], subjectInherited: inh, verb: verb2, vaultState: 'unlocked' });
     ok(ux('tg-p').code === 'groups_unreadable' && ux(['tg-p']).code === 'excepted' && ux([]).ok, 'automation-key-use: a lineage handed as no list is unreadable (the model\'s reading), never «no parents»', [ux('tg-p'), ux(['tg-p'])]);
+    // the chain's cure (B): a key refused by a «仅本组» entry says WHICH (its card names it with its door); the key list says «through
+    // its parent Task Group X»
+    const uo = AK2.useVerdict({ key: key2, grants: [g2([PO])], subject: 'session:k1', subjectGroups: ['tg-c'], subjectInherited: ['tg-p'], verb: verb2, vaultState: 'unlocked' });
+    const uz = AK2.useVerdict({ key: key2, grants: [g2([{ kind: 'group', id: 'tg-z' }])], subject: 'session:k1', subjectGroups: ['tg-c'], subjectInherited: ['tg-p'], verb: verb2, vaultState: 'unlocked' });
+    ok(uo.code === 'not_granted' && uo.only && uo.only.id === 'tg-p' && uz.code === 'not_granted' && !uz.only, 'automation-key-use (the cure (B)): a key refused by a «仅本组» entry says which (`only`), a plain refusal does not', [uo, uz]);
+    const aeSrc2 = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf-8'), apiSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-api'), 'utf-8');
+    ok(/const r = await ask\(\{ key, caller, verb, signal, args: v0\.args, only: verdict\.only \|\| null \}\);/.test(aeSrc2) && /detail: \[\.\.\.\(onlyLine \? \[onlyLine\] : \[\]\)/.test(aeSrc2) && /const throughOf = \(g\) => \{ const v = GM\.admits\(\[A\.useRowOf\(g\)\]\.filter\(Boolean\), facts\); return GM\.lineageWords\(v, groupNameOf\); \};/.test(aeSrc2) && /\$\{v\.through \? ` \(\$\{v\.through\}\)` : ''\}/.test(apiSrc), 'automation (the cure (B)): the ask card carries the «仅本组» line, the key list (and vibespace-api keys) the through-a-parent words');
     // the producer: conversation-ops hands the reach a target whose lineage read threw as unreadable; the stopped target's
     // lineage is the one the wiring read (the U3d read, 7)
     {
@@ -609,6 +616,11 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const tEnded = engL.apiTierFor(recorded, 'lark-y').tier;
     ok(wL.ok && tFiled === 'write-ask' && tLive === 'none' && tEnded === 'write-ask', 'cure (E): the API tier of a recorded principal is judged with the LIVE lineage while its conversation runs (a parent removed since ⇒ none); an ended one keeps the recorded lineage', { wL: wL.ok, tFiled, tLive, tEnded });
   }
+  // the chain's cure (B): `vibespace-channels status` never says «as a member of group P» for a conversation only in a child of P
+  {
+    const caSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8'), chCli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf-8');
+    ok(/const viaParent = r\.principal\.kind === 'group' && !\(Array\.isArray\(ctx && ctx\.groups\) \? ctx\.groups : \[\]\)\.map\(String\)\.includes\(String\(r\.principal\.id\)\);/.test(caSrc) && /\.\.\.\(viaParent \? \{ inherited: true \} : \{\}\), as: \{ kind: r\.principal\.kind/.test(caSrc) && /a\.inherited \? ` \(through its parent Task Group \$\{a\.as\.name \|\| a\.as\.id\}\)` : ` \(as a member of group/.test(chCli), 'channels (the cure (B)): an access row reached through the lineage is marked, and the status line says «through its parent Task Group», never «as a member»');
+  }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [
     "const GM = require('./grant-model.js');",
@@ -627,6 +639,11 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const profX = { id: 'bp-0000d003', label: 'all-but', grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'bp-0000d003', to: [EV], except: [P] }]) };
   const bm = (p, inh) => B.mayAttach(p, { browserKey: 'bk-0000000k', conversationKeys: ['k1'], taskIds: ['tg-c'], inheritedTaskIds: inh }).ok;
   ok(bm(prof, ['tg-p']) && !bm(prof, []) && !bm(profOnly, ['tg-p']) && !bm(profX, ['tg-p']) && bm(profX, []), 'browser-profile: the parent\'s «Who can use it» admits the child (with the lineage only); «仅本组» does not; «All except the parent» leaves it out');
+  // the chain's cure (B): the browser door SAYS what the lineage decided — the agent's «used by» line, the two refusals
+  const nmB = (id) => ({ 'tg-p': 'Parent' })[id] || null;
+  const bfx = { browserKey: 'bk-0000000k', conversationKeys: ['k1'], taskIds: ['tg-c'], inheritedTaskIds: ['tg-p'], nameOf: nmB };
+  const b1 = B.mayAttach(prof, bfx), b2 = B.mayAttach(profOnly, bfx), b3 = B.mayAttach(profX, bfx), bOwn = B.mayAttach(prof, { ...bfx, taskIds: ['tg-p'], inheritedTaskIds: [] });
+  ok(b1.ok && b1.through === GM.LINEAGE_WORDS.through('Parent') && !b2.ok && b2.error.includes('as "this group only"') && b2.only && b2.only.id === 'tg-p' && !b3.ok && b3.code === 'excepted' && b3.error.includes('left out through its parent Task Group "Parent"') && bOwn.ok && !bOwn.through && B.agentUseOf(prof, bfx).through === b1.through, 'browser-profile (the cure (B)): the agent\'s line says «through its parent Task Group X»; the not-owner refusal names the «仅本组» entry, the excepted one the parent — nothing for the parent\'s own member', [b1.through, b2.error, b3.error]);
   const keeperSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf-8'), routesSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf-8');
   ok((keeperSrc.match(/B\.mayAttach\(/g) || []).length === 1 && /const mayAttachL = \(p, f\) => \{ const l = lineOf\(f && f\.taskIds\); return B\.mayAttach\(p, \{ \.\.\.f, inheritedTaskIds: l\.inherited,/.test(keeperSrc) && (keeperSrc.match(/B\.decideAttach\(/g) || []).length === 1 && /B\.decideAttach\(\{[^\n]*inheritedTaskIds: line\.inherited/.test(keeperSrc), 'the keeper judges a caller ONLY through mayAttachL (the lineage asked for the ids it judges) — its one decideAttach too');
   ok((routesSrc.match(/inheritedTaskIds = \(ctx\.lineageOf\(taskIds\) \|\| \[\]\)\.map\(String\)/g) || []).length === 2 && /const agentFactsOf = \(f\) => \(\{ browserKey: f\.browserKey, taskIds: f\.taskIds, inheritedTaskIds: f\.inheritedTaskIds \|\| \[\]/.test(routesSrc) && !/B\.mayAttach\((?!named, agentFactsOf\(f\)\))/.test(routesSrc), 'the routes: a live and a job caller\'s facts carry the lineage; the one direct mayAttach takes agentFactsOf (which carries it)');

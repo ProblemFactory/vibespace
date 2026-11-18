@@ -79,7 +79,7 @@ function writeJsonAtomic(file, obj) {
  */
 function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date.now(), log = () => {}, randomBytes = crypto.randomBytes, grants: grantsStore = null,
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, openFacts = {}, attention = null,
-  maintainerSha = () => process.env[A.MAINTAINER_SHA_ENV] } = {}) {   // lane fleet-feedback-marks: the instance's maintainer key, by its sha
+  maintainerSha = () => process.env[A.MAINTAINER_SHA_ENV], groupNameOf = null } = {}) {   // the chain's cure (B): + groupNameOf (tasks.lineageNameOf)   // lane fleet-feedback-marks: the instance's maintainer key, by its sha
   if (!dataDir || !vault) throw new TypeError('automation-engine: dataDir and vault are required');
   // lane automation-open-limits: the facts an open's limits are judged over — a folder's real path (null = missing) and the
   // hub's defaults for what an open does not name (the wiring hands the account store's and the instance's)
@@ -393,7 +393,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** Ask the owner (≤ 60 s). → Promise<{outcome, answeredBy}> (`allowed` | `always` | `denied` | `expired` | `unfiled` | `quiet` | `vault_locked` | `gone`).
    *  `signal` = the call's own (the door aborts it when the caller's request closes): q-048 verify M1 — a caller that went
    *  away is WITHDRAWN from the card, and its last waiter gone closes the card (ask-over), so an answer runs nothing */
-  function ask({ key, caller, verb, signal = null, args = null }) {
+  function ask({ key, caller, verb, signal = null, args = null, only = null }) {   // the chain's cure (B): + the «仅本组» entry that held the caller out
     const subject = `session:${caller.conversationId}`, pair = pairOf(key.id, subject, verb);
     const q0 = quiet.get(pair);
     if (q0 && q0 > now()) return Promise.resolve({ outcome: 'quiet', until: q0 });
@@ -427,13 +427,16 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
           const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : `{${n}}`));
           const D1 = 'Allow once lets this call go ahead. Always grants the key to this conversation (the Vault window lists it; take it back there). Deny refuses it and asks no more for 10 minutes. No answer in 60 s: refused. The key\'s value is never shown to the conversation.';
           // lane key-grant-everyone: the card names the WHO it does not offer — All agents, on the key's row (never a bare everyone:*)
+          // the chain's cure (B): a key refused by a «仅本组» entry says THAT on its card, with the door that changes it
+          const onlyGroup = only && only.id ? (() => { let n = null; try { n = typeof groupNameOf === 'function' ? groupNameOf(only.id) : null; } catch { n = null; } return String(n || only.id); })() : null;
+          const onlyLine = onlyGroup ? { key: 'The key is granted to this conversation\'s parent Task Group "{group}" as "this group only" — its child groups are not included. Change that entry on the key\'s row in the Vault window.', params: { group: onlyGroup } } : null;
           const D_ALL = 'Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.';
           const it = userTodos.add(caller.sessionKey || 'vault', {
             origin: 'vault', urgency: 'urgent', kind: 'action', by: 'agent', sessionName: who, expiresAt: q.askedAt + A.ASK_TTL_MS,
             text: `${who} wants to use the automation key "${key.name}" (${verbWord})`,
-            detail: [openLine ? fill(openLine.key, openLine.params) : null, rootsLine ? fill(rootsLine.key, rootsLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.', D_ALL].filter(Boolean).join('\n'),
+            detail: [onlyLine ? fill(onlyLine.key, onlyLine.params) : null, openLine ? fill(openLine.key, openLine.params) : null, rootsLine ? fill(rootsLine.key, rootsLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.', D_ALL].filter(Boolean).join('\n'),
             i18n: { text: { key: '{who} wants to use the automation key "{key}" ({verb})', params: { who, key: key.name, verb: verbWord } },
-              detail: [...(openLine ? [openLine] : []), ...(rootsLine ? [rootsLine] : []), { key: D1 },
+              detail: [...(onlyLine ? [onlyLine] : []), ...(openLine ? [openLine] : []), ...(rootsLine ? [rootsLine] : []), { key: D1 },
                 // lane key-instance-scope: the card offers the grant's REACH beside its answers (the client draws the three choices off action.groups)
                 { key: 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.' }, { key: D_ALL }] },
             action: { type: 'automation-ask', askId, keyId: key.id, key: String(key.name).slice(0, 60), verb, subject, groups: q.groups.map((g) => g.slice('group:'.length)).slice(0, 8).join(' ') },   // the caller's Task Group ids, space-joined (an action field is a string; ids hold no space)
@@ -589,7 +592,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (!verdict.ok && (verdict.code === 'not_granted' || verdict.code === 'once_spent')) {
       // lane automation-open-limits: an open its key may not make files no card — the owner is never asked about it
       if (verb === 'conversations.open') { const pre = await limitsJudge(key, v0.args); if (!pre.ok) return done(pre, key.id); }
-      const r = await ask({ key, caller, verb, signal, args: v0.args });
+      const r = await ask({ key, caller, verb, signal, args: v0.args, only: verdict.only || null });
       asked = r.outcome;
       if (r.outcome === 'gone') return done({ ...named('caller_gone', 'the call went away while its card waited — nothing ran'), args: v0.args }, key.id, { ask: 'gone' });
       if (r.outcome === 'vault_locked') return done({ ...named('vault_locked'), args: v0.args }, key.id, { ask: 'locked' });
@@ -683,10 +686,11 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || [], inheritedGroupIds: lineageIn(caller.inherited), groupsUnreadable: !!caller.groupsUnreadable };   // lane lg-group-parents U3d   // lane key-grant-everyone r2
     const lg = liveGrants();   // cure 2: once per call (it was once per key: every grant copied for each key on the main loop)
     const rankOf = (g) => { const v = GM.admits([A.useRowOf(g)].filter(Boolean), facts); return A.viaRank(v.via, v.inherited === true); };   // lane lg-group-parents U3d (its read, 1)
+    const throughOf = (g) => { const v = GM.admits([A.useRowOf(g)].filter(Boolean), facts); return GM.lineageWords(v, groupNameOf); };   // the chain's cure (B): «through its parent Task Group X»
     return db.keys.filter((k) => !k.revokedAt).map((k) => {
       const gs = lg.filter((g) => g.keyId === k.id && g.subject !== 'external' && GM.admits([A.useRowOf(g)].filter(Boolean), facts).ok && !(g.mode === 'once' && g.spentAt));   // B-3190 follow-up: the LIVE grants (a once-grant dead since a lock or a restart is listed nowhere)
       const always = gs.filter((g) => g.mode === 'always');
-      return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode, reach: g.reach })), limits: k.limits,
+      return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => { const through = throughOf(g); return { subject: g.subject, mode: g.mode, reach: g.reach, ...(through ? { through } : {}) }; }), limits: k.limits,
         reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs.slice().sort((a, b) => rankOf(b) - rankOf(a))[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's — B-3190 r1: its most specific once-grant)
     }).filter(Boolean);
   }

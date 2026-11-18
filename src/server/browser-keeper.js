@@ -215,6 +215,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // archived}` | null (a store that no longer lists it) — the write's `unknown_task` and the panel's words. Absent ⇒ no
   // Task Group admits anyone the keeper judges itself (the routes hand their own taskIds to attach).
   taskIdsForKey = null, taskInfo = null,
+  groupNameOf = null,   // the chain's cure (B): a group id → its belted name (tasks.lineageNameOf) for the lineage words
   groupLineageOf = null,   // lane lg-group-parents U3b: (own Task Group ids) → their ancestors (tasks.grantGroupsOf — the ONE reader)
   // lane grants-unify (2026-10-23): "Who can use it" is a ROW of the ONE grants store (door `browser-profile`) — `grants` =
   // the store (or a getter; absent ⇒ the store of this data dir); a conversation is named there by its conversation id, so
@@ -453,7 +454,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     try { return { inherited: (groupLineageOf((Array.isArray(ids) ? ids : []).map(String)) || []).map(String), unreadable: false }; }
     catch (e) { log.warn?.(`[browser] the Task Group lineage could not be read — ${e && e.message}`); return { inherited: [], unreadable: true }; }
   };
-  const mayAttachL = (p, f) => { const l = lineOf(f && f.taskIds); return B.mayAttach(p, { ...f, inheritedTaskIds: l.inherited, groupsUnreadable: !!(f && f.groupsUnreadable) || l.unreadable }); };
+  const mayAttachL = (p, f) => { const l = lineOf(f && f.taskIds); return B.mayAttach(p, { ...f, inheritedTaskIds: l.inherited, groupsUnreadable: !!(f && f.groupsUnreadable) || l.unreadable, nameOf: groupNameOf }); };
   /** A CONVERSATION ON ANOTHER MACHINE (identity verify r2, 2026-09-28): the wiring names the keys live remote sessions
    *  carry; `remote` = the caller's own knowledge (ws-create's spawn, before the session is registered). Never throws. */
   const isRemoteKey = (browserKey, remote = false) => { if (remote) return true; try { const v = remoteKeys(); const set = v instanceof Set ? v : new Set(v || []); return set.has(B.parentKeyOf(String(browserKey || ''))); } catch (e) { log.warn?.(`[browser] the remote-session list could not be read — ${e && e.message}`); return false; } };

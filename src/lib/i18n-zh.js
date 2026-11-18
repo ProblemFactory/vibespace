@@ -12837,6 +12837,8 @@ export default {
   "The field this picker was for is gone — the picker closed and nothing was written": "这个选择器所属的输入框已不存在——选择器已关闭，没有写入任何内容",
   "The row {path} is gone — {picked} was not written": "「{path}」这一行已不存在——没有写入 {picked}",
   "This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant's reach on its chip": "这个作用范围只用于这次新加的授权——先选授权给谁（第一行是「所有 agent」），已有授权的作用范围在它的标签上改",
+  // the chain's cure (B): a key refused by a «仅本组» entry — its card's line
+  "The key is granted to this conversation's parent Task Group \"{group}\" as \"this group only\" — its child groups are not included. Change that entry on the key's row in the Vault window.": "该密钥授权给了本对话的父任务组「{group}」，并标为「仅本组」——不含其子组。请在保管库窗口该密钥的行上修改这一项。",
   "Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.": "「一直」只授权给这个会话——要让这里的每个会话都不用问就能用，在保险库窗口该 key 的行里把它授权给「所有 agent」。",
   "Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant's reach on its chip": "已保存——你选的作用范围没有用上：它只用于这次新加的授权；已有授权的作用范围在它的标签上改",
   // lane job-secrets-retire r2: the For-you notice of the one-shot 2026-10-job-secrets-retired (src/server/migrations.js)

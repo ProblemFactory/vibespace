@@ -744,7 +744,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       console.log('access:');
       for (const a of acc) {
         const where = a.grain === 'account' ? `${a.adapterId} — the whole account (${a.adapter})` : a.grain === 'pattern' ? `${a.adapterId} — conversations matching: ${a.rule}` : `${a.key} — ${a.title}`;
-        const as = a.via === 'group' ? ` (as a member of group ${a.as.name || a.as.id})` : a.via === 'everyone' ? ' (the user gave it to all agents)' : '';
+        const as = a.via === 'group' ? (a.inherited ? ` (through its parent Task Group ${a.as.name || a.as.id})` : ` (as a member of group ${a.as.name || a.as.id})`) : a.via === 'everyone' ? ' (the user gave it to all agents)' : '';
         const w = a.watched;
         const note = w ? `notified: ${w.notify === 'digest' ? `a digest every ${w.digestMinutes} min` : 'woken per batch'}${w.mode === 'filtered' ? ' on a filter' : ''}, at most ${w.dailyWakeCap}/day (${w.wakes24h} in 24 h)` : 'not notified — nothing wakes you; read when you choose';
         console.log(`  ${where}${as}\n      authority: ${a.authority === 'send' ? 'may send directly where the policy allows' : 'drafts (the user approves)'} · ${note}`);

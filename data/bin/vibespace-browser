@@ -1478,7 +1478,7 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       const u = p.use || {};
       const usedBy = u.mode !== 'only' ? 'all your conversations'
         : u.unreadable ? 'chosen conversations — unknown for yours right now (the Task Group list could not be read)'
-          : u.you ? `chosen conversations — yours included${u.via === 'task' ? ' (through its Task Group)' : ''}`
+          : u.you ? `chosen conversations — yours included${u.via === 'task' ? ` (${u.through || 'through its Task Group'})` : ''}`
             : 'chosen conversations — not yours (the user can add this conversation under "Who can use it" in the Agent browser panel)';
       console.log(`${a ? (a.isDefault ? '*' : '+') : ' '} ${p.label}  (${p.id})${a ? '  handle: ' + a.alias : ''}  ${p.provider}${p.host ? ' on ' + p.host : ''}${p.cdpPort ? ' cdp:' + p.cdpPort : ''}${p.legacy ? '  [legacy shared]' : (p.mediated ? '  [separate tabs, mediated]' : '')}  used by: ${usedBy}  browser: ${b ? b.state : 'not running'}  attached: ${leases.length}${p.proxy ? '  proxy: ' + p.proxy : ''}`);
     }

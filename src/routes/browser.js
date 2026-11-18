@@ -415,7 +415,7 @@ function sessionFacts(id) {
   // lane lg-group-parents U3b: the ancestors of those groups (the routes' own judgements — the keeper derives its own); a throw ⇒ unreadable
   let inheritedTaskIds = [];
   if (!groupsUnreadable && typeof ctx.lineageOf === 'function') { try { inheritedTaskIds = (ctx.lineageOf(taskIds) || []).map(String); } catch { groupsUnreadable = true; } }
-  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, inheritedTaskIds, groupsUnreadable, remote, conversationKeys };
+  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, inheritedTaskIds, groupsUnreadable, remote, conversationKeys, nameOf: ctx.groupNameOf || null };   // the chain's cure (B): + the name door
 }
 /**
  * THE ONE RESOLVER OF A PICKED LIVE SESSION (§6.3): the "Who can use it" dialog picks live sessions by their webui id;
@@ -1678,7 +1678,7 @@ function jobFactsOf(token, { mint = true } = {}) {
   // a job whose conversation is not running has no live session: the facts carry a stub (a name for the browser's
   // session label; no spawn pairs — a job never starts the conversation's own temporary browser)
   const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(id ? [`webui:${id}`] : []), ...(ownerKey ? [String(ownerKey)] : [])])];   // lane grants-unify: as its owner conversation
-  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, inheritedTaskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid }, conversationKeys };
+  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, inheritedTaskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid }, conversationKeys, nameOf: ctx.groupNameOf || null };
 }
 /** The /api/agent/browser/<route> a request names (the job's route lists judge it). */
 function agentRouteOf(req) {
@@ -1751,7 +1751,7 @@ function agentDigest(k, f) {
   return B.agentDigestView(k.list(), agentFactsOf(f), (id) => k.profile(id));
 }
 /** The asking conversation's admission facts (the ONE shape every agent view takes). */
-const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, inheritedTaskIds: f.inheritedTaskIds || [], groupsUnreadable: f.groupsUnreadable, ...(Array.isArray(f.conversationKeys) ? { conversationKeys: f.conversationKeys } : {}) });   // lane grants-unify: + the keys the store names it by
+const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, inheritedTaskIds: f.inheritedTaskIds || [], groupsUnreadable: f.groupsUnreadable, ...(Array.isArray(f.conversationKeys) ? { conversationKeys: f.conversationKeys } : {}), ...(typeof f.nameOf === 'function' ? { nameOf: f.nameOf } : {}) });   // lane grants-unify: + the keys the store names it by
 router.get('/api/agent/browser/profiles', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;

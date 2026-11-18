@@ -337,7 +337,7 @@ const endProposals = require('./end-proposals.js').create({ userTodos, deliver, 
 require('./conversation-ops.js').provide({ onSessionList: () => { endProposals.sweep().catch(() => { }); } });
 if (jobsWiring && typeof jobsWiring.setProposalDoor === 'function') jobsWiring.setProposalDoor((caller, a) => endProposals.proposeWakeGrant(caller, a));   // piece 7's job tool ends here
 require('../routes/end-proposals.js').registerEndProposalRoutes(app, { proposals: endProposals });
-const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
+const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, groupNameOf: (id) => { const tk = getTasks && getTasks(); return tk ? tk.lineageNameOf(id) : null; }, log: (m) => console.log('[automation]', m),
   // lane feedback-handled-verb: + feedback.handled / feedback.list over THE feedback store (the owner's PATCH's own call)
   // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
   // write, the For-you store's open asks of a conversation (its own: by agent, not a notice) and their dismissal, the turn fact, and
@@ -1341,6 +1341,7 @@ function createSessionMessages(session, sessionId) {
       // 2026-09-28: read as "no groups", a WIDENING detached a stopped member of the listed Task Group — its tab in the
       // shared browser closed for a change that kept it); the keeper judges it at its next command instead
       groupLineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.grantGroupsOf(ids).inherited : []; },   // lane lg-group-parents U3b: the ONE reader
+      groupNameOf: (id) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.lineageNameOf(id) : null; },   // the chain's cure (B): the name door of the lineage words
       taskIdsForKey: (bk) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return { ids: [], unreadable: false };
@@ -1572,6 +1573,7 @@ function createSessionMessages(session, sessionId) {
       },
       tasksForSession: (s, id) => taskIdsFor(s, id),
       lineageOf: (ids) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.grantGroupsOf(ids).inherited : []; },   // lane lg-group-parents U3b: the routes' direct judgements
+      groupNameOf: (id) => { const tasks = getTasks ? getTasks() : null; return tasks ? tasks.lineageNameOf(id) : null; },   // the chain's cure (B)
       // §3.8 layer ②: a USER's pin/attach/detach queues one typed notice that
       // rides the user's own next message (zero billed turns); the queue is
       // session-status's, keyed the way the prompt-context route drains it
