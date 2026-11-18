@@ -130,7 +130,7 @@ await section('§1b verify r2 W5: WIN_LINE_MAX counts UTF-16 units — cmd.exe\'
   ok(XS.shellPlan('win32', '😀'.repeat(4095)).ok === true && XS.shellPlan('win32', '😀'.repeat(4096)).ok === false, 'an astral character counts two (a WCHAR pair), as cmd counts it');
   ok(XS.shellPlan('linux', 'x'.repeat(100000)).ok === true && XS.shellPlan('darwin', '中'.repeat(50000)).ok === true, 'no such refusal on a POSIX shell (the hub\'s CMD_MAX 4096 bytes is the only bound there)');
   for (const p of ['windows', 'Windows_NT', 'WIN32', 'Win32']) ok(XS.platformLabel(p) === null && XS.interpreterOf(p) === 'sh', `platform "${p}" is not win32: no label, sh — only node\'s own process.platform spelling names Windows (the daemon sends exactly that)`);
-  ok(/platform: process\.platform, arch: process\.arch/.test(fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8')), 'the daemon\'s hello carries process.platform verbatim (W4)');
+  // (§1b the daemon's platform pin — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 });
 
 // ── §2 ──
@@ -484,7 +484,7 @@ await section('§2e verify r5: the quote scanners, the differentials, the order,
   // F2 (LOW): R5's guard refused EVERY `REG_` token after the word, not the type column — `password REG_hunter2` kept its token; the guard
   // names R6's type set now (ONE constant both read)
   ok(SS.redactSecrets('password REG_hunter2\npassword REG_NONE_x\npassword REG_SZ\n  Password  REG_SZ  REG_X\n').text === 'password «redacted»\npassword «redacted»\npassword REG_SZ\n  Password  REG_SZ  «redacted»\n', 'F2: a token that merely STARTS with REG_ after `password` is hidden (pre-fix: kept); a bare type token is still never taken; a two-blank reg row whose value starts with REG_ hides its value');
-  { const src = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8'); const groups = [...src.matchAll(/REG_\(\?:[A-Z_|]+\)/g)].map((m) => m[0]); ok(groups.length === 2 && groups[0] === groups[1] && groups[0].includes('EXPAND_SZ'), `F2: R5's guard and R6's row regex spell ONE type group (${groups.length} spellings in the source, equal)`); }
+  // (F2's one type-group census — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // ── V1 the DIFFERENTIALS (the r4 scanners vs the regexes they replaced) ──
   const M5 = mutantCopies('exo5', REPO);
   const SSi = M5.load('src/secret-shapes.js', fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8') + '\nmodule.exports.__inner = { pemLine };\n', 'inner');
@@ -692,9 +692,7 @@ await section('§3 the manager over fake daemons: the capability picks the form;
     w4.mgr.audit({ hostId: 'host-dial-win1', machine: 'WINDOWS-PC', sessionId: 's', sessionKey: 'claude:other', name: 'n', grant: 'run', verb: 'run', cmd: 'echo smuggle', code: 0, ms: 1, ok: true, stdout: '"sessionKey":"claude:sess-1"\n"sessionKey":"webui:a"\n', stderr: '' });
     const own = (k) => (k.startsWith('webui:') ? w4.mgr.runsFor({}, k.slice(6)) : w4.mgr.runsFor({ backend: 'claude', claudeSessionId: k.slice(7), name: 'n' }, 'wid-' + k)).map((r) => r.cmd);
     ok(KEYS.every((k) => own(k).length === 1 && own(k)[0] === 'echo ' + k.replace(/\u0001/, ' ')), 'X4 held: each key lists exactly its own row — a prefix sibling both ways, a key with JSON-special characters, a mark smuggled inside a stdout admits nothing', Object.fromEntries(KEYS.map((k) => [k, own(k)])));
-    const proxySrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-    const callers = proxySrc.match(/this\.audit\(\{[\s\S]*?\}\)/g) || [];
-    ok(/id: crypto\.randomBytes\(6\)\.toString\('hex'\)/.test(proxySrc) && callers.length >= 8 && callers.every((c) => !/[{,]\s*(id|at):/.test(c)), `X5 held: the id is crypto.randomBytes(6) hex and none of the ${callers.length} audit callers passes id / at (the spread order would let one override the mint)`);
+    // (the audit ids' source pin — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     const ids = new Set(); for (let i = 0; i < 2000; i++) ids.add(w4.mgr.audit({ hostId: 'host-z', verb: 'x', ok: true }).id);
     ok(ids.size === 2000 && [...ids].every((x) => /^[0-9a-f]{12}$/.test(x)), 'X5 held: 2 000 ids unique, every one 12 hex');
     const old1 = E.runRow({ verb: 'run', cmd: 'echo 8', at: 1700000000000, sessionKey: 'k' }), old2 = E.runRow({ verb: 'run', cmd: 'echo 8', at: 1700000000000, sessionKey: 'k' });
@@ -779,8 +777,7 @@ await section('§3 the manager over fake daemons: the capability picks the form;
   const same = w8.mgr.runsOf('host-dial-win1', {});
   ok(same.length === 2 && same[0].at === same[1].at && same[0].cmd === same[1].cmd && /^[0-9a-f]{12}$/.test(same[0].id) && same[0].id !== same[1].id && w8.bc.filter((m) => m.type === 'exit-audit').every((m) => typeof m.line.id === 'string'), 'two runs in the same ms with the same command: two rows, two ids, the broadcast lines carry them', same.map((r) => [r.at, r.id]));
   ok(E.runRow({ verb: 'run', cmd: 'x', id: '<b>' + 'z'.repeat(50) }).id === 'b' + 'z'.repeat(31) && E.runRow({ verb: 'run', cmd: 'x' }).id === null, 'runRow: the id bounded to its alphabet and 32 chars; an older line has none');
-  const dlgSrc = fs.readFileSync(path.join(REPO, 'src/lib/exit-runs-dialog.js'), 'utf8');
-  ok(/export const runKeyOf = \(r\) => \(r\.id \? `id:\$\{r\.id\}` :/.test(dlgSrc), 'the command list keys a row on the line\'s id first (the at + conversation + command key only for a line without one)');
+  // (the command list's row-key pin — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(w7.mgr.runsOf('host-nope', {}).length === 0 && w7.mgr.runsFor(A7, 'wa', { machine: 'nope' }).length === 0 && w7.mgr.runsFor(A7, 'wa', { machine: 'windows', limit: 5 }).length === 5 && w7.mgr.runsFor(A7, 'wa', { machine: 'host-dial-win1', limit: 2 }).length === 2, 'another machine ⇒ nothing; the agent\'s `machine` filter matches by name / id');
 });
 
@@ -808,10 +805,7 @@ await section('§4 the routes · §5 the CLI', async () => {
     ok(ow.status === 200 && ow.j.runs.length === 2 && ow.j.runs[0].name === 'agent A' && ow.j.runs[0].sessionKey === 'claude:A' && ow.j.machine && ow.j.machine.platform === 'win32' && ow.j.machine.interpreter === 'cmd.exe', 'GET /api/hosts/:id/exit-runs (cookie) ⇒ the machine\'s runs with names + the machine\'s platform / interpreter', ow.j);
     for (const tok of ['vsst_A', 'jbt_x']) { const r = await call('GET', '/api/hosts/host-dial-win1/exit-runs', null, { Authorization: 'Bearer ' + tok }); ok(r.status === 403 && r.j.code === 'human_only', `…any bearer (${tok.slice(0, 4)}) ⇒ 403 human_only — the owner's list, never an agent's`); }
     ok((await call('GET', '/api/hosts/nope/exit-runs')).status === 404, '…an unknown machine ⇒ 404');
-    // verify r1 F3: the dialog arms its exit-audit listener BEFORE the fresh GET and queues what lands during it
-    const dlg = fs.readFileSync(path.join(REPO, 'src/lib/exit-runs-dialog.js'), 'utf8');
-    const iOn = dlg.indexOf("app.ws.onGlobal("), iGet = dlg.indexOf('await fetch(`/api/hosts/'), iQ = dlg.indexOf('queued.push(r)'), iApply = dlg.indexOf('for (const r of queued.splice(0)) place(r);');
-    ok(iOn > 0 && iGet > iOn && iQ > iOn && iQ < iGet && iApply > iGet, 'the command list arms its listener before the GET and applies the queued lines after it (pre-fix: armed after the list was drawn — a run landing during the GET was in no row until a reopen)', { iOn, iGet, iQ, iApply });
+    // (verify r1 F3 the dialog arms its listener first — source pin — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     // §5 THE CLI
     const cli = (args) => new Promise((res) => { const c = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-exit'), ...args], { env: { ...process.env, VIBESPACE_API: base, VIBESPACE_SESSION_TOKEN: 'vsst_A' } }); const out = [], err = []; c.stdout.on('data', (d) => out.push(d)); c.stderr.on('data', (d) => err.push(d)); c.on('exit', (code) => res({ code, out: Buffer.concat(out).toString(), err: Buffer.concat(err).toString() })); });
     const c1 = await cli(['run', 'WINDOWS', '--', 'hostname']);
@@ -1248,11 +1242,7 @@ await section('§8 lane exit-transfer: pull / push over a fake device — window
   const m3 = await settle(wm.mgr.push(wm.A, 'wa', 'BOX', { remote: '/srv/exists.bin', local: '/p/up.bin', size: 3, source: body(Buffer.from('abc')), overwrite: true }));
   ok(m1.v && m1.v.verb === 'push' && m1.v.sha256 === sha8(Buffer.from('abc')) && wm.files.get('/srv/up.bin').data.toString() === 'abc' && /^pushed `\/p\/up\.bin` to BOX → `\/srv\/up\.bin` — 3 bytes · sha256/.test(wm.cards[0].text), 'push lands: the bytes on the machine, the sha256, the card', m1.e ? m1.e.message : wm.cards);
   ok(m2.e && m2.e.code === 'exists' && m2kept === 'theirs' && m3.v && wm.files.get('/srv/exists.bin').data.toString() === 'abc', 'push onto an existing file ⇒ exists; --overwrite replaces it', m2.e && m2.e.message);
-  // (m) NEVER A SHELL: the transfer code calls no run / shell / stream op (static census over the manager's transfer and the agent's write-stream)
-  const px = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-  const tx = px.slice(px.indexOf('  async _transfer('), px.indexOf('  /** The display-only card in the calling chat;'));
-  const ax = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  const wsx = ax.slice(ax.indexOf('  const writeStreams = new Map();'), ax.indexOf('  const mux = new Mux(sock, {')) + ax.slice(ax.indexOf("  'part-open': (m) => {"), ax.indexOf('{\n  let wt = null; try { wt = require'));
+  // ((m) never a shell — the census's reads (its check is below) — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // (n) fix r1 ①: where a pull writes is judged WHEN it writes — the destination folder moved away while the ask waits ⇒
   //     refused by name; no file anywhere (the old name is not re-made, nothing lands in the moved folder); the audit line,
   //     the card and the agent's sentence say why
@@ -1301,7 +1291,7 @@ await section('§8 lane exit-transfer: pull / push over a fake device — window
   ok(fs.existsSync(oDst) && wo.audit().some((l) => l.refusal === 'target_busy' && l.localPath === fs.realpathSync(oDst)) && /another pull is writing that local file right now/.test((wo.cards.find((c) => /did not pull `\/srv\/ob\.bin`/.test(c.text)) || {}).text || ''), '…the refusal is an audit line and a card that say why', wo.cards.map((c) => c.text));
   const rfree = await settle(wo.mgr.pull(wo.A, 'wa', 'BOX', { remote: '/srv/ob.bin', local: oDst, overwrite: true }));
   ok(rfree.v && rfree.v.sha256 === sha8(ob) && sha8(fs.readFileSync(oDst)) === sha8(ob), '…and once the first ended the target is free again (--overwrite replaces it whole)', rfree.e && rfree.e.message);
-  ok(tx.length > 3000 && !/runCmd\(|runShell\(|runStream\(|child_process|spawn\(|exec(File)?\(/.test(tx) && wsx.length > 3000 && !/child_process|spawn\(|exec(File)?\(|runCmd|shellPlan/.test(wsx), 'the transfer path never starts a process: the manager\'s _transfer and the agent\'s write-stream + part-* hold no run / shell / spawn call', { tx: tx.length, wsx: wsx.length });
+  // ((m) never a shell — the census's check — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 });
 
 await section('§8b the routes + the CLI: pull / push end to end, a refusal before the body answers at once', async () => {
@@ -1460,7 +1450,7 @@ await section('§9 lane win-run-codepage: a Windows run\'s bytes are decoded per
   // full ICU: every label decodes on this node; the Windows daemon runs nodejs.org's own build (vibespace-agentd-install.ps1), full-icu since Node 13
   const labels = ['gbk', 'shift_jis', 'euc-kr', 'big5', 'windows-1252'];
   ok(labels.every((l) => { try { return !!new TextDecoder(l); } catch { return false; } }) && !!process.versions.icu, `this node (${process.version}, ICU ${process.versions.icu}) decodes every label — full ICU`);
-  ok(/nodejs\.org\/dist/.test(fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.ps1'), 'utf8')), '…and the Windows installer provisions node from nodejs.org/dist (the official full-icu build)');
+  // (the Windows installer provisions node — source pin — MOVED to the fast scripts/test-exit-run-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const RealTD = globalThis.TextDecoder;
   globalThis.TextDecoder = class extends RealTD { constructor(l, o) { if (!/^utf-?8$/i.test(String(l))) { const e = new RangeError(`The "${l}" encoding is not supported`); e.code = 'ERR_ENCODING_NOT_SUPPORTED'; throw e; } super(l, o); } };
   let noIcu;
