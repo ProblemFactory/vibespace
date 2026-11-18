@@ -1365,7 +1365,7 @@ function create(engineCtx) {
     }, { durable: true });
     // a second boot JOINED an open decision: its card says the new count (THE request's store — heldCountOf)
     if (open && open.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', drop = heldDroppedOf(req), line = heldLine(req.held.n, who, day2, drop), key = heldKey(req.held.n, who, day2, drop);
+      const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', drop = heldDroppedOf(req), line = heldLine(req.held.n, who, day2, drop, heldDoubtOf(req)), key = heldKey(req.held.n, who, day2, drop, heldDoubtOf(req));   // bl-msg B-84b4 r2: the boot's hold reshapes LAST — it says the doubt too
       try { userTodos.reshapeItems((it) => { if (it.id !== open.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
     }
     try { store.audit({ kind: 'watch', op: 'held-aside', principal: w.principal, scope, requestId: req.id, n: moved, since, at: t, by: 'system' }); } catch {}
@@ -1455,7 +1455,7 @@ function create(engineCtx) {
       touched = releaseAside(r2, !!approve, only);
       if (approve) for (const c of heldConvsOf(r2)) if (carryKeys.has(c.key)) c.sent = { at: t };
       if (approve && touched) r2.held.inFlight = pressRecordOf(released, t);   // r16: the press in flight — a stop inside its block leaves it, the next boot reconciles by it
-      if (r2.held.inDoubt) { doubtWas = heldDoubtOf(r2); delete r2.held.inDoubt; }   // lane bl-msg B-84b4: the person decided, knowing — the answer says it once
+      if (r2.held.inDoubt) doubtWas = heldDoubtOf(r2);   // lane bl-msg B-84b4 r2: read here, CLEARED only when a send starts (`sending`) — a press refused before its send keeps the card's doubt
       r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
@@ -1494,7 +1494,7 @@ function create(engineCtx) {
     const sending = async () => {
       await store.index.update((ix) => {
         const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
-        if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) r2.held.inFlight.sendingAt = now();
+        if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) { r2.held.inFlight.sendingAt = now(); delete r2.held.inDoubt; }   // r2: the doubt ends where this send starts
       }, { durable: true });
     };
     let delivery = null;
@@ -1517,7 +1517,7 @@ function create(engineCtx) {
     if (!touched && !reopened) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
     const carried = delivery && delivery.ok && Number(delivery.n) > went ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
     const refused = !delivery || delivery.ok ? {} : delivery.stashed ? { why: String(delivery.why || 'refused'), stashed: true, note: 'not delivered now — kept for its next turn' } : { why: String(delivery.why || 'refused'), note: 'not delivered now — the messages stay held on the card' };
-    const doubtSaid = doubtWas ? { inDoubt: doubtWas, doubtNote: `${doubtWas} of them may already have reached ${heldWho({ principal: req0.principal || {} })} before VibeSpace restarted — sent again as you chose` } : {};   // lane bl-msg B-84b4
+    const doubtSaid = doubtWas && delivery && delivery.ok ? { inDoubt: doubtWas, doubtNote: `${doubtWas} of them may already have reached ${heldWho({ principal: req0.principal || {} })} before VibeSpace restarted — sent again as you chose` } : {};   // lane bl-msg B-84b4
     return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}), ...doubtSaid };
   }
   /** r16: THE PRESS IN FLIGHT, persisted on the request (`held.inFlight`) from the release until its re-hold is written under the
@@ -2533,7 +2533,7 @@ function create(engineCtx) {
     const drop = heldDroppedOf(req), who = heldWho({ principal: req.principal || {} });
     try { store.audit({ kind: 'watch', op: 'held-discard', principal: r0.principal, scope: r0.scope, requestId: r0.id, n, at: t, by: 'system', why: drop.why, part: { convs: reach.out.map((o) => o.c.key), of: reach.of } }); } catch {}
     if (req.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      const day = req.held.since ? OF.when(req.held.since) : 'an unknown date', line = heldLine(req.held.n, who, day, drop), key = heldKey(req.held.n, who, day, drop);
+      const day = req.held.since ? OF.when(req.held.since) : 'an unknown date', line = heldLine(req.held.n, who, day, drop, heldDoubtOf(req)), key = heldKey(req.held.n, who, day, drop, heldDoubtOf(req));   // bl-msg B-84b4 r2
       try { userTodos.reshapeItems((it) => { if (it.id !== req.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
     }
     log.log(`[channels] ${r0.id}: ${who} is no longer woken by ${reach.out.length} of its ${reach.of} held conversation(s) (${reach.out.map((o) => `${o.c.key} ${o.rule}`).join(', ')}) — their ${n} held hit(s) dropped, the other ${req.held.n} stay held; the card says so`);

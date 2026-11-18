@@ -2049,8 +2049,8 @@ async function reholdLeg16(ENGM, name) {
 // THE MUTANT «re-hold after the block» (beb0cc795: the press's re-hold written once the block had let go of its chains)
 function lateReholdMutant16() {
   const src = engineSource(REPO);
-  const A16 = 'delivery = await deliverHeld(rec, req0, plan, settle);';
-  return { src, cut: src.split(A16).length === 2 ? src.replace(A16, 'delivery = await deliverHeld(rec, req0, plan, null);') : src };
+  const A16 = 'delivery = await deliverHeld(rec, req0, plan, settle, sending);';   // lane bl-msg B-84b4: the press hands its stamp too
+  return { src, cut: src.split(A16).length === 2 ? src.replace(A16, 'delivery = await deliverHeld(rec, req0, plan, null, sending);') : src };
 }
 try {
   const g = await reholdLeg16(ENG, 'e16-rehold');
