@@ -714,7 +714,12 @@ class TaskGroupManager {
         res[i] = { abs: null, kind: 'reading', via: null, unread: true };
       }
       const y = res[i];
+      // THE CARRY (cure r2, the coordinator's law): «unknown» is carried forward by every row resolved over it — a relative
+      // row of ANY tag resolved while a base above it was unknown resolved against the wrong one, so its folder (the next
+      // `prev`) is unknown too, whatever it answered. Only a ROOTED row that was itself read, or a relative row resolved
+      // while nothing above it was unknown, clears it (a missing / blocked row moves no `prev` and clears nothing).
       if (y && y.kind === 'reading') prevUnknown = true;
+      else if (!ROOTED_ROW(r.path) && (prevUnknown || firstUnknown)) prevUnknown = true;
       else if (y && (y.kind === 'dir' || y.kind === 'file')) prevUnknown = false;
     }
   }
@@ -1926,7 +1931,7 @@ class TaskGroupManager {
 
 
 
-  get _mixStats() { return this.__mixStats || (this.__mixStats = { builds: 0, kept: 0, answers: 0, walks: 0, hits: 0, cleared: 0, waited: 0, bounded: 0, moves: 0, settles: 0 }); }
+  get _mixStats() { return this.__mixStats || (this.__mixStats = { builds: 0, kept: 0, answers: 0, walks: 0, hits: 0, cleared: 0, waited: 0, bounded: 0, unknownNow: 0, moves: 0, settles: 0 }); }
   memberIndexStats() { const ix = this._mix; return { ...this._mixStats, results: ix ? ix.results.size : 0, max: MEMBER_RESULTS_MAX }; }
 
   _memberIndex() {
@@ -2013,7 +2018,8 @@ class TaskGroupManager {
   // hooks' injection, the agent doors, the spawn road): it first WAITS — a promise, never the loop — for the first read
   // of every path this ask needs that was never read, then answers as the release did from the very first ask. The wait
   // is bounded (DECIDE_BOUND_MS): a mount that does not answer gets the «reading» answer when it passes (where the release
-  // held the whole hub while the mount hung), and the group's rules arrive at the next hook by the seen marks.
+  // held the whole hub while the mount hung) — a fact whose read FAILED and waits its back-off gets it at once (cure r2) —
+  // and the group's rules arrive at the next hook by the seen marks.
   /** THE DECIDING DOOR's wait alone, for a synchronous route that re-enters itself (agent-routes' hooks): null when this
    *  ask needs no first read (the route goes straight on, synchronously), else the promise of the bounded wait. */
   membershipRead(args = {}, { boundMs = DECIDE_BOUND_MS } = {}) {
@@ -2031,6 +2037,8 @@ class TaskGroupManager {
       if (!keys.length) break;
       const left = until - Date.now();
       const all = left > 0 ? await this._mfacts.wait(keys, left) : false;
+      // only keys waiting their back-off (no read in flight): the «reading» answer AT ONCE, never the whole bound (cure r2)
+      if (all === null) { this._mixStats.unknownNow++; break; }
       if (!all) { this._mixStats.bounded++; break; }
       this._mixStats.waited++;
     }
@@ -2063,7 +2071,8 @@ class TaskGroupManager {
 
   /** a landed fact that differs from the kept one: when it MOVES a membership answer — a discover group's folders changed,
    *  or a cwd's realpath (a symlinked cwd) landed — the store's own change signal goes out ONCE (coalesced into one tick):
-   *  a page that drew the «reading» answer redraws without anyone asking. A first read that moves nothing says nothing. */
+   *  a page that drew the «reading» answer redraws without anyone asking. A first read that moves nothing says nothing —
+   *  but the settle below; a first read that FAILS calls here too (`v` undefined, cure r2), for that settle alone. */
   _memberMoved(op, p, v) {
     const pend = this._mmPending || (this._mmPending = { real: [] });
     if (op === 'realpath' && v != null && v !== p) pend.real.push([p, v]);   // a symlinked cwd: the groups its realpath ADDS are named at the flush

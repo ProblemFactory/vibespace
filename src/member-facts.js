@@ -9,7 +9,9 @@
  *   kind(abs)  → 'reading' (no fact yet, or the read failed) | 'dir' | 'file' | 'missing'   (the drawing door's answer)
  *   real(p)    → undefined (no fact yet, or the read failed) | null (no realpath) | '<realpath>'
  *   need(keys) → the keys of these with no fact yet (each read started)       (the deciding door asks, then waits)
- *   wait(keys, ms) → resolves when every one of these keys was answered (a fact, or a failure), or when `ms` passed
+ *   wait(keys, ms) → true when every one of these keys with a read in flight was answered (a fact, or a failure), false
+ *                    when `ms` passed first, null AT ONCE when none of the open ones has a read in flight (each waits its
+ *                    back-off: UNKNOWN now — nothing lands before a later ask, so nobody waits a bound for it; cure r2)
  *   pending()  → FIRST reads in flight now (a re-read of a known fact does not count: the store's settle waits only for these)
  *
  * A FAILED READ IS NOT A FACT (cure r1, the readers' MUST 1): only an fs code that states a fact — ENOENT / ENOTDIR /
@@ -19,7 +21,9 @@
  * A stat older than ttlMs is read again in the background when it is ASKED (one read per key in flight) — nothing reads
  * when nobody asks; a realpath is read ONCE per folder and kept, as the release kept it (until it is dropped unasked).
  * A key not asked for keepMs is dropped (the bound follows the rows asked about in the last minutes). `onMoved()` runs
- * when a read lands with a value that differs from the one kept (a first read included). Imports nothing.
+ * when a read lands with a value that differs from the one kept (a first read included), AND when a read of a key with
+ * no fact FAILS (`v` undefined: nothing moved, but an answer handed out «still being read» is now as read as it will be
+ * until the back-off — the store's settle goes out, the keeping sites re-judge; cure r2). Imports nothing.
  */
 const FACT_CODES = new Set(['ENOENT', 'ENOTDIR', 'ELOOP', 'EACCES', 'EPERM', 'ENAMETOOLONG', 'EINVAL']);
 function create({ reader = () => null, fallback = null, ttlMs = 4000, keepMs = 10 * 60 * 1000, timeoutMs = 5000, backoffMs = 1000, backoffMaxMs = 60000,
@@ -55,6 +59,8 @@ function create({ reader = () => null, fallback = null, ttlMs = 4000, keepMs = 1
         f.retryAt = now() + back;
         if (f.fails === 1) { try { log(`membership: the ${op} of ${p} could not be read (${o.unknown}) — UNKNOWN, not a fact; read again in ${Math.round(back / 1000)} s, backing off`); } catch { } }
         for (const w of ws) { try { w(); } catch { } }
+        // a key with no fact whose read FAILED: the store's settle goes out too (cure r2 — it waited for the next ask)
+        if (f.at === 0) { try { onMoved(op, p, undefined); } catch { } }
         return undefined;
       }
       if (f.fails) { try { log(`membership: the ${op} of ${p} read again after ${f.fails} failure(s) — ${o.v === null ? 'none' : o.v}`); } catch { } }
@@ -81,8 +87,12 @@ function create({ reader = () => null, fallback = null, ttlMs = 4000, keepMs = 1
   /** keys = [[op, path], …]: the ones with no fact yet (their reads started by the ask, a failed one after its back-off) */
   function need(keys) { return keys.filter(([op, p]) => get(op, p).at === 0); }
   function wait(keys, ms) {
-    const open = keys.map(([op, p]) => facts.get(keyOf(op, p))).filter((f) => f && f.at === 0);
-    if (!open.length) return Promise.resolve(true);
+    const all = keys.map(([op, p]) => facts.get(keyOf(op, p))).filter((f) => f && f.at === 0);
+    if (!all.length) return Promise.resolve(true);
+    // only a read IN FLIGHT can land: a key waiting its back-off answers «unknown» now (cure r2 — every deciding ask
+    // waited its whole bound on it); the ones in flight are waited for (their landing may make it matter no more)
+    const open = all.filter((f) => f.inflight);
+    if (!open.length) return Promise.resolve(null);
     return new Promise((resolve) => {
       let left = open.length, done = false, timer = null;
       const one = () => { if (--left === 0 && !done) { done = true; clearTimeout(timer); resolve(true); } };

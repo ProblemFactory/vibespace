@@ -17,6 +17,9 @@
 //     forward through its group; the reader is stalled; the REAL re-judge (src/exit-proxy.js rejudgeAll) during the stall
 //     keeps it; when the read lands the answer is the release's and ONE signal went out. RED: the same wiring without the
 //     flag (the ids mapped plainly) drops the forward during the stall.
+//   ⑥ a failed read is not a fact · ⑦ the settle fires with re-reads in flight (cure r1) · ⑧ THE CARRY: the four-row
+//     scene of the coordinator's must against the release's answer, the settle of a failed first read, «unknown» at once
+//     for a key in its back-off · ⑨ the no-inline form on a real SafeFs with no live worker (cure r2).
 // Run: node scripts/test-membership-doors.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,6 +46,9 @@ fs.symlinkSync(P('B'), P('L'));   // a cwd under L/ resolves into B/
 // = until no read is in flight
 const tick = () => new Promise((r) => setImmediate(() => setImmediate(r)));
 async function refresh(tg) { for (let i = 0; i < 12; i++) { await tg._mfacts.settled(); await tick(); if (!tg._mfacts.busy() && !tg._mmTimer) return; } }   // no read in flight AND the store's landing flush ran
+// a deciding ask whose bound timer is unref'd (the hub's loop keeps it alive; a suite's may not): the loop is held up to two
+// bounds, so a door that WAITS its bound reports its red instead of ending the process on an unsettled await
+const alive = (p) => { const h = setTimeout(() => { }, 2 * DECIDE_BOUND_MS); return p.finally(() => clearTimeout(h)); };
 const ALL = [];   // every store this suite made (the count leg lets them all settle first: their landings run in its window)
 let dn = 0;
 function store(tasks, opts = {}) {
@@ -262,6 +268,96 @@ fs.realpathSync.native = real.native;
   ok(ans.unread === true && reReads > 0 && signals.length === 1 && Array.isArray(signals[0].ids) && signals[0].ids.length === 0,
     `the realpath landed while ${reReads} RE-READ(s) of known facts were still in flight: the settle signal went out anyway (${JSON.stringify(signals)}) — only first reads hold it`, { unread: ans.unread, reReads, signals });
   for (const f of held.splice(0)) f();
+}
+
+// ── ⑧ THE CARRY (cure r2, the coordinator's law «unknown is carried forward by every row resolved over it»): the four-row
+//      scene of the must, as written — [1] /B rooted (a dir, read) · [2] /A rooted (its stat TIMES OUT: UNKNOWN through
+//      its back-off) · [3] x relative, NOT discover · [4] sub relative discover; on disk /A/x/sub AND /B/x/sub; the ask
+//      under the WRONG base, /B/x/sub/q — and the second must's shape (a notes row between an unread rooted row and a
+//      relative discover row). THE ORACLE = the release's answer: during the read and through the back-off every answer
+//      is a SUBSET of it, flagged; once read, equal. The same scene drives the shoulds taken: a first read that FAILS
+//      sends the settle; a key in its back-off answers «unknown» AT ONCE on the deciding door, never the whole bound ──
+{
+  for (const d of ['S/A/x/sub/q', 'S/B/x/sub/q', 'W/a/docs/x/q', 'W/b/docs/x/q']) fs.mkdirSync(P(d), { recursive: true });
+  const SCENE = tasksOf({
+    'T-four': { ctx: [row(P('S/B'), 'notes'), row(P('S/A'), 'notes'), row('x', 'notes'), row('sub', 'discover')] },
+    'T-w':    { ctx: [row(P('W/a'), 'notes'), row(P('W/b'), 'discover'), row('docs', 'notes'), row('x', 'discover')] },
+  });
+  const ASK8 = [{ cwd: P('S/B/x/sub/q') }, { cwd: P('S/A/x/sub/q') }, { cwd: P('W/a/docs/x/q') }, { cwd: P('W/b/docs/x/q') }];
+  const rel = releaseOf(store(SCENE).tg);
+  const want = ASK8.map((a) => rel.groupsForSession(a));
+  ok(ids(want[0]) === '' && ids(want[1]) === 'T-four' && ids(want[2]) === '' && ids(want[3]) === 'T-w',
+    `the release places the scene's relative rows under the base being read (/A/x/sub, /W/b/docs/x): [${want.map(ids).join('] [')}]`);
+  const MF = require(path.join(REPO, 'src/member-facts.js'));
+  const SLOW = new Set([P('S/A'), P('W/b')]);
+  const parked = [], live = new Set(), logs = [];
+  let up = false, skew = 0;
+  const readNow = async (op, p) => { if (op === 'realpath') return { path: await fs.promises.realpath(p) }; const st = await fs.promises.stat(p); return { isDirectory: st.isDirectory(), isFile: st.isFile() }; };
+  const reader = { call: (op, payload) => {
+    if (op === 'stat' && SLOW.has(payload.path) && !up) return new Promise((res, rej) => parked.push(() => rej(Object.assign(new Error('timed out'), { safeFsTimeout: true }))));
+    const pr = readNow(op, payload.path); live.add(pr); pr.then(() => live.delete(pr), () => live.delete(pr)); return pr;
+  } };
+  let rd = { call: () => new Promise(() => { }) };   // the boot's priming reads go nowhere: the leg's own facts start cold
+  const { tg, signals } = store(SCENE, { mirrorFs: () => rd });
+  rd = reader;
+  tg._mfacts = MF.create({ reader: () => rd, onMoved: (op, p, v) => tg._memberMoved(op, p, v), log: (m) => logs.push(m), now: () => Date.now() + skew });
+  // «quiet» with reads parked: every read that is not parked has landed and the store's landing flush ran (no settled():
+  // it would wait for the parked ones)
+  const quiet = async () => { for (let i = 0; i < 40; i++) { if (live.size) await Promise.allSettled([...live]); await tick(); if (!live.size && !tg._mmTimer) return; } };
+  for (const a of ASK8) tg.groupsForSession(a);
+  await quiet();
+  const during = ASK8.map((a) => tg.groupsForSession(a));
+  const wide = (got) => ASK8.map((a, i) => (got[i].every((t) => want[i].some((w) => w.id === t.id)) ? null : `${a.cwd.slice(ROOT.length)}: [${ids(got[i])}] ⊄ release [${ids(want[i])}]`)).filter(Boolean);
+  const unflag = (got) => ASK8.filter((a, i) => ids(got[i]) !== ids(want[i]) && !got[i].unread).map((a) => a.cwd.slice(ROOT.length));
+  ok(parked.length === 2 && wide(during).length === 0 && unflag(during).length === 0,
+    `while /A and /W/b are still being read, the relative rows resolved over them carry «unknown» — whatever their tag — and no answer is wider than the release's (${parked.length} reads parked)`, { wide: wide(during), unflagged: unflag(during), during: during.map(ids) });
+  const before = signals.length;
+  for (const f of parked.splice(0)) f();   // the two stats TIME OUT: UNKNOWN, backing off
+  await quiet();
+  const after = ASK8.map((a) => tg.groupsForSession(a));
+  ok(wide(after).length === 0 && unflag(after).length === 0 && tg._mfacts.unknown() === 2 && logs.filter((l) => l.includes('could not be read (timeout) — UNKNOWN')).length === 2,
+    'through the back-off of a timed-out base (the must\'s own scene) the answer stays a subset, flagged; the journal names both failures', { wide: wide(after), logs });
+  const settle = signals.slice(before);
+  ok(settle.length === 1 && Array.isArray(settle[0].ids) && settle[0].ids.length === 0,
+    `a first read that FAILS sends the settle (${JSON.stringify(settle)}): the sites that kept on «still being read» re-judge now, not at the next ask`, settle);
+  const t0 = performance.now();
+  const dec = await alive(tg.groupsForSessionDecided(ASK8[0]));
+  const ms = performance.now() - t0, st = tg.memberIndexStats();
+  ok(st.unknownNow === 1 && st.bounded === 0 && ms < DECIDE_BOUND_MS && ids(dec) === '' && dec.unread === true,
+    `a key in its back-off with no read in flight: the deciding door answers «unknown» AT ONCE (${Math.round(ms)} ms, never its ${DECIDE_BOUND_MS} ms bound) — a subset, flagged`, { st, ms, dec: ids(dec) });
+  up = true; skew = 1500;   // past the back-off the mount answers: the next DECIDING ask reads again (the drawing door's derive is kept 4 s)
+  const fresh = await Promise.all(ASK8.map((a) => tg.groupsForSessionDecided(a)));
+  await refresh(tg);
+  const read = ASK8.map((a) => view(tg.groupsForSession(a)));
+  ok(read.every((v, i) => v === view(want[i])) && fresh.every((g, i) => view(g) === view(want[i])) && tg._mfacts.unknown() === 0,
+    `once /A and /W/b are read, both doors answer as the release, record by record: [${ASK8.map((a, i) => ids(fresh[i])).join('] [')}]`, { read, want: want.map(view) });
+}
+
+// ── ⑨ THE NO-INLINE FORM ITSELF (cure r2): a REAL SafeFs whose worker never starts (no live worker, ever) refuses a
+//      `noInline` call by name and never runs its inline door; the CONTROL — the same pool asked plainly — runs inline;
+//      and a store whose mirror is that pool reads membership through it: UNKNOWN, flagged, said, the inline door untouched ──
+{
+  const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
+  let inl = 0;
+  const inlineRun = (op, payload) => { inl++; const st = fs.statSync(payload.path); return { result: { isDirectory: st.isDirectory(), isFile: st.isFile() } }; };
+  const sf = new SafeFs({ workerPath: 'no-such-worker.js', poolSize: 1, inlineRun });   // not a worker path: the pool never gets a live worker
+  let refused = null;
+  try { await sf.call('stat', { path: P('A') }, { noInline: true }); } catch (e) { refused = e; }
+  ok(refused && refused.code === 'no-worker' && inl === 0, `SafeFs.call(…, { noInline: true }) with no live worker is refused by name (${refused && refused.code}), the inline door never run (${inl})`);
+  const plain = await sf.call('stat', { path: P('A') });
+  ok(inl === 1 && plain && plain.isDirectory === true, `CONTROL: the same pool asked without noInline runs the op inline on the main thread (${inl}) — the rig really has no worker`);
+  inl = 0;
+  const said = [], keep = console.log;
+  console.log = (...a) => { if (String(a[0]).startsWith('[task-groups]')) said.push(a.join(' ')); else keep(...a); };
+  try {
+    const { tg } = store(tasksOf({ 'T-relprev': GROUPS['T-relprev'] }), { mirrorFs: () => sf });   // the store's OWN facts (the constructor's wiring)
+    const a = { cwd: P('A/sub/w') };
+    tg.groupsForSession(a); await refresh(tg);
+    const g = tg.groupsForSession(a);
+    const d = await alive(tg.groupsForSessionDecided(a));
+    ok(inl === 0 && ids(g) === '' && g.unread === true && ids(d) === '' && tg.memberIndexStats().unknownNow === 1 && tg._mfacts.unknown() > 0 && said.some((l) => l.includes('could not be read (no-worker)')),
+      `a store whose mirror is that pool: membership's facts are UNKNOWN (said: no-worker), the answer a flagged subset at once on both doors, the inline door run ${inl} times`, { inl, g: ids(g), said });
+  } finally { console.log = keep; sf.close(); }
 }
 
 // ── ⑤ THE LAW: nobody loses anything on an answer still being read (the REAL exit re-judge, a stand-in holder) ─────────
