@@ -493,6 +493,16 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
     await A.ev(`window.app.browseYourself(${JSON.stringify(PID2)}, { label: 'alone' }); true`);
     const liveA = await until(() => A.h('if (!L) return null; const s = L.state(); return s.mode === "takeover" && s.mine && s.frames >= 1 ? true : null;').catch(() => null), 60000, 200);
     if (ok(!!liveA, 'the person browses "alone" — its browser launched by their press, no conversation holds it (the watch is the person\'s)')) {
+      // the close's rule (c): A RAW PRESS AT A COORDINATE checks the top element at that point FIRST — a counted step that says what
+      // stands there; a press whose point another element covers is not made (and the leg goes red by name)
+      const pressedAt = [];
+      const pressSel = async (sel) => {
+        const p = await until(() => A.rectOf(sel), 10000, 100);
+        const top = p ? await A.ev(`(() => { const t = document.elementFromPoint(${p.x}, ${p.y}), want = document.querySelector(${JSON.stringify(sel)}); return t ? { ok: !!want && (t === want || want.contains(t)), at: t.tagName.toLowerCase() + (typeof t.className === 'string' && t.className ? '.' + t.className.trim().split(' ').filter(Boolean).join('.') : '') } : { ok: false, at: null }; })()`).catch(() => null) : null;
+        pressedAt.push({ sel, at: top ? top.at : null, ok: !!(top && top.ok) });
+        if (!p || !top || !top.ok) return false;
+        await A.clickAt(p.x, p.y); return true;
+      };
       const typeA = async (url) => { await A.h('const i = L.el().querySelector(".browser-live-address-input"); if (!i) return false; i.focus(); i.select(); return true;'); await A.call('Input.insertText', { text: url }); await A.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); };
       const SITE = `http://signin.example.test:${CP}`;
       // its read (M1): the page under the form counts every key it is sent — the person types into the FORM, never into the page
@@ -504,8 +514,8 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
       ok(bar1 && /The page asks you to sign in/.test(bar1.text) && bar1.text.includes(`signin.example.test:${CP}`) && bar1.text.includes('Lane <b>Realm</b>') && !bar1.bold && bar1.dialog,
         `the site asks ⇒ VibeSpace's sign-in form in THE PERSON'S window, naming who asks — the host and the realm, the realm drawn as TEXT ("${String(bar1 && bar1.text).slice(0, 120)}")`, JSON.stringify(bar1));
       // a REAL click on each box and real keys (Input.dispatchKeyEvent into the app page), one by one
-      const clickedU = await A.clickSel('.browser-live-prompt-user'); for (const ch of 'ann') await A.key(ch);
-      const clickedP = await A.clickSel('.browser-live-prompt-pass'); const half = Math.ceil(PWG.length / 2); for (const ch of PWG.slice(0, half)) await A.key(ch);
+      const clickedU = await pressSel('.browser-live-prompt-user'); for (const ch of 'ann') await A.key(ch);
+      const clickedP = await pressSel('.browser-live-prompt-pass'); const half = Math.ceil(PWG.length / 2); for (const ch of PWG.slice(0, half)) await A.key(ch);
       // 主开发 (1): a MODE RECORD arrives while the caret is in the secret's box (the real socket handler, the record the bridge sends when the input state moves)
       const modeIn = await A.h('const s = L.state(); const ws = L.ws(); if (!ws || typeof ws.onmessage !== "function") return false; ws.onmessage({ data: JSON.stringify({ type: "mode", mode: "takeover", holder: s.holder, mine: true, since: s.modeSince || 0, cause: null, human: true }) }); return document.activeElement && document.activeElement.classList.contains("browser-live-prompt-pass");').catch(() => null);
       for (const ch of PWG.slice(half)) await A.key(ch);
@@ -513,7 +523,7 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
       ok(modeIn === true, '主开发 (1): a mode record arrived while the caret was in the secret\'s box — the caret STAYED there', String(modeIn));
       ok(!!k1 && clickedU && clickedP && boxes && boxes.user === 'ann' && boxes.passLen === PWG.length && boxes.focus && (reports.get('k1') || {}).keys === 0,
         'its read (M1): a real click on each box and real keys land IN THE FORM (the user name, every character of the password) — the page under it was sent NO key', JSON.stringify({ boxes, k1: reports.get('k1') }));
-      ok(await A.clickSel('.browser-live-prompt-signin'), 'a real click on Sign in');
+      ok(await pressSel('.browser-live-prompt-signin'), 'a real click on Sign in');
       const signed = await innerUntil('sign1', (r) => r.ok === true, 20000);
       const gone1 = await until(() => A.h('const b = L.el().querySelector(".browser-live-dialog"); return !b || b.style.display === "none" || !b.querySelector(".browser-live-prompt-user");').catch(() => null), 10000, 200);
       ok(!!signed && signed.user === 'ann' && !!gone1 && (reports.get('k1') || {}).keys === 0, 'their Sign in reaches the site — the page commits (the site saw the user name and password), the form goes, and the page under it never got a key', JSON.stringify({ signed, gone1, k1: reports.get('k1') }));
@@ -524,7 +534,8 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
       // Cancel on ANOTHER host (its read, M2: Chrome sends the answer it just used to the same site by itself — no challenge there)
       await typeA(`http://cancel.example.test:${CP}/auth?n=sign2`);
       const bar2 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
-      ok(!!bar2 && await A.clickSel('.browser-live-prompt-cancel'), 'the next sign-in: the form again, and a real click on its Cancel');
+      ok(!!bar2 && await pressSel('.browser-live-prompt-cancel'), 'the next sign-in: the form again, and a real click on its Cancel');
+      ok(pressedAt.length === 4 && pressedAt.every((x) => x.ok), `the close's rule (c): each of the ${pressedAt.length} raw presses found its own element on top at its point first (${pressedAt.map((x) => x.at).join(' · ')})`, JSON.stringify(pressedAt));
       const refused = await innerUntil('sign2', (r) => r.refused === true, 20000);
       ok(!!refused, 'their Cancel ⇒ the page commits the site\'s own 401 body — the page is never left hanging', JSON.stringify(refused));
       const dataHits = []; const walk = (d, depth = 0) => { if (depth > 8) return; let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, depth + 1); else if (e.isFile()) { try { const st = fs.statSync(p); if (st.size < 32 * 1024 * 1024 && fs.readFileSync(p).includes(PWG)) dataHits.push(p); } catch { } } } };
