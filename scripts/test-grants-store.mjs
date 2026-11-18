@@ -510,7 +510,6 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'the legacy subject list (session:<cid> + group:<gid>) — exported for GM.LEGACY\'s migration probes, no door calls it'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
     ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
-    ['src/channel-filter.js', "const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid)", 'the «via» shortcut (memberVia) judges OWN groups only — its entries are rebuilt from key strings and cannot carry «仅本组» (the U3c read, MAJOR 4)'],
     ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'the «via» shortcut (memberStill) judges OWN groups only, as memberVia'],
   ];
   const PENDING = [];   // lane lg-group-parents U3d: every door is wired (the automation doors last, on B-3190's tip)
@@ -666,6 +665,30 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ok(/const use = use1 && \/\^group:\/\.test\(s\) && Array\.isArray\(only\) && only\.map\(String\)\.includes\(s\)/.test(aeC) && /function setOnly\(grantId, on, \{ by = 'user' \} = \{\}\) \{/.test(aeC) && /const to = n\.row\.to\.map\(\(e\) => \(e\.kind === 'group' \? \{ \.\.\.e, only: on === true \} : e\)\);/.test(aeC) && /\.\.\.\(onlyOf\(g\.use\) \? \{ only: true \} : \{\}\)/.test(aeC)
       && /app\.post\('\/api\/automation\/grants\/:grantId\/only', person\(\(req\) => engine\.setOnly\(/.test(arC) && /\.\.\.\(Array\.isArray\(body\(req\)\.only\) \? \{ only: body\(req\)\.only \} : \{\}\)/.test(arC)
       && /only: \{ keys: always\.filter\(\(g\) => g\.only === true/.test(vaC) && /`\/api\/automation\/grants\/\$\{encodeURIComponent\(g\.id\)\}\/only`/.test(vaC) && /'key\.only': i18nKey\('changed «this group only»'\)/.test(vwC), 'automation (the cure (C)): the key dialog offers the switch; an added grant carries it, a kept grant flips by ONE verb (off said explicitly to the writer); the listing carries the stored flag; the audit line has its words');
+  }
+  // the chain's cure (D, the U3c read): a CHILD of an access-holding parent reads there — so it may be a watcher there (at the save
+  // and at every wake); a parent's «仅本组» access refuses it and says THAT
+  {
+    const CFD = require('../src/channel-filter.js');
+    const accP = [{ principal: { kind: 'group', id: 'tg-p', name: 'Parent' }, authority: 'draft' }], accPO = [{ principal: { kind: 'group', id: 'tg-p', name: 'Parent', only: true }, authority: 'draft' }];
+    const membersD = [{ cid: 'k1', groups: ['tg-c'], inherited: ['tg-p'] }, { cid: 'k2', groups: ['tg-z'], inherited: [] }];
+    const wD = (id) => ({ principal: { kind: 'agent', id }, notify: 'wake', mode: 'all', dailyWakeCap: 50 });
+    const okKid = CFD.validateWatchers([wD('k1')], accP, { members: membersD }), noOnly = CFD.validateWatchers([wD('k1')], accPO, { members: membersD }), noStranger = CFD.validateWatchers([wD('k2')], accP, { members: membersD });
+    ok(okKid.ok && okKid.watchers[0].via === 'tg-p' && !noOnly.ok && noOnly.code === 'watcher-needs-access' && /as "this group only"/.test(noOnly.error) && /"Parent"/.test(noOnly.error) && !noStranger.ok && !/parent/i.test(noStranger.error), 'channels (the cure (D)): a child of the access-holding parent is a watcher «via» the parent; a «仅本组» access refuses it and SAYS so (the parent named); a stranger is refused as before', [okKid.ok && okKid.watchers[0].via, noOnly.error, noStranger.error]);
+    const viaRow = { principal: { kind: 'agent', id: 'k1' }, via: 'tg-p' };
+    ok(CFD.memberStill(viaRow, membersD, { rows: accP }) === true && CFD.memberStill(viaRow, membersD, { rows: accPO }) === false && CFD.memberStill(viaRow, [{ cid: 'k1', groups: ['tg-c'], inherited: [] }], { rows: accP }) === false, 'channels (the cure (D)): the wake re-judges the via watcher with the access rows and the lineage — a parent switched to «仅本组», or a lineage gone, stops it');
+    const caD = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
+    ok(/F\.memberStill\(it\.watcher, members, \{ rows: e0\.access \}\)/.test(caD), 'channels (the cure (D)): the wake hands the grain\'s access rows to the re-judge');
+    // CONTROL: the release's via judge (own groups only, from key strings) refuses the child — the leg above would be red
+    const MD = mutantCopies('cure-d-via', REPO);
+    try {
+      const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+      const CUTD = '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows }) : null;';
+      ok(fsrc.split(CUTD).length === 2, 'CONTROL setup: the via line hands the access rows, exactly once');
+      const CFx = MD.load('src/channel-filter.js', fsrc.replace(CUTD, '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members) : null;'), 'via-own-only');
+      const cx = CFx.validateWatchers([wD('k1')], accP, { members: membersD });
+      ok(!cx.ok && cx.code === 'watcher-needs-access', 'CONTROL: a via judge without the access rows (own groups only) refuses the child — the leg above would be red', cx);
+    } finally { try { fs.rmSync(MD.dir, { recursive: true, force: true }); } catch { } }
   }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [

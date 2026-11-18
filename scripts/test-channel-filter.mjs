@@ -821,7 +821,8 @@ console.log('⑭ notify-rules-r2: regex rules judged at save, matched on the fol
   // ── THE THREE CONTROLS (patched copies; each leg above would go RED) ──
   const M = mutantCopies('chan-filter-nrr2', REPO);
   const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-  const CUT1 = "    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members) : null;";
+  // lane lg-group-parents (the chain's cure (D)): the membership line hands the access rows (the via judge reads «仅本组» and the lineage)
+  const CUT1 = "    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows }) : null;";
   ok(FSRC.split(CUT1).length === 2, 'control setup: the membership line is present once');
   const Fm = M.load('src/channel-filter.js', FSRC.replace(CUT1, '    const via = null;'), 'member-not-eligible');
   const c1 = Fm.validateWatchers([w('S1')], access, { members });

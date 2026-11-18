@@ -341,7 +341,7 @@ function create(engineCtx) {
     const hasVia = e0.watchers.some((it) => it && it.watcher && it.watcher.via);
     const anyExcept = CG.hasAnyExcept();
     const members = hasVia || anyExcept ? membersNow() : null;
-    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members)) } : e0;
+    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: e0.access })) } : e0;   // the chain's cure (D): the grain's access rows (a via row's «仅本组», the lineage)
     // lane grants-unify: with an exception anywhere, a NAMED watcher that is running is re-judged too (wakeAdmitOf: may it
     // still see this conversation) — one not running is judged when it runs (its held hits wait, never dropped here)
     const admitOf = new Map();
