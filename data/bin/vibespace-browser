@@ -1160,7 +1160,7 @@ async function runPage(c) {
     let outText = Buffer.concat(outChunks).toString('utf8'), errText = Buffer.concat(errChunks).toString('utf8');
     // lane digit-zero: a fill / type / keyboard type the driver answered 0 is READ BACK before anything is said — the verb's
     // TARGET, never what holds the focus after it (r2): a date / time field takes no typed text (its own setter, in its form,
-    // read back), nothing landed is refused, a different value is said (V.readBack); the audit below records what it found
+    // read back), nothing landed is refused, a different value is said (RB.readBack); the audit below records what it found
     if (code === 0 && readPlan && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit) {
       // ONE bound (10 s) for all of the read-back's driver runs together: each run gets what is left of it
       const rb = await RB.readBack({ plan: readPlan, json: wantsJson, run: (args, o) => runBinQuiet(bin.path, [...(argv.includes('--pin-tab') ? ['--pin-tab'] : []), ...args], { env, cwd: runCwd.dir, ms: o && o.ms > 0 ? Math.min(o.ms, 10000) : 10000 }) });

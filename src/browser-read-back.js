@@ -91,13 +91,15 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
       if (v === null) return unavailable('its target could not be read back through the browser');
       if (matches(v)) return null;
       if (plan.verb !== 'fill' && /[\n\r\t]/.test(plan.asked)) return null;
-      const kind = driverRead(await call(['get', 'attr', 'type', plan.sel, '--json']), { absentIsEmpty: true });
-      const k = kind === null ? null : (String(kind).toLowerCase() || 'text');
-      if (k && FIELD_FORMS[k]) {
+      const kind = driverRead(await call(['get', 'attr', plan.sel, 'type', '--json']), { absentIsEmpty: true }); // get attr <selector> <name>
+      // a kind the browser could not read is never judged as a field: «could not confirm», the value never shown
+      if (kind === null) return unavailable('its kind could not be read through the browser, so what it holds could not be confirmed');
+      const k = String(kind).toLowerCase() || 'text';
+      if (FIELD_FORMS[k]) {
         f = { tag: 'input', kind: k, has: true, equal: false, includes: false, len: v.length, locked: false, value: v };
         setVia = { target: null, expect: { kind: k, value: v }, focus: plan.sel };
       } else {
-        f = { tag: k ? 'input' : 'field', kind: k || 'field', has: true, equal: v === plan.asked, includes: v.includes(plan.asked), len: v.length, locked: false, value: k === 'password' ? null : v.slice(0, READ_BACK_TEXT_MAX + 1) };
+        f = { tag: 'input', kind: k, has: true, equal: v === plan.asked, includes: v.includes(plan.asked), len: v.length, locked: false, value: k === 'password' ? null : v.slice(0, READ_BACK_TEXT_MAX + 1) };
       }
     }
   }
@@ -107,6 +109,7 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
   const form = f.tag === 'input' ? FIELD_FORMS[f.kind] : null;
   if (form) {
     if (f.locked) return fail('field_locked', `nothing was set: the ${f.kind} field is read-only or disabled`);
+    if (f.equal) return null; // it already holds what was asked
     const clearing = plan.verb === 'fill' && plan.asked === '';
     if (!clearing && !form.re.test(plan.asked)) {
       return fail('field_form', `nothing was set: a ${f.kind} field takes no typed text and holds its value as ${form.example} (${form.words}) — your ${what} of ${shown(plan.asked)} is not in that form. Run: vibespace-browser fill ${target} ${form.example} (your value in that form)${f.kind === 'color' || f.kind === 'range' ? '' : ', or click the field and press each digit in the order it shows'}`, { kind: f.kind, form: form.example });
@@ -126,9 +129,10 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
   const secret = f.kind === 'password';
   if (plan.verb === 'fill' ? f.equal : f.includes) return null;
   if (plan.verb !== 'fill' && /[\n\r\t]/.test(plan.asked)) return null; // a line break or a tab may submit the form or move the focus: not judged
-  if (f.len === 0 && plan.asked.length > 0) return fail('nothing_landed', `nothing landed: the ${f.kind === 'field' ? '' : f.kind + ' '}field is empty after your ${what} of ${secret ? `${plan.asked.length} characters` : shown(plan.asked)} — the page refused or cleared it`, { kind: f.kind, value: '' });
+  if (f.len === 0 && plan.asked.length > 0) return strict ? answer(1, 'nothing_landed', `nothing landed: the ${f.kind} field is empty after your ${what} of ${secret ? `${plan.asked.length} characters` : shown(plan.asked)} — the page refused or cleared it`, { kind: f.kind, value: '' })
+    : answer(0, 'nothing_landed', `note: ${what} ran, and the field focused afterwards (${f.kind}) is empty`, { kind: f.kind, value: '' });
   const holds = secret ? `${f.len} characters` : shown(f.value);
-  return answer(0, 'field_differs', `${strict ? '' : 'note: '}${what === 'fill' ? 'filled' : 'typed'} — but the ${strict ? '' : 'focused '}${f.kind === 'field' ? '' : f.kind + ' '}field holds ${holds}, not ${plan.verb === 'fill' ? 'exactly ' : 'a text containing '}${secret ? `the ${plan.asked.length} characters you gave` : shown(plan.asked)} (the page reformatted, cut or moved it)`, { kind: f.kind, value: secret ? null : f.value });
+  return answer(0, 'field_differs', `${strict ? '' : 'note: '}${what === 'fill' ? 'filled' : 'typed'} — but the ${strict ? '' : 'focused '}${f.kind} field holds ${holds}, not ${plan.verb === 'fill' ? 'exactly ' : 'a text containing '}${secret ? `the ${plan.asked.length} characters you gave` : shown(plan.asked)} (the page reformatted, cut or moved it)`, { kind: f.kind, value: secret ? null : f.value });
 }
 
 module.exports = { FIELD_FORMS, READ_BACK_TEXT_MAX, fieldProbeJs, fieldSetJs, evalAnswer, driverRead, readBack };

@@ -138,21 +138,53 @@ const probe = (p, asked, target) => JSON.parse(p.run(RB.fieldProbeJs(asked, targ
 
 console.log('⑤ readBack over a fake page — the TARGET judged, kind by kind');
 const realDate = (v) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
-/** The driver over a fake page: `eval` runs the page-side JS for real (④'s fake DOM) and prints its string; `focus` /
- *  `get value` / `get attr type` resolve a CSS id or an @ref (`refs`); `redirect` moves a focus elsewhere (a page's focus
- *  handler); `fail` = the run numbers that fail; `pretty` prints an eval's object over several lines; `clock` + `cost` advance
- *  a fake clock per run. */
-function fakeDriver(page, { refs = {}, redirect = {}, fail = [], pretty = false, clock = null, cost = 0 } = {}) {
+/** THE DRIVER'S OWN GRAMMAR, read from the help text the tree pins (scripts/fixtures/agent-browser-0.38.1 — the 0.38.1
+ *  capture; 0.38.2 adds lines, removes no verb or flag): `get <sub> <places…>` from get.txt's Subcommands, `focus` / `eval`
+ *  from their Usage lines. The stand-in below reads every argument BY THIS GRAMMAR and refuses a call it does not allow —
+ *  so it cannot drift from the driver (the first cure's stand-in read `get attr` reversed, as the read-back sent it). */
+const HELP = path.join(REPO, 'scripts/fixtures/agent-browser-0.38.1');
+const GRAMMAR = (() => {
+  const help = (v) => fs.readFileSync(path.join(HELP, v + '.txt'), 'utf8');
+  const places = (s) => [...s.matchAll(/<([a-z-]+)>/g)].map((m) => m[1]);
+  const get = {}; for (const m of help('get').matchAll(/^ {2}([a-z][\w-]*)((?: <[a-z-]+>)*) {2,}\S/gm)) get[m[1]] = places(m[2]);
+  const usage = (v) => { const m = new RegExp(`^Usage: agent-browser ${v} (.*)$`, 'm').exec(help(v)); return m ? places(m[1]) : null; };
+  return { get, focus: usage('focus'), eval: usage('eval') };
+})();
+const GLOBALS = new Set(['--json']);
+/** → { verb, sub, named } when the help allows the call, else { refused: why } (a selector looks like one; a name is a name). */
+function byGrammar(args) {
+  const pos = args.filter((a) => !GLOBALS.has(a));
+  const [verb, ...rest] = pos;
+  let sub = null, want = null;
+  if (verb === 'get') { sub = rest.shift(); want = GRAMMAR.get[sub]; if (!want) return { refused: `get has no subcommand «${sub}»` }; }
+  else if (verb === 'focus' || verb === 'eval') want = GRAMMAR[verb];
+  else return { refused: `the read-back has no business with «${verb}»` };
+  if (!want || rest.length !== want.length) return { refused: `«${pos.join(' ')}» — the help says ${verb}${sub ? ' ' + sub : ''} ${(want || []).map((w) => `<${w}>`).join(' ')}` };
+  const named = Object.fromEntries(want.map((w, i) => [w, rest[i]]));
+  if ('name' in named && !/^[A-Za-z_][\w:.-]*$/.test(named.name)) return { refused: `«${pos.join(' ')}» — <name> «${named.name}» is no attribute name (the help: get attr <selector> <name>)` };
+  return { verb, sub, named };
+}
+/** The driver over a fake page, every call read BY THE HELP'S GRAMMAR (a call it does not allow is refused and recorded):
+ *  `eval` runs the page-side JS for real (④'s fake DOM) and prints its string; `focus` / `get value` / `get attr <selector>
+ *  <name>` resolve a CSS id or an @ref (`refs`); `redirect` moves a focus elsewhere; `fail` = the run numbers that fail;
+ *  `attrFails` = the attribute read fails; `pretty` prints an eval's object over several lines; `clock` + `cost` advance a
+ *  fake clock per run. */
+const REFUSED_CALLS = [];
+function fakeDriver(page, { refs = {}, redirect = {}, fail = [], attrFails = false, pretty = false, clock = null, cost = 0 } = {}) {
   const calls = [];
   const idOf = (sel) => refs[sel] || (/^#[\w-]+$/.test(sel) ? sel.slice(1) : null);
   const run = async (args, o) => {
     calls.push({ args, ms: o && o.ms });
     if (clock) clock.t += cost;
+    const g = byGrammar(args);
+    if (g.refused) { REFUSED_CALLS.push(g.refused); return { code: 1, out: '', err: '✗ ' + g.refused }; }
     if (fail.includes(calls.length)) return { code: 1, out: '', err: '✗ CDP command timed out' };
-    if (args[0] === 'eval') { const v = page.run(args[1]); return { code: 0, out: (pretty ? JSON.stringify(JSON.parse(v), null, 2) : JSON.stringify(v)) + '\n', err: '' }; }
-    if (args[0] === 'focus') { const id = idOf(args[1]); if (!id || !page.nodes[id]) return { code: 1, out: '', err: '✗ element not found' }; page.focus(redirect[id] || id); return { code: 0, out: '✓ Done\n', err: '' }; }
-    if (args[0] === 'get' && args[1] === 'value') { const id = idOf(args[2]); if (!id) return { code: 1, out: '', err: '✗ element not found' }; return { code: 0, out: JSON.stringify({ success: true, data: { value: page.nodes[id]._v } }) + '\n', err: '' }; }
-    if (args[0] === 'get' && args[1] === 'attr') { const id = idOf(args[3]); if (!id) return { code: 1, out: '', err: '✗ element not found' }; return { code: 0, out: JSON.stringify({ success: true, data: { value: page.nodes[id].type || null } }) + '\n', err: '' }; }
+    if (g.verb === 'eval') { const v = page.run(g.named.script); return { code: 0, out: (pretty ? JSON.stringify(JSON.parse(v), null, 2) : JSON.stringify(v)) + '\n', err: '' }; }
+    const id = idOf(g.named.selector);
+    if (!id || !page.nodes[id]) return { code: 1, out: '', err: '✗ element not found' };
+    if (g.verb === 'focus') { page.focus(redirect[id] || id); return { code: 0, out: '✓ Done\n', err: '' }; }
+    if (g.sub === 'value') return { code: 0, out: JSON.stringify({ success: true, data: { value: page.nodes[id]._v } }) + '\n', err: '' };
+    if (g.sub === 'attr') { if (attrFails) return { code: 1, out: '', err: '✗ CDP command timed out' }; return { code: 0, out: JSON.stringify({ success: true, data: { value: g.named.name === 'type' ? (page.nodes[id].type || null) : null } }) + '\n', err: '' }; }
     return { code: 9, out: '', err: 'not faked: ' + args.join(' ') };
   };
   return { run, calls };
@@ -227,7 +259,13 @@ async function readBackCensus(readBack) {
   t = await judge(readBack, { verb: 'fill', sel: '#p', asked: 'correct-horse-0' }, fakePage({ p: { kind: 'password', value: 'correct-horse' } }));
   say('a password the page cut ⇒ said by its LENGTHS, never its characters', t.r && t.r.as === 'field_differs' && t.r.out.includes('13 characters') && !t.r.out.includes('correct-horse'), t.r);
   t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '0123' }, fakePage({ n: { kind: 'number' } }, { focused: 'n' }));
-  say('a keyboard type that left the FOCUSED field empty ⇒ SAID (exit 0), never refused', t.r && t.r.code === 0 && t.r.as === 'nothing_landed' && /^note: keyboard type ran, but/.test(t.r.out), t.r); cost['a keyboard type'] = t.d.calls.length;
+  say('a keyboard type that left the FOCUSED field empty ⇒ SAID (exit 0), never refused — what the focused field holds, no cause claimed', t.r && t.r.code === 0 && t.r.as === 'nothing_landed' && /^note: keyboard type ran, and the field focused afterwards \(number\) is empty/.test(t.r.out) && !/refused or cleared/.test(t.r.out), t.r); cost['a keyboard type'] = t.d.calls.length;
+  t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: '4' }, fakePage({ a1: { kind: 'text', value: '4' }, a2: { kind: 'text' } }, { focused: 'a2' }));
+  say('a bare keyboard type into a code box that moved the focus to the empty next one ⇒ SAID (exit 0) as the focused field afterwards — never «the page refused or cleared it»', t.r && t.r.code === 0 && /the field focused afterwards \(text\) is empty/.test(t.r.out) && !/refused or cleared/.test(t.r.out), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e2', asked: '0123' }, fakePage({ t: { kind: 'text', value: '01' } }), { refs: { '@e2': 't' }, attrFails: true });
+  say('the MUST: an @ref whose KIND the browser could not read and whose value does not match ⇒ «could not be confirmed» (exit 0, a note), never «nothing landed», the value never shown', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && /could not be confirmed/.test(t.r.note) && !t.r.code && !/"01"/.test(t.r.note), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE({ value: '2027-01-07' }) }));
+  say('a date field that already holds the asked value ⇒ the driver\'s answer stands, no setter (no extra input / change)', t.r === null && t.d.calls.length === 1 && t.page.events.length === 0, t.r);
   t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: 'hello\n' }, fakePage({ t: { kind: 'text' } }, { focused: 't' }));
   say('a keyboard type holding a line break (it may submit the form) ⇒ not judged', t.r === null, t.r);
   t = await judge(readBack, { verb: 'fill', sel: 'text=Email', asked: 'a@b.c' }, fakePage({ e: { kind: 'email', value: 'a@b.c' } }), { refs: { 'text=Email': 'e' } });
@@ -236,8 +274,14 @@ async function readBackCensus(readBack) {
   { let j = null; try { j = JSON.parse(t.r.out); } catch { /* */ } say('--json ⇒ ONE JSON object: success, the value, via the setter', t.r && t.r.code === 0 && j && j.success === true && j.data.value === '2027-01-07' && j.data.via === 'setter' && t.r.out.trim().split('\n').length === 1, t.r); }
   return { bad, cost };
 }
+ok(JSON.stringify(GRAMMAR.get.attr) === '["selector","name"]' && JSON.stringify(GRAMMAR.get.value) === '["selector"]' && JSON.stringify(GRAMMAR.focus) === '["selector"]' && JSON.stringify(GRAMMAR.eval) === '["script"]',
+  `the stand-in's grammar is the driver's own help, read from the pinned fixture: get attr <selector> <name>, get value <selector>, focus <selector>, eval <script> (${Object.keys(GRAMMAR.get).length} get subcommands)`, GRAMMAR);
+ok(!byGrammar(['get', 'attr', '@e5', 'type', '--json']).refused && byGrammar(['get', 'attr', 'type', '@e5', '--json']).refused && byGrammar(['get', 'valu', '@e5']).refused && byGrammar(['focus']).refused,
+  'the grammar takes get attr <selector> <name> and REFUSES the reversed order (get attr type @e5), an unknown subcommand and a missing selector');
+REFUSED_CALLS.length = 0;
 {
   const { bad, cost } = await readBackCensus(RB.readBack);
+  ok(REFUSED_CALLS.length === 0, `every driver call the read-back made in ⑤ is one the driver's help allows (${REFUSED_CALLS.length} refused)`, REFUSED_CALLS);
   ok(bad.length === 0, `readBack judges the verb's TARGET (a CSS selector in the page, an @ref through the driver), sets a date / time / … field through its own setter in the kind's normal form, clears on an empty fill, never blames the field for a failed run, reads the answer whole, keeps ONE 10 s bound — a bare keyboard type's findings said, never refused`, bad);
   ok(Object.keys(cost).length >= 7, `(e) THE COST, measured on the fake — driver runs per read-back: ${Object.entries(cost).map(([k, n]) => `${k} ${n}`).join(' · ')}`, cost);
 }
@@ -279,6 +323,16 @@ const MUT = mutantCopies('read-back', REPO);
   const VM = require(f);
   const { bad } = await readBackCensus(VM.readBack);
   ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill ISO ⇒ the setter')) && bad.some((b) => b.startsWith('the owner\'s act')), 'CONTROL: a readBack that trusts the driver (the release\'s «Done» over an empty date field) FAILS ⑤', bad.slice(0, 3));
+}
+{
+  // 080d37c23's read-back (the second verdict's must): the attribute asked in the REVERSED order — get attr type <selector>
+  const SRC = fs.readFileSync(path.join(REPO, 'src/browser-read-back.js'), 'utf8');
+  const from = "call(['get', 'attr', plan.sel, 'type', '--json'])";
+  const f = MUT.write('src/browser-read-back.js', SRC.replace(from, "call(['get', 'attr', 'type', plan.sel, '--json'])"), 'reversed'); // stale-pins: kept — the reversed order IS the control's planted mutation
+  REFUSED_CALLS.length = 0;
+  const { bad } = await readBackCensus(require(f).readBack);
+  ok(SRC.includes(from) && bad.some((b) => b.startsWith('a date fill by @ref')) && REFUSED_CALLS.some((r) => /is no attribute name/.test(r)), 'CONTROL: the read-back that asks get attr type <selector> (080d37c23) FAILS — its @ref date fill is not set, and the stand-in refuses the call by the help\'s grammar', { bad: bad.filter((b) => b.startsWith('a date fill by @ref')).map((b) => b.slice(0, 160)), refused: REFUSED_CALLS.slice(0, 2) });
+  REFUSED_CALLS.length = 0;
 }
 {
   // 68da75fa2's read-back (the must): whatever holds the FOCUS after the verb is judged, the target named only in the words
