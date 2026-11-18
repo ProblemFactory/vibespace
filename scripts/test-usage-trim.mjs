@@ -18,6 +18,7 @@
 //   §3 late rows across a trim: one inside the window and one below the cut, arriving mid-trim, stay hot; the view = the full
 //      stable sort; every priced row and count = an untrimmed twin's; the next trim moves the late one; each late row is in the
 //      window ONCE. CONTROL (planted) the commit that swaps over the rows that came meanwhile ⇒ they are lost
+//   §3t (the chain's cure) the equal-instant tie: a late row at the ms of a moved row — the signature and a read-order sum = the twin's
 //   §3b A READER BETWEEN TWO BATCHES SEES A WHOLE WINDOW (the coordinator's 04:47Z ruling, item 1): over a real shard-backed
 //      ledger, eventForRid / eventForMid / ledgerKnowsId / every priced row / every count asked mid-pass and mid-stage answer
 //      what they answered before the trim (the window is built aside and swapped in one commit turn), and the same after it
@@ -389,6 +390,27 @@ try {
     ok(leftAfter == null && stepsAgain && stepsAgain.length >= 3 && big._evCache.events.length + big._evCache.cold.n === nBig + 24500, `an absorb that found nothing ends with no promise left on the cache (${leftAfter}); the next append is taken in ${stepsAgain && stepsAgain.length} steps`);
     const srcA = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
     ok(/if \(appendedNow\) await this\._absorbStepped\(\);/.test(srcA) && /if \(appended\) this\._absorbStepped\(\);/.test(srcA), 'the scan awaits it before it settles; a host batch asks for it');
+  }
+  console.log('§3t the equal-instant tie (the chain\'s cure, small — last: its rows draw nothing the legs before use)');
+  { // a coldable row that comes while the stage is open, at the SAME ms as a row this trim MOVES, waits hot and moves at the next
+    // trim — it then sits after that row in the columns (the untrimmed twin keeps load order). Pinned: the scene's preconditions (a
+    // tie with a MOVED row, held hot), the row neither lost nor doubled, every priced row and count = the twin's (the signature,
+    // order-free), a read-order sum within 1e-12 relative — a one-row reorder's ulp is inside it: the leg pins the scene, not the bit
+    const { uh, c, st, rows } = mk(10000, { hub: false });
+    c.cutoff = T - 43 * DAY; uh._sortedEvents();
+    const g = uh._trimSteps(500); let r = g.next(); while (!r.done && !c.cold.sn) r = g.next();   // the stage is open
+    const deep = rows.filter((e) => (e.ts || 0) < T - 43.8 * DAY), tieTs = deep.length ? deep[0].ts : 0;
+    const late = { ...deep[0], rid: 'req_tie_late', mid: 'msg_tie_late', host: undefined, i: 1234, o: 567, cr: 8910 };   // no draw of the seeded rows: the legs before keep their sequence
+    take(uh, c, [late], st);
+    while (!r.done) r = g.next();
+    const movedTie = c.cold.n > 0 && !c.events.some((e) => e !== late && e.ts === tieTs);   // the row it ties with went cold in this trim
+    const heldHot = c.events.includes(late);
+    uh._trimHot();                                                                          // the next trim moves the late row
+    const twin = mk(0, { hub: false, rows: [...rows, late].map((e) => ({ ...e })) }).uh; twin._sortedEvents();
+    const sumIn = (u) => { let s = 0; for (const e of u._events(0, T + DAY)) s += (Number(e.i) || 0) * 3e-6 + (Number(e.o) || 0) * 1.5e-5 + (Number(e.cw5) || 0) * 3.75e-6 + (Number(e.cr) || 0) * 3e-7; return s; };
+    const a = sumIn(uh), b = sumIn(twin);
+    ok(deep.length > 0 && movedTie && heldHot && !c.events.includes(late) && sig(uh) === sig(twin) && JSON.stringify(counts(uh)) === JSON.stringify(counts(twin)) && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b)),
+      `a row at the SAME ms as a moved row, come while the stage was open: held hot, moved at the next trim; every priced row and count = the untrimmed twin's, the read-order sum ${a === b ? 'equal to the bit' : `within its last ulp (${(a - b).toExponential(2)})`}`, { deep: deep.length, movedTie, heldHot, a, b });
   }
 } finally { Date.now = realNow; }
 fs.rmSync(tmp, { recursive: true, force: true });

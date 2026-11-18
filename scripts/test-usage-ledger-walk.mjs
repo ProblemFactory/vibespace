@@ -336,12 +336,12 @@ const getCount = (TREE) => {
     if (release) w.est._estDrop = function () { this._estMemo.clear(); };
     const M = ['sub-a', 'sub-b', 'sub-c', 'sub-d'], T = NOW + 5000;
     const before = M.map((m) => JSON.stringify(w.est.estimateFor(m, null, T))); // memoized at T (the estimator's 30 s memo)
-    let n = 0; const ri = w.est.resolveIdentity; w.est.resolveIdentity = (a) => { n++; return ri(a); };
+    let n = 0; const ri = w.est.ratesFor; w.est.ratesFor = function (k) { n++; return ri.call(this, k); };   // an estimate built (a memo hit asks the identity, never the rates — the chain's cure)
     w.est.noteLive({ rid: 'msg_u3', accountId: 'sub-a', model: 'claude-opus-5-5', usd: 0.05, ts: T });
     const after = M.map((m) => JSON.stringify(w.est.estimateFor(m, null, T + 1000)));
     const live = n; n = 0;
     w.est.invalidate('email:b@x'); for (const m of M) w.est.estimateFor(m, null, T + 2000);
-    const inv = n; w.est.resolveIdentity = ri;
+    const inv = n; w.est.ratesFor = ri;
     const fresh = M.map((m) => { w.est._estMemo.clear(); return JSON.stringify(w.est.estimateFor(m, null, T + 1000)); });
     rmWorld(w);
     // the recomputed member = a fresh estimator's; the others answer what they answered at T — their memo, as with no record at
@@ -351,6 +351,26 @@ const getCount = (TREE) => {
   const r = run(false), c = run(true);
   ok(r.live === 1 && r.inv === 1 && r.same && r.withEst >= 3, `U3 a record streamed for sub-a recomputes ${r.live} estimate of 4 (${r.withEst} members with one), an invalidation of email:b@x ${r.inv}; sub-a's answer = a fresh estimator's, the three others' = theirs before the record (their memo, as with none)`, r);
   ok(c.live === 4, `control (the release's whole clear per record): ${c.live} of 4 recomputed ⇒ RED`, c);
+  // the chain's cure (small): AN ACCOUNT SWITCH refuses the memo at once — sub-b's entry was built under its identity; the account
+  // now resolves to another (a switch the scan's invalidate never names): its next ask is a fresh estimate, not the old identity's
+  // for up to 30 s. RED: acad2351a's hit check (planted in a copy) ⇒ the old identity's entry served
+  const sw = (E) => {
+    const w = world(REPO, { seed: 9, rows: 1500, pairs: [200, 100, 60, 100] });
+    const est = E ? Object.assign(Object.create(E.UsageEstimator.prototype), w.est) : w.est;
+    const T = NOW + 5000; est.estimateFor('sub-b', null, T);
+    let n = 0; const rf = est.ratesFor, ri = est.resolveIdentity; est.ratesFor = function (k) { n++; return rf.call(this, k); };
+    est.resolveIdentity = (a) => (a === 'sub-b' ? { identityKey: 'email:switched@x' } : ri(a));   // the switch
+    const k0 = est._estMemo.get('sub-b');   // the memo's key: the account (no claim)
+    est.estimateFor('sub-b', null, T + 1000);
+    const k1 = est._estMemo.get('sub-b');
+    rmWorld(w);
+    return { rebuilt: n, was: k0 && k0.ik, now: k1 && k1.ik };
+  };
+  const esrc = fs.readFileSync(path.join(REPO, 'src/usage-estimator.js'), 'utf8'), HIT = '(m.ik || null) === ikNow && ';
+  const ERel = mutantCopies('usage-memo-switch', REPO).load('src/usage-estimator.js', esrc.replace(HIT, ''), 'no-switch');
+  const s1 = sw(null), s0 = sw(ERel);
+  ok(esrc.split(HIT).length === 2 && s1.was && s1.was !== 'email:switched@x' && s1.rebuilt === 1 && s1.now === 'email:switched@x' && s0.rebuilt === 0 && s0.now === s1.was,
+    `an account switch refuses its memo at once: sub-b's entry (${s1.was}) is rebuilt for the identity it resolves to now (${s1.rebuilt} estimate, ${s1.now}); RED (acad2351a's hit): the old identity's entry served (${s0.rebuilt} built, ${s0.now})`, { s1, s0 });
 }
 
 console.log('§3 RATCHET — the work of one relearn over every pair, against the pairs it holds (a count, never the clock)');

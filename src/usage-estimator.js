@@ -1228,7 +1228,10 @@ class UsageEstimator {
     // (utilization 1, fetchedAt now) so the pool's immediate switch reads
     // 85%-ish instead of dead and stays put (adversarial-review major).
     // round 2 (MUST 2): …and the moment the identity's rates LANDED after it was built (on older rates, or on none)
-    if (m && nowMs - m.at < 30000 && !(rawCache?.fetchedAt > (m.baseFetchedAt || 0)) && (!m.ik || this._ratesVerOf(m.ik) === m.rv)) return ownEstimate(m.est, rawCache);
+    // the chain's cure (small): the entry is its IDENTITY's — an account that now resolves to another identity (a switch: the scan's
+    // invalidate names only the groups it walked, so the old one's entry lived its 30 s) is refused at once
+    let ikNow = null; if (m) { try { ikNow = this.resolveIdentity(accountId)?.identityKey || null; } catch { } }
+    if (m && nowMs - m.at < 30000 && (m.ik || null) === ikNow && !(rawCache?.fetchedAt > (m.baseFetchedAt || 0)) && (!m.ik || this._ratesVerOf(m.ik) === m.rv)) return ownEstimate(m.est, rawCache);
     // lane ledger-dedup-law r2: no estimate from a partial ledger — the cost since the anchor would be part of it (the
     // newest month loads last); null = the reading stands (every caller's no-estimate road), nothing memoized
     if (this._ledgerLoading()) return null;

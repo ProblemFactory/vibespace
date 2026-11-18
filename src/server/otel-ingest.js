@@ -73,6 +73,7 @@ const nextTurn = () => new Promise((r) => setImmediate(() => setImmediate(r)));
 const spillOf = new WeakMap(); // usage-cpu U4: a waited record → its line in the spill (a side table: the record itself carries no mark)
 const NL = Buffer.from('\n');
 const W = () => require('../store-writer.js').storeWriter(); // usage-cpu U4: the stash and the spill are written by THE STORE WRITER's thread
+const STASH_DURABLE_MS = 4000; // the chain's cure: a post's answer waits at most this for its stash lines; past it «retry» — two waits + the 1 s Retry-After stay inside the exporter's own 10 s
 
 function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, serverSetting }) {
   // PERSISTED token (review-caught): dtach/pipe sessions survive server
@@ -335,9 +336,17 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       try { out = await ingest(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
       arrivals.kept += out.kept || 0;
       for (const [k, n] of Object.entries(out.seen || {})) arrivals.events[k] = (arrivals.events[k] || 0) + n;
-      // usage-cpu U4 (the second read): the answer goes at once — the post's stash lines are owed to the store writer at ITS pace
-      // (a stop writes them; a kill inside the pace loses them, where the release's append was on disk before the answer — said);
-      // never an urgent write per post (the writer's one thread is shared with a person's acts), never a ½ s wait per post
+      // the chain's cure (as if a must): THE STASH IS ON DISK BEFORE ITS ANSWER, as the release had it — a 200 tells the exporter
+      // never to send these rows again, and they are what the ledger's backfill and a billing question are answered from. The
+      // post's lines (and any a failed write still owes: a resend of a post told to retry) go by the store writer's URGENT road —
+      // the loop never waits (a promise), the wait bounded (STASH_DURABLE_MS); a write that did not land in time answers 503
+      // «retry» (the exporter sends the post again; a known org's rid is never stashed twice — an unknown org's row may be, and its
+      // readers skip those rows), never a 200 for rows a kill could still lose. Its cost, said: a post marks the stash URGENT, so a
+      // person's act waits behind up to the urgent stores ahead of it (the writer's alternation) while sessions export
+      if (stashOwed.length || stashWriting) {
+        const onDisk = await W().durable(file, { timeoutMs: STASH_DURABLE_MS }).catch(() => false);
+        if (!onDisk) return res.status(503).set('Retry-After', '1').json({ error: 'the usage truth stash is not on disk yet — send the post again' });
+      }
       res.json({ partialSuccess: {} });
     },
     // Metrics/traces are not consumed (exporter set to 'none'), but a tolerant

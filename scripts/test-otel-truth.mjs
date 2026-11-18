@@ -318,6 +318,29 @@ const PAYLOAD = (recs) => ({
       ok(countIn(stashOf(d10), 'req_u4both') === 1 && (spillOf(d10) || '') === '' && o10.observedOrgForRid('req_u4both') === 'sub-true', `U4 a record in the stash AND the spill (a stop between the two writes) is stashed no second time (${countIn(stashOf(d10), 'req_u4both')} line); the spill empties`);
       try { SW.forget(path.join(d10, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d10, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d10, { recursive: true, force: true });
     }
+    { // the chain's cure (as if a must): THE STASH IS ON DISK BEFORE ITS ANSWER — the post's lines by the store writer's urgent road,
+      // the wait bounded; a write that did not land in time answers 503 «retry» and the resend is stashed once. RED: acad2351a's
+      // answer at once ⇒ the 200 went out with its line NOT on disk (a kill there loses a row the exporter never resends)
+      const callLogs = (oi, d, rid) => new Promise((resolve) => {
+        const tok = oi.envFor().OTEL_EXPORTER_OTLP_HEADERS.split('=')[1];
+        const req = { socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-vibespace-otel': tok }, body: PAYLOAD([REC({ request_id: { stringValue: rid } })]) };
+        const res = { code: 200, hdr: {}, status(x) { this.code = x; return this; }, set(k, val) { this.hdr[k] = val; return this; }, json(b) { resolve({ code: this.code, retryAfter: this.hdr['Retry-After'] || null, body: b, onDisk: countIn(stashOf(d), rid) }); return this; } };
+        Promise.resolve(oi.logs(req, res)).catch((e) => resolve({ err: String(e) }));
+      });
+      const dH = mkDir4('h'), oH = mk4(dH); await oH.replayed;
+      const g1 = await callLogs(oH, dH, 'req_cure_disk');                 // the answer comes with its line on disk
+      const realDurable = SW.durable; SW.durable = () => Promise.resolve(false);   // the writer's queue past the bound
+      let g2 = null; try { g2 = await callLogs(oH, dH, 'req_cure_late'); } finally { SW.durable = realDurable; }
+      const g3 = await callLogs(oH, dH, 'req_cure_late');                 // the exporter sends it again: a duplicate, its owed line lands, ONE line
+      const srcC = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8'), WAIT = "      if (stashOwed.length || stashWriting) {\n";
+      const RC = mutantCopies('otel-truth-cure', REPO).load('src/server/otel-ingest.js', srcC.replace(WAIT, () => "      if (false) {\n"), 'answer-at-once');
+      const dR = mkDir4('i'), oR = mk4(dR, RC); await oR.replayed;
+      const r1 = await callLogs(oR, dR, 'req_cure_red');
+      ok(srcC.split(WAIT).length === 2 && g1.code === 200 && g1.onDisk === 1 && g2 && g2.code === 503 && g2.retryAfter === '1' && /again/.test(String(g2.body && g2.body.error)) && g3.code === 200 && g3.onDisk === 1,
+        `the stash is on disk BEFORE the answer: a post's 200 came with its line written (${g1.onDisk}); a write past the bound answers 503 «retry» (${g2 && g2.code}), and the resend comes back 200 with the row stashed ONCE (${g3.onDisk})`, { g1, g2, g3 });
+      ok(r1.code === 200 && r1.onDisk === 0, `RED CONTROL (acad2351a: the answer at once): the 200 went out with its line not on disk (${r1.onDisk}) — a kill there loses a row the exporter never sends again`, r1);
+      for (const d of [dH, dR]) { try { await SW.durable(path.join(d, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(d, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d, { recursive: true, force: true }); }
+    }
     const src4 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
     const rel4 = src4.replace('    if (replay.done) return take(records, seen);', '    finishReplay(); return take(records, seen);');
     const R4 = mutantCopies('otel-truth-u4', REPO).load('src/server/otel-ingest.js', rel4, 'sync-finish');
