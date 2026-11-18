@@ -221,8 +221,8 @@ function workerCensus(texts) {
 const TEXTS = Object.fromEntries([...walk('src'), 'server.js'].map((f) => [f, read(f)]));
 const wc = workerCensus(TEXTS);
 ok(wc.sites.join() === 'src/safe-fs.js,src/server/search-index.js,src/server/sync-fs-witness.js,src/server/usage-index.js,src/store-writer.js,src/usage-history.js' /* + B-9428 r2: the ledger's cold fold; + lane hub-fuse-sync-guard: the witness's watchdog thread; + lane hub-loop-stalls: the store writer's thread */, `the server process's new Worker( sites (${wc.sites.join(', ')}); the device daemon's are its own process`);
-ok(wc.scripts.join() === 'src/safe-fs-worker.js,src/search-index-worker.js,src/server/fs-canary-worker.js,src/server/incident-freeze-worker.js,src/server/sync-fs-witness-worker.js,src/sessions-sweep-worker.js,src/store-writer-worker.js,src/transcript-worker.js,src/usage-cold-worker.js,src/usage-index-worker.js' /* + B-891e: the sessions sweep's own worker; + lane vault-slow-load: the incident freeze's own SafeFs worker; + lane hub-fuse-sync-guard: the witness's watchdog */,
-  `every script those sites start (10): ${wc.scripts.join(', ')}`);
+ok(wc.scripts.join() === 'src/agy-cards-worker.js,src/safe-fs-worker.js,src/search-index-worker.js,src/server/fs-canary-worker.js,src/server/incident-freeze-worker.js,src/server/sync-fs-witness-worker.js,src/sessions-sweep-worker.js,src/store-writer-worker.js,src/transcript-worker.js,src/usage-cold-worker.js,src/usage-index-worker.js' /* + B-891e: the sessions sweep's own worker; + lane vault-slow-load: the incident freeze's own SafeFs worker; + lane hub-fuse-sync-guard: the witness's watchdog */,
+  `every script those sites start (11; B-299b A1: + the hub's agy-cards worker): ${wc.scripts.join(', ')}`);
 ok(!wc.bad.length, `each site tracks + skips the answer, each script answers first (${wc.bad.join('; ') || 'clean'})`);
 {
   const noHandler = { ...TEXTS, 'src/usage-index-worker.js': TEXTS['src/usage-index-worker.js'].replace(/\n\s*if \(answerMemory\(msg, parentPort\)\) return;[^\n]*/, '') };

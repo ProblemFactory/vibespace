@@ -50,6 +50,19 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
     // context size) — but a harness whose descriptor reads a WALL from its
     // wrapper's records (antigravity: quota.signalFromStream) has it written
     // as a reading by src/server/stream-wall.js (lane agy-wall-signal).
+    // the descriptor's after-turn records that came OFF the loop (B-299b A1): routed as the loop below routes those kinds — a
+    // `sub` step to its virtual session, a card (a finished one's files into the Artifacts) then the normalizer; never into
+    // the session buffer / the journal
+    const routeLate = (recs) => {
+      for (const msg of Array.isArray(recs) ? recs : []) {
+        try {
+          if (msg.kind === 'sub') { require('../acp-subagents.js').feed(session, id, msg, broadcastToSession); continue; }
+          if (msg.kind === 'subagent' && msg.status && msg.status !== 'running') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[acp] subagent artifacts failed:', e.message); } }
+          feedLive(session, msg);
+        } catch (e) { console.error(`[acp] late record handling failed (${msg && msg.kind}): ${e.message}`); }
+      }
+    };
+    session._acpLate = routeLate; // B-299b A1 r2: the warm's cards that land after the attach drew its history (agy-backfill warmCards)
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
       session.buffer += output;
@@ -131,11 +144,13 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             // quiet wait starts here and nowhere else (src/server/after-turn-read.js)
             try { require('../after-turn-read.js').onTurnEnd(session, msg); } catch (e) { console.warn(`[acp] after-turn read (end) failed: ${e.message}`); }
             // the descriptor's after-turn read (antigravity: the card of a sub its OLD wrapper journaled without one — the
-            // cards' addendum): its records go through THIS loop next, as if journaled (a `sub` step to its virtual
-            // session, a card to the cards) — never into the session buffer / the journal
+            // cards' addendum): a PROMISE (B-299b A1 — the store is read off the loop) whose records routeLate routes as this
+            // loop routes those kinds when it answers; a plain list (a descriptor that reads in place) goes through THIS
+            // loop next, as if journaled — never into the session buffer / the journal
             try {
               const late = require('../../harnesses').harnessOf(session.backend)?.store?.afterTurn?.(session) || [];
-              if (late.length) lineBuf = late.map((r) => JSON.stringify(r)).join('\n') + '\n' + lineBuf;
+              if (typeof late.then === 'function') late.then(routeLate, (e) => console.warn(`[acp] after-turn read failed: ${e && e.message}`)); // B-299b A1: read off the loop, routed when it answers
+              else if (late.length) lineBuf = late.map((r) => JSON.stringify(r)).join('\n') + '\n' + lineBuf;
             } catch (e) { console.warn(`[acp] after-turn read failed: ${e.message}`); }
           } else if (msg.kind === 'update') {
             const u = msg.update || {};

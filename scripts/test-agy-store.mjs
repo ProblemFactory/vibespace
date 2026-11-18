@@ -257,6 +257,7 @@ console.log('— ⑪ A SUB THAT ALREADY RAN (the cards\' addendum): the hub draw
   const plain = new AcpMessageManager('p'); plain.convertHistory(new AcpSessionMessages(sess(), 'p', { buffersDir: BUFS }).raw());
   ok(!plain.messages.some((m) => m.taskInfo?.subId), 'RED (the measured gap): the plain ACP reader over that journal draws NO card — what a reload showed before this addendum');
   const s1 = sess();
+  await BF.warmCards(s1, { dataDir: DATA }); // B-299b A1: the attach's warm reads the store off the loop (the descriptor's store.warmTranscript)
   const raw = new BF.AgySessionMessages(s1, 'p', { buffersDir: BUFS }).raw();
   const at = raw.findIndex((r) => r.update?.toolCallId === KEY && r.update.sessionUpdate === 'tool_call');
   ok(raw.length === jrecs.length + 1 && raw[at + 1].kind === 'subagent' && raw[at + 1].toolCallId === KEY && raw[at + 1].home === home && raw[at + 1].ts === raw[at].ts, 'the antigravity reader: the card right after its row (its time, the account\'s store as its home) — nothing else added to the parent\'s records', raw.map((r) => r.kind));
@@ -274,27 +275,28 @@ console.log('— ⑪ A SUB THAT ALREADY RAN (the cards\' addendum): the hub draw
   const own = new BF.AgySessionMessages(sess({ buffer: withOwn }), 'p', { buffersDir: BUFS }).raw();
   ok(own.filter((r) => r.kind === 'subagent').length === 1, 'a row whose wrapper journaled its own card: unchanged (never a second card)');
   const nohome = path.join(ROOT, 'empty-home'); fs.mkdirSync(nohome, { recursive: true });
-  const cases = [['a store that does not know the sub', { _accountId: 'agy-00000000ffff' }], ['another machine\'s conversation', { host: 'm1' }], ['an account id that is not one', { _accountId: '../x' }]];
+  const cases = [['a store that does not know the sub', { _accountId: 'agy-00000000ffff' }], ['another machine\'s conversation', { host: 'm1' }], ['an account id that is not one', { _accountId: '../x' }], ['a named account whose root is gone (asked on the worker\'s road)', { _accountId: 'agy-0000000000ee' }]];
   fs.mkdirSync(path.join(DATA, 'agy-subs', 'agy-00000000ffff', '.gemini', 'antigravity-cli'), { recursive: true });
-  ok(cases.every(([, o]) => new BF.AgySessionMessages(sess(o), 'p', { buffersDir: BUFS }).raw().length === jrecs.length) && BF.homeOf(sess({ _accountId: 'agy-0000000000ee' }), { dataDir: DATA }) === null && BF.homeOf(sess({ _accountId: null }), { dataDir: DATA }) === require('node:os').homedir(),
+  const caseSessions = cases.map(([, o]) => sess(o)); for (const cs of caseSessions) await BF.warmCards(cs, { dataDir: DATA });
+  ok(caseSessions.every((cs) => new BF.AgySessionMessages(cs, 'p', { buffersDir: BUFS }).raw().length === jrecs.length) && BF.homeOf(sess({ _accountId: 'agy-0000000000ee' }), { dataDir: DATA }) === null && BF.homeOf(sess({ _accountId: 'agy-0000000000ee' }), { dataDir: DATA, stat: false }) === path.join(DATA, 'agy-subs', 'agy-0000000000ee') && BF.homeOf(sess({ _accountId: null }), { dataDir: DATA }) === require('node:os').homedir(),
     'unchanged (no card, no error): ' + cases.map((c) => c[0]).join(' / ') + '; a named account whose root is gone reads NO store (never the machine login\'s); no account = the machine\'s own login');
   // THE TURN END of a conversation an OLD wrapper still serves
   const t0 = Date.parse('2026-10-21T14:32:31.950Z');
   const s2 = sess(); s2._agyCards = new Map(); s2._agyCards.dataDir = DATA;   // what the first rebuild records (no rebuild yet here)
-  ok(BF.afterTurn(s2, { now: t0 + 30000 }).length === 0, 'turn end, the row 30 s old: NOTHING (the new wrapper\'s own look is 60 s — never two writers of one card)');
-  const late = BF.afterTurn(s2, { now: t0 + 61000 });
+  ok((await BF.afterTurn(s2, { now: t0 + 30000 })).length === 0, 'turn end, the row 30 s old: NOTHING (the new wrapper\'s own look is 60 s — never two writers of one card)');
+  const late = await BF.afterTurn(s2, { now: t0 + 61000 });
   ok(late.length === 14 && late[0].kind === 'subagent' && late[0].status === 'completed' && late.slice(1).every((r) => r.kind === 'sub' && r.subId === S), '61 s: the card + its 13 sub steps, once', late.map((r) => r.kind));
-  ok(BF.afterTurn(s2, { now: t0 + 120000 }).length === 0, '…and never again (a finished sub is not read twice)');
+  ok((await BF.afterTurn(s2, { now: t0 + 120000 })).length === 0, '…and never again (a finished sub is not read twice)');
   const home3 = path.join(ROOT, 'h3'), w = mkStore(home3, { lines: 5, answered: false });
   const s3 = sess({ _accountId: null }); s3._agyCards = new Map();
   const pre = process.env.HOME; process.env.HOME = home3;
   let a3, b3, c3;
   try {
-    a3 = BF.afterTurn(s3, { now: t0 + 61000 });
+    a3 = await BF.afterTurn(s3, { now: t0 + 61000 });
     fs.appendFileSync(w.t, w.rest.join('\n') + '\n');
     fs.copyFileSync(path.join(FIX, 'answer.json'), path.join(w.store, 'brain', P, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json'));
-    b3 = BF.afterTurn(s3, { now: t0 + 63000 });
-    c3 = BF.afterTurn(s3, { now: t0 + 67000 });
+    b3 = await BF.afterTurn(s3, { now: t0 + 63000 });
+    c3 = await BF.afterTurn(s3, { now: t0 + 67000 });
   } finally { process.env.HOME = pre; }
   ok(a3[0]?.status === 'running' && a3.length === 1 + a3.filter((r) => r.kind === 'sub').length && a3.length > 1 && b3.length === 0 && c3[0]?.status === 'completed' && c3.length === 1 + 13 - (a3.length - 1),
     'a WORKING sub (the machine login\'s store): its running card + its steps so far; inside 5 s nothing; then the finished card + ONLY the steps not yet sent', { first: a3.map((r) => r.kind + (r.status ? ':' + r.status : '')), second: b3.length, third: c3.length });
@@ -305,10 +307,222 @@ console.log('— ⑪ A SUB THAT ALREADY RAN (the cards\' addendum): the hub draw
   require(path.join(REPO, 'src/server/stdout/acp-events.js')).create({ engine: { noteTurnEnd() { } } }).attach(s4, 'p4', { onData: (cb) => { onData = cb; } }, {
     feedLive: (s, m) => mm4.processLive(m), broadcastToSession: (s, id, f) => frames.push(f), broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { },
   });
-  onData(JOURNAL);
+  // B-299b A1 r2: every main-thread read under the store while the turn end runs, by path — what is left is NAMED
+  const helperReads = [], RS = ['openSync', 'readFileSync', 'readdirSync', 'realpathSync', 'lstatSync', 'statSync', 'existsSync'], realRS = {};
+  for (const k of RS) { realRS[k] = fs[k]; fs[k] = function (p0, ...a) { if (typeof p0 === 'string' && p0.startsWith(home)) helperReads.push(p0); return realRS[k].call(this, p0, ...a); }; }
+  try {
+    onData(JOURNAL);
+    for (let k = 0; k < 500 && !frames.some((f) => f.type === 'subagent-message' && f.subId === S); k++) await new Promise((r) => setTimeout(r, 10)); // B-299b A1: the turn end's read answers off the loop
+  } finally { for (const k of RS) fs[k] = realRS[k]; }
+  ok(helperReads.every((p) => p.endsWith(path.join('logs', 'transcript_full.jsonl'))), `the turn end's main-thread reads under the store: ${helperReads.length}, each one the ARTIFACT door's (helper-transcripts readRecords of the finished sub's transcript_full, as the release read it — named, not this unit's)`, [...new Set(helperReads)].map((x) => path.relative(home, x)));
   const cardFrame = frames.find((f) => f.type === 'msg' && ((f.op === 'edit' && f.fields?.taskInfo?.subId === S) || (f.op === 'create' && f.message?.taskInfo?.subId === S)));
   const subFrames = frames.filter((f) => f.type === 'subagent-message' && f.subId === S);
   ok(!!cardFrame && subFrames.length === 13 && s4.subagentBuffers?.get(S)?.length === 13, 'acp-events at the old wrapper\'s prompt_end: THE CARD frame + 13 subagent-message frames (the sub-<id> viewer\'s live feed)', { card: !!cardFrame, subs: subFrames.length });
+}
+
+// ── ⑪b B-299b A1 (lane bl-loop-a): THE CARDS ARE READ OFF THE HUB'S LOOP ── the warm + its reader and a turn end of a
+// conversation with a sub that already ran make ZERO sync fs calls into the store on the main thread (path- AND fd-named; the
+// «agy-cards» worker reads it); the cards and steps are the release's, on EVERY road a reader is built on (the descriptor's
+// warm with a live session; View History's / the history page's fresh reader with none). Rows are asked CARD_CHUNK a call and
+// once (a second reader joins); a warm past its bound draws what landed, the rest reach the live conversation WHEN they land.
+// A «not found» is asked again when the parent's subagents LISTING moved, when the kept transcript learned the row's sub id, or
+// after NOT_FOUND_MS — never kept for a failed read; an empty answer never drops a card. RED: the store read on the main
+// thread (the release's road), the A1 descriptor (no warm without a session).
+console.log('— ⑪b B-299b A1: the cards off the hub\'s loop');
+{
+  const BF = require(path.join(REPO, 'src/agy-backfill.js'));
+  const AC = require(path.join(REPO, 'src/agy-cards.js'));
+  const H8 = require(path.join(REPO, 'src/harnesses/antigravity.js'));
+  const { parseAcpBufferRecords } = require(path.join(REPO, 'src/acp-message-manager.js'));
+  const mkStore = (h) => { const st = path.join(h, '.gemini', 'antigravity-cli'); fs.mkdirSync(st, { recursive: true }); fs.cpSync(path.join(FIX, 'brain'), path.join(st, 'brain'), { recursive: true }); fs.copyFileSync(path.join(FIX, 'answer.json'), path.join(st, 'brain', P, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json')); return st; };
+  const ACCT = 'agy-0123456789ac', DATA = path.join(ROOT, 'data11b'), home = path.join(DATA, 'agy-subs', ACCT), store = mkStore(home), BUFS = path.join(DATA, 'b');
+  const JOURNAL = fs.readFileSync(path.join(FIX, 'journal-before-cards.jsonl'), 'utf8'), KEY = `${P}:6`;
+  const SPAWNS = AS.unlinkedSpawns(JOURNAL.split('\n').filter(Boolean).map((l) => JSON.parse(l)));
+  const sess = (o = {}) => ({ backend: 'antigravity', backendSessionId: P, buffer: JOURNAL, _accountId: ACCT, ...o });
+  const withData = (x) => { x._agyCards = new Map(); x._agyCards.dataDir = DATA; return x; }; // the account's root under this suite's data dir (the hub's = homeOf's default)
+  const cardsIn = (x) => new BF.AgySessionMessages(x, 'p', { buffersDir: BUFS }).raw().filter((r) => r.kind === 'subagent' && r.toolCallId === KEY);
+  const fresh = () => { BF._cardCache.clear(); BF._cardsInflight.clear(); };
+  const tick = () => new Promise((r) => setImmediate(r));
+  // the counter: a sync fs call naming a path under the store, or an fd one of those opened (readSync / fstatSync / readFileSync(fd) / closeSync)
+  const SYNC = ['openSync', 'readSync', 'readFileSync', 'readdirSync', 'realpathSync', 'lstatSync', 'statSync', 'fstatSync', 'closeSync', 'existsSync', 'accessSync'];
+  const counting = async (fn) => {
+    let n = 0; const fds = new Set(), real = {};
+    for (const k of SYNC) { real[k] = fs[k]; fs[k] = function (p0, ...a) { const named = typeof p0 === 'string' && p0.startsWith(store); if (named || (typeof p0 === 'number' && fds.has(p0))) n++; const r = real[k].call(this, p0, ...a); if (k === 'openSync' && named) fds.add(r); if (k === 'closeSync') fds.delete(p0); return r; }; }
+    try { await fn(); } finally { for (const k of SYNC) fs[k] = real[k]; }
+    return n;
+  };
+  { // the counter's own CONTROL: an fd it opened is followed (open + read + fstat + close = 4)
+    const f = path.join(store, 'brain', P, SG, 'subagents', `${S}.json`);
+    const nfd = await counting(async () => { const fd = fs.openSync(f, 'r'); fs.readSync(fd, Buffer.alloc(8), 0, 8, 0); fs.fstatSync(fd); fs.closeSync(fd); });
+    ok(nfd === 4, `the counter counts a path-named open AND the calls on the fd it gave (${nfd} of 4)`);
+  }
+  // 1. the hub's roads, counted — each one ASKING the worker (the kept cards cleared first)
+  fresh();
+  const s1 = sess(); let c1 = [];
+  const nAttach = await counting(async () => { await BF.warmCards(s1, { dataDir: DATA }); c1 = cardsIn(s1); });
+  fresh();
+  const t0 = Date.parse('2026-10-21T14:32:31.950Z'), s2 = withData(sess());
+  let late = []; const nTurn = await counting(async () => { late = await BF.afterTurn(s2, { now: t0 + 61000 }); });
+  ok(nAttach === 0 && nTurn === 0 && c1.length === 1 && c1[0].status === 'completed' && late.length === 14 && late[0].kind === 'subagent',
+    `a warm + its reader and a turn end make ${nAttach} and ${nTurn} sync fs calls into the store on the main thread (path- or fd-named — the worker reads it); the card and its 13 steps as the release drew them`, { nAttach, nTurn, late: late.length });
+  // RED: the release's road — the worker's own code called on the main thread
+  const src = fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8'), CALL = "got = await pool().call('agySnapshots',";
+  const Rel = mutantCopies('agy-cards-inline', REPO).load('src/agy-backfill.js', src.replace(CALL, "got = await (async (op, x) => require('./agy-cards.js').snapshotsOf(x))('agySnapshots',"), 'inline');
+  const nRel = await counting(async () => { await Rel.warmCards(sess(), { dataDir: DATA }); });
+  ok(src.split(CALL).length === 2 && nRel > 3, `control (the store read on the main thread, as the release read it): ${nRel} sync calls into the store ⇒ RED`);
+  // 2. EVERY ROAD a reader is built on (M2): the descriptor's warm with the live session (ws-handler's attach); a FRESH reader
+  // object with no session (ws-handler's View History, transcript-service's history page of a stopped conversation)
+  fresh();
+  const s5 = withData(sess());
+  await H8.store.warmTranscript(P, '', { session: s5 });
+  const viaDesc = cardsIn(s5);
+  const hv = path.join(ROOT, 'h11v'), storeV = mkStore(hv);
+  fs.mkdirSync(path.join(storeV, 'brain', P, SG, 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(storeV, 'brain', P, SG, 'logs', 'transcript.jsonl'), [ // the parent's own steps: the spawn and «Created the following subagent»
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: '2026-10-21T14:31:00Z', content: '评审一下' },
+    { step_index: 5, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-10-21T14:32:30Z', content: '', tool_calls: [{ name: 'invoke_subagent', args: {} }] },
+    { step_index: 6, source: 'SYSTEM', type: 'GENERIC', status: 'DONE', created_at: '2026-10-21T14:32:31.950Z', content: `Created the following subagent:\n{\n  "conversationId": "${S}"\n}\n` },
+    { step_index: 8, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: '2026-10-21T14:33:00Z', content: 'and one more', tool_calls: [{ name: 'view_file', args: {} }, { name: 'invoke_subagent', args: {} }] },
+    { step_index: 9, source: 'SYSTEM', type: 'GENERIC', status: 'DONE', created_at: '2026-10-21T14:33:01Z', content: 'file read' },
+    { step_index: 10, source: 'SYSTEM', type: 'GENERIC', status: 'DONE', created_at: '2026-10-21T14:33:02Z', content: `Created the following subagent:\n{\n  "conversationId": "${S2}"\n}\n` },
+  ].map((x) => JSON.stringify(x)).join('\n') + '\n');
+  const synthetic = () => ({ backend: 'antigravity', backendSessionId: P, claudeSessionId: P, agentKind: 'primary', cwd: '', buffer: '' }); // what ws-handler / transcript-service build per request
+  const dsrc = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity.js'), 'utf8'), DW = "if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' });";
+  const preH = process.env.HOME; process.env.HOME = hv;
+  let viaView = [], viewRed = [], scanSame = false, scanN = -1;
+  try {
+    fresh(); BF._historyCache.delete(P);
+    await H8.store.warmTranscript(P, '', { remote: false });
+    viaView = cardsIn(synthetic());
+    // the warm's spawn scan builds no records: the SAME rows the history's records name (the kept steps alone, and with the ring)
+    const ids = (xs) => xs.map((x) => `${x.toolCallId}@${x.ts}`).join();
+    const ring = sess({ _accountId: null });
+    scanN = BF.spawnsOf(synthetic()).length;
+    scanSame = ids(BF.spawnsOf(synthetic())) === ids(AS.unlinkedSpawns(BF.withHistory(synthetic(), []))) && ids(BF.spawnsOf(ring)) === ids(AS.unlinkedSpawns(BF.withHistory(ring, parseAcpBufferRecords(JOURNAL))));
+    fresh();
+    const D1 = mutantCopies('agy-desc-a1', REPO).load('src/harnesses/antigravity.js', dsrc.replace(DW, 'if (o.session && !o.remote) await AGY_BACKFILL.warmCards(o.session);'), 'a1');
+    await D1.store.warmTranscript(P, '', { remote: false });
+    viewRed = cardsIn(synthetic());
+  } finally { process.env.HOME = preH; BF._historyCache.delete(P); }
+  ok(dsrc.split(DW).length === 2 && viaDesc.length === 1 && viaDesc[0].status === 'completed' && viaView.length === 1 && viaView[0].status === 'completed' && viaView[0].home === hv && viewRed.length === 0,
+    'every road a reader is built on draws THE CARD: the descriptor\'s warm with the live session, and a FRESH reader with no session (View History; the history page of a stopped conversation — its spawn found in the kept transcript); RED: the A1 descriptor (cards warmed only for a live session) ⇒ none', { desc: viaDesc.length, view: viaView.length, red: viewRed.length });
+  ok(scanSame && scanN === 2, `the warm's spawn scan (no records built): the same rows as the history's records — the kept steps alone (${scanN}: a planner step with two calls, the spawn the SECOND) and with the ring`);
+  const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
+  ok(wsSrc.includes('await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session })') && tsSrc.includes('{ remote: !!r.host, ...(live ? { session: live } : {}) }'),
+    'the callers hand the warm the session it reads the cards for: ws-handler\'s attach its live session, transcript-service\'s history read the live one when there is one');
+  // 3. THE QUEUE (M3): CARD_CHUNK rows a call, a row being read JOINED, the first answer kept while the rest wait; the bound + the late road
+  const fake = (asks, o = {}) => asks.map((a) => ({ toolCallId: a.toolCallId, snap: { subId: S, card: { toolCallId: a.toolCallId, subId: S, status: 'completed', role: 'r' }, subs: [{ subId: S, toolCallId: a.toolCallId, rec: { type: 'x' } }], final: true, ...o }, sig: 'L#', clean: true }));
+  const many = Array.from({ length: 20 }, (_, i) => ({ toolCallId: `${P}:${100 + i}`, parentId: P, step: 100 + i, ts: null }));
+  fresh();
+  const calls = [], gate = [];
+  const held = () => ({ call: (op, x) => new Promise((res) => { calls.push(x.asks.length); gate.push(() => res(fake(x.asks))); }) });
+  const pa = BF.refreshAsync(sess(), many, { dataDir: DATA, pool: held }), pb = BF.refreshAsync(sess(), many, { dataDir: DATA, pool: held });
+  await tick();
+  const asked = calls.join('+');
+  gate[0](); await tick(); await tick();
+  const part = BF.refresh(sess(), many).length;
+  gate[1](); gate[2]();
+  const [ra, rb] = await Promise.all([pa, pb]);
+  ok(asked === '8+8+4' && calls.length === 3 && part === 8 && ra.length === 20 && rb.length === 20,
+    `20 rows = ${asked} (CARD_CHUNK ${BF.CARD_CHUNK} a call); a second reader asking the same rows at once JOINS them (${calls.length} calls, not 6); the first answer is kept while the rest wait (${part} of 20 drawn)`);
+  fresh();
+  let release = null; const routed = [];
+  const slow = () => ({ call: (op, x) => new Promise((res) => { release = () => res(AC.snapshotsOf(x)); }) }); // the worker's own answer, when the leg says
+  const sl = withData(sess()); sl._acpLate = (recs) => routed.push(...recs);
+  await BF.warmCards(sl, { waitMs: 20, pool: slow });
+  const before = cardsIn(sl).length;
+  release(); for (let k = 0; k < 200 && !routed.length; k++) await new Promise((r) => setTimeout(r, 5));
+  const after = cardsIn(sl).length, again = await BF.afterTurn(sl, { now: t0 + 61000, pool: slow });
+  ok(before === 0 && routed.length === 14 && routed[0].kind === 'subagent' && routed[0].status === 'completed' && routed.slice(1).every((r) => r.kind === 'sub') && after === 1 && again.length === 0,
+    `a warm whose worker answers past its bound (20 ms): the attach draws without it; the card + its 13 steps reach the live conversation's late road WHEN it answers (${routed.length} records); the next reader draws it; the turn end sends nothing twice`, { before, routed: routed.length, after, again: again.length });
+  const pool1 = BF._cardsPool();
+  ok(pool1.poolSize === 1 && !!pool1._serial && BF.CARDS_QUEUE_MS > BF.CARDS_RUN_MS && BF.CARDS_RUN_MS >= 30000,
+    `the worker is ONE and serial: a call waits for its turn in main on its own clock (${BF.CARDS_QUEUE_MS / 1000} s) and runs on another (${BF.CARDS_RUN_MS / 1000} s) — a queue after a restart times nothing out; a wedged read fails only itself`);
+  // 3b. r3 (the second read's musts): a reader with no live road waits for its one draw; a live one's failed call is asked once
+  // more; the device agent's bundle (no worker script) reads its own store in place, as the release did there
+  {
+    const at = (ms, v) => () => ({ call: (op, x) => new Promise((res) => setTimeout(() => res(typeof v === 'function' ? v(x) : v), ms)) });
+    fresh();
+    const syn = withData(sess({ buffer: JOURNAL })); delete syn._acpLate;            // View History's reader: no late road
+    await BF.warmCards(syn, { liveWaitMs: 20, viewWaitMs: 5000, pool: at(120, (x) => AC.snapshotsOf(x)) });
+    const viewDrawn = cardsIn(syn).length;
+    fresh();
+    const lv = withData(sess()); const lr = []; lv._acpLate = (recs) => lr.push(...recs);
+    await BF.warmCards(lv, { liveWaitMs: 20, viewWaitMs: 5000, pool: at(120, (x) => AC.snapshotsOf(x)) });
+    const liveDrawn = cardsIn(lv).length;
+    for (let k = 0; k < 200 && !lr.length; k++) await new Promise((r) => setTimeout(r, 5));
+    ok(viewDrawn === 1 && liveDrawn === 0 && lr.length === 14, `a worker slower than the live bound: View History's reader WAITS and draws the card (${viewDrawn}); a live conversation draws without it (${liveDrawn}) and gets it on its late road (${lr.length} records)`);
+    fresh();
+    let tries = 0; const rr = []; const rv = withData(sess()); rv._acpLate = (recs) => rr.push(...recs);
+    const flakyPool = () => ({ call: async (op, x) => { tries++; if (tries === 1) throw Object.assign(new Error('worker gone'), { code: 'EX' }); return AC.snapshotsOf(x); } });
+    await BF.warmCards(rv, { liveWaitMs: 1000, retryMs: 30, pool: flakyPool, log: () => { } });
+    for (let k = 0; k < 200 && !rr.length; k++) await new Promise((r) => setTimeout(r, 5));
+    ok(tries === 2 && rr.length === 14, `a live conversation whose call failed (an idle one has no turn end): asked ONCE more, its card routed then (${tries} calls, ${rr.length} records)`);
+    fresh();
+    const bsrc = fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8'), WK = "if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker.js'))) return";
+    const Dev = mutantCopies('agy-cards-device', REPO).load('src/agy-backfill.js', bsrc.replace(WK, "if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker-not-shipped.js'))) return"), 'device');
+    const dv = sess(); dv._agyCards = new Map(); dv._agyCards.dataDir = DATA;
+    await Dev.warmCards(dv, { dataDir: DATA });
+    const devCards = new Dev.AgySessionMessages(dv, 'p', { buffersDir: BUFS }).raw().filter((r) => r.kind === 'subagent' && r.toolCallId === KEY);
+    ok(bsrc.split(WK).length === 2 && Dev._cardsPool().inPlace === true && devCards.length === 1 && devCards[0].status === 'completed',
+      'a bundle that ships no agy-cards worker (the device agent\'s): its own store read IN PLACE on its own loop, the card drawn as the release drew it there (never a worker respawning forever)');
+    // a FOUND snapshot whose reads failed somewhere: never replaces a card already read; alone it is kept NOT final (asked again)
+    fresh();
+    const snapAns = (o) => (x) => x.asks.map((a) => ({ toolCallId: a.toolCallId, snap: { subId: S, card: { toolCallId: a.toolCallId, subId: S, status: o.status, steps: o.steps }, subs: [], final: o.final !== false }, sig: 'L#', clean: o.clean }));
+    const T5 = Date.parse('2026-10-21T14:40:00Z'), w5 = () => withData(sess({ _accountId: 'agy-0123456789ae' }));
+    const g1 = await BF.refreshAsync(w5(), SPAWNS, { dataDir: DATA, now: T5, pool: at(0, snapAns({ status: 'completed', steps: 0, clean: false })) });
+    const k1 = BF._cardCache.get(`agy-0123456789ae\0${KEY}`);
+    const g2 = await BF.refreshAsync(w5(), SPAWNS, { dataDir: DATA, now: T5 + 6000, pool: at(0, snapAns({ status: 'running', steps: 10, clean: true, final: false })) });
+    const g3 = await BF.refreshAsync(w5(), SPAWNS, { dataDir: DATA, now: T5 + 12000, pool: at(0, snapAns({ status: 'completed', steps: 0, clean: false })) });
+    ok(g1.length === 1 && k1 && k1.final === false && g2[0].card.steps === 10 && g2[0].card.status === 'running' && g3[0].card.steps === 10 && g3[0].card.status === 'running',
+      'a found card whose reads failed (0 steps): kept NOT final, asked again; the clean read replaces it (a working sub, 10 steps); a later read that fails (0 steps, «completed») never replaces the card already read', { first: k1 && k1.final, second: g2[0] && g2[0].card, third: g3[0] && g3[0].card });
+  }
+  // 4. «NOT FOUND» (主开发's bound, M4): asked again only when its SIGNAL moved — the parent's subagents listing, the sub id the
+  // kept transcript learned — or after NOT_FOUND_MS (a link written where no listing looks); never kept for a failed read
+  const ACCT2 = 'agy-0123456789ad', store2 = mkStore(path.join(DATA, 'agy-subs', ACCT2));
+  const taskF = path.join(store2, 'brain', S, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c1.json'), taskText = fs.readFileSync(taskF, 'utf8');
+  const drift = () => { const j = JSON.parse(taskText); j.sourceMetadata.tool.stepIndex = 27; fs.writeFileSync(taskF, JSON.stringify(j)); }; // the stream's step and the task's disagree (measured: :24 vs 27) — no row by step
+  const rowF = path.join(store2, 'brain', P, SG, 'subagents', `${S}.json`), rowText = fs.readFileSync(rowF, 'utf8');
+  let snaps = 0; const so = AS.snapshotOf; AS.snapshotOf = (...a) => { snaps++; return so(...a); };
+  const local = () => ({ call: async (op, x) => AC.snapshotsOf(x) }); // the worker's own code, in this thread (to count its reads)
+  const T = t0 + 61000, ask = async (dt, pool = local) => { const n0 = snaps; const r = await BF.refreshAsync(withData(sess({ _accountId: ACCT2 })), SPAWNS, { dataDir: DATA, now: T + dt, pool }); return { found: r.length, reads: snaps - n0, status: r[0] ? r[0].card.status : null }; };
+  const rd = fs.readdirSync;
+  try {
+    fresh(); // a. the sub's row not written yet, then written IN PLACE (the folder's own time unmoved)
+    const dirM0 = fs.statSync(path.dirname(rowF)).mtimeMs;
+    fs.writeFileSync(rowF, '{}');
+    const a1 = await ask(0), a2 = await ask(6000);
+    fs.writeFileSync(rowF, rowText);
+    const a3 = await ask(12000), dirM1 = fs.statSync(path.dirname(rowF)).mtimeMs;
+    ok(a1.found === 0 && a1.reads === 1 && a2.reads === 0 && a3.found === 1 && a3.reads === 1 && dirM1 === dirM0,
+      `«not found» (${a1.reads} read), asked again over the SAME listing: ${a2.reads} reads; the row rewritten IN PLACE (the folder's own time unmoved: ${dirM1 === dirM0}) moves the listing: found`, { a1, a2, a3 });
+    fresh(); drift(); // b. the sub id learned later — the listing unchanged
+    const b1 = await ask(0), b2 = await ask(6000);
+    BF._historyCache.set(P, { home: path.dirname(path.dirname(store2)), account: ACCT2, next: 0, size: 0, steps: [], created: new Map([[6, S]]), capped: false, ms: 0, bytes: 0, at: Date.now() }); // the kept transcript read «Created the following subagent: S» at step 6
+    const b3 = await ask(12000);
+    BF._historyCache.delete(P);
+    ok(b1.found === 0 && b1.reads === 1 && b2.reads === 0 && b3.found === 1 && b3.reads === 1,
+      `a row the store cannot place by its step: «not found», skipped over the same signal (${b2.reads} reads); the kept transcript then names its sub (the listing unchanged) — the next ask READS and finds it`, { b1, b2, b3 });
+    fresh(); drift(); // c. the floor: the link written where no listing looks (the sub's own messages)
+    const f1 = await ask(0), f2 = await ask(30000);
+    fs.writeFileSync(taskF, taskText);
+    const f3 = await ask(40000), f4 = await ask(62000);
+    ok(f1.found === 0 && f2.reads === 0 && f3.reads === 0 && f3.found === 0 && f4.reads === 1 && f4.found === 1,
+      `a link written in the sub's own messages (no listing shows it): skipped inside ${BF.NOT_FOUND_MS / 1000} s (${f2.reads}, ${f3.reads} reads), then READ and found at 62 s`, { f1, f2, f3, f4 });
+    fresh(); // d. a read that FAILED is never kept as «not found»
+    const subMsgs = path.join(store2, 'brain', S, SG, 'messages');
+    let fail = 1; fs.readdirSync = function (p0, ...a) { if (fail > 0 && typeof p0 === 'string' && p0 === subMsgs) { fail--; throw Object.assign(new Error('EIO: i/o error, scandir'), { code: 'EIO' }); } return rd.call(this, p0, ...a); };
+    const d1 = await ask(0), d2 = await ask(6000);
+    fs.readdirSync = rd;
+    ok(fail === 0 && d1.found === 0 && d1.reads === 1 && d2.reads === 1 && d2.found === 1,
+      `a read that FAILED (EIO on the sub's messages): «not found» this once and never kept — the next ask reads again (${d2.reads}) and finds it`, { d1, d2 });
+    fresh(); // e. an empty answer never drops a card already read
+    let mode = 'card';
+    const flaky = () => ({ call: async (op, x) => (mode === 'card' ? fake(x.asks, { final: false }) : x.asks.map((a) => ({ toolCallId: a.toolCallId, snap: null, sig: null, clean: false }))) });
+    const e1 = await ask(0, flaky); mode = 'none';
+    const e2 = await ask(6000, flaky);
+    ok(e1.found === 1 && e2.found === 1 && e2.status === 'completed', 'a WORKING card read once, then an answer with nothing in it (a read that failed): the card stays', { e1, e2 });
+  } finally { AS.snapshotOf = so; fs.readdirSync = rd; fs.writeFileSync(taskF, taskText); fs.writeFileSync(rowF, rowText); BF._historyCache.delete(P); fresh(); }
 }
 
 // ── ⑫ CARD DETAILS (lane agy-card-details, 2026-10-22 — the owner, two screenshots of an Antigravity chat: «很多卡片
@@ -375,7 +589,7 @@ console.log('— ⑫ card details (the arg normalizer, link-by-id, a killed sub 
     'unlinkedSpawns: two invoke_subagent rows of ONE planner step get DISTINCT stream steps (24 / 25) — never folded into one', spawns.map((s) => s.step));
   const preHome = process.env.HOME; process.env.HOME = home;
   let cards;
-  try { const out = withCards({ _accountId: null, host: 'local' }, journal, { dataDir: path.join(home, 'data') }); cards = out.filter((r) => r.kind === 'subagent'); }
+  try { const who = { _accountId: null, host: 'local' }; await require(path.join(REPO, 'src/agy-backfill.js')).refreshAsync(who, AS.unlinkedSpawns(journal), { dataDir: path.join(home, 'data') }); const out = withCards(who, journal, { dataDir: path.join(home, 'data') }); cards = out.filter((r) => r.kind === 'subagent'); } // B-299b A1: read off the loop first
   finally { process.env.HOME = preHome; }
   ok(cards.length === 2 && cards.map((c) => c.subId).sort().join() === [SA, SB].sort().join() && cards.every((c) => c.status === 'stopped'),
     'withCards: the history gets BOTH subs’ cards (A-L and N-Z), each stopped — never one card for two subs', cards.map((c) => c.subId));

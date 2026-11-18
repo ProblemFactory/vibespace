@@ -272,8 +272,10 @@ module.exports = {
     accountBound: true, // a conversation lives in ITS account root's store (routes/sessions heldAccountOf): a resume goes to that account or is refused — never the default
     SessionMessages: AGY_BACKFILL.AgySessionMessages,
     // the pre-read hook (S3): the conversation's transcript read ONCE, async, kept bounded — the reader splices the steps
-    // before the ring from it (never a synchronous read on the attach path); opts.session names the account's root
-    warmTranscript: (id, cwd, opts) => AGY_BACKFILL.warmHistory(id, { session: (opts && opts.session) || null, remote: !!(opts && opts.remote) }),
+    // before the ring from it (never a synchronous read on the attach path); opts.session names the account's root. B-299b
+    // A1: + the cards of its subs that already ran, read off the loop — for a reader with no live session (View History,
+    // the history page of a stopped conversation) under the machine's login, as the reader it builds is
+    warmTranscript: async (id, cwd, opts) => { const o = opts || {}; const ok = await AGY_BACKFILL.warmHistory(id, { session: o.session || null, remote: !!o.remote }); if (!o.remote) await AGY_BACKFILL.warmCards(o.session || { backend: 'antigravity', backendSessionId: id, buffer: '' }); return ok; },
     // the turn end of a conversation an OLD wrapper still serves (dtach kept its code across the update): the cards of
     // its card-less invoke_subagent rows, read from the store — records acp-events routes as if journaled
     afterTurn: (session) => AGY_BACKFILL.afterTurn(session),

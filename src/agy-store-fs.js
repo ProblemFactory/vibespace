@@ -12,9 +12,12 @@ const path = require('path');
 const AS = require('./agy-store');
 
 const parseJson = (t, f = null) => { try { return JSON.parse(t); } catch { return f; } };
-/** The agy store under `home` (<home>/.gemini/antigravity-cli) — `log(line)` hears every refusal. */
-function storeReader(home, { log = () => { } } = {}) {
+const SAYS_NO = new Set(['ENOENT', 'ENOTDIR', 'ELOOP']); // the store's own «no»: not there (yet), or a link refused
+/** The agy store under `home` (<home>/.gemini/antigravity-cli) — `log(line)` hears every refusal; `onError(e)` every read
+ *  that FAILED (B-299b A1 r2: an EIO / EMFILE / EACCES is no answer — the cards' worker never keeps it as «not found»). */
+function storeReader(home, { log = () => { }, onError = () => { } } = {}) {
   const root = path.join(String(home || ''), '.gemini', 'antigravity-cli');
+  const failed = (e) => { if (!(e && SAYS_NO.has(e.code))) { try { onError(e); } catch { } } };
   /** THE GATE: the verdict on the RELATIVE path, then the path must resolve to itself under the real root — the
    *  absolute path, or null. */
   function storePath(rel, why) {
@@ -23,7 +26,7 @@ function storeReader(home, { log = () => { } } = {}) {
     try {
       const want = path.join(fs.realpathSync(root), ...String(rel).split('/'));
       if (fs.realpathSync(abs) !== want) { log(`store ${why} refused (a link in the store): ${rel}`); return null; }
-    } catch { return null; } // not there (yet)
+    } catch (e) { failed(e); return null; } // not there (yet)
     return abs;
   }
   /** A store FILE opened for reading (O_NOFOLLOW: the last component is never a link) — fd | null. */
@@ -34,19 +37,27 @@ function storeReader(home, { log = () => { } } = {}) {
       const fd = fs.openSync(abs, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
       if (!fs.fstatSync(fd).isFile()) { fs.closeSync(fd); return null; }
       return fd;
-    } catch { return null; }
+    } catch (e) { failed(e); return null; }
   }
   function read(rel) {
     const fd = open(rel, 'read');
     if (fd == null) return null;
-    try { return fs.readFileSync(fd, 'utf8'); } catch { return null; } finally { try { fs.closeSync(fd); } catch { } }
+    try { return fs.readFileSync(fd, 'utf8'); } catch (e) { failed(e); return null; } finally { try { fs.closeSync(fd); } catch { } }
   }
   function list(rel) {
     const abs = storePath(rel, 'list');
     if (!abs) return [];
-    try { return fs.readdirSync(abs).filter((n) => /\.json$/.test(n) && n !== 'read.json').slice(0, 400); } catch { return []; }
+    try { return fs.readdirSync(abs).filter((n) => /\.json$/.test(n) && n !== 'read.json').slice(0, 400); } catch (e) { failed(e); return []; }
   }
   const rows = (rel, of) => list(rel).map((n) => of(parseJson(read(`${rel}/${n}`)))).filter(Boolean);
+  /** A store FOLDER's listing as a SIGNAL (B-299b A1): `name:mtimeMs:size` of each .json in it (the SAME ≤ 400 list() reads,
+   *  sorted) — a file written into the folder late, or one whose bytes changed, moves it whatever the folder's own time says.
+   *  '' = none / refused. */
+  function listing(rel) {
+    const abs = storePath(rel, 'list');
+    if (!abs) return '';
+    try { return fs.readdirSync(abs).filter((n) => /\.json$/.test(n) && n !== 'read.json').slice(0, 400).sort().map((n) => { try { const st = fs.lstatSync(path.join(abs, n)); return `${n}:${st.mtimeMs}:${st.size}`; } catch (e) { failed(e); return `${n}:-`; } }).join('|'); } catch (e) { failed(e); return ''; }
+  }
   /** The complete lines appended to a store file since `offset` (≤ 512 KB a call): {lines, next} | null (no such file). */
   function lines(rel, offset) {
     const fd = open(rel, 'tail');
@@ -59,7 +70,7 @@ function storeReader(home, { log = () => { } } = {}) {
       const end = buf.lastIndexOf(10);
       if (end < 0) return { lines: [], next: offset };
       return { lines: buf.subarray(0, end).toString('utf8').split('\n').filter((l) => l.trim()), next: offset + end + 1 };
-    } catch { return null; } finally { try { fs.closeSync(fd); } catch { } }
+    } catch (e) { failed(e); return null; } finally { try { fs.closeSync(fd); } catch { } }
   }
   /** Every complete line of a store file, ≤ `maxBytes` read — [] | null (no such file). */
   function allLines(rel, maxBytes = 8 * 1024 * 1024) {
@@ -106,7 +117,27 @@ function storeReader(home, { log = () => { } } = {}) {
       return { lines: out, next, size: st.size, capped: stop < st.size };
     } catch { return null; } finally { if (fh) { try { await fh.close(); } catch { } } }
   }
-  return { home: String(home || ''), root, path: storePath, open, read, list, rows, lines, allLines, linesFrom };
+  return { home: String(home || ''), root, path: storePath, open, read, list, rows, listing, lines, allLines, linesFrom };
 }
 
-module.exports = { storeReader };
+// THE CARDS' BATCH (B-299b A1): the store under `home` asked for a batch of spawns — run by the hub's «agy-cards» worker
+// (src/agy-cards-worker.js through src/agy-cards.js, never on the hub's loop), and in place by a process that ships no such
+// worker (the device agent's bundle: its own loop, as the release read it there). Each answer carries its SIGNAL — the parent's
+// subagents listing + the sub id the ask named — and `clean` (no read failed); an ask naming the signal its «not found» was
+// answered on is answered «not found» without reading the store.
+/** [{parentId, toolCallId, step, subId, notFoundOn}] → [{toolCallId, snap | null, sig, clean | skipped}] */
+function snapshotsOf({ home, asks = [], now = Date.now() } = {}) {
+  let failed = 0;
+  const read = storeReader(home, { onError: () => { failed++; } });
+  return asks.map((a) => {
+    failed = 0;
+    try {
+      const pp = AS.storePaths(a.parentId), sig = `${pp ? read.listing(pp.subagents) : ''}#${(a.subId && String(a.subId)) || ''}`;
+      if (a.notFoundOn != null && a.notFoundOn === sig) return { toolCallId: a.toolCallId, snap: null, sig, skipped: true };
+      const snap = AS.snapshotOf(read, { parentId: a.parentId, toolCallId: a.toolCallId, step: a.step, now, subId: a.subId || null });
+      return { toolCallId: a.toolCallId, snap: snap || null, sig, clean: failed === 0 };
+    } catch (e) { return { toolCallId: a.toolCallId, snap: null, sig: null, clean: false, error: String((e && e.message) || e).slice(0, 200) }; }
+  });
+}
+
+module.exports = { storeReader, snapshotsOf };

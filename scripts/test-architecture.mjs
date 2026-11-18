@@ -540,6 +540,9 @@ const SHARED = new Set(['src/storage-path.js' /* lane hub-fuse-sync-guard: THE O
   // the store root + O_NOFOLLOW — the agy wrapper and the hub), and the hub's card for a sub that ALREADY RAN under an
   // older wrapper (the descriptor's history reader + its turn-end read); node builtins + the PURE agy-store + the ACP reader
   'src/agy-store-fs.js', 'src/agy-backfill.js',
+  // B-299b A1 (lane bl-loop-a): the hub's «agy-cards» worker and its reads — SHARED by what they may use (node builtins, the
+  // gate, the PURE agy-store; never ORCH), yet the hub's own: never in the device bundle (§107's bundle census pins it)
+  'src/agy-cards.js', 'src/agy-cards-worker.js',
   // lane runtime-floor: THE PRODUCT'S OWN NODE — the one provisioner (download from a mirror, sha256 against its
   // SHASUMS256.txt, unpack, the binary's own answer, the atomic `current` flip — only under <root>/runtime) + the one
   // downloader of a node release file + the server's self re-exec; and THE BELT for a URL no vendor fixed (safeFetch:
@@ -7692,6 +7695,10 @@ await section(async () => {
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
   const plain107 = r107.outputFiles[0].text, text107 = shipped107(r107), size107 = Buffer.byteLength(text107);
   ok(/--external:xlsx\b/.test(flags107) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
+  // B-299b A1 (the coordinator's bound): the Antigravity cards' worker is the HUB's own — its script and its reads never enter
+  // the device agent's bundle (the descriptor reaches it only by a path the worker pool starts, never a require)
+  const in107 = Object.keys(r107.metafile.inputs);
+  ok(in107.some((k) => /src\/agy-backfill\.js$/.test(k)) && !in107.some((k) => /src\/agy-cards(?:-worker)?\.js$/.test(k)), `§107 the device bundle carries agy-backfill (the descriptor's reader) but NOT the hub's agy-cards worker nor its reads (${in107.filter((k) => /agy-/.test(k)).join(', ')})`);
   ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the 2.369.407 sources' ${RELEASE_BUNDLE_BYTES} bytes, as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code raises RELEASE_BUNDLE_BYTES here to the size this leg prints, in the same commit, with its reason' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the

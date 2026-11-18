@@ -332,17 +332,20 @@ function ringStart(records, convId) {
 /** THE SPLICE: `records` (the ring) with the transcript's steps that come BEFORE it prepended — none when the ring holds
  *  the conversation's start. The cut: the ring's first step, or (the ring opens with the person's own bubbles) the first
  *  of those bubbles' USER_INPUT steps. → {records, prepended (records added), cut (the first step NOT prepended)}. */
+/** THE CUT a splice prepends below (the first step NOT prepended): the ring's first step, or — the ring opens with the person's
+ *  own bubbles — the first of those bubbles' USER_INPUT steps (-1: fewer kept than the ring shows). B-299b A1 r5: the warm's
+ *  spawn scan reads the SAME cut — never a row the history does not draw. */
+function spliceCut(records, steps, convId) {
+  const { first, leadUsers } = ringStart(Array.isArray(records) ? records : [], convId);
+  if (!leadUsers) return first;
+  const users = (Array.isArray(steps) ? steps : []).filter((s) => s && s.idx < first && s.type === 'USER_INPUT' && userTextOf(s)).sort((a, b) => a.idx - b.idx);
+  return users.length >= leadUsers ? users[users.length - leadUsers].idx : -1;
+}
 function historySplice(records, steps, convId) {
   const list = Array.isArray(records) ? records : [];
   if (!isId(convId) || !Array.isArray(steps) || !steps.length) return { records: list, prepended: 0, cut: 0 };
-  const { first, leadUsers } = ringStart(list, convId);
-  let cut = first;
-  const below = steps.filter((s) => s && s.idx < first).sort((a, b) => a.idx - b.idx);
-  if (leadUsers) {
-    const users = below.filter((s) => s.type === 'USER_INPUT' && userTextOf(s));
-    cut = users.length >= leadUsers ? users[users.length - leadUsers].idx : -1;
-  }
-  const add = conversationRecords(below.filter((s) => s.idx < cut), { convId });
+  const cut = spliceCut(list, steps, convId);   // ≤ the ring's first step
+  const add = conversationRecords(steps.filter((s) => s && s.idx < cut).sort((a, b) => a.idx - b.idx), { convId });
   return add.length ? { records: add.concat(list), prepended: add.length, cut } : { records: list, prepended: 0, cut: 0 };
 }
 
@@ -488,6 +491,6 @@ module.exports = {
   transcriptStepOf, resultBody, deliveredMessageOf, kindOfTool, stepRecords, writesOf, artifactRecordsOf,
   subagentRowOf, messageRowOf, taskOf, answersOf, createdSubagentOf, subagentInfoIds, subPhaseOf, cardOf,
   unlinkedSpawns, snapshotOf, subIdForStep, closePendingRecords, SUB_TERMINATED,
-  conversationRecords, ringStart, historySplice, userTextOf,
+  conversationRecords, ringStart, spliceCut, historySplice, userTextOf,
   decodeScalar, normalizeAgyToolArgs,
 };

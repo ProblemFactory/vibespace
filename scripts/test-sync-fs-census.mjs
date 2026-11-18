@@ -47,7 +47,7 @@ const ROWS = [
   ["src/acp-message-manager.js", "*", 1, "local-only", "this._buffersDir = BUFFERS_DIR <checkout>/data/session-buffers (mounts-plugins-wiring / cli-env); file named by the session id"],
   ["src/agent-routes.js", "*", 1, "local-only", "<checkout>/docs/agent/<f>, f from the fixed AGENT_DOC_TOPICS table"],
   ["src/agy-backfill.js", "*", 1, "local-only", "dir = <dataDir>/agy-subs/<id> (id must match ^agy-[0-9a-f]{6,32}$)"],
-  ["src/agy-store-fs.js", "*", 5, "local-only", "root = <home>/.gemini/antigravity-cli, home = os.homedir() or data/agy-subs/<id> (agy-backfill homeOf, its only hub caller): the vendor CLI's own store"],
+  ["src/agy-store-fs.js", "*", 7, "local-only", "root = <home>/.gemini/antigravity-cli, home = os.homedir() or data/agy-subs/<id> (agy-backfill homeOf, its only hub caller): the vendor CLI's own store — B-299b A1 +2 (the listing signal's readdir + lstat); the hub reads it in its agy-cards worker"],
   ["src/app-secrets-seal.js", "*", 7, "via-safefs", "a child-process CLI (argv open|seal <file>) run by src/secret-service.py subprocess.run([node, sealer, mode, STORE]); never required by the hub (B-694d +1: the temp file written through its own fd and fsynced, the folder fsynced after the rename — «stored» is answered after this exits)"],
   ["src/app-secrets.js", "*", 5, "local-only", "every path is <dataDir>/desktop-apps/<id>/portal/{secrets store, bus} — dir = machine.logRoot/<id> (desktop-app-keeper.js:778-779)."],
   ["src/app-system-serve.js", "*", 3, "local-only", "shimDir = <home>/.vibespace/sysroot/bin (HOME dot-dir); shim must have dirname === shimDir, opened O_NOFOLLOW"],
