@@ -4,7 +4,21 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
-## 2.369.409 — 2026-11-18
+## 2.369.409 — 2026-11-17
+
+### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
+- RE-RANKED on b06f36e90: the row's top items (the channels adapters chain, people.json) shipped in .407; the witness's rootOf is a stat, not a write; session-meta's first write stays synchronous by its durable ruling; usage-cache-write is a read-merge-write of the FILE that another process (the statusline) also writes — a design question, not moved; browser-kept.json / browser-profiles.json are read off disk by browser-env (the sweep's spared directories, the fresh-key rule) — moving them needs that reader on the store's memory, a READ change left for after bl-jobs' read helper.
+- U1 the decision engine: the memo PACED ('decision-memo.write'), the day's counter an ACT ('decision-usage.write', rank 0) — the judge call that changed it answers once its durable() resolves (the loop never waits; a kill after an answer never lowers the day's spend); the text-model client awaits ledger.settle the same way; a failed write is said once from onWritten and the next landing once. Store-write debt −6.
+- U2 the outstanding-deliveries table (src/turn-carry.js): written whole at every prompt hook's mark and every confirm's clear — now a mark is an act (rank 0 + durable()), the rest paced. Debt −2.
+- U3 the wake-pace and dispatch ledgers (src/channel-store.js): through owe() — wake-pace paced, dispatch an act; flush() = writeNow when owed; a BLOCKED ledger keeps its old road. Debt −2 (893 → 883 over the three).
+- A load of the engine or the table first lands what THIS process still owes for its file (an in-process restart, a suite's); a hub's boot owes nothing — two named waits in test-store-write-census.
+- Legs: test-decision-budget ⑩, test-seen-marks U2, test-channel-store-loop-free (a) — each over a writer stand-in or the placed stall, with a RED mutant / the base.
+
+### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
+- U1 the decision engine: the memo PACED ('decision-memo.write'), the day's counter an ACT ('decision-usage.write', rank 0) — the judge call that changed it answers once its durable() resolves (the loop never waits; an answered call's cost is on disk — the gap left is «billed, not answered yet»: the write in flight, at most one paced write, then its own); the text-model client awaits ledger.settle the same way; a failed write is said once from onWritten and the next landing once. Store-write debt −6.
+
+### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
+- U1 the decision engine: the memo PACED ('decision-memo.write'), the day's counter an ACT ('decision-usage.write', rank 0) — the judge call that changed it answers once its durable() resolves (the loop never waits; an answered call's cost is on disk — the gap left is «billed, not answered yet»: the write in flight, at most one paced write, then its own — ms on a local disk; on the measured slow mount about 1.5 s with the writer idle, up to about 5 s behind the channels index's write; nothing rebuilds the counter after a kill, backlog B-a85f); the text-model client awaits ledger.settle the same way; a failed write is said once from onWritten and the next landing once. Store-write debt −6.
 
 ### B-403e (lane bl-accounts; 主开发 2026-11-18 02:38Z, GO 02:58Z) — ONE ASK PER FILE PER SYNCHRONOUS RUN: the pool pass, a record, a broadcast
 - **The witness** (the production hub's last five hours, every hold over 1 s ranked by the site its sample names): about forty percent of the held time was ONE synchronous function, the pool pass `maybePoolAutoSwitchForPool`, asking the SAME files on the data mount again and again — each member's reading about S·(M+2)·(1–2) times, each conversation's link 6–8 times, each member's credential file about 9 + 2·S/M times; ≈ 1,250–1,970 synchronous mount asks per pass at the witness's size over ≈ 90 distinct files (the first line's count, by reading).
