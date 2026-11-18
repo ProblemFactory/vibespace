@@ -656,13 +656,25 @@ console.log('— B-346d: the child url cache key follows the browser\'s run');
     return a === a2 && a !== b && a.startsWith('child:bk-0000000c@') && Bm.childUrlKey('bk-0000000c', ephs, noStamp) === 'child:bk-0000000c@77'
       && Bm.childUrlKey('bk-0000000d', ephs, run1) === 'child:bk-0000000d@' && Bm.childUrlKey('bk-0000000c', ephs, run1) !== Bm.childUrlKey('bk-0000000d', ephs, run1);
   };
+  // its verdict's should: a Chrome the SAME daemon relaunched in place (same start, a new browser pid / start time) ⇒ a NEW key
+  const judgeInPlace = (Bm) => {
+    const ephs = [{ id: 'bp-e1', owner: { kind: 'conversation', id: 'bk-0000000c' } }];
+    const c1 = { 'bp-e1': { startedAt: 1000, pid: 41, browser: { pid: 500, starttime: 9001 } } }, c1b = { 'bp-e1': { startedAt: 1000, pid: 41, browser: { pid: 500, starttime: 9001 } } };
+    const c2 = { 'bp-e1': { startedAt: 1000, pid: 41, browser: { pid: 501, starttime: 9002 } } };
+    return Bm.childUrlKey('bk-0000000c', ephs, c1) === Bm.childUrlKey('bk-0000000c', ephs, c1b) && Bm.childUrlKey('bk-0000000c', ephs, c1) !== Bm.childUrlKey('bk-0000000c', ephs, c2);
+  };
   ok(judgeKey(B), 'B-346d childUrlKey: one run of a conversation\'s browser ⇒ one key; its daemon relaunched (a new start) ⇒ a NEW key (the old run\'s port is never the answer); no start stamp ⇒ the pid; no record ⇒ its own empty-run key');
+  ok(judgeInPlace(B), 'B-346d (its verdict\'s should): a Chrome its daemon relaunched IN PLACE (the same start, a new browser pid + start time) ⇒ a NEW key — the old port is never the answer on that road either');
   const ks3 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   ok(ks3.includes('    const key = B.childUrlKey(h, reg.profiles.filter(isEph), reg.browsers);') && ks3.includes("    for (const k of [...vpUrls.keys()]) if (k !== key && k.startsWith('child:' + h + '@')) vpUrls.delete(k);")
     && ks3.includes("target.kind === 'child' ? childUrlKey(target.handle) :") && ks3.includes('    if (fresh) vpUrls.delete(childUrlKey(p.owner.id));') && !ks3.includes("'child:' + String(target.handle || '')"),
     'B-346d wiring: withCdpUrl and cdpEndpointFor key a conversation\'s browser\'s url by its run (the previous runs\' urls dropped); the per-conversation key is gone');
-  const bsrc3 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'), keyNeedle = "  return 'child:' + h + '@' + (rec ? String(Number(rec.startedAt) || rec.pid || '') : '');";
+  const bsrc3 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'), keyNeedle = "  return 'child:' + h + '@' + (rec ? String(Number(rec.startedAt) || rec.pid || '') + br : '');";
   ok(bsrc3.split(keyNeedle).length === 2, 'B-346d control setup: the run in the key is found once in src/browser-profiles.js');
+  const brNeedle = "  const br = rec && rec.browser && rec.browser.pid ? ':' + rec.browser.pid + '.' + (rec.browser.starttime == null ? '' : rec.browser.starttime) : '';";
+  ok(bsrc3.split(brNeedle).length === 2, 'B-346d control setup: the browser\'s identity in the key is found once');
+  const By = mutantCopies('keeper-b346d-inplace', REPO).load('src/browser-profiles.js', bsrc3.replace(brNeedle, "  const br = '';"), 'no-browser-in-key');
+  ok(judgeKey(By) && !judgeInPlace(By), 'CONTROL (B-346d, its verdict\'s should: the key without the browser\'s identity) ⇒ an in-place relaunch keeps the old key — RED');
   const Bx = mutantCopies('keeper-b346d', REPO).load('src/browser-profiles.js', bsrc3.replace(keyNeedle, "  return 'child:' + h;"), 'one-key-per-conversation');
   ok(!judgeKey(Bx), 'CONTROL (B-346d, the release\'s cache: one key per conversation) ⇒ a relaunched daemon is answered with the OLD run\'s port — RED');
 }

@@ -949,6 +949,29 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     };
     const readyViewed = await again(1), readyNobody = await again(0);
     ok(readyViewed && !readyNobody, 'B-346d: a browser started again under an open live view is watched again at once (its url read for THAT run); with nobody browsing and no view, it waits for its next verb (as before)', { readyViewed, readyNobody });
+    // B-346d (its verdict's should, check 5): a DISARM ends a pending re-arm — a socket closed under an open view leaves one
+    // pending; the browser then STOPS (browser-stopped): no socket opens after it (its tries are the stopped browser's, never
+    // the next one's). CONTROL: a dialogs copy whose disarm leaves the pending re-arm ⇒ a socket opens on the stopped browser
+    const stoppedLeg = async (modPath) => {
+      const X = world2({ holders: 'agent', print: false, rearmMs: 60, modPath });
+      await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open');
+      X.world.viewers = 1;
+      try { X.f.sock().h.close(); } catch { /* */ }
+      await until2(() => !X.w() || X.w().state !== 'open', 500); // the close is seen: a re-arm is pending (60 ms)
+      const s0 = X.world.sockets;
+      await X.lease({ kind: 'browser-stopped', profileId: PID, why: 'stopped' });
+      await sleep2(300); // past the pending re-arm (60 ms) and the one after it (120 ms): the waits are the mechanism's own backoff
+      const after = X.world.sockets - s0;
+      X.D.shutdown();
+      return after;
+    };
+    const dsrc346 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const DISARM_REARM = "    { const r = rearms.get(String(profileId || '')); if (r && r.t) clearTimeout(r.t); rearms.delete(String(profileId || '')); }";
+    ok(dsrc346.split(DISARM_REARM).length === 2, 'B-346d control setup: the disarm\'s end of a pending re-arm is found once in src/server/browser-dialogs.js');
+    const MUT346 = mutantCopies('browser-passkey-b346d', REPO);
+    const noEnd = MUT346.write('src/server/browser-dialogs.js', dsrc346.replace(DISARM_REARM, '    { /* (no end of a pending re-arm) */ }'), 'b346d-disarm-keeps-rearm');
+    const [stopNow, stopCtl] = await Promise.all([stoppedLeg(null), stoppedLeg(noEnd)]);
+    ok(stopNow === 0 && stopCtl > 0, `B-346d: a socket closed under an open view, then the browser STOPS — no socket opens after it (${stopNow}); CONTROL: a disarm that leaves the pending re-arm opens ${stopCtl} on the stopped browser — RED`, { stopNow, stopCtl });
   }
   // the re-arm is bounded (rearmMs 1: the five tries' backoff is 1+2+4+8+16 ms — r5: was 5 ms, the waits scaled with it)
   {

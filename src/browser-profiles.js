@@ -1506,13 +1506,16 @@ function ephemeralPairsVerdict(pairs, browserKey) {
  */
 /** B-346d (the owner's live view said «not watching», ECONNREFUSED on the OLD port after its daemon restarted): the cache key of a
  *  conversation's own browser's CDP url is per RUN of that browser — its record's start (else its pid) — so a relaunched daemon (a
- *  new Chrome on a new port) is never answered with the previous run's port. `ephs` = the ephemeral profiles, `browsers` = the
- *  records by profile id. PURE. */
+ *  new Chrome on a new port) is never answered with the previous run's port. Its verdict's should: the BROWSER's own identity
+ *  (its pid + start time, `rec.browser` — the tick and a view's port ask follow an in-place relaunch there) is in the key too, so a
+ *  Chrome the same daemon relaunched in place misses as well. `ephs` = the ephemeral profiles, `browsers` = the records by
+ *  profile id. PURE. */
 function childUrlKey(handle, ephs = [], browsers = {}) {
   const h = String(handle || '');
   const p = (Array.isArray(ephs) ? ephs : []).find((x) => x && x.owner && String(x.owner.id) === h) || null;
   const rec = p && browsers && typeof browsers === 'object' ? browsers[p.id] : null;
-  return 'child:' + h + '@' + (rec ? String(Number(rec.startedAt) || rec.pid || '') : '');
+  const br = rec && rec.browser && rec.browser.pid ? ':' + rec.browser.pid + '.' + (rec.browser.starttime == null ? '' : rec.browser.starttime) : '';
+  return 'child:' + h + '@' + (rec ? String(Number(rec.startedAt) || rec.pid || '') + br : '');
 }
 function pairsIdleMs(pairs) {
   for (const s of Array.isArray(pairs) ? pairs : []) {
