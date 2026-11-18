@@ -7592,6 +7592,48 @@ class ChatView {
     this._updateRuns();
   }
 
+  /** The pass's VIEWPORT ANCHOR (read before it mutates): the topmost visible element and its distance from the view's top,
+   *  and — B-f1f0 (lane needs-card-tail's find on 9de5c902: when that element itself FOLDS, a new turn folding the previous
+   *  turn's run, a scrolled reader jumped by its height, 196 px) — the elements below it in the view, each with its own
+   *  distance, so the restore can keep one that still shows. Pinned (the tail pin owns the scroll) or at the top ⇒ none.
+   *  Run headers / footers are skipped (the pass removes them). → { el, delta, h, below: [[el, delta]…] } | null — `h` its height
+   *  (a card a fold COMPACTS keeps showing at another height: chat-channel-compact / chat-machine-compact — the adversarial read) */
+  _runsAnchor(list) {
+    if (this._pinned || !(list.scrollTop > 0)) return null;
+    const st = list.scrollTop, end = st + list.clientHeight;
+    let out = null;
+    for (const el of list.children) {
+      if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
+      if (el.offsetTop + el.offsetHeight <= st) continue;
+      if (el.offsetTop >= end) break;
+      if (!out) out = { el, delta: el.offsetTop - st, h: el.offsetHeight, below: [] };
+      else if (el.offsetHeight > 0) out.below.push([el, el.offsetTop - st]);
+    }
+    return out;
+  }
+
+  /** The anchor kept where the reader saw it after the pass. A PROGRAMMATIC FOLD NEVER MOVES A SCROLLED READER (B-f1f0): the
+   *  anchor still shows at its height ⇒ it keeps its distance; it FOLDED (display:none) or a fold changed its height (a card the
+   *  run compacts) ⇒ the first element below it in the view that still shows keeps ITS distance (what the reader was looking at
+   *  stays put; the fold closes above it); nothing below it still shows ⇒ the anchor's own top when it still shows, else as
+   *  before: back to its run header (directly above, where the folded content was — a press on it restores the view), forward
+   *  only when nothing visible precedes it */
+  _runsRestore(list, anchor) {
+    if (!anchor || !anchor.el.isConnected) return;
+    const anchorEl = anchor.el, changed = anchorEl.offsetParent === null || anchorEl.offsetHeight !== anchor.h;
+    const keep = changed ? anchor.below.find(([e]) => e.isConnected && e.offsetParent !== null) : null;
+    let a = keep ? keep[0] : anchorEl;
+    if (!keep) {
+      while (a && a.offsetParent === null) a = a.previousElementSibling;
+      if (!a) { a = anchorEl; while (a && a.offsetParent === null) a = a.nextElementSibling; }
+    }
+    if (!a) return;
+    const stBefore = list.scrollTop;
+    this._traceExpect('runsRestore');
+    list.scrollTop = keep ? a.offsetTop - keep[1] : a === anchorEl ? a.offsetTop - anchor.delta : a.offsetTop;
+    if (Math.abs(list.scrollTop - stBefore) > 1) this._trace('runsRestore', { same: a === anchorEl, kept: !!keep, from: Math.round(stBefore), to: Math.round(list.scrollTop) });
+  }
+
   _updateRuns() {
     const list = this._messageList;
     if (!list || this._disposed) return;
@@ -7604,14 +7646,7 @@ class ChatView {
     // load in a loop (real report: 往上翻阅跳动+翻不回来). Keep the topmost
     // visible element fixed across the pass. Skip when pinned (bottom-follow
     // owns the scroll) and skip run headers/footers (removed by the pass).
-    let anchorEl = null, anchorDelta = 0;
-    if (!this._pinned && list.scrollTop > 0) {
-      const st = list.scrollTop;
-      for (const el of list.children) {
-        if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
-        if (el.offsetTop + el.offsetHeight > st) { anchorEl = el; anchorDelta = el.offsetTop - st; break; }
-      }
-    }
+    const anchor = this._runsAnchor(list);
     this._runsMutating = true;
     try {
       list.querySelectorAll(':scope > .chat-run-header, :scope > .chat-run-footer').forEach((h) => h.remove());
@@ -7880,21 +7915,7 @@ class ChatView {
       this._runs = built;
     } finally {
       this._runsMutating = false;
-      if (anchorEl && anchorEl.isConnected) {
-        // the anchor itself may have folded (display:none) — prefer falling
-        // BACK to its run header (it sits directly above, exactly where the
-        // folded content was, and clicking it restores the view); fall
-        // forward only when nothing visible precedes the anchor
-        let a = anchorEl;
-        while (a && a.offsetParent === null) a = a.previousElementSibling;
-        if (!a) { a = anchorEl; while (a && a.offsetParent === null) a = a.nextElementSibling; }
-        if (a) {
-          const stBefore = list.scrollTop;
-          this._traceExpect('runsRestore');
-          list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
-          if (Math.abs(list.scrollTop - stBefore) > 1) this._trace('runsRestore', { same: a === anchorEl, from: Math.round(stBefore), to: Math.round(list.scrollTop) });
-        }
-      }
+      this._runsRestore(list, anchor);
       // Drain OUR OWN mutation records: the observer callback is delivered at
       // a microtask checkpoint AFTER this finally resets _runsMutating, so the
       // flag alone never suppressed self-triggering — every pass scheduled

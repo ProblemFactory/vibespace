@@ -1408,5 +1408,44 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
   } finally { globalThis.document = doc0; }
 }
 
+// B-f1f0 (lane needs-card-tail's find on 9de5c902): _updateRuns kept the TOPMOST visible element still — when that element itself
+// FOLDED (a new turn folding the previous turn's run) the restore fell back to the run's header at the view's top and a scrolled
+// reader jumped (196 px measured). A PROGRAMMATIC FOLD NEVER MOVES A SCROLLED READER: the REAL _runsAnchor / _runsRestore over a
+// fake list (heights laid out in order; a folded element is display:none — no offsetParent, 0 tall): E0 300 · E1 196 · E2 204 ·
+// E3 200 · E4 300, the view 400–800 (E1 its topmost, cut 104 px above). The pass folds E1 under a 30-px run header ⇒ E2 stays
+// where the reader saw it (96 px down the view); a pass that folds nothing keeps E1's own distance; a pass that folds the whole
+// view falls back to the header as before; a pass that COMPACTS the anchor (a channel / machine card its run closes: it keeps
+// showing, 60 px — the adversarial read) keeps E2 where it was too; on a patched copy (the anchor below never kept) E2 jumps — RED by name
+{
+  const mk = (list, id, h, cls = []) => { const e = { id, h, shown: true, cls: new Set(['chat-msg', ...cls]), isConnected: true, classList: { contains: (c) => e.cls.has(c) },
+    get offsetParent() { return e.shown ? {} : null; }, get offsetHeight() { return e.shown ? e.h : 0; },
+    get offsetTop() { let y = 0; for (const x of list.children) { if (x === e) return e.shown ? y : 0; if (x.shown) y += x.h; } return 0; },
+    get previousElementSibling() { const k = list.children.indexOf(e); return k > 0 ? list.children[k - 1] : null; },
+    get nextElementSibling() { const k = list.children.indexOf(e); return k >= 0 && k < list.children.length - 1 ? list.children[k + 1] : null; } }; return e; };
+  const scene = (CV, fold) => {
+    const list = { children: [], scrollTop: 400, clientHeight: 400 };
+    const E = [300, 196, 204, 200, 300].map((h, k) => mk(list, 'E' + k, h)); list.children.push(...E);
+    const v = Object.assign(Object.create(CV.prototype), { _pinned: false, _trace() {}, _traceExpect() {} });
+    const seen = (e) => e.offsetTop - list.scrollTop, before = E.map(seen);
+    const a = v._runsAnchor(list);
+    if (fold === 'compact') { const H = mk(list, 'H', 30, ['chat-run-header']); list.children.splice(1, 0, H); E[1].h = 60; }
+    else if (fold.length) { const H = mk(list, 'H', 30, ['chat-run-header']); list.children.splice(list.children.indexOf(E[fold[0]]), 0, H); for (const k of fold) E[k].shown = false; }
+    else { const H = mk(list, 'H', 30, ['chat-run-header']); list.children.splice(0, 0, H); }   // (a header drawn above the view, nothing in it folded)
+    v._runsRestore(list, a);
+    return { anchor: a && a.el.id, below: a && a.below.map(([e, d]) => [e.id, d]), before, after: E.map((e) => (e.shown ? seen(e) : null)), top: list.scrollTop };
+  };
+  const one = scene(ChatView, [1]), none = scene(ChatView, []), all = scene(ChatView, [1, 2, 3]), cpt = scene(ChatView, 'compact');
+  ok(`B-f1f0: the anchor read before the pass — E1 at ${one.before[1]} and the elements below it in the view, each with its own distance (${JSON.stringify(one.below)})`, one.anchor === 'E1' && JSON.stringify(one.below) === '[["E2",96],["E3",300]]');
+  ok(`B-f1f0 RED-able (b06f36e90: the header put at the view's top, E2 at 30): the topmost element folds ⇒ E2 stays where the reader saw it (${one.before[2]} → ${one.after[2]})`, one.after[2] === one.before[2] && one.after[2] === 96, JSON.stringify(one));
+  ok(`B-f1f0: a pass that folds nothing in the view keeps the topmost element's own distance (${none.before[1]} → ${none.after[1]})`, none.after[1] === none.before[1]);
+  ok(`B-f1f0: a pass that folds the whole view falls back to its run header as before (scrollTop ${all.top} = the header's place)`, all.top === 300, JSON.stringify(all));
+  ok(`B-f1f0 RED-able (8658d36be: the compacted anchor kept its top and E2 jumped up): a pass that COMPACTS the topmost element (still shown, 196 → 60 px) ⇒ E2 stays where the reader saw it (${cpt.before[2]} → ${cpt.after[2]})`, cpt.after[2] === cpt.before[2] && cpt.after[2] === 96, JSON.stringify(cpt));
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const CVS = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), from = "keep = changed ? anchor.below.find(([e]) => e.isConnected && e.offsetParent !== null) : null;";
+  const CVm = CVS.split(from).length === 2 ? (await import(mutantCopies('f1f0', REPO).write('src/lib/chat-view.js', CVS.replace(from, 'keep = null;'), 'no-below'))).ChatView : null;
+  const red = CVm ? scene(CVm, [1]) : null;
+  ok(`B-f1f0 CONTROL: the patched copy that never keeps an element below the anchor moves the reader (E2 ${red && red.before[2]} → ${red && red.after[2]}) — the leg goes red`, !!red && red.after[2] !== red.before[2], JSON.stringify(red));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
