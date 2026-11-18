@@ -1961,17 +1961,78 @@ class LayoutManager {
   // already replaces the matching read-only window; the resumes go ONE AT A TIME,
   // each when the previous one's create has ended (resume-pacer.js — never a clock).
   async _offerResumeAll(stopped) {
-    const { showConfirmDialog } = await import('./utils.js');
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
     const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
-    const ok = await showConfirmDialog({
+    const ok = await this.askResumeAll({
       title: t('Resume interrupted sessions?'),
       message: t('{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', { n: stopped.length }) // plain words: showConfirmDialog prints its message as TEXT (the tags showed, literally)
         + (ended ? ' ' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : ''),
       confirmText: t('Resume all {n}', { n: stopped.length }),
     }).catch(() => false);
-    if (!ok) return;
-    return this._resumeAll(stopped);
+    if (!ok) { this._keepOffer(stopped); return; } // dismissed: a door stays while they stay stopped (B-6352)
+    this._keepOffer(null);
+    try { return await this._resumeAll(stopped); }
+    finally { this._keepOffer(stopped); } // a Stop, a refusal, a throw: the ones still stopped keep their door
+  }
+
+  /** The offer's question (showConfirmDialog — a method, so a suite answers it the way confirmRemovePlaceholder is answered). */
+  async askResumeAll(q) {
+    const { showConfirmDialog } = await import('./utils.js');
+    return showConfirmDialog(q);
+  }
+
+  /** THE OFFER HAS A WAY BACK (B-6352 — userW 2026-11-16 closed the boot offer by mistake after a restart, and only a reload brought
+   *  it back): the list the offer named is kept, and the Resume bar of each of ITS windows still stopped carries «Resume all N»
+   *  (a window of another conversation shows no door: its press would resume others) — N = the offer's conversations the
+   *  sidebar lists as stopped whose window still stands (a desktop's held record or a window this page built: one the person
+   *  closed, or a conversation deleted, no longer counts), re-counted whenever the sidebar's list changes (paintOfferDoors). The
+   *  press asks the same question over those and resumes them the same way (paced, resume-pacer.js); under two left the door
+   *  hides (a window's own Resume is the one door). The group button of the sidebar is NOT this: it resumes every stopped session
+   *  of a group, old ones too. */
+  _keepOffer(list) {
+    this._resumeOffer = list && list.length ? list : null;
+    this.paintOfferDoors();
+  }
+  _offerLeft() {
+    if (!this._resumeOffer) return [];
+    const key = (backend, id) => (backend || 'claude') + ':' + id, stopped = new Set(), standing = new Set();
+    for (const r of this.app.sidebar?._allSessions || []) if (r && r.status === 'stopped') stopped.add(key(r.backend, r.backendSessionId || r.sessionId)); // one linear pass per repaint
+    for (const [, st] of this.app.desktopManager?._savedStates || []) for (const w of (st && st.windows) || []) { const c = conversationOf(w); if (c) standing.add(key(w.backend || w.openSpec?.backend, c)); }
+    for (const [, w] of this.app.wm?.windows || []) { const s = (w && w._openSpec) || {}; if (s.backendSessionId) standing.add(key(s.backend, s.backendSessionId)); }
+    return this._resumeOffer.filter((d) => { const k = key(d.opts?.backend, d.opts?.backendSessionId || d.sessionId); return stopped.has(k) && standing.has(k); });
+  }
+  /** A stopped window's Resume bar (chat-view _showResumeBar, with its conversation `conv` = {backend, id}) takes the door; it shows
+   *  while two or more of the offer's conversations are left AND this window's is one of them. */
+  offerDoor(bar, conv = null) {
+    if (!bar || typeof document === 'undefined') return null;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chat-resume-btn chat-resume-all-btn';
+    b._conv = conv && conv.id ? (conv.backend || 'claude') + ':' + conv.id : null;
+    b.onclick = () => this.reopenResumeOffer();
+    bar.appendChild(b);
+    (this._offerDoors || (this._offerDoors = new Set())).add(b);
+    this.paintOfferDoors();
+    return b;
+  }
+  paintOfferDoors() {
+    if (!this._offerDoors || !this._offerDoors.size) return;
+    const left = this._offerLeft(), n = left.length;
+    const mine = new Set(left.map((d) => (d.opts?.backend || 'claude') + ':' + (d.opts?.backendSessionId || d.sessionId)));
+    for (const b of this._offerDoors) {
+      if (b.isConnected) b._shown = true;
+      else if (b._shown) { this._offerDoors.delete(b); continue; } // its bar left the page (the window closed or resumed)
+      const show = n >= 2 && !!b._conv && mine.has(b._conv);
+      b.hidden = !show;
+      b.textContent = show ? t('Resume all {n}', { n }) : '';
+    }
+  }
+  /** The door's press: the same question over the offer's conversations still stopped (one question at a time). */
+  async reopenResumeOffer() {
+    const left = this._offerLeft();
+    if (left.length < 2 || this._offerAsking) { this.paintOfferDoors(); return null; }
+    this._offerAsking = true;
+    try { return await this._offerResumeAll(left); } finally { this._offerAsking = false; }
   }
 
   /** The resume-all's resumes, PACED (lane resume-all-paced, L1 — the field incident of 2026-11-16: a fixed 400 ms clock fired 68

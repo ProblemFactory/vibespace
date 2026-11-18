@@ -7040,6 +7040,7 @@ class ChatView {
     if (why) note.dataset.stopWhy = '1';
 
     bar.append(note, btn);
+    this.app?.layoutManager?.offerDoor?.(bar, { backend: spec.backend, id: spec.backendSessionId }); // «Resume all N» while the dismissed boot offer's conversations stay stopped (B-6352)
     // Insert before status bar (which is the last child)
     if (this._statusBar?.element && this._statusBar.element.parentNode === container) {
       container.insertBefore(bar, this._statusBar.element);

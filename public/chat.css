@@ -919,6 +919,11 @@
 }
 .chat-resume-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .chat-resume-btn svg { width: 14px; height: 14px; }
+/* B-6352: the dismissed boot offer's way back — «Resume all N» beside the window's own Resume, the quieter of the two */
+.chat-resume-all-btn { background: transparent; color: var(--text); border-color: var(--border); }
+.chat-resume-all-btn:hover { background: var(--bg-hover, rgba(127,127,127,.12)); border-color: var(--border); }
+.chat-resume-all-btn[hidden] { display: none; }
+.chat-resume-bar:has(.chat-resume-all-btn:not([hidden])) .chat-resume-note { flex-basis: 100%; } /* two buttons: the note keeps its own line (a phone's 360 px) */
 /* Sub-agent view (2.369.53): a note only — no Resume button, the child ran inside its parent. */
 .chat-subagent-note { justify-content: flex-start; }
 .chat-login-bar { flex-wrap: wrap; gap: 8px; }

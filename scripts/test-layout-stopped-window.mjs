@@ -58,6 +58,8 @@
 //        and named in the dialog (the base kept the first ten ever written + the burst)
 //      B-46fc a page that leaves takes its last change — the REAL LayoutManager: a window opened, then pagehide (or the page
 //        hidden) inside the debounce ⇒ its save goes at once
+//      B-6352 a dismissed resume-all offer has a way back — «Resume all N» in each stopped window's Resume bar while two or
+//        more of its conversations stay stopped, the same question, the same paced resume
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -1006,6 +1008,64 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
   const { LayoutManager: LM2 } = await mutantEsm('src/lib/layout.js', '    this._restoring = false; if (dm) dm._restoring = false;\n', '');
   const red2 = await scene(LM2, 'pagehide', { gate: 'boot' });
   ok(red2.now === 0, '§9 CONTROL: the gates left up for the flush ⇒ the boot-gated save is deferred again and never leaves — the measured-scene leg goes RED', red2.now);
+});
+
+await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the REAL LayoutManager: the door in each of its stopped windows\' Resume bar', async () => {
+  const scene = async (Lm) => {
+    // 个人 holds the three stopped windows the boot offered (Ledger, Tutor, Ops desk) and a fourth stopped one it did not (Colony game)
+    const W = world({ records: { 'desk-w': [], 'desk-p': [named(0), named(1), named(2), named(7)], 'desk-r': [] }, active: 'desk-w', Lm });
+    const stopped = [0, 1, 2].map((i) => ({ key: 'claude:' + CID(i) + ':', sessionId: 'sess-' + i, cwd: CWD(i), name: NAMES[i], opts: { backend: 'claude', backendSessionId: CID(i) } }));
+    const rows = W.app.sidebar._allSessions = [0, 1, 2, 7].map((i) => ({ backend: 'claude', backendSessionId: CID(i), status: 'stopped' }));
+    const asked = [], ran = []; let answer = false, boom = false;
+    W.lm.askResumeAll = async (q) => { asked.push(q); return answer; };
+    W.lm._resumeAll = async (list) => { ran.push(list.map((d) => d.name)); if (boom) throw new Error('the pacer threw'); for (const d of list) rows.find((r) => r.backendSessionId === d.opts.backendSessionId).status = 'live'; return list.length; }; // the paced door (test-resume-all-paced) — here: the list it is handed
+    const bar = () => { const b = mkEl('div'); b.isConnected = true; return b; };
+    const barA = bar(), barB = bar(), barC = bar();
+    const doorA = W.lm.offerDoor(barA, { backend: 'claude', id: CID(0) }), doorB = W.lm.offerDoor(barB, { backend: 'claude', id: CID(1) }); // two of its windows' Resume bars, built at the boot restore
+    const doorC = W.lm.offerDoor(barC, { backend: 'claude', id: CID(7) }); // a stopped window of ANOTHER conversation
+    doorA.isConnected = doorB.isConnected = doorC.isConnected = true; // …on the page
+    const said = (d) => (d && !d.hidden ? d.textContent : null);
+    const before = [said(doorA), said(doorB)];
+    await W.lm._offerResumeAll(stopped); // the boot offer, dismissed
+    const afterNo = [said(doorA), said(doorB), said(doorC)];
+    return { W, stopped, rows, asked, ran, doorA, doorB, doorC, barA, said, before, afterNo, setAnswer: (v) => { answer = v; }, setBoom: (v) => { boom = v; } };
+  };
+  const s = await scene(LM);
+  ok(J(s.before) === J([null, null]) && s.barA.children.includes(s.doorA) && s.doorA.className.includes('chat-resume-btn'), '§9 before the offer is answered the bars carry the door HIDDEN (the offer itself is on screen)', s.before);
+  ok(s.asked.length === 1 && J(s.afterNo) === J(['Resume all 3', 'Resume all 3', null]), '§9 the boot offer DISMISSED ⇒ the Resume bar of each of ITS windows says «Resume all 3»; a stopped window of another conversation shows no door (its press would resume others) — b06f36e90: nothing, only a reload asked again', s.afterNo);
+  s.rows[0].status = 'live'; s.W.lm.paintOfferDoors(); // the person resumed «Ledger» by its own bar; the sidebar's list says it runs (its merge repaints)
+  ok(s.said(s.doorB) === 'Resume all 2' && s.said(s.doorA) === null, '§9 …one resumed by its own bar ⇒ the count follows the list: «Resume all 2» (its own bar shows none — it is no longer one of them)', [s.said(s.doorA), s.said(s.doorB)]);
+  s.setAnswer(true);
+  await s.doorB.onclick();
+  ok(s.asked.length === 2 && s.asked[1].confirmText === 'Resume all 2' && /^2 sessions were interrupted/.test(s.asked[1].message) && s.asked[1].title === 'Resume interrupted sessions?', '§9 the door\'s press asks THE SAME question over the ones still stopped («2 sessions were interrupted…», «Resume all 2»)', s.asked[1]);
+  ok(J(s.ran) === J([[NAMES[1], NAMES[2]]]), '§9 …and its yes resumes exactly those through the same paced door (_resumeAll)', s.ran);
+  s.W.lm.paintOfferDoors();
+  ok(J([s.said(s.doorA), s.said(s.doorB)]) === J([null, null]), '§9 …all running again ⇒ the door hides', [s.said(s.doorA), s.said(s.doorB)]);
+  // what no longer counts: a window the person closed, a conversation no row lists (deleted); one left is no bulk
+  const t1 = await scene(LM);
+  t1.W.dm._setRecord('desk-p', { windows: [named(0), named(1), named(7)], grid: null }); t1.W.lm.paintOfferDoors(); // «Ops desk»'s window closed
+  const c1 = t1.said(t1.doorA);
+  t1.rows.splice(1, 1); t1.W.lm.paintOfferDoors(); // «Tutor»'s conversation deleted: its row is gone
+  ok(c1 === 'Resume all 2' && t1.said(t1.doorA) === null, '§9 …a window the person CLOSED no longer counts («Resume all 2»); a conversation no row lists no longer counts either — one left ⇒ no door', { c1, now: t1.said(t1.doorA) });
+  const n0 = t1.asked.length; await t1.doorA.onclick();
+  ok(t1.asked.length === n0, '§9 …and the press of a door with one left asks nothing');
+  const t3 = await scene(LM);
+  let release; t3.W.lm.askResumeAll = (q) => { t3.asked.push(q); return new Promise((r) => { release = r; }); };
+  const p1 = t3.doorA.onclick(), p2 = t3.doorB.onclick();
+  await tick(5); const open = t3.asked.length; release(false); await p1; await p2;
+  ok(open === 2 && t3.said(t3.doorA) === 'Resume all 3', '§9 …two presses while its question is open ask ONE question; dismissed again, the door stays', { open });
+  t3.doorA.isConnected = false; t3.W.lm.paintOfferDoors();
+  ok(!t3.W.lm._offerDoors.has(t3.doorA) && t3.W.lm._offerDoors.has(t3.doorB), '§9 …a door whose bar left the page is forgotten');
+  const t4 = await scene(LM); t4.setAnswer(true); t4.setBoom(true);
+  let threw = false; try { await t4.doorA.onclick(); } catch { threw = true; }
+  ok(threw && t4.said(t4.doorA) === 'Resume all 3', '§9 …a bulk resume that THROWS gives the door back (the list kept in a finally)', { threw, now: t4.said(t4.doorA) });
+  // the wiring: chat-view's Resume bar hands its bar and its conversation; the sidebar's merge repaints; the two-button bar keeps the note on its own line
+  ok(/bar\.append\(note, btn\);\n\s+this\.app\?\.layoutManager\?\.offerDoor\?\.\(bar, \{ backend: spec\.backend, id: spec\.backendSessionId \}\);/.test(read('src/lib/chat-view.js')) && /_mergeAndRender\(\) \{\n\s+this\._merge\(\);\n\s+this\.app\?\.layoutManager\?\.paintOfferDoors\?\.\(\);/.test(read('src/lib/sidebar.js')), '§9 …wired: chat-view _showResumeBar hands its bar and conversation to offerDoor; Sidebar _mergeAndRender repaints the count');
+  ok(/\.chat-resume-all-btn\[hidden\] \{ display: none; \}/.test(read('public/chat.css')) && /\.chat-resume-bar:has\(\.chat-resume-all-btn:not\(\[hidden\]\)\) \.chat-resume-note \{ flex-basis: 100%; \}/.test(read('public/chat.css')), '§9 …a hidden door takes no room; with two buttons the note keeps its own line (a phone\'s 360 px)');
+  // RED CONTROL: the dismissal keeps nothing (b06f36e90's `if (!ok) return;`)
+  const { LayoutManager: LM1 } = await mutantEsm('src/lib/layout.js', 'if (!ok) { this._keepOffer(stopped); return; }', 'if (!ok) return;');
+  const red = await scene(LM1);
+  ok(J(red.afterNo) === J([null, null, null]), '§9 CONTROL: a dismissal that keeps nothing ⇒ no door after it (the second leg goes RED)', red.afterNo);
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

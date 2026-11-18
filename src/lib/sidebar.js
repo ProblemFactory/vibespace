@@ -1134,6 +1134,7 @@ class Sidebar {
 
   _mergeAndRender() {
     this._merge();
+    this.app?.layoutManager?.paintOfferDoors?.(); // the resume-all door's count follows the list (B-6352)
     // Sessions created "in" a task get bound once their backend id appears
     this._processPendingTaskBinds?.();
     // Task ⚠ badges depend on the session list (folder auto-include + blocked
