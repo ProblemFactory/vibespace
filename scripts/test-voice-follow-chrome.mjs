@@ -107,7 +107,7 @@ import { Terminal } from '@xterm/xterm';
 import { t } from ${JSON.stringify(path.join(REPO, 'src/lib/i18n.js'))};
 import { installIncidentRecorder } from ${JSON.stringify(path.join(REPO, 'src/lib/incident-recorder.js'))};
 window.__follow = () => (typeof VI.followFocus === 'function' ? VI.followFocus() : 'absent');
-window.__judge = (sel) => { const el = document.querySelector(sel); return el && VI.fieldFacts ? dictationTarget(VI.fieldFacts(el)) : null; };
+window.__judge = (sel) => { const el = document.querySelector(sel); if (!el || !VI.fieldFacts) return null; const f = VI.fieldFacts(el); return { ...dictationTarget(f), tag: f.tag, type: f.type }; };   // + the box's kind (⑥ matches it to its own site)
 window.__notePlugins = (rows) => VI.noteVoicePlugins(rows);
 window.__sends = [];
 window.__events = [];
@@ -734,12 +734,20 @@ console.log('⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived) — and
   for (const r of C) (by[r.verdict.why] = by[r.verdict.why] || []).push(r);
   console.log(`    ${C.length} sites: ${Object.entries(by).map(([w, rs]) => `${w} ${rs.length}`).join(' · ')}`);
   for (const w of ['secret', 'terminal', 'disabled', 'read-only', 'opted-out', 'hidden']) for (const r of by[w] || []) console.log(`      ${rowText(r)}`);
-  const pairs = Object.entries(judged).map(([k, rt]) => {
-    const [file, name] = k.split(' ');
-    const rows = C.filter((r) => r.file === file && r.name === name && (name !== 'input' || r.tag === 'input'));
-    return { k, runtime: rt && rt.why, census: [...new Set(rows.map((r) => r.verdict.why))].join('|') || 'NO SITE' };
-  });
+  // THE BOX'S OWN SITE (the 2.369.410 train's hosted red, 2026-11-18): one file may make ONE name for several boxes — settings-ui.js
+  // makes `input` for two checkboxes, a range, a number and two text rows — so a rendered box is judged against the sites of ITS
+  // KIND (an input's static type as the census read it = the type the page reports at run time; a site whose type is set at run
+  // time stays in), never the union of every site of that name. B-1747 made this leg real: its ok had the condition and the
+  // name swapped, so a truthy string sat in the condition and the union's «not-text|target» was never judged
+  const ofKind = (r, rt) => r.tag !== 'input' || !rt || !rt.type || r.facts.dynamic || (r.facts.type || 'text') === rt.type;
+  const censusOf = (file, name, rt, kinded = true) => [...new Set(C.filter((r) => r.file === file && r.name === name && (name !== 'input' || r.tag === 'input') && (!kinded || ofKind(r, rt))).map((r) => r.verdict.why))].join('|') || 'NO SITE';
+  const pairs = Object.entries(judged).map(([k, rt]) => { const [file, name] = k.split(' '); return { k, runtime: rt && rt.why, type: rt && rt.type, census: censusOf(file, name, rt) }; });
   ok(`every box rendered here is judged at run time as the census judged its site (${pairs.map((x) => `${x.k}: ${x.runtime}`).join(' · ')})`, pairs.length >= 8 && pairs.every((x) => x.runtime === x.census), pairs);
+  // CONTROLS: the union (the leg as it was — red on the hosted run once it was real) does not match the settings text row; and the
+  // kind is a real filter — that same verdict judged as a CHECKBOX of settings-ui.js meets the checkbox sites' «not-text»
+  const st = judged['settings-ui.js input'];
+  ok('CONTROL: the settings text row against the UNION of settings-ui.js\'s `input` sites (the leg as it was) does NOT match — the union reads not-text and target', !!st && st.why === 'target' && st.type === 'text' && censusOf('settings-ui.js', 'input', st, false).split('|').sort().join() === 'not-text,target', st);
+  ok('CONTROL: the kind is a real filter — a target verdict judged as a CHECKBOX of settings-ui.js meets the checkbox sites («not-text»), never «target»', censusOf('settings-ui.js', 'input', { why: 'target', type: 'checkbox' }) === 'not-text');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
