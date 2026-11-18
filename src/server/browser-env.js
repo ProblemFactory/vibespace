@@ -123,6 +123,7 @@ const SP = require('../storage-path.js'); // lane hub-fuse-sync-guard: the witne
 const os = require('os');
 const crypto = require('crypto');
 const B = require('../browser-profiles.js');
+const BSTD = require('../browser-stderr.js'); // B-1789: the quiet log switches (lane browser-stderr-pipe's defence in depth) reach the conversation's spawn file and its helpers'
 const { createBrowserFacts, dirIdentity, makeBrowserTmpDir } = require('../browser-facts.js');
 const { repointPoolSymlink } = require('../account-material.js');
 const browserBindings = require('./browser-bindings.js');
@@ -415,6 +416,11 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       // lane browser-resume: its kept directory
       composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, keptDir, headed: headedSetting(), mark: key, holdDialogs: true, automationFlag: automationFlagOn() });
       const cfg = composed.config;
+      // B-1789 (a sub-agent's child browser stopped answering ~20–25 s after its start, fb-a0d05b52b6 / fb-9427a5f43a): lane
+      // browser-stderr-pipe's defence in depth (Chrome's logging off: QUIET_LOG_ARGS) never reached the EPHEMERAL road — the
+      // keeper's quietLogFor skips it and this spawn file did not carry them. Now it does (a user's own logging switch wins);
+      // the mark stays last. A helper's file copies this one (childConfigFor), so it carries them too.
+      cfg.args = B.withKeeperMark(BSTD.withQuietLogging(cfg.args), key);
       writeJson(p, cfg);
       const back = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (!back || typeof back !== 'object') throw new Error('read-back was not an object');
@@ -795,7 +801,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     const namesProfile = B.configNamesProfile(cfg);
     const out = { ...cfg };
     delete out.profile;
-    out.args = B.withKeeperMark(out.args, childKey); // lane H verify r4: the child's browser carries ITS OWN launch mark, never the parent's
+    out.args = B.withKeeperMark(BSTD.withQuietLogging(out.args), childKey); // lane H verify r4: the child's browser carries ITS OWN launch mark, never the parent's — B-1789: + the quiet switches (a parent's file written before them still gives its helper a quiet Chrome)
     try {
       ensureDirs();
       const p = configPathFor(childKey);

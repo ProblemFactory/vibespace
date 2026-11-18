@@ -94,10 +94,10 @@ function mkEnv(settings, userCfg) {
   const { be } = mkEnv({}, { args: '--no-sandbox' });
   const r = be.envFor({ browserKey: K1 });
   const cfg = r.configPath ? JSON.parse(fs.readFileSync(r.configPath, 'utf8')) : null;
-  ok(r.variant === B.VARIANTS.D && cfg && argList(cfg.args).join(' ') === `--no-sandbox ${FLAG} --vibespace-keeper=${K1}` && r.automationFlag === 'added', 'DEFAULT (no setting stored): the spawn config carries the flag, the user\'s own args kept, the mark last', cfg);
+  ok(r.variant === B.VARIANTS.D && cfg && argList(cfg.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${K1}` && r.automationFlag === 'added', 'DEFAULT (no setting stored): the spawn config carries the flag, the user\'s own args kept, the mark last', cfg);
   const child = be.childConfigFor(K1 + '.1');
   const cc = child.path ? JSON.parse(fs.readFileSync(child.path, 'utf8')) : null;
-  ok(cc && argList(cc.args).join(' ') === `--no-sandbox ${FLAG} --vibespace-keeper=${K1}.1`, 'a sub-agent\'s own config inherits the flag, with ITS OWN mark last', cc);
+  ok(cc && argList(cc.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${K1}.1`, 'a sub-agent\'s own config inherits the flag, with ITS OWN mark last', cc);
   const { be: beOff } = mkEnv({ 'browser.automationFlag': false }, { args: '--no-sandbox' });
   const rOff = beOff.envFor({ browserKey: 'bk-00000e02' });
   const cOff = JSON.parse(fs.readFileSync(rOff.configPath, 'utf8'));
@@ -107,7 +107,30 @@ function mkEnv(settings, userCfg) {
   const cT = JSON.parse(fs.readFileSync(rT.configPath, 'utf8'));
   beT.envFor({ browserKey: 'bk-00000e04' });
   const said = lines.filter((l) => /does not add --disable-blink-features=AutomationControlled/.test(l));
-  ok(argList(cT.args).join(' ') === '--no-sandbox --disable-blink-features=Foo --vibespace-keeper=bk-00000e03' && said.length === 1 && /drop yours/.test(said[0]), 'a --disable-blink-features switch of the user\'s is theirs: never overridden, and the journal says why ONCE (two spawns, one line)', { cT, said });
+  ok(argList(cT.args).join(' ') === '--no-sandbox --disable-blink-features=Foo --disable-logging --log-level=3 --vibespace-keeper=bk-00000e03' && said.length === 1 && /drop yours/.test(said[0]), 'a --disable-blink-features switch of the user\'s is theirs: never overridden, and the journal says why ONCE (two spawns, one line)', { cT, said });
+}
+// B-1789 (a sub-agent's child browser stopped answering ~20–25 s after its start): the spawn file — and the helper's copy — carry
+// lane browser-stderr-pipe's quiet log switches (the keeper's own quietLogFor never reached the ephemeral road); a user's own
+// logging switch wins. CONTROL: a browser-env whose spawn file lacks them
+{
+  const quietOf = (args) => argList(args).filter((x) => x === '--disable-logging' || x === '--log-level=3').length;
+  const { be: beQ } = mkEnv({}, { args: '--no-sandbox,--v=1' });
+  const rQ = beQ.envFor({ browserKey: 'bk-00000e05' });
+  const cQ = JSON.parse(fs.readFileSync(rQ.configPath, 'utf8'));
+  ok(quietOf(cQ.args) === 0 && argList(cQ.args).includes('--v=1'), 'B-1789: a user\'s own logging switch (--v=1) is theirs — the spawn file adds no quiet switch beside it', cQ.args);
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+  const ANCH = '      cfg.args = B.withKeeperMark(BSTD.withQuietLogging(cfg.args), key);';
+  if (!esrc.includes(ANCH)) ok(false, 'the anchor of the control «B-1789 quiet spawn file» is not in the source (src/server/browser-env.js)');
+  else {
+    const MQ = mutantCopies('b1789-env', REPO);
+    const BEc = MQ.load('src/server/browser-env.js', esrc.replace(ANCH, '      // (no quiet switches)'), 'b1789-no-quiet');
+    const d = fs.mkdtempSync(path.join(ROOT, 'env-')); const h = path.join(d, 'home'); fs.mkdirSync(path.join(h, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(h, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
+    const bc = BEc.create({ dataDir: path.join(d, 'data'), homeDir: h, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) } });
+    const rc = bc.envFor({ browserKey: 'bk-00000e06' });
+    const cc0 = JSON.parse(fs.readFileSync(rc.configPath, 'utf8'));
+    ok(quietOf(cc0.args) === 0, 'CONTROL (B-1789, the release\'s spawn file): no quiet switch on the ephemeral road — the spawn-file legs above are RED on it', cc0.args);
+    for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { label: 'B-1789 CONTROL: ' })) ok(r.pass, r.name, r.detail);
+  }
 }
 
 console.log('— ②b lane hooks-create H5: the window preference on a machine with no desktop (resolved at the LAUNCH, never baked at the spawn)');

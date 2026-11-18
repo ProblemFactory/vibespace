@@ -7,6 +7,9 @@
 //   Ⓑ THE PIN (the driver on PATH, ≥ 0.38.2): the SAME spam ⇒ answers for ≥ 3× the time-to-hang; fd 2 still a pipe — drained
 //     (the verdict null)
 //   Ⓒ the quiet switches (--disable-logging --log-level=3), Chrome's stderr captured by a test-local wrapper: fewer bytes
+//   Ⓓ B-1789 (a sub-agent's child browser stopped answering ~20–25 s after each start, fb-a0d05b52b6): a HELPER's browser on
+//     its OWN config — browser-env's childConfigFor, the real module — under the same log spam answers a steady eval past 60 s,
+//     and its Chrome's command line carries the quiet switches the spawn file now gives it
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -122,6 +125,26 @@ try {
   const C = await quietLeg('bspc', BE.withQuietLogging('--no-sandbox'));
   ok(D.ok && C.ok && D.answers && C.answers, 'both browsers launched and answer', { D, C });
   ok(C.bytes < D.bytes, `the quiet switches cut what Chrome writes on its own: ${C.bytes} bytes vs ${D.bytes} without them (same page, same 20 s)`, { C, D });
+
+  // ═══ Ⓓ B-1789: a helper's (child) browser on its own config answers past 60 s ═══
+  console.log('— Ⓓ B-1789: a sub-agent\'s child browser, on browser-env\'s own child config, under the spam: a steady eval for 65 s');
+  {
+    const ENVM = require('../src/server/browser-env.js');
+    const be = ENVM.create({ dataDir: path.join(S, 'env-data'), homeDir: HOME, serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } }, env: {}, socketDirBase: path.join(S, 'env-sock'), facts: { floor: async () => ({ state: 'ok' }) } });
+    const PK = 'bk-0000b789';
+    be.envFor({ browserKey: PK }); // the conversation's own spawn file (the parent the child's copies)
+    const cc = be.childConfigFor(PK + '.1');
+    const ccArgs = cc.path ? String((JSON.parse(fs.readFileSync(cc.path, 'utf8')) || {}).args || '') : '';
+    ok(!!cc.path && BE.QUIET_LOG_ARGS.every((q) => ccArgs.split(/[,\n]/).map((x) => x.trim()).includes(q)), `the child's own config (browser-env childConfigFor) carries the quiet switches (${ccArgs})`, cc);
+    const K = await launch('bspk' + process.pid, { AGENT_BROWSER_CONFIG: cc.path || '' });
+    ok(K.ok && K.cpid && K.port, 'the child browser launched through the driver on its own config', K.error);
+    let cmd = ''; try { cmd = fs.readFileSync(`/proc/${K.cpid}/cmdline`, 'utf8').split('\0').join(' '); } catch { cmd = ''; }
+    ok(BE.QUIET_LOG_ARGS.every((q) => cmd.includes(q)), 'its Chrome\'s command line carries --disable-logging --log-level=3', cmd.slice(0, 300));
+    let asks = 0, misses = 0, lastAnswerAt = 0;
+    while (Date.now() - K.t0 < 65000) { asks++; const e = ab(K.env, ['eval', '1+1'], 5000); if (e.ok && /2/.test(e.out)) lastAnswerAt = Date.now() - K.t0; else misses++; await sleep(1000); }
+    ok(misses === 0 && asks >= 30 && lastAnswerAt >= 60000, `B-1789: ${asks} evals over 65 s all answered (the last at ${(lastAnswerAt / 1000).toFixed(0)} s) — the child browser keeps answering past 60 s (the row's ~20–25 s stall never comes)`, { asks, misses, lastAnswerAt });
+    await end(K);
+  }
 } finally {
   for (const it of ended) await end(it);
   fs.rmSync(S, { recursive: true, force: true });
