@@ -29,7 +29,7 @@ function ownModelOf(s) { return (s && s._modelLocked && s._lockedModel) || (s &&
  *  frame every client of the conversation gets the moment the lock or its target moves, whoever moved it — a Lock / Unlock
  *  press, a pick under the lock (ws-handler), the parse's target-less latch and its alias → full-id upgrade. Its data are the
  *  attach status's own two fields; the bar takes them through applyStatus. A bundle that does not know the subtype ignores it. */
-function lockFrame(s, id) { return { type: 'msg', sessionId: id, op: 'meta', subtype: 'model-lock', data: { modelLocked: !!(s && s._modelLocked), lockedModel: (s && s._lockedModel) || null } }; }
+function lockFrame(s, id) { return { type: 'msg', sessionId: id, op: 'meta', subtype: 'model-lock', data: { modelLocked: !!(s && s._modelLocked), lockedModel: (s && s._lockedModel) || null, lockedContext: (s && s._lockedContext) || null } }; }
 /** THE WRAPPER'S OWN SIDECAR (r3's rung, bounded in r4): `<dir>/<webui id>.json` — local-only (the id is the hub's own; a
  *  path that resolves outside `dir` is refused), at most SIDECAR_CAP bytes (a bigger file is skipped by name), read only
  *  for a WALL record. → the parsed object, or null. */

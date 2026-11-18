@@ -2906,6 +2906,7 @@ export default {
   "e.g. 5173, or 10.0.0.5:8080 to forward a machine on its LAN": "如 5173，或 10.0.0.5:8080 以转发局域网内某机器的端口",
   "fable (latest, 200k)": "fable（最新，200k 上下文）",
   "fable[1m] (latest, 1M)": "fable[1m]（最新，1M 上下文）",
+  "{name} is locked to {model} with the 1M context, but this Claude Code gives {model} no 1M context — it resumed with the standard context": "「{name}」锁定在 {model} 并要求 1M 上下文，但当前的 Claude Code 没有为 {model} 提供 1M 上下文——它已以标准上下文恢复",
   "haiku (latest)": "haiku（最新）",
   "installed, not dialed in": "已安装，未拨入",
   "last known": "最后已知",

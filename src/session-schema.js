@@ -153,6 +153,8 @@ const SESSION_FIELDS = {
   _spawnModel:         { owner: 'ws',     persisted: 'meta',    config: { key: 'model', example: 'claude-fable-5-1' }, note: 'model at spawn (identity ladder fallback)' },
   _modelLocked:        { owner: 'pool',   persisted: 'meta',    config: { key: 'modelLock', example: true }, note: 'per-conversation model lock flag' },
   _lockedModel:        { owner: 'pool',   persisted: 'meta',    config: { key: 'lockModel', example: 'claude-fable-5-1' }, note: 'lock target: what a Lock frame names, else the served model; a pick under the lock re-targets it; master\'s A5 upgrades a bare alias to the resolved id its LIVE echo names — a typed /model never moves it (lane fable-52-cli-321 r15)' },
+  _lockedContext:      { owner: 'pool',   persisted: 'meta',    config: { key: 'lockContext', example: '1m' }, note: 'B-6c55: the PERSON\'s context ask BESIDE the lock target (src/lock-context.js) — \'1m\' when the pick (else the spawn model) named [1m] at the Lock / a re-target; the repin and a resume command target + [1m]; cleared with the lock or by a pick without it' },
+  _spawnContext:       { owner: 'ws',     persisted: 'meta',    note: 'B-6c55: the context the spawn\'s --model carried (\'1m\' or null) — a Lock on this process with no pick reads the person\'s ask from it' },
   _fallbackStopFired:  { owner: 'pool',   persisted: null,      note: 'once-per-turn stop-on-fallback belt latch' },
   // THE MODEL FACTS (lane fable-52-cli-321 r4, src/server/model-ask.js): the ask and the served model, numbered from ONE counter
   _modelSeq:           { owner: 'pool',   persisted: 'meta',    note: 'the conversation\'s ONE model-facts counter (meta modelSeq) — every ask move and every changed served fact takes its next number; never a clock' },

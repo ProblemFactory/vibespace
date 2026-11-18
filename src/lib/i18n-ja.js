@@ -2906,6 +2906,7 @@ export default {
   "e.g. 5173, or 10.0.0.5:8080 to forward a machine on its LAN": "例：5173、または LAN 内のマシンを転送する場合は 10.0.0.5:8080",
   "fable (latest, 200k)": "fable（最新、200k コンテキスト）",
   "fable[1m] (latest, 1M)": "fable[1m]（最新、1M コンテキスト）",
+  "{name} is locked to {model} with the 1M context, but this Claude Code gives {model} no 1M context — it resumed with the standard context": "「{name}」は 1M コンテキストで {model} にロックされていますが、この Claude Code は {model} に 1M コンテキストを提供していません——標準のコンテキストで再開しました",
   "haiku (latest)": "haiku（最新）",
   "installed, not dialed in": "インストール済み、未接続",
   "last known": "最終確認",

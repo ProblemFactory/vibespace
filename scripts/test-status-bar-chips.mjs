@@ -41,6 +41,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
+// B-6c55: the bar's pick closure calls contextOf (its module import) — every sandbox below that runs that closure hands it in
+const LOCKCTX_T = (await import('node:module')).createRequire(import.meta.url)('../src/lock-context.js');
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -448,7 +450,7 @@ console.log('— ⑦ a locked chip holds the served model against the lock targe
   }
   const untold = census.filter((c) => !c.told);
   ok(census.length >= 4 && untold.length === 0, `⑦ every server writer of the lock is told to every client — ${census.length} writers (ws-handler's press and pick, the parse's target-less latch; round 4's law C took the echo's alias upgrade away), each followed by lockFrame's broadcast${untold.length ? ' — UNTOLD: ' + untold.map((c) => c.f + ':' + c.line).join(', ') : ''}`);
-  ok(/subtype: 'model-lock', data: \{ modelLocked: !!\(s && s\._modelLocked\), lockedModel: \(s && s\._lockedModel\) \|\| null \}/.test(read('src/server/stream-wall.js')), '⑦ lockFrame carries exactly the attach status\'s two fields (modelLocked, lockedModel)');
+  ok(/subtype: 'model-lock', data: \{ modelLocked: !!\(s && s\._modelLocked\), lockedModel: \(s && s\._lockedModel\) \|\| null, lockedContext: \(s && s\._lockedContext\) \|\| null \}/.test(read('src/server/stream-wall.js')), '⑦ lockFrame carries the attach status\'s fields (modelLocked, lockedModel — and B-6c55\'s lockedContext, the person\'s 1M ask beside the target)');
   // THE PARSE'S WRITER, DRIVEN (the slice acceptance's minor 2 — the census above only reads it): the REAL claude-stream-json consumer,
   // attached to a fake pty with a recording broadcastToSession, latches a target-less lock (a conversation an older meta saved as
   // `modelLock` with no `lockModel`) on its first main-thread record; its frame reaches BOTH bars through chat-view's own model-lock
@@ -595,11 +597,11 @@ const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
   const arrowOf = (head) => { const at = sb.indexOf(head); if (at < 0) return ''; let i = sb.indexOf('=>', at) + 2; while (sb[i] === ' ') i++; const open = sb.indexOf('(', at + head.indexOf('(')); let d = 0, j = i; for (; j < sb.length; j++) { if (sb[j] === '{') d++; else if (sb[j] === '}') { d--; if (!d) break; } } return sb.slice(open, j + 1); };
   const pickSrc = arrowOf('const pick = (model) =>'), lockSrc = arrowOf('lockItem.onclick = (ev) =>');
   const mk = (o) => { const sent = [], cfg = []; const bar = mkBar(ChatStatusBar, { onConfigChange: (c) => cfg.push(c) }); bar._ws = { send: (f) => sent.push(JSON.parse(JSON.stringify(f))) }; bar.applyStatus(o === undefined ? facts({ _modelLocked: false, _lockedModel: null }) : o); return { bar, sent, cfg }; };
-  const bindP = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP8.namedModel);
+  const bindP = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', 'contextOf', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP8.namedModel, LOCKCTX_T.contextOf);   // B-6c55: the bar imports contextOf
   const { namedModel: _nm } = MP8;
   const press = { pick: (x, m) => bindP(pickSrc, x.bar)(m), lock: (x) => bindP(lockSrc, x.bar)({ stopPropagation() { } }) };
   ok(pickSrc.length > 300 && lockSrc.length > 300 && typeof _nm === 'function', `⑧ the pick closure (${pickSrc.length} chars) and the Lock row (${lockSrc.length} chars) are read and run as they are`);
-  ok(/if \(this\._modelLocked\) this\._lockedModel = model;/.test(pickSrc) && /this\._onConfigChange\?\.\(\{ model, \.\.\.\(this\._modelLocked \? \{ lockModel: model \} : \{\}\) \}\);/.test(pickSrc) && /this\._statusModel = model;/.test(pickSrc)
+  ok(/if \(this\._modelLocked\) this\._lockedModel = model;/.test(pickSrc) && /this\._onConfigChange\?\.\(\{ model, \.\.\.\(this\._modelLocked \? \{ lockModel: model(?:, lockContext: contextOf\(model\) \|\| undefined)? \} : \{\}\) \}\);/.test(pickSrc) && /this\._statusModel = model;/.test(pickSrc)
     && /this\._modelLocked = nowLock;/.test(lockSrc) && /this\._lockedModel = nowLock \? \(this\._statusModel \|\| null\) : null;/.test(lockSrc) && /this\._onConfigChange\?\.\(\{ modelLock: nowLock, lockModel: nowLock \? this\._statusModel : undefined/.test(lockSrc)
     && !/\b_press\b|\b_pending\b|PENDING_MS|_serverModelFacts|endServerFacts|_settleLock|hasPendingModel/.test(sb),
     '⑧ ONE WAY TO PRESS: the pick and the Lock are MASTER\'s lines on every page (the chip shows a pick at once, a standing lock re-targeted; a Lock sets its mark at once and saves what it locked) — the bar has no pending press, no regime, no settle path');
@@ -924,7 +926,7 @@ console.log('— ⑩ round 9: what a resume reads is saved AT THE PRESS as on ma
   const arrow9 = (head) => { const at = sb9.indexOf(head); if (at < 0) return null; let i = sb9.indexOf('=>', at) + 2; while (sb9[i] === ' ') i++; const open = sb9.indexOf('(', at + head.indexOf('(')); if (sb9[i] !== '{') return sb9.slice(open, sb9.indexOf(';\n', i)); let d = 0, j = i; for (; j < sb9.length; j++) { if (sb9[j] === '{') d++; else if (sb9[j] === '}') { d--; if (!d) break; } } return sb9.slice(open, j + 1); };
   const { createRequire: cr9 } = await import('node:module'); const MP9 = cr9(path.join(repo, 'src/model-providers.js'))('./model-providers.js');
   const pick9 = arrow9('const pick = (model) =>'), lock9 = arrow9('lockItem.onclick = (ev) =>');
-  const bind9 = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP9.namedModel);
+  const bind9 = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', 'contextOf', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP9.namedModel, LOCKCTX_T.contextOf);   // B-6c55: the bar imports contextOf
   const EV = { stopPropagation() { } };
   const f9 = (o = {}) => { const v = { askedModel: 'fable[1m]', askSeq: 0, modelLocked: false, lockedModel: null, servedModel: 'claude-fable-5-2', servedSeq: 1, cliModel: 'claude-fable-5-2', model: firstStatus.model, ...o };
     return { ...firstStatus, model: v.model, modelLocked: !!v.modelLocked, lockedModel: v.lockedModel || null, ...MA8.modelFacts({ backend: 'claude', _modelLocked: v.modelLocked, _lockedModel: v.lockedModel, _pickedModel: v.askedModel, _spawnModel: null, _askSeq: v.askSeq, _servedModel: v.servedModel, _servedSeq: v.servedSeq, _cliModel: v.cliModel, _transcriptModel: v.model || null, _askRefused: null }) }; };   // round 13: the REAL facts over a session's fields
@@ -1200,12 +1202,12 @@ console.log('— ⑨ the seeded walk: Stop, ✕, a sticky fallback, d7, old / re
   const sbW = read('src/lib/chat-status-bar.js');
   const arrowOf = (head) => { const at = sbW.indexOf(head); if (at < 0) return null; let i = sbW.indexOf('=>', at) + 2; while (sbW[i] === ' ') i++; const open = sbW.indexOf('(', at + head.indexOf('(')); if (sbW[i] !== '{') return sbW.slice(open, sbW.indexOf(';\n', i)); let d = 0, j = i; for (; j < sbW.length; j++) { if (sbW[j] === '{') d++; else if (sbW[j] === '}') { d--; if (!d) break; } } return sbW.slice(open, j + 1); };
   const pickSrcW = arrowOf('const pick = (model) =>'), lockSrcW = arrowOf('lockItem.onclick = (ev) =>');
-  const bindW = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP.namedModel);
+  const bindW = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', 'contextOf', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP.namedModel, LOCKCTX_T.contextOf);   // B-6c55: the bar imports contextOf
   const cvSrc = read('src/lib/chat-view.js'), lockLine = /if \(op\.subtype === 'model-lock'\) \{\n\s*(this\._statusBar\.applyStatus\([^\n]*\);)\n/.exec(cvSrc);
   const applyLockOp = new Function('op', (lockLine ? lockLine[1] : '').replace('this._statusBar', 'this'));
   ok(!!pickSrcW && !!lockSrcW && /_onConfigChange/.test(pickSrcW) && /_onConfigChange/.test(lockSrcW) && !!lockLine && cAt > 0, '⑨ the walk runs the real code: the set-model case, the bar\'s own pick and Lock closures (the saved config), chat-view\'s model-lock line, sbSeenFirst, the repin');
   const RES = { opus: 'claude-opus-5-5', 'opus[1m]': 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', fable: 'claude-fable-5-2', 'fable[1m]': 'claude-fable-5-2' };
-  const resolve = (m) => RES[m] || (/^claude-[a-z0-9-]+$/.test(m) ? m : null);
+  const resolve = (m) => { const b = String(m || '').replace(/\[1m\]$/, ''); return RES[m] || RES[b] || (/^claude-[a-z0-9-]+$/.test(b) ? b : null); };   // B-6c55: the CLI takes a model's [1m] form too (a locked 1M conversation's repin sends it)
   const SID = 'sid-chips', CLIENTS = ['A', 'B'], CONV = 'conv-walk';
   const lockRow = (bar) => bar._lockRowOffered();
   // MASTER's own identity rule (chat-status-bar sameModel — alias-tolerant: a [1m] mark, the claude- prefix, a prefix of the other)

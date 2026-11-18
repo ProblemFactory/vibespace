@@ -578,7 +578,7 @@ export function installSidebarState(SidebarClass) {
     // (`config: {key, example}` / SESSION_CONFIG_ONLY) and test-session-schema
     // drives THIS function with each example — a key it drops is red. (Owner ruling 9's
     // 'worktree' is one of the TRI-STATE keys below, not this truthy list.)
-    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock', 'lockModel', 'outputStyle']) {
+    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock', 'lockModel', 'lockContext', 'outputStyle']) {   // lockContext: B-6c55
       if (config?.[k]) clean[k] = config[k];
     }
     // autoResume is TRI-STATE: an explicit false must persist (its whole point

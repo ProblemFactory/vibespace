@@ -8069,8 +8069,10 @@ function maybeRepinLockedModel(session) {
     if (modelsMatch(session._servedModel, session._lockedModel)) return;
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter?.formatSetModel) return;
-    session.pty.write(adapter.formatSetModel(session._lockedModel) + '\n');
-    global.__vsEvent?.('model-lock-repin', `${session._servedModel || '?'}->${session._lockedModel}`);
+    let catalog = null; if (!session.host) { try { catalog = require('./cli-model-catalog.js').view(); } catch { catalog = null; } }   // a remote machine's CLI is not this catalog's
+    const cmd = require('../lock-context.js').commandOf(session._lockedModel, session._lockedContext, catalog).model;   // B-6c55: the person's 1M ask rides the repin
+    session.pty.write(adapter.formatSetModel(cmd) + '\n');
+    global.__vsEvent?.('model-lock-repin', `${session._servedModel || '?'}->${cmd}`);
   } catch (e) { console.warn('[model-lock] repin failed:', e.message); }
 }
 

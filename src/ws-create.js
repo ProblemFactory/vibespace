@@ -8,6 +8,7 @@
  */
 
 const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
+const LOCKCTX = require('./lock-context.js'); // B-6c55: the context a lock keeps (PURE)
 const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
 const { capsOf, worktreeRefusal, worktreeSpawnArgs, toolAllowlistArgs } = require('./backend-caps');
@@ -695,9 +696,26 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: effortNo.code, effort: effortNo.effort, levels: effortNo.levels, message: effortNo.message }));
             break;
           }
+          // B-6c55: A LOCKED CONVERSATION'S CONTEXT ASK rides the spawn — the saved fact (the person's, src/lock-context.js), else the
+          // spawn's own model when it names [1m]. The TARGET (data.model, the lock, _spawnModel, the pool's request model) stays as it
+          // was (law b): only the --model the CLI is COMMANDED with gains [1m]. A CLI whose own catalog says the model has no long
+          // context is SAID to the person by name (law c) — never a silent short context
+          // the saved fact applies only to the model the lock holds (a model the gear set beside a stale fact is never given it), and
+          // without one the spawn's model speaks only when it was the person's own pick (origin 'chosen' — never an instance default)
+          const lockOn = !!data.modelLock && !!data.model && require('./server/model-ask.js').sameModel(data.model, data.lockModel || data.model);
+          data._lockContext = lockOn ? (LOCKCTX.lockContextOf(data.lockContext) || (data._modelOrigin === 'chosen' ? LOCKCTX.lockContextFor(data.model) : null)) : null;
+          let catalog = null;
+          if (data._lockContext && !data.hostId) { try { catalog = require('./server/cli-model-catalog.js').view(); } catch { catalog = null; } }   // a remote machine's CLI is not this catalog's: not judged
+          const cmdOf = LOCKCTX.commandOf(data.model, data._lockContext, catalog);
+          const commandModel = data._lockContext ? cmdOf.model : data.model;
+          data._spawnContext = LOCKCTX.contextOf(commandModel);   // what the spawn COMMANDED (a later Lock on this process reads it)
+          if (cmdOf.refused) {
+            const said = LOCKCTX.NO_LONG_CONTEXT, name = String(data.name || data.sessionName || '').slice(0, 80) || 'This conversation';
+            try { serverNotice?.(`lock-context-${id}`, said.replace(/\{model\}/g, data.model).replace('{name}', name), { level: 2, i18n: { key: said, params: { model: data.model, name } } }); } catch { }
+          }
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
-            model: data.model,
+            model: commandModel,
             permissionMode: data.permissionMode,
             resumeId: data.resume && data.resumeId ? data.resumeId : null,
             fork: data.fork || false,
@@ -1071,6 +1089,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // saved config had no model. No target ⇒ the server latches the
             // first main-thread served model instead.
             _lockedModel: data.modelLock ? (data.lockModel || data.model || null) : null,
+            _lockedContext: data._lockContext || null,   // B-6c55: the person's context ask beside the target (the repin sends both)
+            _spawnContext: data._spawnContext || null,   // B-6c55: the context the spawn's --model carried
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -1691,6 +1711,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             worktreePath: session._worktreePath || undefined, // filled by the init frame (the CLI's own announced cwd)
             modelLocked: session._modelLocked || undefined, // #6: survive server restart (else a resumed lock's badge silently reverts — review-caught)
             lockedModel: session._lockedModel || undefined,
+            lockedContext: session._lockedContext || undefined,   // B-6c55: survives a server restart beside the target
+            spawnContext: session._spawnContext || undefined,     // B-6c55: what the spawn commanded (a Lock after a restart reads it)
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             taskIds: session._initialGroupIds && session._initialGroupIds.length ? session._initialGroupIds : undefined, // lane new-session-form: every group, in selection order

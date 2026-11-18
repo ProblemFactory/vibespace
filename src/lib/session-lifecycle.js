@@ -65,7 +65,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -211,6 +211,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
       modelLock: modelLock || undefined, // #6 lock v2: the server re-pins the target model after any fallback
       lockModel: (lockModel && namedModel(lockModel)) || undefined, // explicit lock TARGET (r6: through the same door) (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
+      lockContext: modelLock && lockContext === '1m' ? '1m' : undefined, // B-6c55: the person's context ask beside the target (src/lock-context.js)
       // THE CONVERSATION'S POOL PIN (2026-09-28): a RESUME carries the conversation's own pin (the
       // server honours it only for a member of the pool this spawn bills, and never on a fork)
       poolPin: (!fork && poolPin && typeof poolPin.memberId === 'string') ? { memberId: poolPin.memberId, at: poolPin.at || null, ...(poolPin.poolId ? { poolId: poolPin.poolId } : {}) } : undefined,
@@ -1222,6 +1223,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       accountId: accountId !== undefined ? accountId : resumeAccountOf(savedCfg.account, this.sidebar?._allSessions, backend, targetBackendId, { bound: accountBound(backend) && !hostId }),
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
       lockModel: savedCfg.lockModel,
+      lockContext: savedCfg.lockContext,   // B-6c55: the person's 1M ask beside the lock target — the resume commands both
       poolPin: savedCfg.poolPin, // 2026-09-28: the conversation's pool pin rides a resume (never a fork)
       syncId: syncId || row?.id, // LAW 1: the row's own id — the record keeps the row, its box and its group
       ...(unpressed ? { quiet: true } : {}), // nobody pressed it: drawn, the person's window keeps the focus (r4 N3)

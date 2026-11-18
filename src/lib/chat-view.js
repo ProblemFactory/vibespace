@@ -5087,6 +5087,9 @@ class ChatView {
     }
     // THE LOCK MOVED (lane fable-52-cli-321 F1): a press, a pick under it or the server's own upgrade, on whichever client —
     // the attach status's two fields, through the bar's attach door, so no client holds a stale lock target until a reload
+    // B-6c55: the person's context ask beside the target (the server decided it from their pick) — saved, so a resume commands it.
+    // Its own line BEFORE the lock's branch: the branch keeps the release's shape (suites run its applyStatus line as written)
+    if (op.subtype === 'model-lock' && op.data && 'lockedContext' in op.data) this._persistSessionConfig({ lockContext: op.data.lockedContext || undefined });
     if (op.subtype === 'model-lock') {
       this._statusBar.applyStatus({ modelLocked: !!op.data?.modelLocked, lockedModel: op.data?.lockedModel || null, lockMoved: true });
       return;

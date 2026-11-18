@@ -4070,6 +4070,163 @@ console.log('\n§ask the model facts: a pick moves the ask; the CLI reports what
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
+// ── §B-6c55 A LOCK KEEPS THE PERSON'S 1M ASK (the ruling 2026-11-18 00:07Z) ──
+// The Lock records what the chip showed — the CLI's resolved id, never its [1m] form — so a Lock on a `fable[1m]` conversation
+// then a resume (its saved model = the target) or a turn-end repin (`/model <target>`) commanded the SHORT context. Now the
+// person's context ask lives BESIDE the target (src/lock-context.js): (a) only the person's ask (their pick, else the spawn's
+// model — never what the CLI reported), cleared when the lock lifts or a pick names no [1m]; (b) the chip, the pool's request
+// model and the projection read the target byte for byte as on the release; (c) a CLI whose catalog gives the model no 1M
+// context is SAID to the person by name. Every leg runs the tree's REAL text (ws-handler's case, the engine's functions, the
+// create's block); the release's own text is the red control.
+console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the repin and a resume command both; nothing else reads it');
+{
+  const { execFileSync } = await import('node:child_process');
+  const LC = require(path.join(REPO, 'src/lock-context.js'));
+  ok('§B-6c55 PURE: contextOf / withContext / lockContextOf / longContextOf', LC.contextOf('fable[1m]') === '1m' && LC.contextOf('claude-fable-5') === null && LC.contextOf(null) === null
+    && LC.withContext('claude-fable-5', '1m') === 'claude-fable-5[1m]' && LC.withContext('claude-opus-5-5[1m]', '1m') === 'claude-opus-5-5[1m]' && LC.withContext('claude-fable-5', null) === 'claude-fable-5' && LC.withContext(null, '1m') === null
+    && LC.lockContextOf('1m') === '1m' && LC.lockContextOf('yes') === null
+    && LC.longContextOf({ models: [{ id: 'claude-fable-5', oneM: 'native' }, { id: 'claude-haiku-5', oneM: null }] }, 'claude-fable-5') === true
+    && LC.longContextOf({ models: [{ id: 'claude-haiku-5', oneM: null }] }, 'claude-haiku-5[1m]') === false && LC.longContextOf(null, 'claude-fable-5') === null && LC.longContextOf({ models: [] }, 'fable') === null);
+  const baseOf = (f) => { try { return execFileSync('git', ['show', `b06f36e90:${f}`], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { return ''; } };
+  // ws-handler's REAL set-model case (its own text), over fake sessions
+  const caseOf = (src) => { const a = src.indexOf("        case 'set-model': {"), b = src.indexOf("        case 'set-effort': {", a); return a > 0 && b > a ? src.slice(a, b) : ''; };
+  const wsRequire = createRequire(path.join(REPO, 'src/ws-handler.js'));
+  const hubOf = (caseText) => {
+    const run = new Function('data', 'activeSessions', 'adapterRegistry', 'readSessionMeta', 'writeSessionMeta', 'broadcastActiveSessions', 'broadcastToSession', 'ws', 'require', `switch (data.type) {\n${caseText}\n}`);
+    const sessions = new Map(), meta = {}, frames = [];
+    const h = { sessions, meta, frames };
+    h.add = (id, o = {}) => { const x = { sockName: 'cw-' + id, _webuiId: id, backend: 'claude', mode: 'chat', _spawnModel: 'fable[1m]', pty: { write: () => {} }, ...o }; sessions.set(id, x); return x; };
+    h.send = (id, data) => run({ type: 'set-model', sessionId: id, ...data }, sessions, { get: () => ({ formatSetModel: (m) => JSON.stringify({ request: { subtype: 'set_model', model: m } }) }) }, (k) => meta[k] || {}, (k, v) => { meta[k] = v; }, () => {}, (x, sid, frame) => frames.push(frame), { send: () => {} }, wsRequire);
+    return h;
+  };
+  const CASE = caseOf(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'));
+  {
+    const h = hubOf(CASE), d = h.add('d', { _servedModel: 'claude-fable-5' });
+    h.send('d', { lock: true, lockModel: 'claude-fable-5' });
+    await new Promise((r) => setImmediate(r));
+    const lockOp = h.frames.filter((f) => f && f.subtype === 'model-lock').pop();
+    ok('§B-6c55 (a) a Lock on a conversation spawned on fable[1m]: the target is what the chip showed (claude-fable-5 — unchanged, law b), the person\'s 1M ask beside it, saved in the meta and told on the lock frame',
+      d._lockedModel === 'claude-fable-5' && d._lockedContext === '1m' && h.meta['cw-d'] && h.meta['cw-d'].lockedContext === '1m' && lockOp && lockOp.data.lockedContext === '1m' && lockOp.data.lockedModel === 'claude-fable-5', JSON.stringify({ l: d._lockedModel, c: d._lockedContext, op: lockOp && lockOp.data }));
+    h.send('d', { model: 'claude-opus-5-5' });
+    const noCtx = d._lockedContext;
+    h.send('d', { model: 'opus[1m]' });
+    const back = d._lockedContext;
+    h.send('d', { lock: false });
+    ok('§B-6c55 (a) a pick under the lock WITHOUT [1m] clears the fact, a pick with it sets it, the lock lifted clears it (meta too)', noCtx === null && back === '1m' && d._lockedContext === null && h.meta['cw-d'].lockedContext === null, JSON.stringify({ noCtx, back, after: d._lockedContext }));
+    const h2 = hubOf(CASE), r = h2.add('r', { _spawnModel: 'claude-fable-5', _servedModel: 'claude-fable-5[1m]', _cliModel: 'fable[1m]' });
+    h2.send('r', { lock: true, lockModel: 'claude-fable-5' });
+    ok('§B-6c55 (a) the fact is the PERSON\'s ask only: spawned on claude-fable-5, the CLI reporting a [1m] model — the Lock records NO context', r._lockedContext === null, JSON.stringify({ c: r._lockedContext }));
+    const h3 = hubOf(CASE), p = h3.add('p', { _spawnModel: 'claude-fable-5', _pickedModel: 'fable[1m]' });
+    h3.send('p', { lock: true, lockModel: 'claude-fable-5' });
+    ok('§B-6c55 (a) …and the PICK outranks the spawn model: picked fable[1m] on a claude-fable-5 spawn ⇒ the 1M ask is kept', p._lockedContext === '1m');
+    const h4 = hubOf(CASE), ty = h4.add('ty', { _spawnModel: 'fable[1m]', _pickedModel: 'fable[1m]', _servedModel: 'claude-opus-5-5' });
+    h4.send('ty', { lock: true, lockModel: 'claude-opus-5-5' });
+    ok('§B-6c55 (a) a pick the chip no longer shows (fable[1m] picked, a typed /model moved the CLI to opus) ⇒ a Lock on claude-opus-5-5 records NO context (the ask must name the locked model)', ty._lockedModel === 'claude-opus-5-5' && ty._lockedContext === null, JSON.stringify({ c: ty._lockedContext }));
+    const h5 = hubOf(CASE), rs = h5.add('rs', { _spawnModel: 'claude-fable-5', _spawnContext: '1m', _servedModel: 'claude-fable-5' });
+    h5.send('rs', { lock: false }); h5.send('rs', { lock: true, lockModel: 'claude-fable-5' });
+    ok('§B-6c55 (a) a RESUMED process (no pick; its spawn commanded claude-fable-5[1m]): Unlock then Lock keeps the 1M ask from what the spawn commanded', rs._lockedContext === '1m', JSON.stringify({ c: rs._lockedContext }));
+    const base = caseOf(baseOf('src/ws-handler.js'));
+    if (base) { const hb = hubOf(base), db = hb.add('db', { _servedModel: 'claude-fable-5' }); hb.send('db', { lock: true, lockModel: 'claude-fable-5' }); ok('§B-6c55 RED CONTROL: the release b06f36e90\'s case kept no context — the Lock on a fable[1m] conversation saved claude-fable-5 alone', db._lockedModel === 'claude-fable-5' && !db._lockedContext && !('lockedContext' in (hb.meta['cw-db'] || {}))); }
+  }
+  // the engine's REAL repin (its own text): the 1M ask rides the /model it sends
+  {
+    const engOf = (src) => { const fn = (head) => { const at = src.indexOf(head), end = at < 0 ? -1 : src.indexOf('\n}\n', at); return at < 0 || end < 0 ? '' : src.slice(at, end + 2); }; return { src, fn }; };
+    const make = (src) => {
+      const { fn } = engOf(src), writes = [];
+      const E = new Function('adapterRegistry', 'global', 'require', fn('function modelsMatch(a, b) {') + '\n' + fn('function maybeRepinLockedModel(session) {') + '\nreturn { maybeRepinLockedModel };')(
+        { get: () => ({ formatSetModel: (m) => JSON.stringify({ request: { subtype: 'set_model', model: m } }) }) }, { __vsEvent: () => {} }, createRequire(path.join(REPO, 'src/server/usage-pool-engine.js')));
+      return { writes, repin: (o) => E.maybeRepinLockedModel({ _modelLocked: true, mode: 'chat', backend: 'claude', pty: { write: (x) => writes.push(JSON.parse(x).request.model) }, ...o }) };
+    };
+    const live = make(fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'));
+    {
+      // the repin asks the installed CLI's catalog: a model it gives no 1M form is repinned as the target alone (a remote session: not judged)
+      const { fn } = engOf(fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8')), w2 = [];
+      const engReq = createRequire(path.join(REPO, 'src/server/usage-pool-engine.js'));
+      const cat = { models: [{ id: 'claude-haiku-5', firstParty: 'claude-haiku-5-20260101', oneM: null }, { id: 'claude-fable-5', oneM: 'native' }], aliases: { haiku: 'claude-haiku-5' } };
+      const E2 = new Function('adapterRegistry', 'global', 'require', fn('function modelsMatch(a, b) {') + '\n' + fn('function maybeRepinLockedModel(session) {') + '\nreturn { maybeRepinLockedModel };')(
+        { get: () => ({ formatSetModel: (m) => JSON.stringify({ request: { subtype: 'set_model', model: m } }) }) }, { __vsEvent: () => {} }, (m) => (m === './cli-model-catalog.js' ? { view: () => cat } : engReq(m)));
+      const rp = (o) => E2.maybeRepinLockedModel({ _modelLocked: true, mode: 'chat', backend: 'claude', pty: { write: (x) => w2.push(JSON.parse(x).request.model) }, _servedModel: 'claude-opus-5-5', ...o });
+      rp({ _lockedModel: 'claude-haiku-5', _lockedContext: '1m' }); rp({ _lockedModel: 'claude-fable-5', _lockedContext: '1m' }); rp({ _lockedModel: 'claude-haiku-5', _lockedContext: '1m', host: 'm1' });
+      ok('§B-6c55 (c) the repin asks the CLI\'s catalog: haiku has no 1M form ⇒ /model claude-haiku-5; fable has ⇒ claude-fable-5[1m]; a REMOTE session is not judged by this hub\'s catalog ⇒ claude-haiku-5[1m] as asked', JSON.stringify(w2) === JSON.stringify(['claude-haiku-5', 'claude-fable-5[1m]', 'claude-haiku-5[1m]']), JSON.stringify(w2));
+    }
+    live.repin({ _lockedModel: 'claude-fable-5', _lockedContext: '1m', _servedModel: 'claude-opus-5-5' });
+    live.repin({ _lockedModel: 'claude-fable-5', _lockedContext: null, _servedModel: 'claude-opus-5-5' });
+    live.repin({ _lockedModel: 'claude-fable-5', _lockedContext: '1m', _servedModel: 'claude-fable-5' });
+    ok('§B-6c55 the turn-end repin after a fallback commands target + [1m] when the fact stands (claude-fable-5[1m]), the target alone without it, and nothing when the target is served', JSON.stringify(live.writes) === JSON.stringify(['claude-fable-5[1m]', 'claude-fable-5']), JSON.stringify(live.writes));
+    const relEng = baseOf('src/server/usage-pool-engine.js');
+    if (relEng) { const rel = make(relEng); rel.repin({ _lockedModel: 'claude-fable-5', _lockedContext: '1m', _servedModel: 'claude-opus-5-5' }); ok('§B-6c55 RED CONTROL: the release\'s repin sent /model claude-fable-5 — the 1M ask dropped at every repin', JSON.stringify(rel.writes) === JSON.stringify(['claude-fable-5']), JSON.stringify(rel.writes)); }
+    // (b) the pool's request model reads the TARGET byte for byte as on the release (sessionModelFor over the same shapes)
+    const sm = (src) => { const { fn } = engOf(src); return new Function(fn('function modelsMatch(a, b) {') + '\n' + fn('function servedDefinesModel(s) {') + '\n' + fn('function sessionModelFor(s) {') + '\nreturn sessionModelFor;')(); };
+    const shapes = [
+      { _modelLocked: true, _lockedModel: 'claude-fable-5', _lockedContext: '1m', _servedModel: 'claude-opus-5-5', _spawnModel: 'fable[1m]' },
+      { _modelLocked: true, _lockedModel: 'claude-fable-5', _lockedContext: '1m', _servedModel: 'claude-fable-5', _pickedModel: 'fable[1m]', _pickedModelAt: 5 },
+      { _modelLocked: true, _lockedModel: 'claude-opus-5-5', _lockedContext: '1m', _servedModel: 'claude-opus-5-5', _servedViaFallback: { to: 'claude-opus-5-5' }, _pickedModel: 'opus[1m]', _pickedModelAt: 3 },
+    ];
+    const mine = sm(fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'));
+    const got = shapes.map((x) => mine(x));
+    if (relEng) {
+      const rel = sm(relEng), want = shapes.map((x) => rel(x));
+      ok('§B-6c55 (b) the pool\'s request model (sessionModelFor) answers byte for byte what the release answers over the same locked sessions with the fact — the TARGET, never target + [1m]', JSON.stringify(got) === JSON.stringify(want) && got[0] === 'claude-fable-5', JSON.stringify({ got, want }));
+      const planted = sm(relEng.replace('&& !(s._servedViaFallback?.to && modelsMatch(s._lockedModel, s._servedViaFallback.to))) return s._lockedModel;', "&& !(s._servedViaFallback?.to && modelsMatch(s._lockedModel, s._servedViaFallback.to))) return s._lockedModel + (s._lockedContext ? '[1m]' : '');"));
+      ok('§B-6c55 (b) RED CONTROL: a request model that read the commanded form (target + [1m]) differs from the release — the leg above can go red', JSON.stringify(shapes.map((x) => planted(x))) !== JSON.stringify(want));
+    }
+    const sw = require(path.join(REPO, 'src/server/stream-wall.js'));
+    const fr = sw.lockFrame(shapes[0], 'x');
+    ok('§B-6c55 (b) the chip\'s field is the target: the lock frame\'s lockedModel = claude-fable-5 (the fact rides beside it as lockedContext)', fr.data.lockedModel === 'claude-fable-5' && fr.data.lockedContext === '1m' && sw.ownModelOf(shapes[0]) === 'claude-fable-5', JSON.stringify(fr.data));
+  }
+  // the create's REAL block (its own text): a resume commands target + [1m]; a catalog with no 1M form for the model is SAID
+  {
+    const blockOf = (src) => { const a = src.indexOf('          // the saved fact applies only to the model the lock holds'), b = src.indexOf('          const sessionSpec = adapter.buildSessionArgs({', a); return a > 0 && b > a ? src.slice(a, b) : ''; };
+    const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), BLOCK = blockOf(wc);
+    ok('§B-6c55 the create\'s block exists and the spawn is commanded with it (model: commandModel); the lock target and the spawn model keep data.model', !!BLOCK && /const sessionSpec = adapter\.buildSessionArgs\(\{\s*cwd,\s*model: commandModel,/.test(wc) && /_lockedModel: data\.modelLock \? \(data\.lockModel \|\| data\.model \|\| null\) : null,/.test(wc) && /session\._spawnModel = data\.model \|\| null;/.test(wc));
+    const wcReq = createRequire(path.join(REPO, 'src/ws-create.js'));
+    const runCreate = (data, catalog) => {
+      const notices = [];
+      const fn = new Function('data', 'LOCKCTX', 'serverNotice', 'require', 'id', `${BLOCK}\nreturn commandModel;`);
+      if (!('_modelOrigin' in data)) data._modelOrigin = 'chosen';   // the person's own pick, unless a leg says otherwise
+      const cmd = fn(data, LC, (k, text, o) => notices.push({ k, text, o }), (m) => (m === './server/cli-model-catalog.js' ? { view: () => catalog } : wcReq(m)), 'sess-7-1');
+      return { cmd, notices, ctx: data._lockContext === undefined ? null : data._lockContext };
+    };
+    const fableCat = { models: [{ id: 'claude-fable-5', oneM: 'native' }, { id: 'claude-haiku-5', oneM: null }] };
+    const a = runCreate({ modelLock: true, lockModel: 'claude-fable-5', lockContext: '1m', model: 'claude-fable-5', resumeId: 'r1' }, null);
+    const b = runCreate({ modelLock: true, lockModel: 'claude-fable-5', lockContext: '1m', model: 'claude-fable-5', resumeId: 'r1' }, fableCat);
+    const c = runCreate({ modelLock: true, lockModel: 'claude-haiku-5', lockContext: '1m', model: 'claude-haiku-5', resumeId: 'r2' }, fableCat);
+    const d = runCreate({ modelLock: true, lockModel: 'claude-fable-5', model: 'claude-fable-5', resumeId: 'r3' }, fableCat);
+    const e = runCreate({ modelLock: false, lockContext: '1m', model: 'claude-fable-5', resumeId: 'r4' }, fableCat);
+    ok('§B-6c55 a resume of a locked conversation with the saved 1M ask commands claude-fable-5[1m] (no catalog read yet, or the catalog gives it a 1M form) — nothing said', a.cmd === 'claude-fable-5[1m]' && b.cmd === 'claude-fable-5[1m]' && !a.notices.length && !b.notices.length, JSON.stringify({ a: a.cmd, b: b.cmd }));
+    ok('§B-6c55 (c) the CLI\'s own catalog gives the model NO 1M form ⇒ the resume says so BY NAME (one level-2 notice keyed by the new session, its words a t() key naming the conversation and the model) — never a silent short context',
+      c.cmd === 'claude-haiku-5' && c.notices.length === 1 && c.notices[0].k === 'lock-context-sess-7-1' && c.notices[0].o.level === 2 && c.notices[0].o.i18n.key === LC.NO_LONG_CONTEXT && c.notices[0].o.i18n.params.model === 'claude-haiku-5' && /claude-haiku-5/.test(c.notices[0].text), JSON.stringify(c));
+    const c2 = runCreate({ modelLock: true, lockModel: 'claude-haiku-5[1m]', lockContext: '1m', model: 'claude-haiku-5[1m]', resumeId: 'r5', name: 'notes' }, fableCat);
+    ok('§B-6c55 (c) a target already in its [1m] form that the catalog gives no 1M ⇒ the resume commands it WITHOUT the mark, and says so', c2.cmd === 'claude-haiku-5' && c2.notices.length === 1 && c2.notices[0].o.i18n.params.name === 'notes', JSON.stringify(c2));
+    const gear = runCreate({ modelLock: true, lockModel: 'claude-fable-5', lockContext: '1m', model: 'claude-opus-5-5', resumeId: 'r6' }, null);
+    const inst = runCreate({ modelLock: true, model: 'fable[1m]', _modelOrigin: 'instance', resumeId: 'r7' }, null);
+    const chosen = runCreate({ modelLock: true, model: 'fable[1m]', _modelOrigin: 'chosen', resumeId: 'r8' }, null);
+    const remote = runCreate({ modelLock: true, lockModel: 'claude-haiku-5', lockContext: '1m', model: 'claude-haiku-5', resumeId: 'r9', hostId: 'm1' }, fableCat);
+    ok('§B-6c55 (a) a stale saved fact beside ANOTHER model (the gear set claude-opus-5-5 on a fable[1m] lock) is never applied; an instance default\'s [1m] is no fact (origin instance), the person\'s chosen one is; a REMOTE resume is not judged by this hub\'s catalog (commanded as asked)',
+      gear.cmd === 'claude-opus-5-5' && !gear.ctx && inst.ctx === null && chosen.ctx === '1m' && remote.cmd === 'claude-haiku-5[1m]' && !remote.notices.length, JSON.stringify({ gear, inst: inst.ctx, chosen: chosen.ctx, remote }));
+    const sc = { modelLock: true, lockModel: 'claude-fable-5', lockContext: '1m', model: 'claude-fable-5', resumeId: 'r10' }; runCreate(sc, null);
+    ok('§B-6c55 the spawn keeps what it COMMANDED beside its model (_spawnContext \'1m\' — meta spawnContext, restored at boot): a Lock on this process later reads it', sc._spawnContext === '1m' && /_spawnContext: data\._spawnContext \|\| null,/.test(wc) && /spawnContext: session\._spawnContext \|\| undefined,/.test(wc));
+    ok('§B-6c55 the catalog reads a dated first-party id and an alias (longContextOf)', LC.longContextOf({ models: [{ id: 'claude-opus-4-5', firstParty: 'claude-opus-4-5-20251101', oneM: null }], aliases: { opus: 'claude-opus-4-5' } }, 'claude-opus-4-5-20251101') === false && LC.longContextOf({ models: [{ id: 'claude-opus-4-5', oneM: null }], aliases: { opus: 'claude-opus-4-5' } }, 'opus[1m]') === false);
+    ok('§B-6c55 (a) no saved fact and a spawn model without [1m] commands the model as asked; no lock, no fact at all', d.cmd === 'claude-fable-5' && !d.ctx && e.cmd === 'claude-fable-5' && e.ctx === null, JSON.stringify({ d, e }));
+    const relWc = baseOf('src/ws-create.js');
+    if (relWc) ok('§B-6c55 RED CONTROL: the release\'s create had no such block — the spawn commanded data.model (claude-fable-5: the 1M ask dropped on every resume after a Lock)', !blockOf(relWc) && /const sessionSpec = adapter\.buildSessionArgs\(\{\s*cwd,\s*model: data\.model,/.test(relWc));
+  }
+  // the page's roads: the saved config keeps what the lock frame names; a resume carries it; a restart restores it
+  {
+    const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8'), br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8'), ss = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-state.js'), 'utf8');
+    ok('§B-6c55 WIRING: the model-lock op saves lockContext into the conversation\'s config; the resume passes savedCfg.lockContext; the create frame carries it only with the lock; the config keeps the key; a restart restores the meta\'s (both rebuilds)',
+      /if \(op\.subtype === 'model-lock' && op\.data && 'lockedContext' in op\.data\) this\._persistSessionConfig\(\{ lockContext: op\.data\.lockedContext \|\| undefined \}\);/.test(cv)
+      && /lockContext: savedCfg\.lockContext,/.test(sl) && /lockContext: modelLock && lockContext === '1m' \? '1m' : undefined,/.test(sl)
+      && /'modelLock', 'lockModel', 'lockContext', 'outputStyle'/.test(ss)
+      && (br.match(/_lockedContext: require\('\.\.\/lock-context\.js'\)\.lockContextOf\(meta\.lockedContext\),/g) || []).length === 2
+      && (br.match(/_spawnContext: require\('\.\.\/lock-context\.js'\)\.lockContextOf\(meta\.spawnContext\),/g) || []).length === 2);
+    const ir = require(path.join(REPO, 'src/inbox-reopen.js')), irs = fs.readFileSync(path.join(REPO, 'src/inbox-reopen.js'), 'utf8'), bar = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
+    ok('§B-6c55 WIRING: the For-you reopen carries the fact like every resume road; the bar\'s own pick under a lock writes its [1m] (or clears it), an unlock clears it — no server needed',
+      ir.REOPEN_CFG_KEYS.includes('lockContext') && /lockContext: c\.modelLock && c\.lockContext === '1m' \? '1m' : undefined,/.test(irs)
+      && /lockModel: model, lockContext: contextOf\(model\) \|\| undefined/.test(bar) && /\.\.\.\(nowLock \? \{\} : \{ lockContext: undefined \}\)/.test(bar));
+  }
+}
+
 console.log('\n§tree the patched copies never touch the tree');
 for (const r of copiesCensus(MUTF.files, MUTF.dir, REPO, { minCopies: 20 })) ok('§tree ' + r.name, r.pass, r.detail);
 

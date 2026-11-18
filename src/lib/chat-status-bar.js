@@ -33,6 +33,7 @@ import { openAccountModelsDialog } from './account-models.js';
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
 import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper, in the device's words
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { contextOf } from '../lock-context.js'; // B-6c55: a pick's 1M ask (PURE)
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
 const modelCore = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
@@ -2241,7 +2242,7 @@ export class ChatStatusBar {
         // the tooltip kept naming the old target while the server retried the
         // new one) — the server's retarget branch does the same with data.model
         if (this._modelLocked) this._lockedModel = model;
-        this._onConfigChange?.({ model, ...(this._modelLocked ? { lockModel: model } : {}) });
+        this._onConfigChange?.({ model, ...(this._modelLocked ? { lockModel: model, lockContext: contextOf(model) || undefined } : {}) });   // B-6c55: the pick IS the ask — its [1m] (or none) beside the lock, also where no server answers
         // optimistic; the CLI's own confirmation (set_model echo / codex
         // turn_context) overwrites this with the RESOLVED id
         this._statusModel = model;
@@ -2357,7 +2358,7 @@ export class ChatStatusBar {
           this._ws.send({ type: 'set-model', sessionId: this._sessionId, lock: nowLock, lockModel: nowLock ? (this._statusModel || undefined) : undefined });
           // Persist the target as the session's model config too, so a resume
           // spawns on it and the lock re-arms with the right target.
-          this._onConfigChange?.({ modelLock: nowLock, lockModel: nowLock ? this._statusModel : undefined, ...(nowLock && this._statusModel ? { model: this._statusModel } : {}) });
+          this._onConfigChange?.({ modelLock: nowLock, lockModel: nowLock ? this._statusModel : undefined, ...(nowLock && this._statusModel ? { model: this._statusModel } : {}), ...(nowLock ? {} : { lockContext: undefined }) });   // B-6c55: an unlock clears the fact (the server's frame names a Lock's)
           this.render();
         };
         dropdown.appendChild(lockItem);

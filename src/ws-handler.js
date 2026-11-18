@@ -686,6 +686,7 @@ function registerWsHandler(wss, ctx) {
           // (a lock set or lifted) changes no model (law D). THE LOCK ROAD IS MASTER'S CODE (round 14): what a Lock holds, its echo
           // upgrade (A5), the repin — master's lines; where the 1M context lives is B-6c55's.
           const MA = require('./server/model-ask.js');
+          const LOCKCTX = require('./lock-context.js');   // B-6c55: the context a lock keeps (PURE)
           const door = MA.setModelDoor(data);
           // the refusal names its press (reqId) and its REASON (a code the client turns into the person's language — r7)
           const refuse = (reason, why) => { try { ws.send(JSON.stringify({ type: 'error', code: 'model-refused', reason, scope: 'action', sessionId: data.sessionId, reqId: data.reqId ?? null, error: `Model not changed: ${why}`, message: `Model not changed: ${why}` })); } catch { } };
@@ -708,16 +709,19 @@ function registerWsHandler(wss, ctx) {
               // safety-reroute completes the flagged turn on the fallback,
               // but every subsequent turn re-attempts the original model.
               if ('lock' in data) {
+                // B-6c55: the PERSON's context ask beside the target — their pick, else what their spawn commanded — only when it names the locked model
+                session._lockedContext = data.lock ? LOCKCTX.contextAskFor({ picked: session._pickedModel, spawn: session._spawnModel, spawnContext: session._spawnContext }, data.lockModel || session._servedModel || null, MA.sameModel) : null;
                 session._modelLocked = !!data.lock;
                 session._lockedModel = data.lock ? (data.lockModel || session._servedModel || null) : null;
-                lockSaid = Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), modelLocked: session._modelLocked, lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {   // round 2 (law B): a person's act — the writer's NEXT write, the ANSWER after it
+                lockSaid = Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext }, { durable: true }) : true).then((ok) => {   // round 2 (law B): a person's act — the writer's NEXT write, the ANSWER after it
                   broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
                   broadcastActiveSessions(); ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
                 }, () => { });
               } else if (model && session._modelLocked) {
                 // changing the model while locked re-targets the lock
+                session._lockedContext = LOCKCTX.lockContextFor(model);   // B-6c55: [1m] or none
                 session._lockedModel = model;
-                lockSaid = Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {
+                lockSaid = Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), lockedModel: session._lockedModel, lockedContext: session._lockedContext }, { durable: true }) : true).then((ok) => {
                   broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
                   ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
                 }, () => { });
@@ -1427,6 +1431,7 @@ function registerWsHandler(wss, ctx) {
               // reconnecting second client showing LOCKED forever after an unlock
               chatStatus.modelLocked = !!session._modelLocked;
               chatStatus.lockedModel = session._lockedModel || null;
+              chatStatus.lockedContext = session._lockedContext || null;   // B-6c55: the person's context ask beside the target
               session._transcriptModel = chatStatus.lastAsked || chatStatus.model || null;   // the model the conversation would continue with — the record's LAST (round 11; else the attach's) — a Lock's target when nothing else is known (round 9)
               // THE MODEL FACTS (lane fable-52-cli-321 r4): the ask (the lock, else the pick, else the spawn model), the lock and the
               // served model, each numbered from the conversation's one counter — the chip shows these and nothing a client draws

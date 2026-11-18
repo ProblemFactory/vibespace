@@ -696,6 +696,8 @@ function restoreSessions() {
       forkedFrom: meta.forkedFrom || null,
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
+      _lockedContext: require('../lock-context.js').lockContextOf(meta.lockedContext),   // B-6c55
+      _spawnContext: require('../lock-context.js').lockContextOf(meta.spawnContext),     // B-6c55: what the spawn commanded
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _initialGroupIds: spawnGroupIds(meta), // lane new-session-form: every group it was spawned into (meta `taskIds`; an older meta's one `taskId`)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
@@ -998,6 +1000,8 @@ async function readoptOrphanKeeperSessions() {
       _authAtSpawn: meta.authAtSpawn || null,
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
+      _lockedContext: require('../lock-context.js').lockContextOf(meta.lockedContext),   // B-6c55
+      _spawnContext: require('../lock-context.js').lockContextOf(meta.spawnContext),     // B-6c55: what the spawn commanded
       _initialGroupId: meta.taskId || null,
       _initialGroupIds: spawnGroupIds(meta),
       _remotePort: rport,

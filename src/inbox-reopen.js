@@ -28,7 +28,7 @@ const { resumeSpawnPick } = require('./resume-continuity.js');
 const NO_TRANSCRIPT_HERE = 'no transcript of this conversation was found on this machine — it cannot be reopened here';
 
 /** The fields of a conversation's config a resume carries (session-lifecycle resumeSession's `savedCfg.*` reads). */
-const REOPEN_CFG_KEYS = Object.freeze(['model', 'permission', 'effort', 'outputStyle', 'worktree', 'autoResume', 'account', 'modelLock', 'lockModel', 'poolPin', 'tools']);
+const REOPEN_CFG_KEYS = Object.freeze(['model', 'permission', 'effort', 'outputStyle', 'worktree', 'autoResume', 'account', 'modelLock', 'lockModel', 'lockContext', 'poolPin', 'tools']);
 
 const str = (v) => (typeof v === 'string' ? v : '');
 /** "host: /path" (a merged record's display cwd) → the real path — the client's stripCwdHostLabel (src/lib/utils.js). */
@@ -70,7 +70,7 @@ function reopenCreate({ key, entry = null, item = null, cfg = null, defaults = n
     resume: true, resumeId: conv.id, cols: 120, rows: 30, reqId: str(reqId) || undefined,
     taskId: str(taskId) || undefined,
     accountId: str(c.account) || undefined,
-    modelLock: c.modelLock || undefined, lockModel: c.lockModel || undefined,
+    modelLock: c.modelLock || undefined, lockModel: c.lockModel || undefined, lockContext: c.modelLock && c.lockContext === '1m' ? '1m' : undefined,   // B-6c55
     poolPin: pin ? { memberId: pin.memberId, at: pin.at || null, ...(pin.poolId ? { poolId: pin.poolId } : {}) } : undefined,
   };
   return { ok: true, data, conversation: { backend: conv.backend, backendSessionId: conv.id, cwd, hostId: hostId || null, name: str(name) || null } };

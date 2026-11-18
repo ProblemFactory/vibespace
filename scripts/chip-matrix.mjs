@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+const LOCKCTX_CM = (await import('node:module')).createRequire(import.meta.url)('../src/lock-context.js');   // B-6c55: the bar's pick closure calls contextOf
 
 /** The doors a model chip is painted from (rounds 10 and 11), each a scene of steps over one root's real code. */
 export const DOORS = Object.freeze([
@@ -141,7 +142,8 @@ export async function driveChipMatrix(root) {
     // the road a view takes when its conversation ENDS while it stays open (chat-view's own _setReadOnly, its text)
     const ro = cv.indexOf('  _setReadOnly() {');
     const setRO = ro >= 0 ? new Function(cv.slice(cv.indexOf('{', ro) + 1, cv.indexOf('\n  }\n', ro))) : null;
-    const bindArrow = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP.namedModel || ((m) => m));
+    // (B-6c55: the tree's pick closure calls contextOf, its module import — handed in; a closure that names none ignores it)
+    const bindArrow = (src, bar) => new Function('showToast', 't', 'dropdown', 'namedModel', 'contextOf', `return (${src});`).call(bar, () => { bar.__toasts = (bar.__toasts || 0) + 1; }, (x) => x, { remove() { } }, MP.namedModel || ((m) => m), LOCKCTX_CM.contextOf);
 
     // Claude record lists — what a stopped / resumed conversation's chatStatus() reads:
     //   two models in one process (asked A, served B last: the cumulative modelUsage's FIRST key stays A);

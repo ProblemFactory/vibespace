@@ -792,8 +792,8 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
   const sumM = (i) => M.reduce((n, r) => n + r[i], 0);
   ok(!pm.length, `session-meta: ${gm.size} scopes — ${sumM(2)} writes durable before the answer (bindings, a person's acts), ${sumM(3)} paced (stamps, caches, rings, a first version written synchronously)`, pm.slice(0, 8));
   const WH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  const lockW = "modelLocked: session._modelLocked, lockedModel: session._lockedModel }, { durable: true })";
-  ok(WH.includes(lockW) && judgeM(metaSites({ 'src/ws-handler.js': WH.replace(lockW, "modelLocked: session._modelLocked, lockedModel: session._lockedModel })") })).some((x) => x.startsWith('MOVED: src/ws-handler.js|registerWsHandler > handleMessage')),
+  const lockW = "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext }, { durable: true })";   // B-6c55: the fact rides the same durable write
+  ok(WH.includes(lockW) && judgeM(metaSites({ 'src/ws-handler.js': WH.replace(lockW, "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext })") })).some((x) => x.startsWith('MOVED: src/ws-handler.js|registerWsHandler > handleMessage')),
     'CONTROL: the model lock without `durable` (a person\'s act paced) is red by name');
   const SS = fs.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
   ok((SS.match(/sessionStatus\.persisted\(\)/g) || []).length === 2 && /persisted\(\) \{/.test(fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8')),
