@@ -1353,7 +1353,7 @@ class MountManager {
     this._countCacheFiles(this._cacheDirOf(m), T.countCap)
       .then((c) => { st.files = c.n; st.capped = c.capped; this._notify(); }, () => {});
     this._notify();
-    const done = this._waitMounted(m, pid)
+    const done = this._waitMounted(m, pid, mp)
       .then((r) => { if (r !== 'mounted') this._starting.delete(m.id); return this._startSettled(m, mp, r, opts); })
       .catch((e) => { this._errors.set(m.id, String(e.message || e)); return false; })
       .finally(() => { if (this._starting.get(m.id) === st) this._starting.delete(m.id); this._notify(); });
@@ -1363,7 +1363,7 @@ class MountManager {
   /** Wait for the fuse mount WHILE ITS DAEMON LIVES (never a fixed 5 s):
    *  'mounted' | 'died' (pid gone) | 'hung' (no CPU progress for hungMs) |
    *  'ceiling' — the last two SIGKILL it. Progress = utime+stime. */
-  _waitMounted(m, pid) {
+  _waitMounted(m, pid, mp0) {
     const T = this._startingT || MountManager.STARTING;
     const o = this._procOpts || {}, popts = { ...(o.procRoot ? { procRoot: o.procRoot } : {}), ...(o.kill ? { kill: o.kill } : {}), ...(o.ps ? { ps: o.ps } : {}), what: 'the daemon of a storage mount point' };
     return new Promise((resolve) => {
@@ -1374,13 +1374,15 @@ class MountManager {
         const cpu = await this._cpuTicks(pid);
         if (cpu == null) return resolve('died');
         if (mark == null) mark = cpu;
-        if (!asked) { asked = true; const rec = this._daemonIds && this._daemonIds.get(this.pathOf(m)); ident = rec && rec.pid === pid ? rec : PI.identityOf(pid, popts); }   // B-e783 cure: ONCE, at the first tick, while it lives — the record (the spawn's, the adopt's) or its own stat line (no /proc: PI's ps, once)
+        if (!asked) { asked = true; const rec = this._daemonIds && this._daemonIds.get(mp0 || this.pathOf(m)); ident = rec && rec.pid === pid ? rec : PI.identityOf(pid, popts); }   // B-e783 cure: ONCE, at the first tick, while it lives — the record (the spawn's, the adopt's) or its own stat line (no /proc: PI's ps, once)
         const now = Date.now();
         if (cpu - mark >= T.progressTicks) { mark = cpu; markAt = now; }
         const verdict = now - markAt >= T.hungMs ? 'hung' : now - t0 >= T.ceilingMs ? 'ceiling' : null;
         if (verdict) {   // B-e783 cure: by identity, like every road (a recycled pid is never signalled; a refusal is said)
           const r = ident ? PI.signalIdentity(ident, 'SIGKILL', popts) : { ok: false, why: 'unknown-identity' };
-          if (!r.ok) console.warn(`[mounts] mount ${m.id}: the ${verdict} daemon was not signalled (${r.why})`);   // the record id, never its name
+          if (r.ok) { (this._killed || (this._killed = new Map())).set(ident.pid + ':' + ident.starttime, Date.now()); const mp = mp0 || this.pathOf(m); if (this._daemonIds && this._daemonIds.get(mp)?.pid === ident.pid) this._daemonIds.delete(mp); }   // cure 2: killed by this manager — never recorded or adopted while it lingers (the walk's mp, the wait's own)
+          else if (r.why === 'gone' || r.why === 'pid-recycled') return resolve('died');   // cure 2: it ended (a zombie, or its pid now another process's) before the kill — «died», never «hung … killed»
+          else console.warn(`[mounts] mount ${m.id}: the ${verdict} daemon was not signalled (${r.why})`);   // the record id, never its name
           return resolve(verdict);
         }
         setTimeout(tick, T.pollMs);
@@ -1616,8 +1618,8 @@ class MountManager {
   async _daemonState(mp) {
     if (!hasProc(this._procOpts)) return 'noproc';
     if (this._recordedAlive(mp)) return 'alive';
-    let w; try { w = await this._walk({ mp }); } catch (e) { if (e && e.partial && e.partial.length) { this._record(mp, e.partial[0]); return 'alive'; } return 'unknown'; }   // B-e783 cure: what the walk NAMED before a stall is alive (recorded)
-    if (w.ids.length) return 'alive';
+    let w; try { w = await this._walk({ mp }); } catch (e) { const named = this._unkilled((e && e.partial) || []); if (named.length) { this._record(mp, named[0]); return 'alive'; } return 'unknown'; }   // B-e783 cure: what the walk NAMED before a stall is alive (recorded)
+    if (this._unkilled(w.ids).length) return 'alive';
     return w.unread > 0 ? 'unknown' : 'dead';
   }
 
@@ -1636,6 +1638,8 @@ class MountManager {
     if (a === false) this._daemonIds.delete(mp);
     return null;
   }
+  /** cure 2: the ids a walk named, less any this manager killed while that walk ran, or that ended since — never handed out, never «alive» for it. */
+  _unkilled(list) { if (!list.length) return list; const k = this._killed, o = this._procOpts && this._procOpts.procRoot ? { procRoot: this._procOpts.procRoot } : undefined; return list.filter((x) => !(k && k.has(x.pid + ':' + x.starttime)) && PI.aliveIdentity({ pid: x.pid, starttime: x.starttime }, o) !== false); }   // r5: nor one that has ended since (its key pruned by a later walk) — its stat line
   _record(mp, id) { if (this._killed && this._killed.has(id.pid + ':' + id.starttime)) return; (this._daemonIds || (this._daemonIds = new Map())).set(mp, { pid: id.pid, starttime: id.starttime }); }   // a daemon this manager killed is never recorded (it lingers)
 
   /** The daemon THIS hub spawned is known from its first moment: the pid and its start time — ONE stat line, read at once (no
@@ -1654,7 +1658,6 @@ class MountManager {
     let pids;
     try { const p = (await this._daemonPids(mp, { strict: true }))[0] || 0; ct.delete(mp); return p; }
     catch (e) {
-      if (e && e.partial && e.partial.length) { ct.delete(mp); this._record(mp, e.partial[0]); return e.partial[0].pid; }
       if (e && e.code === 'no_proc') return 0;
       pids = (e && e.unreadPids) || [];
     }
@@ -1675,10 +1678,11 @@ class MountManager {
     if (rec) return [rec.pid];
     let w;
     try { w = await this._walk({ mp }); }
-    catch (e) { if (e && e.partial && e.partial.length) { this._record(mp, e.partial[0]); return e.partial.map((x) => x.pid); } throw e; }   // B-e783 cure: what the walk NAMED before a stall is alive (the probe keeps its CPU witness)
-    if (w.ids.length) this._record(mp, w.ids[0]);
+    catch (e) { const named = this._unkilled((e && e.partial) || []); if (named.length) { this._record(mp, named[0]); return named.map((x) => x.pid); } if (e) e.partial = named; throw e; }   // a stall's rethrow carries only the living (no caller adopts the dying daemon)   // B-e783 cure: what the walk NAMED before a stall is alive (the probe keeps its CPU witness)
+    const ids = this._unkilled(w.ids);
+    if (ids.length) this._record(mp, ids[0]);
     else if (strict && w.unread > 0) throw Object.assign(new Error('a process could not be read'), { code: 'walk_unknown', partial: [], unreadPids: w.unreadPids });
-    return w.ids.map((x) => x.pid);
+    return ids.map((x) => x.pid);
   }
 
   /** B-e783: THE walk of /proc for the daemons of a mount point (or, `authorize`, for orphaned rclone authorize processes) —
@@ -1702,7 +1706,7 @@ class MountManager {
     const killed = this._killed || (this._killed = new Map()), skip = this._unreadable || (this._unreadable = new Map());
     const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
     const ids = [], seen = new Set();
-    let unread = 0, inFlight = null, stalled = null, timer = null, stopped = false;
+    let unread = 0, inFlight = null, stalled = null, timer = null, stopped = false, listedAt = Infinity;
     const unreadPids = [], cant = (pid) => { unread++; unreadPids.push(Number(pid)); };
     const read = (key, p) => { inFlight = key; clearTimeout(timer); timer = setTimeout(() => stalled && stalled(), this._readMs || READ_MS); if (timer.unref) timer.unref(); return p.finally(() => { inFlight = null; clearTimeout(timer); }); };
     const stall = new Promise((_, rej) => { stalled = () => rej(Object.assign(new Error('a /proc read did not answer'), { code: 'walk_stalled' })); });
@@ -1710,6 +1714,7 @@ class MountManager {
       if (!authorize) owners = await this._logOwners(read);
       if (stopped) return;
       const pids = (await read(null, fs.promises.readdir(root))).filter((n) => /^\d+$/.test(n) && Number(n) !== process.pid);
+      listedAt = Date.now();   // cure 2 r3: a kill stamped after this listing is not judged by it
       for (const pid of pids) {
         if (stopped) return;
         seen.add(pid);
@@ -1754,8 +1759,7 @@ class MountManager {
     }
     finally { clearTimeout(timer); }
     for (const k of [...skip.keys()]) if (!seen.has(k.split(':')[0])) skip.delete(k);   // that process is gone: forgotten
-    const now = Date.now();
-    for (const [k, at] of killed) if (now - at > 60000) killed.delete(k);   // a killed daemon is gone well within a minute
+    for (const [k, at] of [...killed]) if (at < listedAt && !seen.has(k.split(':')[0])) killed.delete(k);   // cure 2: forgotten only when that process is gone from a listing taken AFTER its kill (a killed daemon asleep in the kernel can linger past any clock)
     return { ids, unread, unreadPids };
   }
 
