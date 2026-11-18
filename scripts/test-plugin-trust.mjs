@@ -203,7 +203,11 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
   const store = { resolveIntegration: (id) => { if (id !== 'plugin-git') throw new Error('unknown integration'); return credValues ? { source: 'user', values: { ...credValues }, whyCode: null, why: null } : { source: 'none', values: {}, whyCode: 'no-values', why: 'no key of your own and no cluster default' }; } };
   const GR = path.join(G, 'root'); fs.mkdirSync(path.join(GR, 'data', 'plugins'), { recursive: true });
   const quiet = { log() {}, warn() {} };
-  const PL = require(path.join(REPO, 'src/server/plugin-loader.js')).create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: 1500 });
+  // B-518e (the coordinator's law 2026-11-18 00:24Z: a fast leg's verdict is a count or an order, never a short limit a loaded
+  // machine can miss): every leg that EXPECTS a clean install gives git a limit far above the stub's own time; the one
+  // deliberate timeout leg below (gitTimeoutMs 600 over a git that never answers) keeps its short limit on purpose
+  const CLEAN_GIT_MS = 60000;
+  const PL = require(path.join(REPO, 'src/server/plugin-loader.js')).create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: CLEAN_GIT_MS });
   const URL_H = URL_HTTPS, URL_S = URL_SSH;
   const thr = async (p) => { try { await p; return null; } catch (e) { return e; } };
   const fetchOf = (cs) => cs.find((c) => c.argv.includes('fetch')) || null;
@@ -288,7 +292,7 @@ console.log('— git source + the Plugin Git credential (lane engine-distributio
     ok(LSRC.includes(anchor), 'control ⑦b: the git branch of unchanged is in plugin-loader.js', anchor);
     const moved = (u, rec, sha) => !!u && u.unchanged === false && rec?.sha === sha && u.plugin?.version === '1.0.2';
     const before = PL.installRecord('acme.private');
-    const mut = M.load('src/server/plugin-loader.js', LSRC.replace(anchor, "inst.source === 'git' ? !!r.sha :"), 'unchanged-git').create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: 1500 });
+    const mut = M.load('src/server/plugin-loader.js', LSRC.replace(anchor, "inst.source === 'git' ? !!r.sha :"), 'unchanged-git').create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: CLEAN_GIT_MS });
     const sha3 = FX.commit({ 'vibespace-plugin.json': pkg('1.0.2') });
     const um = await mut.update('acme.private');
     ok(before.ref === 'main' && before.sha === sha2 && sha3 !== sha2 && um.unchanged === true && !moved(um, mut.installRecord('acme.private'), sha3), 'RED CONTROL ⑦b: a loader whose git branch ignores the recorded sha answers unchanged: true on a ref that moved — the leg below refuses it', { unchanged: um.unchanged, sha: mut.installRecord('acme.private')?.sha });
