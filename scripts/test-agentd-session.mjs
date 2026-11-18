@@ -267,9 +267,9 @@ if (!fs.existsSync('/proc/self/environ')) {
   //    the same held daemon hands it straight down — the leg can go red
   const bundleSrc = fs.readFileSync(bundle, 'utf8');
   // esbuild re-spells the source line (`...(extra || {})` loses its parens), so
-  // the anchor is a regex over the BUNDLE and the source pin below keeps the
-  // source spelling; both must hit exactly once
-  const ANCHOR = 'const merged = { ...daemonEnv(process.env), ...(extra || {}) };';
+  // the anchor is a regex over the BUNDLE and the source pin (its ANCHOR, in the
+  // fast scripts/test-agentd-session-pins.mjs since B-94d3) keeps the source
+  // spelling; both must hit exactly once
   const BUNDLE_RE = /const merged = \{ \.\.\.daemonEnv\(process\.env\), \.\.\.\(?extra \|\| \{\}\)? \};/g;
   check('the built bundle carries the sanitized spawnEnv base exactly once (patch anchor)', (bundleSrc.match(BUNDLE_RE) || []).length === 1, String((bundleSrc.match(BUNDLE_RE) || []).length));
   const preBundle = path.join(tmp, 'agentd-prefix.js');

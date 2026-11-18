@@ -4,6 +4,9 @@
 // every patched-copy CONTROL (with its premise) stay there: §1 the ONE surface (the grep census over src/lib + the two windows'
 // wiring), the server half's install pin, §9 the last-close route + the new words' zh / ja, §ARD the one subtle fallback. Each
 // reads the file it pins BY NAME (§1 lists src/lib), so ci.mjs's affected rule selects this suite on a change of that file.
+// UNCONDITIONAL HERE, ON PURPOSE (a stronger gate than the heavy's): in the heavy the server half's install pin sat in the
+// `else` branch of `if (!fs.existsSync('/proc/self/stat'))`, so a host without procfs skipped it with the stop-rule legs. It
+// reads only server.js, which every host has, so here it runs on every host.
 // Run: node scripts/test-vnc-view-pins.mjs
 import fs from 'node:fs';
 import path from 'node:path';

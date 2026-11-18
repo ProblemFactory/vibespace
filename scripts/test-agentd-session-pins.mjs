@@ -4,6 +4,9 @@
 // there: the wiring pins — the three daemon birth sites name the sanitizer, and no raw process.env env literal survives in the
 // daemon tier (with the raw-literal rule's own control). Each reads the file it pins BY NAME, so ci.mjs's affected rule selects
 // this suite on a change of that file.
+// UNCONDITIONAL HERE, ON PURPOSE (a stronger gate than the heavy's): in the heavy these pins sat in the `else` branch of
+// `if (!fs.existsSync('/proc/self/environ'))`, so a host without procfs skipped them with the environ legs. They read only
+// source text, which every host has, so here they run on every host.
 // Run: node scripts/test-agentd-session-pins.mjs
 import fs from 'node:fs';
 import path from 'node:path';

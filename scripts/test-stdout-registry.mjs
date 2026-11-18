@@ -1907,11 +1907,7 @@ console.log('— wiring pins');
   ok('test-harness-contract pins descriptor↔consumer coverage; ci.mjs runs this suite; test-session-schema + test-attach-rebuild scan src/server/stdout/', /hasConsumer\(h\.caps\.streamProtocol\)/.test(read('scripts/test-harness-contract.mjs')) && /'test-stdout-registry'/.test(read('scripts/ci.mjs')) && /src\/server\/stdout/.test(read('scripts/test-session-schema.mjs')) && /src\/server\/stdout/.test(read('scripts/test-attach-rebuild.mjs')));
   // B3 turn truth (§2.5/§2.10/§2.11) — the seams a green unit test cannot see
   {
-    const cs = read('src/server/stdout/claude-stream-json.js');
-    const ad = read('src/adapters/claude-code.js');
-    const mm = read('src/message-manager.js');
-    const wsh = read('src/ws-handler.js');
-    const srv = read('server.js');
+    // (its five source reads went with the seams' pins to scripts/test-stdout-registry-pins.mjs — B-94d3)
     // FUNCTIONAL, not a regex: the record only exists if the real adapter puts
     // the env on the real spawn spec. A grep would pass on a commented-out line.
     {
