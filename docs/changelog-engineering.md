@@ -1200,6 +1200,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Round 2 (主开发 17:56Z — one small commit).** The check reads the proxy's login into the call alone (never the forwarders' shared entry; dropped in the finally) AFTER the running-road comparison; its forwarder admits its one host only; the close proven on an answer, an unreadable answer and a time-out (RED: the close removed); `exit_external_browser` before the address is asked; the three new codes' statuses; a refused row's mark drops when the stored value changes from another page; the dialog's address in use is the stored one.
 - **The restack onto 2.369.410 — three of the release's laws met** (2026-11-18): test-browser-proxy and test-browser-exit take the ONE guarded helper (B-1747, test-ci-gate-tiers §7b: every condition a boolean, written `!!(…)` where it was a value); test-agent-leak-census gets the wiring's `browserProxyLogins` construction as a catalog row (eval, real over the scratch vault); the fast tier's cap rises by arithmetic to 1256 s (the release's 1249.353 s + the two new rows 3.2 s and 2.5 s).
 
+
 ## 2.369.410 — 2026-11-18
 
 ### bl-mail B-2f6c — a Gmail re-authorize after a Disconnect never read the mail added to known threads
