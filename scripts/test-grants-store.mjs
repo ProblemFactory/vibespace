@@ -195,7 +195,7 @@ const { makeRecord, makeConversation } = require('../src/channel-record.js');
 const CH = require('../src/channels/index.js');
 const ENG = require('../src/server/channels-engine.js');
 let worldN = 0;
-async function world() {
+async function world({ live: liveIn = null } = {}) {   // lane lg-group-parents (cure 3's read): + the live sessions a leg needs
   const A = 'gsx', OPS = 'ops';
   const recs = []; let seq = 0;
   const mint = (text) => makeRecord({ adapterId: A, convId: OPS, vendorId: `gsx-${++seq}`, at: Date.now() + seq, author: { id: 'u-ada', name: 'Ada', isSelf: false, isBot: false }, text, mentions: [], attachments: [], replyTo: null, threadKey: OPS, raw: {} });
@@ -210,7 +210,7 @@ async function world() {
   fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), J({ v: 1, adapters: [{ id: A, kind: A, label: 'GSX', enabled: true, linkedAt: 1, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null }] }));
   const registry = CH.createChannelRegistry(); registry.register(mod);
-  const live = [{ cid: 'm1', name: 'One', groups: ['g1'] }, { cid: 'm2', name: 'Two', groups: ['g1'] }];
+  const live = liveIn || [{ cid: 'm1', name: 'One', groups: ['g1'] }, { cid: 'm2', name: 'Two', groups: ['g1'] }];
   const base = Date.now(); let offset = 0;
   const e = ENG.create({ dataDir, env: {}, registry, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: ladder, userTodos: { add() { return { id: 't' }; }, get() { return null; }, setStatus() {} }, serverSetting: () => undefined, liveSessions: () => live, now: () => base + offset });
   await e.pass(A, { force: true });
@@ -765,7 +765,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const acctFirst6 = CF6.validateWatchers([w6], [], { inherited: [acctP6, ruleP6], members: members6, except: [] });
     ok(!ruleFirst6.ok && acctFirst6.ok, 'cure 3: the FIRST row per group decides — the callers list them in the store\'s precedence (a rule\'s row before the account\'s), never a union over grains', { ruleFirst: ruleFirst6.ok, acctFirst: acctFirst6.ok });
     const ca6 = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
-    ok(/return \[\.\.\.pats, \.\.\.acc, \.\.\.grants\];/.test(ca6) && /for \(const pa of rankedPatternsOf\(en\.adapterId\)\) if \(pa && pa\.pattern && pa\.id !== skipRule/.test(ca6) && /const rankedPatternsOf = \(adapterId\) => rawPatternsOf\(adapterId\)\.slice\(\)\.sort\(\(a, b\) => \(Number\(a\.createdAt\) \|\| 0\) - \(Number\(b\.createdAt\) \|\| 0\) \|\| String\(a\.id\)\.localeCompare\(String\(b\.id\)\)\);/.test(ca6), 'cure 3: the server lists the rows above a conversation in the store\'s precedence — the matching rules (oldest first, as effectiveGrants ranks them) before the account');
+    ok(/return \[\.\.\.pats, \.\.\.acc, \.\.\.grants\];/.test(ca6) && /for \(const pa of rankedPatternsOf\(en\.adapterId\)\) if \(pa && pa\.pattern && pa\.id !== skipRule/.test(ca6) && /const rankedPatternsOf = \(adapterId\) => F\.rankPatterns\(rawPatternsOf\(adapterId\)\);/.test(ca6) && /const ranked = rankPatterns\(\(Array\.isArray\(patterns\) \? patterns : \[\]\)\.filter\(\(x\) => x && x\.pattern\)\);/.test(fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8')) && JSON.stringify(CF6.rankPatterns([{ id: 'b', createdAt: 5 }, { id: 'c' }, { id: 'a', createdAt: 5 }, null]).map((x) => x.id)) === JSON.stringify(['c', 'a', 'b']), 'cure 3: the server lists the rows above a conversation in the store\'s precedence — the matching rules before the account, ranked by ONE function (F.rankPatterns: oldest first, a missing time first, then id) that effectiveGrants reads too');
   }
   // cure 3 (b): the editor judges a Notify… save from the SAME rows as the server — its rows above carry each row's own «除了»
   // (the real engine's conversation view), a rule's listed before the account's
@@ -780,6 +780,20 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const ev7 = ca7.slice(ca7.indexOf('  function eligibleAboveView(en) {'), ca7.indexOf('  function grainView('));
     ok(ev7.indexOf("add(r.principal, 'pattern', r.except)") > 0 && ev7.indexOf("add(r.principal, 'pattern', r.except)") < ev7.indexOf("add(r.principal, 'account', r.except)") && /\.\.\.\(p\.kind === 'group' && p\.only === true \? \{ only: true \} : \{\}\) \}, via, \.\.\.\(Array\.isArray\(ex\) \? \{ except: \[\.\.\.ex\] \} : \{\}\)/.test(ev7), 'cure 3 (b): a rule\'s rows before the account\'s (the first per principal is the one in effect), each with its «除了» and «仅本组»');
     try { wb6.e.stop(); } catch { }
+  }
+  // cure 3's read (a should taken): the save and the wake on ONE real engine — P holds the account (no «除了») and the conversation
+  // (child X left out): a member of X is refused at the save by name; a member of the other child Y is saved via P and WOKEN
+  {
+    const P8 = { kind: 'group', id: 'tg-p', name: 'Parent' };
+    const w8 = await world({ live: [{ cid: 'kx', name: 'KidX', groups: ['tg-x'], inherited: ['tg-p'] }, { cid: 'ky', name: 'KidY', groups: ['tg-y'], inherited: ['tg-p'] }] });
+    const a8 = await w8.e.setAccess(w8.A, { kind: 'account' }, [{ principal: P8, authority: 'draft' }]);
+    const c8 = await w8.e.setAccess(w8.A, w8.C, [{ principal: P8, authority: 'draft' }], { except: [{ kind: 'group', id: 'tg-x' }] });
+    const wOf8 = (cid, name) => ({ principal: { kind: 'agent', id: cid, name }, notify: 'wake', mode: 'all', dailyWakeCap: 50 });
+    const sx8 = await w8.e.setWatchers(w8.A, w8.C, [wOf8('kx', 'KidX')]);
+    const sy8 = await w8.e.setWatchers(w8.A, w8.C, [wOf8('ky', 'KidY')]);
+    await w8.ingest(2);
+    ok(!!a8 && a8.ok === true && !!c8 && c8.ok === true && !!sx8 && sx8.ok === false && /left out through its parent Task Group "Parent"|has no access here/.test(String(sx8.error || '')) && !!sy8 && sy8.ok === true && w8.ladder.calls.includes('ky') && !w8.ladder.calls.includes('kx'), 'cure 3 (the save and the wake on ONE real engine): P on the account and on the conversation with X left out — a member of X is refused at the save by name; a member of Y is saved via P and woken', { a8: a8 && a8.ok, c8: c8 && c8.ok, sx8, sy8: sy8 && sy8.ok, calls: w8.ladder.calls });
+    try { w8.e.stop(); } catch { }
   }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [

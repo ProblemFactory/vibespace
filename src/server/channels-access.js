@@ -218,7 +218,7 @@ function create(engineCtx) {
   const rawPatternsOf = (adapterId) => Object.values(store.index.table('patternAssignments') || {}).filter((p) => p && p.adapterId === adapterId);
   // lane lg-group-parents (cure 3): the rules in effectiveGrants' order (oldest first, then id) — the rows above a conversation are
   // listed in the store's precedence (a rule's before the account's), the order the via judge's first-row-per-group reads
-  const rankedPatternsOf = (adapterId) => rawPatternsOf(adapterId).slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+  const rankedPatternsOf = (adapterId) => F.rankPatterns(rawPatternsOf(adapterId));   // ONE ranker (cure 3's read): effectiveGrants' own
   function accountGrainOf(adapterId) { const tb = store.index.table('accountAssignments'); return overlay((tb && tb[adapterId]) || null, 'account', adapterId); }
   function patternsOf(adapterId) { return rawPatternsOf(adapterId).map((pa) => overlay(pa, 'pattern', pa.id)).filter(Boolean); }
   function patternById(id) { const tb = store.index.table('patternAssignments') || {}; return tb[id] ? overlay(tb[id], 'pattern', id) : null; }

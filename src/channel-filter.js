@@ -1592,6 +1592,9 @@ function patternSummary(pattern) {
  * `source` = the finest grain holding any row (the row chip's "(account)" /
  * "(rule)").
  */
+/** THE rules' precedence — oldest first, then id (lane lg-group-parents, cure 3's read: ONE ranker). effectiveGrants reads the
+ *  matching rules in this order, and channels-access lists the rows above a conversation in it (the via judge's first row per group). */
+function rankPatterns(list) { return (Array.isArray(list) ? list : []).filter(Boolean).slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id))); }
 function effectiveGrants({ conversation = null, patterns = [], account = null } = {}, facts = {}, { grantKeys = [], accountKeys = [] } = {}) {
   /* PRECEDENCE: conversation > pattern > account */
   // lane channel-agent-watch W3: each grain is READ with the access ABOVE it — the account's rows (+ the account-scope
@@ -1600,8 +1603,7 @@ function effectiveGrants({ conversation = null, patterns = [], account = null } 
   // agent that holds the whole account is in effect, never dropped as "no access at this grain"
   // lane wake-approve-card r5: every grain read through grainAsFired — the one reader «held» and the grain writer read by
   const accountG = grainAsFired('account', account, { accountKeys });
-  const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.pattern)
-    .slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+  const ranked = rankPatterns((Array.isArray(patterns) ? patterns : []).filter((x) => x && x.pattern));
   const matched = [];
   for (const pa of ranked) {
     const m = matchConversation(pa.pattern, facts);
@@ -1957,5 +1959,5 @@ module.exports = {
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
   memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
-  splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, rowVerdict, expectedWakesTotal, othersLine,
+  splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, rankPatterns, effectiveAccess, effectiveWatchers, rowNames, rowVerdict, expectedWakesTotal, othersLine,
 };

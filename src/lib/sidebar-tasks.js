@@ -455,7 +455,7 @@ export function installSidebarTasks(SidebarClass) {
   proto._taskUpdate = async function(id, patch) {
     // lane lg-group-parents (cure 3 (a)): a parents write refused as stale carries the store's list — the copy adopts it at once
     // (a missed broadcast never leaves every later press refused until the tab is reopened)
-    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch, (d) => { if (d && d.code === 'parents_stale' && Array.isArray(d.parents)) this._upsertTaskLocal({ id, parents: d.parents.map(String) }); });
+    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch, (d) => { if (d && d.code === 'parents_stale' && Array.isArray(d.parents) && (this._tasks || []).some((x) => x && x.id === id)) this._upsertTaskLocal({ id, parents: d.parents.map(String) }); });   // only a group the copy holds (never a partial record)
     if (data?.task) this._upsertTaskLocal(data.task);
     return data;
   };
