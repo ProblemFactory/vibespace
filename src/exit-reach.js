@@ -800,6 +800,7 @@ function cardText(rec, { machine = '' } = {}) {
   if (r.outcome === 'unfiled') return `did not run \`${c}\` on ${machine} — its approval could not be put in For you`;
   if (r.outcome === 'offline') return `did not run \`${c}\` on ${machine} — ${machine} is offline`;
   if (r.outcome === 'run_failed') return `could not finish \`${c}\` on ${machine} — the link was lost while it ran`;
+  if (r.outcome === 'quoting') return `did not run \`${c}\` on ${machine} — allowed, then refused: ${machine} runs commands with cmd.exe, which cannot take these words as they were sent (nothing ran)`; // B-f169
   // lane-exit-run-output: the child never started — the card says WHY (the owner read "exit 1 · 0.0 s" four times)
   if (r.outcome === 'spawn_failed') return `could not start \`${c}\` on ${machine} — ${XS.spawnFailureText(spawnErrorOf(r.spawnError), { interpreter: r.interpreter || XS.POSIX_SHELL })}`;
   // lane device-upgrade-stuck: refused before it was sent — never "exit 1"

@@ -1139,6 +1139,9 @@ console.log('B-f169 THE ARGV, WORD FOR WORD — the hub quotes the words ONCE fo
   const n2 = w.runs.length;
   const rw = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['cmd', '/c', 'dir', 'C:\\My Files'] }));
   ok(!!rw.e && rw.e.code === 'bad_command' && rw.e.argv === 'cmd-exe' && /runs commands with cmd\.exe, whose quoting differs from the line composed for this run/.test(rw.e.message) && w.runs.length === n2, 'a Windows agent (cmd.exe) on a record that did not say so: the sh line composed for the run is never sent — REFUSED by name (its own refusal, never «the link failed»), nothing ran', rw.e && rw.e.message);
+  const lr = w.recs[0].exit && w.recs[0].exit.lastRun, lc = w.cards.at(-1);
+  ok(!!lr && lr.outcome === 'quoting' && !!lc && /allowed, then refused: Macbook runs commands with cmd\.exe, which cannot take these words as they were sent \(nothing ran\)/.test(lc.text), '…and that refusal is WRITTEN DOWN — the machine\'s last run and the chat card say «allowed, then refused» (nothing ran)', { lr, card: lc && lc.text });
+  ok(XS.winArgvLine(['del', 'a,b.txt']).line === 'del "a,b.txt"' && XS.winArgvLine(['set', 'A=1']).line === 'set "A=1"' && XS.winArgvLine(['echo', 'a;b']).line === 'echo "a;b"', 'cmd.exe\'s built-ins split a word on , ; = — such a word goes in double quotes (one file, one word)');
   const rp = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['ver'] }));
   ok(!rp.e && w.runs.length === n2 + 1 && lineOf() === 'ver', '…plain words need no quoting and run there as typed', { e: rp.e && rp.e.message, line: lineOf() });
   w.recs[0].deviceRuntime = { platform: 'win32' };

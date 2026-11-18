@@ -682,7 +682,14 @@ class ExitProxyManager {
         interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
       }
     } catch (e) {
-      if (e && e.argv === 'cmd-exe') throw e; // B-f169: the words were refused by name before anything was sent — never «the link failed»
+      if (e && e.argv === 'cmd-exe') { // B-f169: refused by name before anything was sent — never «the link failed»; and WRITTEN DOWN (allowed, then refused)
+        const by0 = { key: this.keyOf(session, sessionId), name: (session && session.name) || '' }, ms0 = this.now() - t0;
+        try { this.hosts.setLastRun?.(h.id, E.runRecord({ cmd, code: null, ms: ms0, by: by0, at: t0, outcome: 'quoting' })); } catch (e2) { this.log(`last run not recorded: ${e2.message}`); }
+        this.audit({ hostId: h.id, machine, sessionId, sessionKey: by0.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code: null, ms: ms0, ok: false, refusal: 'bad_command', argv: 'cmd-exe', ...(asked ? { asked: true } : {}), ...(platform ? { platform } : {}) });
+        card({ outcome: 'quoting', cmd });
+        try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
+        throw e;
+      }
       // lane device-allow-flags: the machine's OWN allow list leaves `run` off — refused before it was sent (never "the link
       // failed while it ran"); the sentence is the device's: the flag + the re-run
       if (e && e.code === 'op-not-allowed') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'op_not_allowed', grant: 'run', h, cmd, error: e.message }); }

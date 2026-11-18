@@ -45,12 +45,13 @@ machine's shell, so `vibespace-exit run box -- bash -c 'ls /srv; df -h'` runs ex
 words were joined with spaces and re-split there — another command ran). An empty word stays a word. On Windows (cmd.exe) the
 words are put in cmd.exe's own form — a word with spaces in double quotes, backslashes as typed (`-- powershell -NoProfile
 -Command "Get-ChildItem C:\x"` works); a word holding a double quote, `& | < > ^ ( ) % !`, an empty word or a trailing backslash
-cannot pass word for word and is refused by name, nothing runs: write ONE line in cmd.exe's own quoting.
+cannot pass word for word and is refused by name, nothing runs: write ONE line in cmd.exe's own quoting. A word holding `,` `;`
+or `=` is put in double quotes too (cmd's built-ins split on them); `*` and `?` still reach the program, which expands them.
 
 
 - **Windows** — `cmd.exe /d /s /c "<line>"`. One line only: join steps with `&` or `&&` (a line
   break would be refused by name — `cmd.exe runs one line`). Inner quotes, pipes, `%VAR%` and `^` are
-  cmd's own; nothing is re-quoted on the way. PowerShell needs its own call: `powershell -NoProfile
+  cmd's own; ONE word after `--` is not re-quoted on the way (two or more words are, as above). PowerShell needs its own call: `powershell -NoProfile
   -Command "…"`. Paths use backslashes or quoted forward slashes as cmd accepts them.
 - **macOS / Linux / BSD** — `sh -lc <line>`: a login shell, so the user's PATH applies; multi-line
   commands are fine.

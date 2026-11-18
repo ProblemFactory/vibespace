@@ -56,7 +56,7 @@ const USAGE = [
   '                                            credentials are THIS conversation\'s — the port refuses every other client)',
   '  vibespace-exit run <machine> -- <cmd>   run <cmd> ON the machine as its user, up to 30 s (universal: ICMP/UDP/proxy-unaware/its DNS);',
   '                                            with "ask me each time" it first waits (≤ 60 s) for the user\'s Allow.',
-  '                                            ONE word after -- = a line as written (the machine\'s shell reads it); two or more = words, sent word for word.',
+  '                                            ONE word after -- is a shell LINE as written; TWO OR MORE are exactly those words.',
   '                                            The machine picks the shell: Windows runs the line under cmd.exe (ONE line — join',
   '                                            steps with & or &&; %VAR% and inner quotes are cmd\'s own), everything else under sh -lc.',
   '                                            A command that could not start is said by name (exit 127 not found / 126 not executable).',
