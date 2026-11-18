@@ -313,6 +313,9 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   // the stash strip's hidden group press, drawn only mid-turn where Enter steers
   const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '98f87f3662f7';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
+  // ALSO (lane bl-tests-chrome, .411): a missed pin prints the WHOLE signature, in pieces a log keeps whole (ok() cuts a detail at
+  // 700 chars and the signature is ~1650), so the next re-pin is placed by a diff against the last one, not by arithmetic
+  if (crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) !== DESK_SIG) for (let i = 0, n = Math.ceil(sig.length / 180); i < n; i++) console.log(`    desk sig whole [${i + 1}/${n}]: ${sig.slice(i * 180, (i + 1) * 180)}`);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('desk: no camera input on the desk (lane phone-take-photo)', deskCam === 0, deskCam);
   ok('RED control: the phone block un-gated changes the desk PNG', leak !== real && leakSig === sig, { leak, real });
