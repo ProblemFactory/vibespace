@@ -1031,5 +1031,42 @@ console.log('⑮ B-7c97 — a hold never names the measuring wrapper; every coun
   }
 }
 
+console.log('⑯ the train\'s close (主开发 2026-11-18 12:37Z; test-loop-hold-live (D) red at 01a4d9a73) — round 4\'s two laws in the node-own rule');
+{
+  const OUT = '/tmp/lh-outside.js', CHILD = '/tmp/lh-child.cjs';   // files outside the repo (a plugin, a script under a symlink leading out)
+  const loaded = (id) => id !== 'internal/forged';   // the runtime's loaded ids: every id here but the forged one
+  const ans = (frames, L = LH) => { const sm = L.sampleOf(enc(frames), ROOT, null, null, loaded); return L.framesAnswer(sm.frames, sm.form, sm.cut); };
+  const HR = ['hrtimeBigInt', 'node:internal/bootstrap/node', 436];   // the hog's own process.hrtime.bigint() (Node 24: bootstrap/node)
+  const VMR = [['runInThisContext', 'node:vm', 316], ['', CHILD, 12], ['listOnTimeout', 'node:internal/timers', 594], ['processTimers', 'node:internal/timers', 529]];
+  const D2 = [HR, ['outsideHog', OUT, 1], ...VMR];                        // (D) the hog under a repo symlink leading OUT
+  const D3a = [['forgedInternal', 'node:internal/forged', 1], ...VMR];    // (D) a vm script calling itself node:internal/forged
+  const D3b = [HR, ['forgedInternal', 'node:internal/forged', 1], ...VMR];
+  const DEEP = [HR, ['pluginFn', OUT, 7], ['busyHog', ROOT + '/src/hogs.js', 38]];   // a plugin between the runtime and our code
+  const NONE = [HR, ['', 'node:internal/timers', 594]];                 // nothing below the run
+  const d2 = ans(D2), a = ans(D3a), b = ans(D3b), deep = ans(DEEP), none = ans(NONE);
+  ok(d2.words === 'node’s own code — bootstrap, driven by (outside the repo)' && d2.key === '(outside the repo)' && !/outsideHog|lh-outside/.test(d2.words + d2.key + d2.keyWords) && deep.words === d2.words,
+    `(b) THE DRIVER IS THE FIRST FRAME BELOW THE RUN: the hog's clock read on a script outside the repo is «${d2.words}» — never «with no frame of ours below it», never a deeper frame of ours past the plugin`, { d2, deep });
+  ok(!/node’s own code/.test(a.words) && /node:internal\/forged:1/.test(a.words) && a.key === 'node:internal/forged:1' && !/forgedInternal/.test(a.words + a.key + a.keyWords)
+    && b.words === 'node’s own code — bootstrap, driven by node:internal/forged:1' && !/forgedInternal/.test(b.words + b.key),
+    `(a) ONLY AN ID THE RUNTIME LOADED IS THE RUNTIME'S OWN: a vm script named node:internal/forged is said by its location alone — «${a.words}» — and below a real runtime frame it is the driver by its location: «${b.words}»`, { a, b });
+  ok(none.words === 'node’s own code — bootstrap, with no frame of ours below it' && none.key === '(node’s own code — bootstrap)',
+    'nothing below the run: «with no frame of ours below it», keyed by the module, as B-fe0b ruled', none);
+  // the holds, through the watchdog's own road (askOf → judgeAsks → the fold → the line), as the live suite reads them
+  const FROM = 90000, TO = FROM + 300, B0 = 6;
+  const hold = (answers) => { const J = LH.judgeAsks(answers.map((x, i) => ({ postedAt: FROM + 50 + i * 100, answeredAt: FROM + 50.05 + i * 100, state: 'running', answer: x, beat: B0 })), { beat0: B0, holdEnd: TO }); return LH.holdLine({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 300, samples: J.samples, outside: J.outside, d: null }); };
+  const l2 = hold([d2, d2]), l3 = hold([a, b]);
+  ok(/\(outside the repo\)/.test(l2) && !/outsideHog|link-out|lh-outside/.test(l2) && /node:internal\/forged/.test(l3) && !/forgedInternal/.test(l3) && !/node’s own code — forged/.test(l3),
+    `the two (D) holds as the live suite reads them — «${l2}» · «${l3}»`, { l2, l3 });
+  // RED CONTROLS: the tip as it was (01a4d9a73 / d1ff2d7c1), each law cut alone — a patched copy compiled in memory
+  const SRC = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+  const load = (src) => { const m = { exports: {} }; vm.compileFunction(src, ['module', 'exports', 'require'], { filename: 'loop-hold-close410-mutant.js' })(m, m.exports, require); return m.exports; };
+  const cut = (from, to) => (SRC.split(from).length === 2 ? load(SRC.replace(from, to)) : null);
+  const tipDriver = cut('driver: end < frames.length && frames[end] ? frames[end] : null };', 'driver: repoFrame(frames.slice(end)) };');   // stale-pins: kept (the red control rebuilds the tip's driver)
+  const tipForged = cut("const runtimeOwn = (f) => !!f && f.cls === 'node' && f.notLoaded !== true;", "const runtimeOwn = (f) => !!f && f.cls === 'node';");
+  const rd = tipDriver ? ans(D2, tipDriver) : null, rp = tipDriver ? ans(DEEP, tipDriver) : null, rf = tipForged ? ans(D3a, tipForged) : null;
+  ok(rd && rd.words === 'node’s own code — bootstrap, with no frame of ours below it' && rp && rp.words === 'node’s own code — bootstrap, driven by busyHog (src/hogs.js:38)' && rf && rf.words.startsWith('node’s own code — forged, '),
+    `RED CONTROLS (the tip as it was): the driver read as the first frame OF OURS forgets the script outside the repo («${rd && rd.words}») and skips the plugin for our frame past it («${rp && rp.words}»); a forged id taken as the runtime's own: «${rf && rf.words}»`, { rd, rp, rf });
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

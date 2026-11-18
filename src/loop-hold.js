@@ -183,7 +183,8 @@ function frameOf(raw, root, isRepoFile = null, lineOf = null, isInternal = null)
   if (file0 === SYNC_FS_URL) return { cls: 'syncfs', fn: fn0 && /^[A-Za-z][\w.]{0,40}$/.test(fn0) ? fn0 : 'a synchronous fs call', file: SYNC_FS_URL, line: 0 };
   // node:internal/streams/end-of-stream, node:v8 — its NAME only when that id is one of Node's own loaded modules (round 4:
   // a vm script may call itself «node:…»; it is then said by its location alone)
-  if (/^node:[\w/-]+$/.test(file0)) return { cls: 'node', fn: typeof isInternal !== 'function' || isInternal(file0.slice(5)) === true ? fn : null, file: file0, line };
+  // (主开发 2026-11-18 12:37Z) an id the runtime did NOT load is marked `notLoaded`: it is never the runtime's own code either
+  if (/^node:[\w/-]+$/.test(file0)) { const loaded = typeof isInternal !== 'function' || isInternal(file0.slice(5)) === true; return { cls: 'node', fn: loaded ? fn : null, file: file0, line, ...(loaded ? {} : { notLoaded: true }) }; }
   const r = typeof root === 'string' && root.startsWith('/') ? root.replace(/\/+$/, '') + '/' : null;
   if (r && file0.startsWith(r) && !file0.includes('/../') && !(raw && raw.evalish)) {
     const rel = file0.slice(r.length);
@@ -351,13 +352,20 @@ function isDelivery(frames) {
 /** PURE: a node: id → its module word (node:internal/deps/undici/undici ⇒ undici, node:zlib ⇒ zlib, node:_http_agent ⇒ http_agent) */
 const moduleOf = (file) => String(file || '').replace(/^node:/, '').replace(/^internal\//, '').replace(/^deps\//, '').split('/')[0].replace(/^_+/, '') || 'node';
 /** PURE: a sample whose first frame past the built-ins is node's own → { module, driver (the first repo frame below the run, or null) }, else null */
+/** THE TRAIN'S CLOSE (主开发 2026-11-18 12:37Z, test-loop-hold-live (D) red at 01a4d9a73), round 4's two laws kept:
+ *  (a) ONLY AN ID THE RUNTIME ITSELF LOADED IS THE RUNTIME'S OWN CODE — a frame the reader marked `notLoaded` (a vm script
+ *  calling itself «node:internal/…») is neither in the run nor its module: it is said by its location alone, as before;
+ *  (b) THE DRIVER IS THE FIRST FRAME BELOW THE RUN — ours by its location, «(outside the repo)» by that word (a plugin, a
+ *  script under a symlink leading out), a not-loaded id by its location; never a deeper frame of ours past it, and «with no
+ *  frame of ours below it» only when nothing lies below. */
+const runtimeOwn = (f) => !!f && f.cls === 'node' && f.notLoaded !== true;
 function nodeOwnOf(frames) {
   if (!Array.isArray(frames)) return null;
   let i = 0;
   while (i < frames.length && frames[i] && frames[i].cls === 'builtin') i++;
-  if (i >= frames.length || !frames[i] || frames[i].cls !== 'node') return null;
+  if (i >= frames.length || !runtimeOwn(frames[i])) return null;
   let end = i;
-  while (end < frames.length && frames[end] && (frames[end].cls === 'node' || frames[end].cls === 'builtin')) end++;
+  while (end < frames.length && frames[end] && (runtimeOwn(frames[end]) || frames[end].cls === 'builtin')) end++;
   const run = frames.slice(i, end).filter((f) => f.cls === 'node');   // innermost first
   let owner = null;
   for (let j = run.length - 1; j >= 0 && !owner; j--) if (DEPS_FILE.test(run[j].file)) owner = run[j];
@@ -368,7 +376,7 @@ function nodeOwnOf(frames) {
   }
   for (let j = 0; j < run.length && !owner; j++) if (!LOADER_FILE.test(run[j].file) && !HELPER_MODULE.has(moduleOf(run[j].file))) owner = run[j];
   for (let j = run.length - 1; j >= 0 && !owner; j--) if (!LOADER_FILE.test(run[j].file)) owner = run[j];
-  return { module: moduleOf((owner || run[0]).file), driver: repoFrame(frames.slice(end)) };
+  return { module: moduleOf((owner || run[0]).file), driver: end < frames.length && frames[end] ? frames[end] : null };
 }
 /** PURE: the words of a sample of node's own code */
 const nodeOwnWords = (o, cut = false) => `${NODE_OWN} \u2014 ${o.module}${o.driver ? `, driven by ${frameText(o.driver)}` : cut ? ', the stack cut before any frame of ours' : ', with no frame of ours below it'}`;

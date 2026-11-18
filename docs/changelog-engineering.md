@@ -961,6 +961,14 @@ This file is the engineers' record of every release: the lanes, the verification
 - **K30 (from .409 K30, the test machines: the load-clock family, row B-518e; this train carries bl-tests-a's B-518e counts).** On the packed test machines a few legs that compare two wall clocks or count sampled ticks can go red — test-user-state-bounds (law A's ratio legs), test-loop-hold ⑫ and test-loop-census (a) / (d) — with this hotfix's units and without them; each is green alone on the integration box in both zones, and they run on the test machine's serial lane since 2026-11-18 05:09Z.
 @@NEWKNOWN
 
+
+### bl-loop-b — the train's close: round 4's two laws inside the node-own rule (test-loop-hold-live (D) red at 01a4d9a73)
+- (a) Only an id the runtime itself loaded is the runtime's own code: `frameOf` marks a `node:` frame `isInternal` does not know `notLoaded`; `nodeOwnOf` runs only over `runtimeOwn` frames — a vm script named «node:internal/forged» is said by its location alone, never «node’s own code — forged».
+- (b) The driver is the FIRST frame below the run: ours by its location, «(outside the repo)» by that word, a not-loaded id by its location — B-fe0b's `repoFrame(frames.slice(end))` (the first frame OF OURS anywhere below) forgot a frame outside the repo and said «with no frame of ours below it».
+- The (D) holds' «bootstrap» sample is `hrtimeBigInt` (node:internal/bootstrap/node, Node 24) — the hog's own clock call, not a loader frame nor the ask's lazy load; with (b) its driver names the hold.
+- Limit: `isInternal` is the worker's snapshot of loaded modules, so a module node loads after the witness started (undici) is `notLoaded` too — by its location, as its name already was; a refresh of that list from the main thread is a follow-up.
+- test-loop-hold ⑯: the two (D) shapes, a plugin between the runtime and our code, nothing below; the holds through askOf → judgeAsks → the line; RED CONTROLS: the tip's driver (forgets the outside frame, skips the plugin for our frame past it) and the tip's run (a forged id as the runtime's own). The heavy (D) legs are NOT restated: the law did not move, the product did.
+
 ## 2.369.409 — 2026-11-17
 
 ### lg-store-writes — B-0248: three more stores off the main thread (the store writer's next commits)
