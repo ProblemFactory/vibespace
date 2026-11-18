@@ -35,8 +35,9 @@ const UPLOAD_WINDOW_MS = 60000;        // one attempt's own window: the base's b
 const UPLOAD_MIN_WINDOW_MS = 5000;     // a retry is made only if at least this much window is left after its wait
 const UPLOAD_WAIT_MAX_MS = 10000;      // the longest wait a send sits through between attempts (a vendor naming more: no retry)
 /** What an agent's waiting command brings (r2 F3): the CLI's write budget (= src/cli-call.js BUDGETS.write, pinned
- *  equal by the gate), less SEND_BUDGET_RESERVE_MS for what the send does after the chain (the completing call, the
- *  outcome write, the receipt). Nobody's command waits on an outbox send: it brings OUTBOX_SEND_BUDGET_MS. */
+ *  equal by the gate), less SEND_BUDGET_RESERVE_MS for what the send does after the vendor's requests (the outcome
+ *  write, the receipt — r4: never the completing call or a file's message, which read their own window from the budget
+ *  once a retry landed). Nobody's command waits on an outbox send: it brings OUTBOX_SEND_BUDGET_MS. */
 const CLI_WRITE_BUDGET_MS = 30000;
 const SEND_BUDGET_RESERVE_MS = 2000;
 const OUTBOX_SEND_BUDGET_MS = 120000;

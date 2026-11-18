@@ -799,7 +799,7 @@ function create(record = {}, deps = {}) {
       const windowOf = (own) => { const w = Plan.windowMs(n, now(), deadline, { ...own, bounded }); if (!w) throw (lastErr ? stoppedUpload(lastErr, n - 1, 'budget') : budgetStop(own === ASK_WINDOW ? 'files.getUploadURLExternal' : 'files.upload')); return w; };
       let u;
       try { u = await api('files.getUploadURLExternal', { filename: f.name, length: f.data.length }, { convId, windowOf: () => windowOf(ASK_WINDOW) }); }
-      catch (e) { if (n > 1 && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }   // r3: a retry's ask that failed once no window is left = the budget's stop
+      catch (e) { if ((n > 1 || bounded) && e instanceof ChannelError && e.code === 'transport') windowOf(ASK_WINDOW); throw e; }   // r3: a retry's ask that failed once no window is left = the budget's stop (r4: a later file's bounded first ask too)
       const url = String((u && u.upload_url) || ''), fid = String((u && u.file_id) || '');
       if (!url.startsWith(FILES_ORIGIN) || !ID_RE.test(fid)) throw new ChannelError('vendor-error', 'slack files.getUploadURLExternal: the answer names no files.slack.com upload URL — nothing was uploaded', { retryable: false, detail: { why: 'upload-url' } });
       try { await uploadBytes(url, f.data, convId, () => windowOf(BYTES_WINDOW)); }

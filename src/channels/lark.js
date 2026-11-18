@@ -1974,9 +1974,9 @@ function create(record = {}, deps = {}) {
     let d;
     try {
       await pace(1);   // lane R5 verify r4: a send is a vendor request like any other — paced, then metered (it was neither)
-      const win = _windowOf ? _windowOf() : null;   // r4 (B-0207): a file's message after a landed retry reads the budget here (none left: thrown, nothing metered or sent)
+      let win = _windowOf ? _windowOf() : null;   // r4 (B-0207): a file's message after a landed retry reads the budget here (none left: thrown, nothing metered or sent)
       meter(1);
-      if (bearerExpired()) at0 = await accessToken();   // verify r5: an expired bearer is refreshed before the send, never sent
+      if (bearerExpired()) { at0 = await accessToken(); if (_windowOf) win = _windowOf(); }   // verify r5: an expired bearer is refreshed before the send, never sent; r4 r1: the window read again after the refresh
       const at = bearerNow(at0);
       d = replyTo
         ? await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(replyTo))}/reply`, { method: 'POST', what: 'lark reply', headers: { Authorization: `Bearer ${at}` }, body, ...(win ? { signal: AbortSignal.timeout(win) } : {}) })   // gated-inline: send-reply
