@@ -1508,7 +1508,7 @@ function feedResumeText(v, { t = defaultT, stamp = (ms) => new Date(ms).toISOStr
   const at = c ? Number(c.at) : 0, gap = c ? Number(c.gapMs) : 0;
   if (!(at > 0) || !(gap >= CATCHUP_SAY_GAP_MS) || now - at > CATCHUP_SAY_FOR_MS) return '';
   const n = Math.max(0, Math.floor(Number(c.touched) || 0)), time = stamp(at - gap);
-  if (c.walked) return t('Caught up from {time} — the change history had expired, so every conversation is checked once', { time });   // a reseed: no count to give
+  if (c.walked) return t('Catching up from {time} — every conversation is checked once', { time });   // a reseed (an expired history, a lost cursor, an overflow): no count — and the walk may run on
   if (!n) return t('Caught up from {time} — no new messages', { time });
   return n === 1 ? t('Caught up from {time} — 1 conversation had new messages', { time }) : t('Caught up from {time} — {n} conversations had new messages', { time, n });
 }

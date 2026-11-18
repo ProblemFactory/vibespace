@@ -1885,9 +1885,10 @@ console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-auth
     const settle = async (k) => { for (let i = 0; i < k; i++) { clock += 61e3; await e2.pass('gmail', { force: true }).catch(() => {}); await sleep(5); } };
     await land(await e2.connect('gmail'));
     await settle(4);
+    const firstReads = mb.calls.filter((c) => /\/threads\/[^/]+$/.test(c.path) && c.q.format === 'full').length;
     const known = [...mb.threads.keys()];
     const stored = () => { const s = new Set(); for (const t of mb.threads.keys()) for (const m of e2.messages('gmail', t, { limit: 500 }) || []) s.add(m.vendorId); return s; };
-    const out = { before: stored().size, named: known.filter((id) => (e2.store.index.entry('gmail', id, { create: false }) || {}).named === true).length };
+    const out = { firstReads, before: stored().size, named: known.filter((id) => (e2.store.index.entry('gmail', id, { create: false }) || {}).named === true).length };
     // the refresh dies (the client the account's token was issued under is no longer what it refreshes with — B-166e);
     // threads 0–4 gain mail, thread 5 none (the price of a LOST cursor: it is read once too)
     mb.refresh = 'dead';
@@ -1924,6 +1925,7 @@ console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-auth
     return out;
   }
   const H = await holeRig('fix');
+  ok(H.firstReads === 6, 'the FIRST connect reads each of the 6 threads ONCE (a cursor-less walk holds no row yet — nothing read twice)', JSON.stringify({ firstReads: H.firstReads }));
   ok(H.before === 12 && H.named === 6 && H.adds === 16 && H.knownAdds === 10 && H.auth === 'connected', 'the rig: 6 named threads read (12 messages), then 16 INBOX adds over a 6 h dead sign-in (10 into 5 of the known threads, 6 new threads), Disconnect, Re-authorize', J(H));
   ok(H.cursorKept && H.cursor0 && !H.setupKept, 'THE ROOT: the mailbox cursor is still on the record after the Disconnect (the adapter\'s state is the account\'s); the install\'s setup report is not (the next sign-in probes again)', J({ cursor0: H.cursor0, kept: H.cursorKept, setup: H.setupKept }));
   ok(H.lost.length === 0, 'THE INCIDENT\'S ROAD: after Disconnect → Re-authorize every one of the 16 messages of the signed-out window is read', J(H.lost));
@@ -1964,7 +1966,7 @@ console.log('\n㉔ B-2f6c: a Disconnect keeps the mailbox cursor — the re-auth
   const E4 = await holeRig('expired', { expire: true });
   const lcE = E4.feed && E4.feed.lastCatchUp;
   const saidE = lcE && CAPS.feedResumeText(E4.feed, { stamp: () => 'FROM', now: clock });
-  ok(E4.lost.length === 0 && lcE && lcE.walked === true && lcE.gapMs >= 6 * 3600e3 && saidE === 'Caught up from FROM — the change history had expired, so every conversation is checked once', 'a gap the vendor\'s history no longer covers (404): nothing lost, and the card says the catch-up as a walk (it used to say nothing)', J({ lost: E4.lost, lc: lcE, said: saidE }));
+  ok(E4.lost.length === 0 && lcE && lcE.walked === true && lcE.gapMs >= 6 * 3600e3 && saidE === 'Catching up from FROM — every conversation is checked once', 'a gap the vendor\'s history no longer covers (404): nothing lost, and the card says the catch-up as a walk (it used to say nothing)', J({ lost: E4.lost, lc: lcE, said: saidE }));
   // THE ADAPTER'S OWN LEGS — a held row the engine never NAMED, and a restart in the middle of a cursor-less walk
   {
     const mb = holeVendor();
@@ -2044,23 +2046,25 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   await L.e2.connect('gmail', { flowId: s2.flowId });
   ok(L.asks().length === 0 && L.todos.get(a2[0].id).status === 'done', 'Connect resolves the item (the account is made)', J(L.asks()));
   // a Connect inside the minute files nothing (the minute compressed to 300 ms; Connect at once)
-  const quickRun = async (E, tag) => {
+  // an ABSENCE is judged after the compressed minute has surely passed; a PRESENCE (the red controls) is polled to a deadline
+  const settle = async (count, wantSome) => { const t0 = Date.now(); for (;;) { if (wantSome && count() >= 1) return count(); if (Date.now() - t0 >= (wantSome ? 4000 : 450)) return count(); await sleep(25); } };
+  const quickRun = async (E, tag, { wantSome = false } = {}) => {
     const Q = await landedRig(tag, E);
     const q1 = await Q.signIn({ wait: 0, to: 300 });
     await Q.e2.connect('gmail', { flowId: q1.flowId });
-    await sleep(450);
-    return Q.asks().length;
+    return settle(() => Q.asks().length, wantSome);
   };
   ok(await quickRun(ENG, 'quick') === 0, 'a Connect inside the minute files nothing (the person was there)');
   // the person signs in AGAIN (the wrong account) inside the minute: ONE item, for the NEWER sign-in; and a newer one
   // CONNECTED inside the minute leaves no item for the one it replaced
-  const twoRun = async (E, tag, { connect = false } = {}) => {
+  const twoRun = async (E, tag, { connect = false, wantSome = false } = {}) => {
     const T = await landedRig(tag, E);
     const a = await T.signIn({ wait: 0, to: 300 });
     clock += 1000;
     const b = await T.signIn({ wait: 0, to: 300 });
     if (connect) await T.e2.connect('gmail', { flowId: b.flowId });
-    await sleep(450);
+    await settle(() => T.asks().length, wantSome);
+    if (!connect) await sleep(100);   // two landings: let the newer one's minute pass too before judging ONE item
     return { asks: T.asks().map((x) => x.action.flowId), a: a.flowId, b: b.flowId };
   };
   const two = await twoRun(ENG, 'two'), twoC = await twoRun(ENG, 'two-connected', { connect: true });
@@ -2092,11 +2096,11 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
   ok([BAIL, ENDOLD, GUARD, SWEEP, CONNOLD].every((x) => ASRC2.split(x).length === 2), 'control setup: the bail, the landing\'s and Connect\'s ends of the older asks, the pending guard and the restart sweep are present once each');
   const engOf = (src, tag) => ML.load('src/server/channels-engine.js', ESRC2.replace("require('./channels-auth.js')", `require(${JSON.stringify(ML.write('src/server/channels-auth.js', src, tag))})`), tag);
   const engFan = engOf(ASRC2.replace(BAIL, "    for (const q of pendingFlows.values()) if (q !== p && q.kind === p.kind) endLandedAsk(q, 'a newer sign-in of its type landed');\n").replace(ENDOLD, '    if (p.ok) landedAskLater(p);\n').replace(CONNOLD, ''), 'fan-out');
-  const twoF = await twoRun(engFan, 'two-fan', { connect: true });
+  const twoF = await twoRun(engFan, 'two-fan', { connect: true, wantSome: true });
   ok(J(twoF.asks) === J([twoF.a]), 'RED CONTROL (the row\'s first commit): its fan-out let the OLDER timer file «finish connecting» for the sign-in the person replaced and connected over', J(twoF));
   const CONNOWN = "    endLandedAsk(p, 'it was connected');   // B-8edd: and every older landed sign-in of its type — the person chose this one\n";
   ok(ASRC2.split(CONNOWN).length === 2, 'control setup: Connect\'s end of its own ask is present once');
-  const q1 = await quickRun(engOf(ASRC2.replace(GUARD, ' || '), 'no-guard'), 'quick-noguard'), q2 = await quickRun(engOf(ASRC2.replace(CONNOWN, ''), 'no-connect-end'), 'quick-noconnend'), q3 = await quickRun(engOf(ASRC2.replace(GUARD, ' || ').replace(CONNOWN, ''), 'neither'), 'quick-neither');
+  const q1 = await quickRun(engOf(ASRC2.replace(GUARD, ' || '), 'no-guard'), 'quick-noguard'), q2 = await quickRun(engOf(ASRC2.replace(CONNOWN, ''), 'no-connect-end'), 'quick-noconnend'), q3 = await quickRun(engOf(ASRC2.replace(GUARD, ' || ').replace(CONNOWN, ''), 'neither'), 'quick-neither', { wantSome: true });
   ok(q1 === 0 && q2 === 0 && q3 === 1, 'DEFENCE IN DEPTH (a red control): Connect ending its own ask OR the pending guard alone keeps the quick leg green; with both removed an item follows a Connect for an account already made — the quick leg is red on it', JSON.stringify({ noGuard: q1, noConnectEnd: q2, neither: q3 }));
   // a RESTART: the pending sign-ins (memory) are gone — their open items are resolved at the next start
   const rs = async (E, tag) => {

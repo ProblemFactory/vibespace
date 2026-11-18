@@ -578,7 +578,7 @@ console.log("lane channel-feed-authority: the feed's AUTHORITY (authoritative �
     ['11 touched', { at: AT, gapMs: H6, pages: 1, touched: 11 }, NOW, 'Caught up from 08:15 — 11 conversations had new messages'],
     ['one touched', { at: AT, gapMs: H6, pages: 1, touched: 1 }, NOW, 'Caught up from 08:15 — 1 conversation had new messages'],
     ['nothing touched', { at: AT, gapMs: H6, pages: 1, touched: 0 }, NOW, 'Caught up from 08:15 — no new messages'],
-    ['a gap that ended in a reseed (the history had expired)', { at: AT, gapMs: H6, pages: 1, touched: 0, walked: true }, NOW, 'Caught up from 08:15 — the change history had expired, so every conversation is checked once'],
+    ['a gap that ended in a reseed (an expired history, a lost cursor, an overflow)', { at: AT, gapMs: H6, pages: 1, touched: 0, walked: true }, NOW, 'Catching up from 08:15 — every conversation is checked once'],
     ['a short gap (a restart) is not said', { at: AT, gapMs: C.CATCHUP_SAY_GAP_MS - 1, touched: 3 }, NOW, ''],
     ['the gap bound itself is said', { at: AT, gapMs: C.CATCHUP_SAY_GAP_MS, touched: 2 }, NOW, 'Caught up from ? — 2 conversations had new messages'],
     ['a day later it is gone', { at: AT, gapMs: H6, touched: 11 }, AT + C.CATCHUP_SAY_FOR_MS + 1, ''],

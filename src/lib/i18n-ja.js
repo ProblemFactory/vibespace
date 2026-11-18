@@ -6359,7 +6359,7 @@ export default {
   "{n} search hits could not be read in the last hour": "直近 1 時間に {n} 件の検索結果を読み取れませんでした",
   "New messages: searching for the first time": "新着メッセージ：初回の検索中",
   "Search is behind — each chat is checked on its own until it catches up": "検索が遅れています — 追いつくまで各チャットを個別に確認します",
-  "Caught up from {time} — the change history had expired, so every conversation is checked once": "{time} から追いつきました — 変更履歴が期限切れのため、すべての会話を一度確認します",
+  "Catching up from {time} — every conversation is checked once": "{time} から追いつき中 — すべての会話を一度確認します",
   "Caught up from {time} — no new messages": "{time} から追いつきました — 新着なし",
   "Caught up from {time} — 1 conversation had new messages": "{time} から追いつきました — 新着のある会話 1 件",
   "Caught up from {time} — {n} conversations had new messages": "{time} から追いつきました — 新着のある会話 {n} 件",
@@ -10982,6 +10982,7 @@ export default {
   // B-8edd: a sign-in landed and nobody pressed Connect
   "{kind}: signed in as {user} — finish connecting": "{kind}：{user} としてログイン済み — 接続を完了してください",
   "{kind}: signed in — finish connecting": "{kind}：ログイン済み — 接続を完了してください",
+  "The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits until {until} UTC.": "ログインは完了しましたが、アカウントはまだ接続されていません — 「アカウントを接続」を開いて完了してください。このログインは {until} UTC まで有効です。",
   "Finish connecting": "接続を完了",
   "Open Connect an account with this sign-in": "このログインで「アカウントを接続」を開く",
   "the vendor refused the refresh token": "サービス側が更新トークンを拒否しました",

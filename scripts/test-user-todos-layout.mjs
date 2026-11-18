@@ -1303,7 +1303,6 @@ console.log('lane vault-paste-request: an agent\'s request for a secret — the 
     ];
     const door = ((FA0.ROW_OF['channel-connect'] || {}).buttons || [])[0] || {};
     ok(door.answer === 'connect' && door.door === 'connect' && PINS.every(([src, pin]) => src.split(pin).length === 2), 'the button\'s door: the registry declares `connect`; runAction opens the Connect dialog on the item\'s type with ITS sign-in; the app passes it on; the dialog\'s attach shows it first', JSON.stringify(door));
-    ok(PINS.every(([src, pin]) => src.replace(pin, '').split(pin).length === 1), 'CONTROL: each pin is red with its line removed (a door that silently does nothing is caught)');
     const A0 = (await import('node:module')).createRequire(import.meta.url)(path.join(ROOT, 'src/attention-model.js'));
     ok(A0.rowOf(deadItem, Date.now()).band === 1 && A0.rowOf({ ...deadItem, urgency: 'normal' }, Date.now()).band === 4, 'it sits in band 1 (urgent — the top of For you); the names item (normal, a producer button) in band 4');
     globalThis.document.createElement = realCreate;

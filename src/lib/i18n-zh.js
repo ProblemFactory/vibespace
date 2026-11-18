@@ -6360,7 +6360,7 @@ export default {
   "{n} search hits could not be read in the last hour": "最近一小时有 {n} 条搜索结果无法读取",
   "New messages: searching for the first time": "新消息：首次搜索中",
   "Search is behind — each chat is checked on its own until it catches up": "搜索落后了 — 追上之前每个会话单独检查",
-  "Caught up from {time} — the change history had expired, so every conversation is checked once": "已追上（自 {time}）— 变更记录已过期，每个会话都会检查一次",
+  "Catching up from {time} — every conversation is checked once": "正在从 {time} 起追赶 — 每个会话都会检查一次",
   "Caught up from {time} — no new messages": "已追上（自 {time}）— 没有新消息",
   "Caught up from {time} — 1 conversation had new messages": "已追上（自 {time}）— 1 个会话有新消息",
   "Caught up from {time} — {n} conversations had new messages": "已追上（自 {time}）— {n} 个会话有新消息",
@@ -10983,6 +10983,7 @@ export default {
   // B-8edd: a sign-in landed and nobody pressed Connect
   "{kind}: signed in as {user} — finish connecting": "{kind}：已以 {user} 登录 — 请完成连接",
   "{kind}: signed in — finish connecting": "{kind}：已登录 — 请完成连接",
+  "The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits until {until} UTC.": "已登录，但账号还没有连接 — 打开「连接账号」完成；这次登录会保留到 {until} UTC。",
   "Finish connecting": "完成连接",
   "Open Connect an account with this sign-in": "用这次登录打开「连接账号」",
   "the vendor refused the refresh token": "服务方拒绝了刷新令牌",

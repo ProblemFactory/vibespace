@@ -460,7 +460,7 @@ function create(engineCtx) {
   // sign-ins live in memory); the store ends it as expired when the sign-in's own time does (`expiresAt` = the start +
   // PENDING_FLOW_TTL_MS — it used to end without a word).
   const LANDED_ASK_MS = 60 * 1000;
-  const LANDED_KEYS = Object.freeze({ u: i18nKey('{kind}: signed in as {user} — finish connecting'), n: i18nKey('{kind}: signed in — finish connecting') });
+  const LANDED_KEYS = Object.freeze({ u: i18nKey('{kind}: signed in as {user} — finish connecting'), n: i18nKey('{kind}: signed in — finish connecting'), d: i18nKey('The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits until {until} UTC.') });
   function clearLandedAsk(p) { if (p && p.askTimer) { clearTimeout(p.askTimer); p.askTimer = null; } }
   /** The landed, unconnected sign-ins of p's type started AFTER / BEFORE it — by the pending map's order (the starts'
    *  order) while p is in it, by the start times once it left (Connect takes it first). */
@@ -482,11 +482,11 @@ function create(engineCtx) {
     try {
       const it = userTodos.add(INBOX_KEY, {
         origin: 'channels', kind: 'action', text,
-        detail: `The sign-in landed but the account was not connected — open «Connect an account» to finish; the sign-in waits until ${new Date(until).toISOString()}.`,
+        detail: `The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits until ${new Date(until).toISOString().slice(0, 16).replace('T', ' ')} UTC.`,
         urgency: 'normal', by: 'agent', sessionName: 'Channels', expiresAt: until,
         action: { type: 'channel-connect', kind: p.kind, flowId: p.flowId },
         openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)),
-        i18n: { text: { key: user ? LANDED_KEYS.u : LANDED_KEYS.n, params: { kind, ...(user ? { user } : {}) } }, source: INBOX_SOURCE },
+        i18n: { text: { key: user ? LANDED_KEYS.u : LANDED_KEYS.n, params: { kind, ...(user ? { user } : {}) } }, detail: [{ key: LANDED_KEYS.d, params: { until: new Date(until).toISOString().slice(0, 16).replace('T', ' ') } }], source: INBOX_SOURCE },   // the detail in the person's language too
       });
       if (it && it.id) { p.askItem = { id: it.id, text }; log.log(`[channels] ${p.kind}: a sign-in landed and nobody pressed Connect in ${Math.round(LANDED_ASK_MS / 1000)} s — a "For you" item asks to finish connecting`); }
     } catch (e) { log.warn(`[channels] ${p.kind}: could not file the landed sign-in in the inbox: ${(e && e.message) || e}`); }
