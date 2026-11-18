@@ -1,0 +1,26 @@
+// FROZEN (B-874f, lane bl-tests-e, 2026-11-17): lines 695–718 of scripts/test-oat-materialize.mjs at a7321ff0e (2026-10-14, a lane commit master never held) —
+// F13's loop-gap helper and its `r13.maxGap < 50` bound, the 59.4 ms red of .270's candidate. test-ci-gate §2e's incident control reads THIS file, never the object.
+  const f13 = async (M, N = 200) => {
+    const am13 = mk(M); await nv(am13, '2.1.296');
+    const ids = [];
+    for (let i = 0; i < N; i++) { const m = am13.createSubscription({ name: 'C' + i }).id; put(am13, m, login(NOW, { dead: true })); ids.push(m); }
+    for (const m of ids) { const a = am13.get(m); a.oatEnc = am13._enc(OAT); a.oatMintedAt = Date.now(); a.oatShape = SHAPE; }
+    am13._save();
+    const subs = path.join(am13.dataDir, 'subs') + path.sep;
+    const syncHits = [];
+    const SYNC = ['readFileSync', 'writeFileSync', 'openSync', 'renameSync', 'unlinkSync', 'fsyncSync', 'statSync', 'lstatSync', 'existsSync', 'chmodSync', 'mkdirSync', 'readdirSync'];
+    const keep = {};
+    // (the ONE roster rebuild a sweep that moved something broadcasts — list(), the store's existing _notify path for
+    // every change — reads the rows synchronously; it is outside the sweep's acts, and inside the loop-gap figure)
+    for (const k of SYNC) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (String(p).startsWith(subs) && !/AccountManager\.list \(/.test(String(new Error().stack))) syncHits.push(k); return keep[k].call(this, p, ...r); }; }
+    let maxGap = 0, last = performance.now(), on = true;
+    const tick = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; if (on) setImmediate(tick); };
+    setImmediate(tick);
+    let first, steady;
+    try { first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); } finally { on = false; for (const k of SYNC) fs[k] = keep[k]; }
+    const counts = {}; for (const v of Object.values(first)) counts[v] = (counts[v] || 0) + 1;
+    return { N, maxGap: +maxGap.toFixed(1), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)] };
+  };
+  const r13 = await f13();
+  ok(r13.counts.materialize === 200 && r13.steady.join() === 'written', 'F13: 200 fake rows — the first sweep materializes every one (archive + write), the next finds every one written', r13.counts);
+  ok(r13.maxGap < 50, `F13: the event loop's longest stall across both sweeps is ${r13.maxGap} ms (< 50 ms) — one row per loop turn`, r13);

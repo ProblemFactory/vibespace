@@ -364,14 +364,13 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   }
   // THE SECOND INCIDENT (lane oat-loop-gap-bound): .270's candidate (run 38560509611) went red on test-oat-materialize
   // F13's `r13.maxGap < 50` — 59.4 ms on ubuntu-latest — a span this census could not see through the helper's
-  // `maxGap: +maxGap.toFixed(1)`; that suite at a7321ff0e reads RED here, today's (a stall against a control) does not
-  let a7321 = null;
-  try { a7321 = git(REPO, ['show', 'a7321ff0e:scripts/test-oat-materialize.mjs']); } catch { a7321 = null; }
-  if (a7321 === null) console.log('    SKIP: a7321ff0e is not in this checkout (a depth-1 clone) — the F13 incident control needs it');
-  else {
-    const pF13 = WC.ratchetVerdict(plantSuite('test-oat-materialize', a7321), baseline).problems.filter((p) => p.startsWith('test-oat-materialize'));
-    ok(pF13.length === 1 && /r13\.maxGap < 50/.test(pF13[0]), `CONTROL: a7321ff0e's test-oat-materialize (\`r13.maxGap < 50\`, the 59.4 ms red) reads RED here (${pF13.length} problem${pF13.length === 1 ? '' : 's'})`);
-  }
+  // `maxGap: +maxGap.toFixed(1)`; that suite at a7321ff0e reads RED here, today's (a stall against a control) does not.
+  // B-874f (lane bl-tests-e): a7321ff0e is a lane commit master never held — the leg ran only where that branch was fetched (the
+  // push gate) and SKIPPED everywhere else. The 24 lines it asserts on are FROZEN once in scripts/fixtures/off-master/ and read
+  // here on every checkout, the runner's depth-1 clone too.
+  const a7321 = fs.readFileSync(path.join(REPO, 'scripts/fixtures/off-master/a7321ff0e-oat-materialize-f13.txt'), 'utf8');
+  const pF13 = WC.ratchetVerdict(plantSuite('test-oat-materialize', a7321), baseline).problems.filter((p) => p.startsWith('test-oat-materialize'));
+  ok(pF13.length === 1 && /r13\.maxGap < 50/.test(pF13[0]), `CONTROL: a7321ff0e's test-oat-materialize F13 (\`r13.maxGap < 50\`, the 59.4 ms red — frozen) reads RED here (${pF13.length} problem${pF13.length === 1 ? '' : 's'})`);
   // THE THIRD INCIDENT (lane reconnect-storm-band): .271's heavy shard 6/6 went red on test-reconnect-storm (d), `fix ≤
   // control + max(25 %, 25 ms)` on the server's loop delay — 61 vs 31 and 60 vs 25 on ubuntu-latest — a bound relative to
   // a control that ADDS a literal band. That suite is HEAVY (this census reads the fast tier) and its loop figures come
@@ -792,7 +791,6 @@ console.log('\n§2j a suite reads no history master does not have');
     '6f1aad6d': ['test-channels-gmail-shape.mjs'], // channels lane R5 verify r3 2026-09-26: its r3-tree control [B-3642]
     '7b6fa3c7b': ['test-plugin-settings.mjs', 'test-plugins-grammar.mjs'], // the LLM plugin's card row 2026-10-12: the base's plugin file at its old path [B-43a0]
     '817550d4': ['test-queue-steer.mjs'], // the pre-repair pick commit: a historical positive control [B-4075]
-    'a7321ff0e': ['test-ci-gate.mjs'], // §2e's own control: the wall-clock bound before the rule [B-874f]
     'f36369057': ['test-phone-desktop-sync.mjs'], // lane phone-arrangement-local 2026-10-12: ⑩–⑬'s base TREE (a worktree at it) — no master ancestor holds captureForViewport without captureBuilt [B-44c5]
   });
   // B-1388 (lane bl-tests-e, 2026-11-17 — the B-4291 r2 acceptance's six latent forms, each blind on a planted file while a plain
