@@ -607,6 +607,14 @@ class ExitProxyManager {
    * timedOut, asked}` | throws a named error whose message is the agent-facing sentence.
    */
   async run(session, sessionId, ref, cmd, { signal = null } = {}) {
+    // B-f169: `{ argv }` = the words after `--` (two or more), handed word for word — quoted ONCE here for the far POSIX shell
+    // (src/exit-shell.js argvLine); everything below (the belt, the ask, the card, the audit) reads that one line
+    let fromArgv = null;
+    if (cmd && typeof cmd === 'object' && !Array.isArray(cmd)) {
+      const v = XS.argvLine(cmd.argv);
+      if (!v.ok) throw namedError('bad_command', E.refusalText('bad_command'));
+      fromArgv = { ...v, words: cmd.argv.slice() }; cmd = v.line;
+    }
     if (typeof cmd !== 'string' || !cmd.trim() || E.cmdBytes(cmd) > E.CMD_MAX) throw namedError('bad_command', E.refusalText('bad_command'));
     // verify-r5 X2: a command whose DISPLAY order differs from what runs (bidi controls) is never asked about, run or shown
     const hidden = E.hiddenOrderOf(cmd);
@@ -625,6 +633,14 @@ class ExitProxyManager {
       throw this._refused(session, sessionId, { code: j.verdict.code, grant: 'run', h, has: j.has, cmd });
     }
     if (h.transport === 'dial' && !h.online) { card({ outcome: 'offline', cmd }); throw this._refused(session, sessionId, { code: 'offline', grant: 'run', h, cmd }); }
+    // B-f169: cmd.exe reads no POSIX quoting — words that needed it are refused BY NAME before anyone is asked (a machine known
+    // to be Windows), or below once its agent says so; nothing that differs from the words written ever runs
+    const argvWin = (why) => namedError('bad_command', `${machine} runs commands with cmd.exe, ${why} — nothing ran. Write the command as ONE line after \`--\`, in cmd.exe's own quoting.`, { argv: 'cmd-exe' });
+    if (fromArgv && h.deviceRuntime && h.deviceRuntime.platform === 'win32') { // a machine KNOWN to be Windows: cmd.exe's line is the one asked and run
+      const wl = XS.winArgvLine(fromArgv.words);
+      if (!wl.ok) { this._refused(session, sessionId, { code: 'bad_command', grant: 'run', h, cmd }); throw argvWin('which cannot take these words as they are (a double quote, one of & | < > ^ ( ) % !, an empty word or a trailing backslash)'); }
+      cmd = wl.line; fromArgv = { ...fromArgv, win: true };
+    }
     let asked = false;
     if (j.access.run.ask) {
       asked = true;
@@ -658,12 +674,15 @@ class ExitProxyManager {
       // the hello and refuses by name below; pre-fix it sent `sh -lc` anyway and the card read "exit 1 · 0.0 s · no output"
       if (!XS.canRunLine(platform, caps)) outdated = { agentVersion: E.agentVersionOf(info.daemonVersion) };
       else {
+        // B-f169: the agent says cmd.exe while the line was composed for sh — only the SAME line may run (the one asked about)
+        if (fromArgv && !fromArgv.win && platform === 'win32') { const wl = XS.winArgvLine(fromArgv.words); if (!wl.ok || wl.line !== cmd) throw argvWin(wl.ok ? 'whose quoting differs from the line composed for this run (its record now says Windows: run it again)' : 'which cannot take these words as they are (a double quote, one of & | < > ^ ( ) % !, an empty word or a trailing backslash)'); }
         r = useShell ? await dm.runShell(cmd, { ...opts, by: opts.by }) : await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], { ...opts, by: opts.by });
         // verify r1 F5a: the reply's `interpreter` is read through the CLOSED set — a daemon's raw string (`<system-reminder`,
         // an RLO) reached the agent's sentence, the card, the audit and the history as itself; off the set ⇒ what the hub asked for
         interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
       }
     } catch (e) {
+      if (e && e.argv === 'cmd-exe') throw e; // B-f169: the words were refused by name before anything was sent — never «the link failed»
       // lane device-allow-flags: the machine's OWN allow list leaves `run` off — refused before it was sent (never "the link
       // failed while it ran"); the sentence is the device's: the flag + the re-run
       if (e && e.code === 'op-not-allowed') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'op_not_allowed', grant: 'run', h, cmd, error: e.message }); }

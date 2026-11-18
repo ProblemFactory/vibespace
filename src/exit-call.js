@@ -14,6 +14,7 @@
 // the call stays a plain Bash card.
 const E = require('./exit-reach.js');
 const HC = require('./hidden-chars.js');
+const XS = require('./exit-shell.js'); // B-f169: the words after `--` are the hub's ONE line, never joined
 
 const VERBS = Object.freeze(['run', 'push', 'pull', 'list', 'runs', 'use', 'url']);
 const INFO_VERBS = Object.freeze(['list', 'runs', 'use', 'url']);
@@ -81,7 +82,8 @@ function argsOf(argv) {
   if (verb === 'run') {
     const dd = rest.indexOf('--');
     const ref = dd >= 0 ? rest.slice(0, dd).join(' ').trim() : (rest[0] || '');
-    const command = (dd >= 0 ? rest.slice(dd + 1) : rest.slice(1)).join(' ').trim();
+    const words = dd >= 0 ? rest.slice(dd + 1) : rest.slice(1);
+    const command = (words.length === 1 ? words[0] : words.length ? XS.argvLine(words).line : '').trim(); // the line the hub runs for those words
     return command ? { verb, ref, command } : null;
   }
   const overwrite = rest.includes('--overwrite');

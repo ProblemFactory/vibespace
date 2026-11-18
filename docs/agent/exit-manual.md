@@ -37,7 +37,16 @@ open to you.
 
 ## The shell is the MACHINE's (read this before `run`)
 
-`run` hands the machine ONE line; the machine's own agent runs it under the interpreter it has:
+`run` hands the machine ONE line; the machine's own agent runs it under the interpreter it has.
+
+**Words or a line (2.369.408).** ONE word after `--` is that line as written — `vibespace-exit run box -- 'ls -la | head'`: the
+machine's shell reads its pipe. TWO OR MORE words are an argv and arrive WORD FOR WORD: the hub quotes each once for the
+machine's shell, so `vibespace-exit run box -- bash -c 'ls /srv; df -h'` runs exactly `bash`, `-c` and that script (before, the
+words were joined with spaces and re-split there — another command ran). An empty word stays a word. On Windows (cmd.exe) the
+words are put in cmd.exe's own form — a word with spaces in double quotes, backslashes as typed (`-- powershell -NoProfile
+-Command "Get-ChildItem C:\x"` works); a word holding a double quote, `& | < > ^ ( ) % !`, an empty word or a trailing backslash
+cannot pass word for word and is refused by name, nothing runs: write ONE line in cmd.exe's own quoting.
+
 
 - **Windows** — `cmd.exe /d /s /c "<line>"`. One line only: join steps with `&` or `&&` (a line
   break would be refused by name — `cmd.exe runs one line`). Inner quotes, pipes, `%VAR%` and `^` are

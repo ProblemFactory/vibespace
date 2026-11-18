@@ -32,6 +32,7 @@ const ok = (c, name, extra) => { if (c) { pass++; console.log('  ✓ ' + name); 
 
 const XC = require(path.join(REPO, 'src/exit-call.js'));
 const E = require(path.join(REPO, 'src/exit-reach.js'));
+const XSH = require(path.join(REPO, 'src/exit-shell.js')); // B-f169: the stub reads the words as the hub does
 const RS = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-run-summary.js')).href);
 const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 
@@ -50,6 +51,7 @@ const RUNS = {
   whoami: { refuse: 'not_granted', status: 403 },
   'no-such-tool --x': { refuse: 'spawn_failed', status: 422, exitCode: 127 },
 };
+const RUN_BODIES = []; // B-f169: what the REAL CLI posted to the run route
 const send = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
 const server = http.createServer((req, res) => {
   const chunks = [];
@@ -61,6 +63,8 @@ const server = http.createServer((req, res) => {
     if (u.pathname === '/api/agent/exit/runs') return send(res, 200, { runs: [{ at: Date.UTC(2026, 9, 4, 9, 40), machine: M, outcome: 'ran', code: 0, ms: 412, cmd: 'hostname', stdout: 'BOX-STUDIO' }] });
     if (u.pathname === '/api/agent/exit/use') return send(res, 200, { url: `socks5h://vs-u1:s3cretpass@127.0.0.1:${DEAD_EXIT}`, machine: M });
     if (u.pathname === '/api/agent/exit/run') {
+      RUN_BODIES.push({ ...body }); // as posted (the stub's own read below adds nothing to it)
+      if (Array.isArray(body.argv)) body.cmd = typeof XSH.argvLine === 'function' ? XSH.argvLine(body.argv).line : body.argv.join(' '); // B-f169
       const r = RUNS[body.cmd];
       if (!r) return send(res, 400, { error: 'unknown fixture', code: 'bad_command' });
       if (r.refuse) return send(res, r.status, { error: E.refusalText(r.refuse, { machine: M, cmd: body.cmd, grant: 'run', spawnError: { code: 'ENOENT' }, interpreter: 'sh', platform: 'linux' }), code: r.refuse, ...(r.exitCode ? { exitCode: r.exitCode } : {}) });
@@ -94,6 +98,21 @@ const merge = (r) => {
   const body = [String(r.stdout || '').replace(/\n+$/, ''), String(r.stderr || '').replace(/\n+$/, '')].filter(Boolean).join('\n');
   return { code: r.status, error: r.status !== 0, content: r.status ? `Exit code ${r.status}\n${body}` : body };
 };
+
+// ── ⓪ B-f169 THE ARGV, WORD FOR WORD: the REAL CLI posts the words it was given — never a joined line ──
+console.log('⓪ B-f169: the real CLI hands the words after -- as words (one word = a line as written)');
+{
+  RUN_BODIES.length = 0;
+  await runLine(`vibespace-exit run ${M} -- bash -c 'printf "[%s]" "$1"' x 'a b; echo pwned'`);
+  await runLine(`vibespace-exit run ${M} -- 'uname -a'`);
+  await runLine(`vibespace-exit run ${M} -- printf '%s|' a '' b`);
+  const [w2, w1, w3] = RUN_BODIES;
+  ok(!!w2 && JSON.stringify(w2.argv) === JSON.stringify(['bash', '-c', 'printf "[%s]" "$1"', 'x', 'a b; echo pwned']) && w2.cmd === undefined, 'two or more words reach the hub AS WORDS (a quoted script, a space, both quote kinds, a semicolon — nothing joined)', w2);
+  ok(!!w1 && w1.cmd === 'uname -a' && w1.argv === undefined, '…ONE word is a line as written (the far shell reads it: pipes, redirects)', w1);
+  ok(!!w3 && JSON.stringify(w3.argv) === JSON.stringify(['printf', '%s|', 'a', '', 'b']), '…an EMPTY word is a word too (never dropped)', w3);
+  const call = XC.argsOf(['run', M, '--', 'bash', '-c', 'ls /srv; df -h']);
+  ok(!!call && call.command === "bash -c 'ls /srv; df -h'" && XC.argsOf(['run', M, '--', 'ls -la | head']).command === 'ls -la | head', 'the chat\'s history card names the line the hub RAN for the words (one word: as written) — never the joined words', call);
+}
 
 // ── ① the parse over the CLI's real output ──
 console.log('① the parse over the real CLI');

@@ -56,6 +56,7 @@ const USAGE = [
   '                                            credentials are THIS conversation\'s — the port refuses every other client)',
   '  vibespace-exit run <machine> -- <cmd>   run <cmd> ON the machine as its user, up to 30 s (universal: ICMP/UDP/proxy-unaware/its DNS);',
   '                                            with "ask me each time" it first waits (≤ 60 s) for the user\'s Allow.',
+  '                                            ONE word after -- = a line as written (the machine\'s shell reads it); two or more = words, sent word for word.',
   '                                            The machine picks the shell: Windows runs the line under cmd.exe (ONE line — join',
   '                                            steps with & or &&; %VAR% and inner quotes are cmd\'s own), everything else under sh -lc.',
   '                                            A command that could not start is said by name (exit 127 not found / 126 not executable).',
@@ -214,7 +215,11 @@ async function main() {
     let machine, cmdParts;
     if (dashdash >= 0) { machine = rest.slice(0, dashdash).join(' ').trim() || undefined; cmdParts = rest.slice(dashdash + 1); }
     else { machine = rest[0]; cmdParts = rest.slice(1); } // tolerate a missing --
-    const command = cmdParts.join(' ').trim();
+    // B-f169 THE ARGV, WORD FOR WORD: ONE word after `--` is a line as written (the far shell reads it — pipes, redirects);
+    // two or more are the argv, sent as words and quoted ONCE by the hub for the far shell — never joined here (a joined
+    // `bash -c 'ls /x'` ran `bash -c ls /x`: another command than the one written)
+    const words = cmdParts; // every word, an empty one included (`ssh-keygen -N '' -f k`)
+    const command = words.length === 1 ? words[0].trim() : words.join(' ').trim();
     if (!command) { console.error('vibespace-exit run: need a command after `--`, e.g. vibespace-exit run mac -- curl -s https://ifconfig.me'); process.exit(2); }
     // "ask me each time": the route answers once — after the user's Allow (≤ 60 s) and the run (≤ 30 s). Say so
     // when the call outlives a second and the machine asks.
@@ -228,7 +233,7 @@ async function main() {
         if (hit.some((e) => e.grants && e.grants.runAsk)) console.error("# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray");
       } catch { }
     }, 1000);
-    const r = await post('/api/agent/exit/run', { machine, cmd: command }, { cls: 'wake', ms: 105000 });   // the user's Allow ≤ 60 s + the run ≤ 30 s
+    const r = await post('/api/agent/exit/run', words.length > 1 ? { machine, argv: words } : { machine, cmd: command }, { cls: 'wake', ms: 105000 });   // the user's Allow ≤ 60 s + the run ≤ 30 s
     clearTimeout(waitNote);
     if (r.stdout) process.stdout.write(r.stdout.endsWith('\n') ? r.stdout : r.stdout + '\n');
     if (r.stderr) process.stderr.write(r.stderr.endsWith('\n') ? r.stderr : r.stderr + '\n');

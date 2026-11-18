@@ -67,12 +67,12 @@ app.get('/api/agent/exit/runs', (req, res) => {
 });
 app.post('/api/agent/exit/run', async (req, res) => {
   const e = agentOr401(req, res); if (!e) return;
-  const { machine, cmd } = req.body || {};
+  const { machine, cmd, argv } = req.body || {};
   // verify-r2 ask-a: the CLI's call ending (its process gone, its own timeout, the conversation killed) settles a
   // waiting ask — the answer would reach nobody and the command must not run for nobody
   const ac = new AbortController();
   res.on('close', () => { if (!res.writableFinished) ac.abort(); });
-  try { res.json(await exitProxy.run(e[1], e[0], machine, cmd, { signal: ac.signal })); }
+  try { res.json(await exitProxy.run(e[1], e[0], machine, Array.isArray(argv) ? { argv } : cmd, { signal: ac.signal })); } // B-f169: the words, word for word
   catch (err) { agentFail(res, err); }
 });
 // lane exit-transfer (design 013 B): ONE file between this machine and a paired one, under the `run` grant, through the

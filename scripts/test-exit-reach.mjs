@@ -31,6 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
@@ -1106,6 +1107,46 @@ console.log('lane exit-transfer (design 013 B): the PURE parts of pull / push �
   ctl('xt4', "  if (/[\\u0000-\\u001f\\u007f]/.test(p) || hidden.length) return refuse('bad_path'", "  if (false) return refuse('bad_path'", (X) => judgeP(X).some((r) => !r.pass && /\\u202e|\\n|\\u200b/.test(JSON.stringify(r.p))), 'the hidden / control check removed — the RLO / newline / zero-width rows go red');
   ctl('xt5', "  if (/[\\\\/]$/.test(p) || tl && p.length <= 2) return refuse('bad_path'", "  if (false) return refuse('bad_path'", (X) => judgeP(X).some((r) => !r.pass && /\/home\/me\/"|Users\\\\\\\\"/.test(JSON.stringify(r.p))), 'the folder-spelling check removed — "/home/me/" goes red');
   for (const r of copiesCensus(MX.files, MX.dir, REPO, { minCopies: 5, label: 'mutant-copy (exit-transfer): ' })) ok(r.pass, r.name, r.detail);
+}
+
+console.log('B-f169 THE ARGV, WORD FOR WORD — the hub quotes the words ONCE for the far shell; a REAL sh reads them back, on the dial road and the ssh road');
+{
+  const XS = require(path.join(REPO, 'src/exit-shell.js'));
+  const w = world();
+  const A = w.sessions.get('wa');
+  for (const id of ['host-dial-Macbook', 'host-box']) await w.mgr.setAccess(id, { use: { mode: 'nobody' }, run: { mode: 'only', who: [{ kind: 'session', id: 'claude:A' }], ask: false }, base: w.mgr.view(id).base });
+  const WORDS = ['sh', '-c', 'printf "[%s]\\n" "$@"', 'x', 'a b', "it's", 'say "hi"; echo pwned', '$HOME `id` * ~', ''];
+  const WANT = '[a b]\n[it\'s]\n[say "hi"; echo pwned]\n[$HOME `id` * ~]\n[]\n';
+  // the device's own plan for the line it is handed (src/exit-shell.js shellPlan: sh -lc <line>), run for real
+  const onDevice = (line) => { const p = XS.shellPlan('linux', line); try { return execFileSync('/bin/' + p.file, p.args, { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: SCR }, timeout: 5000 }); } catch (e) { return 'ERR ' + (e.stdout || e.message); } };
+  const lineOf = () => { const r = w.runs.at(-1); return r ? r.args[r.args.length - 1] : null; };
+  for (const [machine, road] of [['Macbook', 'dial'], ['Build Box', 'ssh']]) {
+    const n0 = w.runs.length;
+    const r = await settle(w.mgr.run(A, 'wa', machine, { argv: WORDS }));
+    const line = w.runs.length === n0 + 1 ? lineOf() : null;
+    const got = line ? onDevice(line) : '';
+    ok(!r.e && !!line && got === WANT, `the ${road} road: a script holding spaces, both quote kinds, a semicolon, $, a backtick, a glob, ~ and an EMPTY word reaches the far shell WORD FOR WORD (the program printed each word as written; «echo pwned» never ran)`, { e: r.e && r.e.message, line, got });
+  }
+  const n1 = w.runs.length;
+  await settle(w.mgr.run(A, 'wa', 'Macbook', 'echo a | tr a b'));
+  ok(w.runs.length === n1 + 1 && lineOf() === 'echo a | tr a b', 'ONE word is a line as written — the far shell reads its pipe (unchanged)', lineOf());
+  ok(XS.argvLine(['uname', '-a']).line === 'uname -a' && XS.argvLine(['uname', '-a']).quoted === false && XS.argvLine([]).ok === false && XS.argvLine(['a', 'b\0c']).ok === false, 'plain words stay plain (the line reads as typed); no words or a NUL ⇒ refused');
+  ok(XS.argvLine(['A=1', 'env']).line === "'A=1' env" && XS.argvLine(['if', 'x']).line === "'if' x" && XS.argvLine(['env', 'A=1', 'x']).line === 'env A=1 x', 'a FIRST word sh would read as an assignment or a reserved word is quoted — it is a program\'s name (later words stay as typed)');
+  ok(XS.winArgvLine(['powershell', '-NoProfile', '-Command', 'Get-ChildItem C:\\x']).line === 'powershell -NoProfile -Command "Get-ChildItem C:\\x"' && XS.winArgvLine(['type', 'C:\\Users\\me\\a.txt']).line === 'type C:\\Users\\me\\a.txt' && XS.winArgvLine(['dir', '文档']).line === 'dir 文档' && ['say "hi"', 'a&b', '%PATH%', '', 'C:\\a b\\'].every((w) => XS.winArgvLine(['echo', w]).ok === false), 'cmd.exe\'s words: backslashes and any letter as typed, a word with spaces in double quotes; a double quote, & | < > ^ ( ) % !, an empty word or a trailing backslash cannot pass word for word (refused)');
+  // cmd.exe reads no POSIX quoting: words that need it are refused BY NAME, nothing runs
+  const winDm = { ...w.dm, status: () => ({ info: { platform: 'win32', capabilities: ['run-shell'] } }), runShell: async (line, opts) => { w.runs.push({ cmd: 'cmd.exe', args: [line], opts }); return { code: 0, stdout: 'ok\r\n', stderr: '', timedOut: false, signal: null, interpreter: 'cmd.exe' }; } };
+  w.hosts.deviceBounded = async () => winDm;
+  const n2 = w.runs.length;
+  const rw = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['cmd', '/c', 'dir', 'C:\\My Files'] }));
+  ok(!!rw.e && rw.e.code === 'bad_command' && rw.e.argv === 'cmd-exe' && /runs commands with cmd\.exe, whose quoting differs from the line composed for this run/.test(rw.e.message) && w.runs.length === n2, 'a Windows agent (cmd.exe) on a record that did not say so: the sh line composed for the run is never sent — REFUSED by name (its own refusal, never «the link failed»), nothing ran', rw.e && rw.e.message);
+  const rp = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['ver'] }));
+  ok(!rp.e && w.runs.length === n2 + 1 && lineOf() === 'ver', '…plain words need no quoting and run there as typed', { e: rp.e && rp.e.message, line: lineOf() });
+  w.recs[0].deviceRuntime = { platform: 'win32' };
+  const n3 = w.runs.length;
+  const rk = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['echo', 'say "hi"'] }));
+  ok(!!rk.e && rk.e.argv === 'cmd-exe' && /which cannot take these words as they are/.test(rk.e.message) && w.runs.length === n3, '…a machine KNOWN to be Windows: words cmd.exe cannot take are refused before anything is asked or sent', rk.e && rk.e.message);
+  const rq = await settle(w.mgr.run(A, 'wa', 'Macbook', { argv: ['powershell', '-NoProfile', '-Command', 'Get-ChildItem C:\\x'] }));
+  ok(!rq.e && w.runs.length === n3 + 1 && lineOf() === 'powershell -NoProfile -Command "Get-ChildItem C:\\x"', '…and its words in cmd.exe\'s own quoting are the line asked about and run (the manual\'s PowerShell form)', { e: rq.e && rq.e.message, line: lineOf() });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

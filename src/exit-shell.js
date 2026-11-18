@@ -61,6 +61,37 @@ function canRunLine(platform, capabilities) {
   return !(platform === 'win32' && !(Array.isArray(capabilities) && capabilities.includes(RUN_SHELL_CAP)));
 }
 
+/** B-f169 THE ARGV, WORD FOR WORD: the words an agent handed `vibespace-exit run <machine> -- <word> <word>…` (two or more)
+ *  → ONE line the far POSIX shell reads back into EXACTLY those words — a word of plain characters as it is, every other in
+ *  single quotes (a quote inside as '\''); the FIRST word quoted too when sh would read it as an assignment (`A=1`) or a
+ *  reserved word (`if`, `time`, `!`) — it is a program's name. ONE quoting step: the CLI never joins, the device's `sh -lc`
+ *  reads the line once. `quoted` = some word needed quoting. → {ok, line, quoted}. */
+const ARGV_PLAIN = /^[A-Za-z0-9_@%+=:,./-]+$/;
+const SH_RESERVED = new Set(['!', '{', '}', '[[', ']]', 'case', 'coproc', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'for', 'function', 'if', 'in', 'select', 'then', 'time', 'until', 'while']);
+const sqWord = (w) => `'${w.replace(/'/g, `'\\''`)}'`;
+function argvLine(words) {
+  if (!Array.isArray(words) || !words.length || words.some((w) => typeof w !== 'string' || w.includes('\0'))) return { ok: false, line: '', quoted: false };
+  let quoted = false;
+  const line = words.map((w, i) => { if (ARGV_PLAIN.test(w) && !(i === 0 && (w.includes('=') || SH_RESERVED.has(w)))) return w; quoted = true; return sqWord(w); }).join(' ');
+  return { ok: true, line, quoted };
+}
+/** The SAME words for cmd.exe (`cmd /d /s /c "<line>"`, the program's own argv parser): a word with none of cmd's live
+ *  characters as it is (a backslash and any letter are fine there), a word holding only spaces besides in double quotes;
+ *  a word with a double quote, `& | < > ^ ( ) % !`, a trailing backslash or nothing at all cannot be handed WORD FOR WORD
+ *  through cmd.exe ⇒ {ok: false} (the hub refuses by name: write cmd.exe's own line). → {ok, line}. */
+const WIN_LIVE = /["&|<>^()%!]/;
+function winArgvLine(words) {
+  if (!Array.isArray(words) || !words.length || words.some((w) => typeof w !== 'string' || w.includes('\0'))) return { ok: false, line: '' };
+  const out = [];
+  for (const w of words) {
+    if (!w || WIN_LIVE.test(w)) return { ok: false, line: '' };
+    if (!/\s/.test(w)) { out.push(w); continue; }
+    if (/\\$/.test(w)) return { ok: false, line: '' };
+    out.push(`"${w}"`);
+  }
+  return { ok: true, line: out.join(' ') };
+}
+
 /**
  * The spawn plan of a shell line ON a device of `platform` → `{ok: true, file, args, windowsVerbatimArguments,
  * interpreter}` | `{ok: false, code, message, interpreter}` (a line cmd.exe cannot run whole; an empty / non-string line).
@@ -183,4 +214,4 @@ function cutText(text, max) {
   return s.slice(0, c >= 0xD800 && c <= 0xDBFF ? max - 1 : max);
 }
 
-module.exports = { CODEPAGE_LABELS, CODEPAGE_PROBES, CODEPAGE_PROBE_MS, UTF8_FALLBACK, RUN_ENCODINGS, codePageLabel, parseCodePage, codePageAsker, knownEncoding, decodeRunOutput, cutText, RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };
+module.exports = { CODEPAGE_LABELS, CODEPAGE_PROBES, CODEPAGE_PROBE_MS, UTF8_FALLBACK, RUN_ENCODINGS, codePageLabel, parseCodePage, codePageAsker, knownEncoding, decodeRunOutput, cutText, RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText, argvLine, winArgvLine };
