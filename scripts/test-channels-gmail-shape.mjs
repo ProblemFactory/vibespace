@@ -2046,6 +2046,11 @@ console.log('\n㉕ B-8edd: a sign-in that landed and nobody connected is a For-y
     'a sign-in that landed with no Connect for the minute files ONE For-you item, the type and the login named, its action the type + the sign-in', J(a1));
   ok(it.i18n && it.i18n.text && it.i18n.text.key === '{kind}: signed in as {user} — finish connecting' && J(it.i18n.text.params) === J({ kind: 'Gmail', user: 'member.a@example.com' }) && it.urgency === 'normal' && it.expiresAt === s1.startedAt + ENG.PENDING_FLOW_TTL_MS,
     'its words are keyed for the person\'s language, and it ends when the sign-in\'s own time does (the start + 30 min)', J({ i18n: it.i18n, expiresAt: it.expiresAt, want: s1.startedAt + ENG.PENDING_FLOW_TTL_MS }));
+  const dl = ((it.i18n && it.i18n.detail) || [])[0] || {};
+  const until = dl.params && dl.params.until;
+  ok(until && until.at === s1.startedAt + ENG.PENDING_FLOW_TTL_MS && until.key === 'the sign-in waits until {time}' && until.gone === 'the sign-in has run out — sign in again' && dl.key === 'The sign-in landed but the account was not connected — open Connect an account to finish; {until}.',
+    'cure2: the detail\'s END rides as an INSTANT CLAUSE {at, key, gone} — the page words it in its own clock («waits until …», «has run out» once passed)', J(dl));
+  ok(/waits 30 minutes from its start\.$/.test(it.detail || '') && !/\d{1,2}:\d{2}|UTC|\d{4}-\d{2}-\d{2}/.test(it.detail || ''), 'the store\'s English fallback (a reader with no page) says a DURATION — no clock, no zone, no date', it.detail);
   const st1 = L.e2.oauthStatus(null, { kind: 'gmail' });
   ok(st1.done && st1.ok && st1.flowId === s1.flowId && st1.token === s1.flowId, 'the Connect dialog the verb opens finds this sign-in by its type (what the dialog\'s attach reads)', J(st1));
   // a newer landing of the same type: ONE item, the newest

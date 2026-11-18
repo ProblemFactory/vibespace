@@ -10986,7 +10986,9 @@ export default {
   // B-8edd: a sign-in landed and nobody pressed Connect
   "{kind}: signed in as {user} — finish connecting": "{kind}：{user} としてログイン済み — 接続を完了してください",
   "{kind}: signed in — finish connecting": "{kind}：ログイン済み — 接続を完了してください",
-  "The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits until {until} UTC.": "ログインは完了しましたが、アカウントはまだ接続されていません — 「アカウントを接続」を開いて完了してください。このログインは {until} UTC まで有効です。",
+  "The sign-in landed but the account was not connected — open Connect an account to finish; {until}.": "ログインは完了しましたが、アカウントはまだ接続されていません — 「アカウントを接続」を開いて完了してください。{until}。",
+  "the sign-in waits until {time}": "このログインは {time} まで有効です",
+  "the sign-in has run out — sign in again": "このログインは期限切れです — もう一度ログインしてください",
   "Finish connecting": "接続を完了",
   "Open Connect an account with this sign-in": "このログインで「アカウントを接続」を開く",
   "the vendor refused the refresh token": "サービス側が更新トークンを拒否しました",

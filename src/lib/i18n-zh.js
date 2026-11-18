@@ -10987,7 +10987,9 @@ export default {
   // B-8edd: a sign-in landed and nobody pressed Connect
   "{kind}: signed in as {user} — finish connecting": "{kind}：已以 {user} 登录 — 请完成连接",
   "{kind}: signed in — finish connecting": "{kind}：已登录 — 请完成连接",
-  "The sign-in landed but the account was not connected — open Connect an account to finish; the sign-in waits until {until} UTC.": "已登录，但账号还没有连接 — 打开「连接账号」完成；这次登录会保留到 {until} UTC。",
+  "The sign-in landed but the account was not connected — open Connect an account to finish; {until}.": "已登录，但账号还没有连接 — 打开「连接账号」完成；{until}。",
+  "the sign-in waits until {time}": "这次登录会保留到 {time}",
+  "the sign-in has run out — sign in again": "这次登录已过期 — 请重新登录",
   "Finish connecting": "完成连接",
   "Open Connect an account with this sign-in": "用这次登录打开「连接账号」",
   "the vendor refused the refresh token": "服务方拒绝了刷新令牌",
