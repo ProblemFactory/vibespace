@@ -432,6 +432,9 @@ try {
   check('the watch request\'s card on a phone (375 touch): in its tool card, Approve / Reject 44 px tall', onPhone && (await B.evalJs(`(() => { const b = document.querySelector('.cn-card[data-item="${wr && wr.id}"] .ut-action-proposal[data-answer="approve"]'); return !!b && b.getBoundingClientRect().height >= 43.5; })()`)));
   await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
   await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wr && wr.id}"]')`, 12000);
+  // ④b's law reads THIS view later: the one that saw both filings open (its open slot the newest, the watch request) — marked, so
+  // ④b knows whether it is still the same view or one built again since (a page sent to the back may rebuild its views)
+  check('① client B\'s chat view is marked — the view that saw both filings open (④b reads the accordion on it)', (await B.evalJs(`(() => { const v = ${VIEW}; if (v) v.__ncBothSeen = 1; return !!v; })()`)) === true);
   await A.front();
   lap('① done');
 
@@ -492,6 +495,27 @@ try {
 
   console.log('④b ANSWERED ON ANOTHER CLIENT: the card patched in place');
   await B.front(); await B.waitFor(`!!document.querySelector('.cn-card[data-item="${ask.id}"].cn-open')`, 10000); await sleep(800);
+  // THE ACCORDION ON THE SECOND PAGE (the 2.369.410 train's hosted red, 2026-11-18: this leg pressed Reply on a FOLDED card — cn-open
+  // only says «unresolved», and a folded card's actions have no box). B's view saw the ask AND the watch request open (①), so its
+  // open slot is the newest, the watch request; A resolved it (③) and a resolution never moves the slot — on that view the ask is
+  // FOLDED, and ONE press on its row opens it in place. The law is read on the view ① marked (pinned there; a view built again
+  // after ③ takes the only open item, the ask — one built between ① and ③ saw both and folds it the same — and the leg says
+  // which view it judged); the press is proved to open THE card it pressed (marked before, the same element and view after);
+  // then the leg does what a person does — a folded card is opened by a press on its row, the Reply pressed past the press arm
+  const accB = await B.evalJs(`(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="${ask.id}"]'); return { same: !!v && v.__ncBothSeen === 1, slot: v && v._needsCards ? v._needsCards._slot : null, open: !!c && c.classList.contains('cn-open'), fold: !!c && c.classList.contains('cn-fold') }; })()`);
+  const OPENED = `(() => { const c = document.querySelector('.cn-card[data-item="${ask.id}"]'), b = c && c.querySelector('.ut-reply-btn'), r = b && b.getBoundingClientRect(); return !!c && c.classList.contains('cn-open') && !c.classList.contains('cn-fold') && !!r && r.width > 0 && r.height > 0; })()`;
+  let unfolded = null;
+  if (accB && accB.fold) {
+    await B.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${ask.id}"]'); if (c) c.dataset.lawFold = '1'; return !!c; })()`);
+    await B.press(`.cn-card[data-item="${ask.id}"] .ut-item > .ut-body > .ut-text`, { touch: false });
+    unfolded = !!(await B.waitFor(`${OPENED} && document.querySelector('.cn-card[data-item="${ask.id}"]').dataset.lawFold === '1' && ${accB.same ? `(${VIEW})?.__ncBothSeen === 1` : 'true'}`, 4000));
+  }
+  check(`THE LAW ON THE SECOND PAGE (${accB && accB.same ? 'the view that saw both filings — not built again since ①' : 'a view built again since ①'}): the ask's card is folded exactly when the open slot is not the ask${accB && accB.same ? ' — here the slot stayed on the NEWER request the first client resolved, so the ask is FOLDED' : ''}; a folded card opens with ONE press on its row — THAT card, in place: open, not folded, its Reply with a box`,
+    !!accB && accB.open && accB.fold === (accB.slot !== ask.id) && (!accB.same || (accB.slot === (wr && wr.id) && accB.fold)) && (!accB.fold || unfolded === true), { accB, unfolded });
+  // the Reply below is pressed on an OPEN card (whatever road opened it), past the press arm (ARM_MS 700: what an open moved under
+  // the pointer answers nothing that long)
+  if (!(await B.waitFor(OPENED, 6000))) throw new Error('④b: the ask\'s card on B is not OPEN and NOT FOLDED with a Reply that has a box — ' + JSON.stringify(await B.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${ask.id}"]'), b = c && c.querySelector('.ut-reply-btn'), r = b && b.getBoundingClientRect(); return { cls: c ? c.className : null, reply: !!b, w: r ? r.width : 0, h: r ? r.height : 0 }; })()`)));
+  await sleep(900);
   // ANSWERED ELSEWHERE, PATCHED IN PLACE: B in front (a page sent to the back may rebuild its views on its return — not
   // this card's doing); «another client» (page A's own road, evaluated in the back — no input) answers the ask with its label
   await B.evalJs(`(() => { for (const c of document.querySelectorAll('.cn-card[data-item="${ask.id}"]')) c.dataset.probe = 'before'; return true; })()`);
