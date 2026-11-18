@@ -170,7 +170,9 @@
 // `[ci] dir sweep due — <why>` line per sweep); `off` skips every tier's sweep (a lane on a box whose reap is the
 // owner's; `--reap` by hand still judges); `every` = the pre-.280 sweep after every row, a skipped one too.
 // VIBESPACE_CI_SCRATCH_ROOTS: ':'-separated absolute root PATTERNS (`*` = one name inside a segment) the scratch reaper
-// judges like /tmp/vs-* — a box's acceptance worktrees' scratch hubs and Chromes (B-f397; extraRootPatterns).
+// judges like /tmp/vs-* — a box's acceptance worktrees' scratch hubs and Chromes (B-f397; extraRootPatterns). Name LOCAL
+// folders only: a root on a network mount can hang the sweep (a configured root is lstat'd and its run record read, and its
+// processes' cwds are stat'd through /proc, inside the reaper's lock).
 // Exit codes: 0 green · 1 red · 2 refused (dirty tree / bad --only) · 3 the
 // tier did not run (never got the machine lock) · 4 ABORTED (superseded, the
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
@@ -1716,11 +1718,17 @@ const extraRootRes = () => {
 };
 /** The scratch root a (normalized) path begins with — `/tmp/vs-<name>`, else a VIBESPACE_CI_SCRATCH_ROOTS root — or null. A
  *  configured root that IS, holds or lies inside the account's home, this checkout or the gate's cwd is never one. */
+// batch 34 cure (主开发 09:32Z): THE REAL HOME IS NEVER A SCRATCH ROOT — the home is judged by the ACCOUNT'S REAL home (the passwd
+// entry) as well as by HOME, so a gate run under a scratch HOME still refuses a configured root that is, holds or lies inside the
+// real one (and the mount under it). A path compared, nothing read there (test-architecture §68's one reasoned scripts site). Read
+// once, and only once a pattern is configured (an import of ci.mjs — the pre-push hook — reads no passwd entry).
+let passwdHomeMemo;
+export const passwdHome = () => (passwdHomeMemo !== undefined ? passwdHomeMemo : (passwdHomeMemo = (() => { try { return os.userInfo().homedir || null; } catch { return null; } })()));
 export function scratchRootOf(s) {
   const m = SCRATCH_ROOT_RE.exec(s); if (m) return m[0];
   const extras = extraRootRes(); if (!extras.length) return null;
   const near = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
-  const kept = [os.homedir(), process.env.HOME, path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()].filter(Boolean).map((p) => path.resolve(p));
+  const kept = [os.homedir(), process.env.HOME, passwdHome(), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()].filter(Boolean).map((p) => path.resolve(p));
   for (const re of extras) { const x = re.exec(s); if (x && !kept.some((k) => near(x[0], k))) return x[0]; }
   return null;
 }

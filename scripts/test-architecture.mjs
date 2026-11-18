@@ -3751,8 +3751,13 @@ await section(async () => {
   if (imageAcct) locals.add(imageAcct);
   locals.add('runner');   // THE HOSTED RUNNER'S ACCOUNT counts as real everywhere too: the hosted build runs this census where «runner» IS an account under /home
   const judge = (src, accounts = locals) => { const hits = []; const code = src.split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l)).join('\n'); for (const m of code.matchAll(/userInfo\(\)\s*\.\s*homedir/g)) hits.push(`${code.slice(0, m.index).split('\n').length}: userInfo().homedir`); for (const m of code.matchAll(/['"`]\/home\/([^/'"`\s]+)/g)) if (accounts.has(m[1])) hits.push(`${code.slice(0, m.index).split('\n').length}: /home/${m[1]}`); return hits; };
+  // ONE reasoned scripts site (batch 34 cure, 主开发 09:32Z): the scratch reaper's never-a-root guard compares a configured root with
+  // the ACCOUNT'S REAL home, so a gate under a scratch HOME still refuses it — a path compared, never opened
+  const SCRIPT_ALLOW = { 'scripts/ci.mjs': [/THE REAL HOME IS NEVER A SCRATCH ROOT/, 1] };
+  const allowed = (f, h) => !!SCRIPT_ALLOW[f] && h.length === SCRIPT_ALLOW[f][1] && h.every((x) => x.includes('userInfo().homedir')) && SCRIPT_ALLOW[f][0].test(fs.readFileSync(f, 'utf8'));
   const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
-  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, h]) => h.length);
+  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([f, h]) => h.length && !allowed(f, h));
+  ok(Object.keys(SCRIPT_ALLOW).every((f) => { const h = judge(fs.readFileSync(f, 'utf8')); return h.length === SCRIPT_ALLOW[f][1] && allowed(f, h); }), `§68 the one reasoned scripts site is alive — exactly ${SCRIPT_ALLOW['scripts/ci.mjs'][1]} passwd read in scripts/ci.mjs, with its reason (a second read, or the reason gone, is red)`);
   ok(scope.length >= 100, `§68 census scope is non-vacuous (${scope.length} scripts; ${locals.size} local accounts under /home)`);
   ok(bad.length === 0, `§68 no suite reads the passwd home or names a real account's /home/<name>${bad.length ? ' — ' + bad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
   ok(judge("const realBrowsers = path.join(os.userInfo().homedir, '.agent-browser');").length === 1 && judge("// a comment naming os.userInfo().homedir\nconst h = path.join(os.homedir(), 'x');").length === 0 && judge("const h = '/home/alice/.agent-browser';", new Set(['alice'])).length === 1 && judge("const h = '/home/u/.agent-browser'; const g = path.join(os.homedir(), 'x');", new Set(['alice'])).length === 0,

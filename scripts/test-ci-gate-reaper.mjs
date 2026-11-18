@@ -10,11 +10,15 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, extraRootPatterns, scratchRootOf, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, extraRootPatterns, scratchRootOf, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS , passwdHome } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
+// batch 34 cure (the readers, 09:32Z): two fixtures here lie outside /tmp/vs-* on purpose (the configured-root leg's, the plain
+// dir's: the built-in shape must not claim them), where no directory sweep looks — so a signal to the suite removes every
+// fixture too, then is raised again (only a SIGKILL can leave them)
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } process.kill(process.pid, sig); });
 
 try {
 
@@ -514,6 +518,24 @@ console.log('\n§9d the directory sweep (B-60d2)');
   ok(reuse.code === 0 && !!reuse.o && reuse.o.p !== reuse.o.left && reuse.o.p.startsWith(reuse.o.left + '-') && reuse.o.p === reuse.o.q && reuse.o.leftKept && reuse.o.pFree && /already exists and this process did not make it/.test(reuse.err),
     `B-d8e3: a leftover at the pid-keyed name is left alone and said; the run takes a fresh name that does not exist, the same for every ask: ${JSON.stringify(reuse)}`);
   ok(!!reuseOld.o && reuseOld.o.p === reuseOld.o.left, `CONTROL B-d8e3: the old scratch() hands the leftover over as the run's own folder (red): ${JSON.stringify(reuseOld.o)}`);
+  // batch 34 cure (the readers, 09:32Z): CSP_REPORTS_FILE steps aside the same way — a child suite plants a leftover at ITS OWN
+  // pid-keyed csp-reports folder (a killed run's report lines in it), then imports scratch.mjs (the name is decided at import);
+  // RED control: the old line hands the leftover over (the next run reads another run's reports)
+  const CSP_ASIDE = 'return fs.existsSync(d) ? leftoverAside(d) : d;';
+  ok(SCRSRC.includes(CSP_ASIDE), 'CONTROL batch 34 cure: the patched CSP line is in scratch.mjs');
+  const cspBody = (url) => `import fs from 'node:fs';\nimport path from 'node:path';\nimport { createRequire } from 'node:module';\nconst { FIXTURE_CWD_PREFIX, TMP_ROOTS } = createRequire(${JSON.stringify(path.join(REPO, 'scripts', 'x.mjs'))})('../src/fixture-guard.js');\nconst left = path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'csp-reports-' + process.pid);\nfs.mkdirSync(left); fs.writeFileSync(path.join(left, 'csp-reports.jsonl'), '{"an-old-run":1}\\n');\nconst { CSP_REPORTS_FILE } = await import(${JSON.stringify(url)});\nconst dir = path.dirname(CSP_REPORTS_FILE);\nconsole.log(JSON.stringify({ left, dir, leftKept: fs.readFileSync(path.join(left, 'csp-reports.jsonl'), 'utf8') === '{"an-old-run":1}\\n' }));\n`;
+  const runCsp = (file, url) => new Promise((res) => {
+    const f = path.join(MUT, file); fs.writeFileSync(f, cspBody(url));
+    const c = spawn(process.execPath, [f], { stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = '';
+    const t = setTimeout(() => c.kill('SIGKILL'), 20000);
+    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (code) => { clearTimeout(t); let o = null; try { o = JSON.parse(out.trim().split('\n').pop()); } catch { } if (o) for (const d of [o.left, o.dir]) tmpDirs.push(d); res({ code, o, err: err.trim().slice(0, 300) }); });
+  });
+  const oldCspUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC.replace(CSP_ASIDE, 'return d;'), 'old-csp')).href;
+  const [csp, cspOld] = await Promise.all([runCsp('test-fx9d-csp.mjs', scratchUrl), runCsp('test-fx9d-csp-old.mjs', oldCspUrl)]);
+  const leftAfter = (() => { try { return fs.readFileSync(path.join(csp.o?.left || '/nonexistent', 'csp-reports.jsonl'), 'utf8') === '{"an-old-run":1}\n'; } catch { return false; } })();   // after the child's exit hooks ran
+  ok(csp.code === 0 && !!csp.o && csp.o.dir !== csp.o.left && csp.o.dir.startsWith(csp.o.left + '-') && csp.o.leftKept && leftAfter && /already exists and this process did not make it/.test(csp.err), `batch 34 cure: a leftover csp-reports folder at the pid-keyed name is left alone; the run's reports go to a fresh folder beside it: ${JSON.stringify(csp)}`);
+  ok(!!cspOld.o && cspOld.o.dir === cspOld.o.left, `CONTROL batch 34 cure: the old CSP line hands the leftover over — this run would read another run's reports (red): ${JSON.stringify(cspOld.o)}`);
   ok(ordOld.o?.seen.join() === 'same-turn:false,later:false' && ordOld.o.roots.every((d) => !fs.existsSync(d)), `CONTROL B-0d6d: the closer armed alone (the old order) runs first — the hooks read removed roots (red): ${JSON.stringify(ordOld)}`);
   // THE EVIDENCE: a live process's cwd and XDG_RUNTIME_DIR are held paths (real /proc); a private session bus under a
   // record-less root is a suite's executable; a verify workspace's lane dir is its own root (item 4: dpi-measure)
@@ -611,6 +633,41 @@ console.log('\n§9d the directory sweep (B-60d2)');
       const standIns = [['/tmp/vs-ci-fast-0123abcd-4242', 'refused'], ['/tmp/vs-ci-fast-0123abcd-4242/wt/checkout', 'built-in'], ['/srv/co', 'refused']].map(([p, want]) => ({ p, want, ...sayOf(p) }));
       ok(standIns.every((x) => x.c.case === x.want && x.ok) && standIns[0].c.builtIn === '/tmp/vs-ci-fast-0123abcd-4242' && standIns[2].c.builtIn === null,
         `train-410 gate cure (b): the cases a gate may put its checkout in, each answered as the law says — ${standIns.map((x) => `${x.p} → ${x.words}`).join(' | ')}`);
+      // batch 34 cure (主开发 09:32Z, as if a must): THE GUARD THAT KEEPS THE HOME (and the workspace mount under it) FROM EVER BEING
+      // A ROOT HAS ITS OWN RED CONTROL — the HOME variable, the account's REAL home under a scratch HOME, and the gate's cwd; each a
+      // mutant of ci.mjs that drops that guard from the kept list goes red (it names the folder a root). Pure: no folder is read.
+      const KEPT = '[os.homedir(), process.env.HOME, passwdHome(), ';
+      const noVar = await mutant9('no-home-var', KEPT, '[passwdHome(), '), noReal = await mutant9('no-home-real', KEPT, '[os.homedir(), process.env.HOME, '), noCk = await mutant9('no-checkout', "passwdHome(), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()]", 'passwdHome(), process.cwd()]'), noCwd = await mutant9('no-cwd', ', process.cwd()].filter(Boolean)', '].filter(Boolean)');
+      const homes = path.join(acc, 'hh-homes'), H = path.join(homes, 'hh-scratch-home'), C = path.join(acc, 'cc-cwds', 'cc-gate-cwd');
+      for (const d of [H, C]) fs.mkdirSync(d, { recursive: true });
+      const prevHome = process.env.HOME, cwd0 = process.cwd(), realHome = passwdHome();   // ci.mjs's own read (§68's one reasoned site), never a second one
+      try {
+        process.env.HOME = H;   // os.homedir() answers HOME while it is set: a scratch HOME
+        process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${homes}/hh*`;
+        ok(scratchRootOf(path.join(H, 'x')) === null && noVar.scratchRootOf && noVar.scratchRootOf(path.join(H, 'x')) === H,
+          `batch 34 cure: a configured root that IS the HOME is never a root; CONTROL — the HOME guard dropped, it is (${noVar.scratchRootOf ? noVar.scratchRootOf(path.join(H, 'x')) : JSON.stringify(noVar)})`);
+        const inReal = realHome ? `${realHome}/zz-vs-never/zz-a-root` : null;   // made-up names inside the account's real home: the pattern is judged, nothing is read
+        if (realHome) process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${realHome}/zz-vs-never/zz-a*`;   // one level deeper: three segments even for a home of /root
+        if (!realHome || extraRootPatterns().ok.length !== 1) console.log(`  ○ SKIP batch 34 cure (b): ${!realHome ? 'this uid has no passwd entry — ci.mjs keeps no real home either, only the variable' : "the account's real home cannot be spelled as a pattern (/ or a character outside the pattern set), so no configured root can name a folder inside it"}`);
+        else ok(scratchRootOf(path.join(inReal, 'x')) === null && noReal.scratchRootOf && noReal.scratchRootOf(path.join(inReal, 'x')) === inReal,
+          `batch 34 cure: under a scratch HOME the account's REAL home still holds no root; CONTROL — judged by the variable alone, a pattern inside it names a root (${noReal.scratchRootOf ? (noReal.scratchRootOf(path.join(inReal, 'x')) === inReal ? 'it does' : 'it does not') : JSON.stringify(noReal)})`);
+        if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+        process.chdir(C);
+        process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${path.dirname(C)}/cc*`;
+        ok(scratchRootOf(path.join(C, 'x')) === null && noCwd.scratchRootOf && noCwd.scratchRootOf(path.join(C, 'x')) === C,
+          `batch 34 cure: a configured root that IS the gate's cwd is never a root; CONTROL — the cwd guard dropped, it is (${noCwd.scratchRootOf ? noCwd.scratchRootOf(path.join(C, 'x')) : JSON.stringify(noCwd)})`);
+        // the CHECKOUT guard's own control (the readers, 09:4xZ), by the checkout's CASE (the train-410 gate rule, (b) above): only a
+        // LAWFUL checkout reaches the kept list — from C (away from it), a mutant without the checkout entry names it. A refused or
+        // built-in checkout never reaches the list (no configured root can name it / the built-in root answers first, asserted in (b)):
+        // the control says that case and has nothing to hold there
+        process.env.VIBESPACE_CI_SCRATCH_ROOTS = here.c.pattern;
+        const nearK = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+        const ckHeld = [os.homedir(), process.env.HOME, realHome].filter(Boolean).map((p) => path.resolve(p)).some((h) => nearK(ck, h));
+        if (here.c.case !== 'lawful') console.log(`  ○ batch 34 cure (checkout control): this checkout is «${here.c.case}» — it never reaches the kept list, so the checkout guard has nothing to hold here (asserted in (b) above)`);
+        else if (ckHeld) console.log('  ○ batch 34 cure (checkout control): this checkout lies in a home, so the home guard holds it as well — the checkout guard alone cannot be shown here');
+        else ok(scratchRootOf(path.join(ck, 'scripts')) === null && noCk.scratchRootOf && noCk.scratchRootOf(path.join(ck, 'scripts')) !== null,
+          `batch 34 cure: away from the checkout, a configured root that IS the (lawful) checkout is still never a root; CONTROL — the checkout guard dropped, it is (${noCk.scratchRootOf ? noCk.scratchRootOf(path.join(ck, 'scripts')) : JSON.stringify(noCk)})`);
+      } finally { process.chdir(cwd0); if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome; }
     } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_SCRATCH_ROOTS; else process.env.VIBESPACE_CI_SCRATCH_ROOTS = prev; }
   }
 }
