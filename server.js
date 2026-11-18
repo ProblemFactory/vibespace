@@ -1002,7 +1002,7 @@ const sessionBrain = require('./src/server/session-brain.js').create({
   broadcastAll: (msg) => { const json = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(json); } catch {} } }, // session-vcs must reach an explorer-only client, not just the session's attached ones
   getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }), getSessionStatus: () => { try { return sessionStatus; } catch { return null; } }, sessionStatusKey,
 });
-const { sbSeenFirst, claudeSideEffects } = sessionBrain;
+const { sbSeenFirst, claudeSideEffects, noteTurnFeed } = sessionBrain;
 hosts.onSessionEvents = (hostId, m) => {
   try {
     if (!m?.sid) return;
@@ -1015,7 +1015,7 @@ hosts.onSessionEvents = (hostId, m) => {
       if (sess) {
         for (const line of m.raw) {
           let rec = null; try { rec = JSON.parse(line); } catch { continue; }
-          if (sbSeenFirst(sess, rec)) claudeSideEffects(sess, sess._webuiId || null, rec);
+          noteTurnFeed(sess, rec, 'device'); if (sbSeenFirst(sess, rec)) claudeSideEffects(sess, sess._webuiId || null, rec);   // B-d868 cure 3: the feed's position is noted where it DELIVERS, before the gate that may drop the record
         }
       }
     }

@@ -430,6 +430,42 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     const v = [B.sbSeenFirst(g2, { type: 'frame_stamp', cli_uuid: V('h1') }), B.sbSeenFirst(g2, { type: 'frame_stamp', cli_uuid: V('h2') })];
     ok(`CONTROL (B-d868): the copy keyed requestId:type:subtype collapses the second frame_stamp (${v.join(',')}) — the leg goes red`, v.join() === 'true,false');
   }
+  // (cure 3, 主开发 12:32Z) THE DEVICE FEED'S POSITION IS NOTED WHERE IT DELIVERS — before the gate that may drop the record. The
+  // parse REGISTERS every record in the brain's own seen-first gate (as the hub wires it), the device path is server.js's OWN line
+  // (evaluated as written), and the parse sees a turn's stamped records but MISSES its result and the next init, which the device
+  // feed alone supplies — the turn ends and the next opens (the tip before this cure dropped both as «behind»: the previous «you» stood)
+  const SJ = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const devLineOf = (src) => { const l = src.split('\n').find((x) => x.includes('if (sbSeenFirst(sess, rec)) claudeSideEffects(sess, sess._webuiId || null, rec);')); if (!l) throw new Error("the anchor of the device path's line is not in server.js"); return l.replace(/\/\/.*$/, ''); };
+  const gapRun = (lineText) => {
+    const B = SB.create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { } });
+    const { attach: attachG } = consumer.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(),
+      USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: (sx2, m2) => B.sbSeenFirst(sx2, m2), hosts: null, usageHistory: null, pagesRef: { current: null } });
+    const gid = 'w-gap-' + Math.random().toString(36).slice(2, 6), cid = 'c1d00000-0000-4000-8000-' + String(++n).padStart(12, '0');
+    const sx = { mode: 'chat', backend: 'claude', name: gid, cwd: CWD, host: 'h-gap', keeperSid: 'k-gap', claudeSessionId: cid, backendSessionId: cid, sockName: 'cw-' + gid, buffer: '', createdAt: Date.now() };
+    sx._normalizer = createMessageManager('claude', gid); activeSessions.set(gid, sx); const px = fakePty(); attachG(sx, gid, px, helpers);
+    const dev = new Function('noteTurnFeed', 'sbSeenFirst', 'claudeSideEffects', 'sess', 'rec', lineText);
+    const device = (r) => dev(B.noteTurnFeed, B.sbSeenFirst, B.claudeSideEffects, sx, r);
+    const both = (r) => { px.data(J(r)); device(r); };   // the parse first (it registers), then the device feed (dropped by the gate)
+    const G = (k) => 'd8680000-0000-4000-8000-0000000003' + k;
+    both({ type: 'frame_stamp', cli_uuid: G('p0') }); both({ type: 'system', subtype: 'init', uuid: G('i0'), user_message_uuids: [G('p0')] });
+    both({ type: 'assistant', uuid: G('a0'), timestamp: Tm(50), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } }); both({ type: 'result', uuid: G('r0') });
+    both({ type: 'frame_stamp', cli_uuid: G('p1') }); both({ type: 'system', subtype: 'init', uuid: G('i1'), user_message_uuids: [G('p1')] });
+    both({ type: 'assistant', uuid: G('a1'), timestamp: Tm(100), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } });
+    const before = { ...sx._turnBy };
+    device({ type: 'result', uuid: G('r1') }); const ended = { by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive };   // the parse MISSED these two
+    device({ type: 'system', subtype: 'init', uuid: G('i2') });
+    activeSessions.delete(gid);
+    return { before, ended, after: { by: sx._turnBy.by, source: sx._turnBy.source, live: sx._turnLive } };
+  };
+  const devLine = devLineOf(SJ);
+  const gap = gapRun(devLine);
+  ok(`B-d868 (cure 3): the parse misses a result and the next init, the device feed supplies them — the turn ends (${gap.ended.by}, ${gap.ended.source}, live ${gap.ended.live}) and the next opens (${gap.after.source}, live ${gap.after.live}); never the previous «${gap.before.by}»`,
+    gap.before.by === 'person' && gap.ended.by === 'unrecorded' && gap.ended.source === 'turn-ended' && gap.ended.live === false && gap.after.source === 'pending' && gap.after.live === true, JSON.stringify(gap));
+  const fromFeed = "noteTurnFeed(sess, rec, 'device'); ";
+  if (anchor(devLine, fromFeed, 'B-d868 the device position noted before its gate')) {
+    const g0 = gapRun(devLine.replace(fromFeed, ''));
+    ok(`CONTROL (B-d868 cure 3): server.js's device line without the position (the tip before this cure) drops the result and the init the device alone supplied — the previous «${g0.after.by}» stands, live ${g0.after.live}`, g0.after.by === 'person' && g0.after.live === true, JSON.stringify(g0));
+  }
   // (as-if-must (1)) AFTER A RE-ATTACH THE OPENER IS UNKNOWN until a turn starts in its sight: the person's turn, then a fresh
   // attach of the SAME session (a dead bridge healed, a parse gap) — never the previous «you»
   const ra = mkSession('w-reattach');

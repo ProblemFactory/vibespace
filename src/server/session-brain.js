@@ -65,16 +65,25 @@ function noteTurnAttach(session) {
   st.bgLive = live.slice(0, 100);
   sayBackground(session, st);
 }
+/** THE STREAM'S OWN ORDER (主开发's as-if-musts 12:09Z and 12:32Z): a feed's position is the newest stamp it has DELIVERED — noted
+ *  where the feed delivers, before ANY gate that may drop the record: noteTurnOpener notes it before its once-gate, and server.js's
+ *  device path calls this ahead of sbSeenFirst (a device record the parse took first never reaches the opener; noted there
+ *  only, the device feed's position stayed at zero on an ordinary conversation, and the result + init it alone supplied after a
+ *  parse gap were dropped as «behind» — the previous turn's «you» standing over a turn it did not start). The CLI stamps its
+ *  user / assistant records; init and result carry none. When NEITHER feed ever carries a stamp the order rule is silent (both
+ *  positions stay 0, nothing is behind): the two memories alone hold — the once-memory (600 keys) and the opened inits (2000). */
+function noteTurnFeed(session, msg, feed) {
+  if (!session || !msg || typeof msg !== 'object') return;
+  const ts = typeof msg.timestamp === 'string' ? Date.parse(msg.timestamp) : NaN;
+  if (!Number.isFinite(ts)) return;
+  const st = turnStateOf(session);
+  if (ts > (st.feedAt[feed] || 0)) st.feedAt[feed] = ts;
+}
 /** Feed ONE record (`feed`: 'parse' | 'device'). A record without an identity is taken from the parse only. */
 function noteTurnOpener(session, msg, feed = 'parse') {
   if (!session || !msg || typeof msg !== 'object') return;
   const st = turnStateOf(session);
-  // THE STREAM'S OWN ORDER (主开发's as-if-must 12:09Z: a late backlog from the device feed — its keys gone from the once-memory —
-  // must never take an old turn's start again): each feed's position in the stream is the newest stamp it has delivered
-  // (the CLI stamps its user / assistant records; init and result carry none). Taken before the once-gate: a record
-  // already taken still says where its feed has reached
-  const ts = typeof msg.timestamp === 'string' ? Date.parse(msg.timestamp) : NaN;
-  if (Number.isFinite(ts) && ts > (st.feedAt[feed] || 0)) st.feedAt[feed] = ts;
+  noteTurnFeed(session, msg, feed);   // where this feed has reached — before the once-gate (the device path notes it before ITS gate too)
   const key = turnKeyOf(msg);
   if (key) { if (st.seen.has(key)) return; st.seen.add(key); if (st.seen.size > TURN_SEEN_MAX) st.seen.delete(st.seen.values().next().value); }
   else if (feed !== 'parse') return;
@@ -332,6 +341,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbSeenFirst, claudeSideEffects, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
+  return { sbSeenFirst, claudeSideEffects, noteTurnFeed, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange, noteSessionTitle, noteWritesLost };
 }
-module.exports = { create, noteTurnOpener, noteTurnCmdRecord, noteTurnAttach };
+module.exports = { create, noteTurnOpener, noteTurnCmdRecord, noteTurnAttach, noteTurnFeed };
