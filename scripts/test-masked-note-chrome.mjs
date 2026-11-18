@@ -212,8 +212,7 @@ for (const [label, url, want] of [['THIS TREE', pageNow, true], ['CONTROL (r3\'s
 // runs linkifyInto over the pane. The REAL linkifyInto (src/lib/user-todos-row.js) in Chrome: the pre's text = the detail exactly (a copy of
 // it copies the command), the masked run its words, THE note the pre's NEXT sibling; in prose (main-ask's words, no block) the note stays inline
 {
-  const IW = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8');
-  ok(IW.includes("else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }") && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW), 'r6 (m7): the For-you window draws a plain ask\'s detail as <pre class=iw-exit-cmd> by textContent, then linkifyInto over its pane (inbox-window.js, read)');
+  // (r6 (m7)'s source pin of src/lib/inbox-window.js: MOVED to the fast scripts/test-masked-note-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const dir = path.join(ROOT, 'm7'); fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'entry.js'), `import * as ROW from ${JSON.stringify(path.join(REPO, 'src/lib/user-todos-row.js'))};\nwindow.__m7 = { linkifyInto: ROW.linkifyInto };`);
   await esbuild.build({ entryPoints: [path.join(dir, 'entry.js')], bundle: true, outfile: path.join(dir, 'bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, logLevel: 'silent' });

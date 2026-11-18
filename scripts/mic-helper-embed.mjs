@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // lane stream-mic-road (the window helper's way — scripts/wgc-helper-embed.mjs): THE MICROPHONE HELPERS' SOURCES INTO THE
 // AGENT BUNDLE — writes src/mic-helper-source.js from tools/vibespace-mic/ (the Windows helper's C#, the Mac helper's Swift,
-// the Mac plug-in's C + Info.plist). Run it after editing any of them; scripts/test-stream-mic-op.mjs fails while they differ.
+// the Mac plug-in's C + Info.plist). Run it after editing any of them; scripts/test-stream-mic-op-pins.mjs fails while they differ.
 // A plain module, so every esbuild of the agent carries the text with no loader flag; the agent builds each ON the machine
 // (src/desktop-mic.js — a stamp per source digest, so a changed source rebuilds).
 //   node scripts/mic-helper-embed.mjs            write the module

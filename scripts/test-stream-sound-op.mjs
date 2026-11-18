@@ -30,7 +30,6 @@ import dgram from 'node:dgram';
 import { execFileSync, spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
-import { moduleText, readTexts } from './mic-helper-embed.mjs';
 import { writeFakeMic } from './fixtures/stream/mic-fakes.mjs';
 import { writeFakeMacHelper, helperLog, MAC_FACTS } from './fixtures/stream/mac-fakes.mjs';
 import { flvBytes } from './fixtures/stream/screen-fakes.mjs';
@@ -118,19 +117,7 @@ const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const CAP_LIST = /capabilities: \[([^\]]*)\]/;
 const capsOf = (txt) => { const m = CAP_LIST.exec(txt); return m ? m[1].split(',').map((x) => x.trim()).filter(Boolean) : null; };
 
-console.log('§0 the helpers\' sources');
-{
-  ok(fs.readFileSync(path.join(REPO, 'src/mic-helper-source.js'), 'utf8') === moduleText(readTexts()), 'src/mic-helper-source.js is the generated text of tools/vibespace-mic/ (node scripts/mic-helper-embed.mjs after editing them)');
-  const WIN = require(path.join(REPO, 'src/mic-helper-source.js')).WIN;
-  const lb = WIN.slice(WIN.indexOf('static int Loopback()'), WIN.indexOf('/// setdefault:'));
-  ok(/cmd == "loopback"\) return Loopback\(\)/.test(WIN) && lb.length > 500 && /GetDefaultAudioEndpoint\(0, 0, out dev\)/.test(lb) && /0x00020000 \| 0x00040000 \| AUTOCONVERT/.test(lb) && /IAudioCaptureClient/.test(lb), 'the Windows helper\'s `loopback` verb: WASAPI LOOPBACK (0x00020000, event-driven, AUTOCONVERTPCM → 48 kHz float stereo) of the default RENDER endpoint (flow 0)');
-  ok((lb.match(/ReleaseBuffer\((kaFrames|want), 2\)/g) || []).length === 2 && /Initialize\(0, 0x00040000 \| AUTOCONVERT, 400000/.test(lb), 'beside it a SILENT render stream on the same endpoint (AUDCLNT_BUFFERFLAGS_SILENT) — the keep-alive without which a quiet machine delivers nothing (the probe\'s leg 1b)');
-  ok(!/GetEnvironmentVariable|args\[1\]|GetDefaultAudioEndpoint\(1/.test(lb) && /OpenStandardOutput/.test(lb) && /OpenStandardInput/.test(lb), 'it reads nothing from env or argv, never the CAPTURE flow (no microphone); PCM to stdout, it ends when stdin closes');
-  const SWIFT = fs.readFileSync(path.join(REPO, 'tools/vibespace-screen/vibespace-screen.swift'), 'utf8');
-  ok(MSRC.SOURCE === SWIFT && MSRC.VERSION === 'vs-' + MSRC.SHA256.slice(0, 12) && MSRC.VERSION !== 'vs-054d5cc35456', `the Mac's screen helper rides the bundle verbatim; its VERSION moved (vs-054d5cc35456 → ${MSRC.VERSION}) — the owner switches Screen Recording on once more for it (helper_changed_regrant)`);
-  ok(/c\.capturesAudio = on/.test(SWIFT) && /s\.updateConfiguration\(c\)/.test(SWIFT) && /addStreamOutput\(self, type: \.audio/.test(SWIFT) && (SWIFT.match(/SCStream\(filter:/g) || []).length === 1 && /excludesCurrentProcessAudio = true/.test(SWIFT), 'the Mac: capturesAudio on the SAME SCStream (updateConfiguration — one SCStream in the helper), its own process excluded');
-  ok(/mFormatID: kAudioFormatOpus, mFormatFlags: 0, mBytesPerPacket: 0, mFramesPerPacket: 960/.test(SWIFT) && /conv\.bitRate = 64000/.test(SWIFT) && /Data\(\[0x91\]\) \+ Data\("Opus"\.utf8\)/.test(SWIFT) && /A\.contains\("--audio"\)/.test(SWIFT) && /p\.first == "audio", p\.count > 1/.test(SWIFT) && !/AVCaptureDevice|kAudioDevicePropertyScopeInput/.test(SWIFT), 'AudioToolbox Opus 20 ms 64 kbps → FLV audio tags (0x91 \'Opus\'); `audio on|off` on stdin, `--audio` from the start; no microphone anywhere');
-}
+// (§0 the helpers' sources (src/mic-helper-source.js, tools/vibespace-screen/vibespace-screen.swift): MOVED to the fast scripts/test-stream-sound-op-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('§1 the op: by id, the hello-ack word, the module in the bundle');
 const { dm, ready } = deviceOn(home, BUNDLE, { VIBESPACE_MIC_HELPER: FK.exe, ...ENC });
@@ -139,8 +126,7 @@ const conn = await ready;
   const caps = conn.info.capabilities;
   ok(caps.includes('stream-audio') && caps.indexOf('stream-audio') === caps.length - 1 && caps.indexOf('stream-mic') === caps.length - 2, 'the hello-ack names stream-audio (after stream-mic)', caps.slice(-3));
   ok(/op: "stream-audio-result"/.test(bundleText) && /function createSound\(/.test(bundleText) && /hc = r\.helper = spawn\(h\.exe, \["loopback"\]/.test(bundleText), 'the bundle answers stream-audio-result and carries src/desktop-sound.js (npm run build:agentd after a change)');
-  const client = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
-  ok(/m\.op === 'stream-audio-result'/.test(client) && /async streamAudio\(sid, \{ on = false \} = \{\}\) \{\s*const conn = await this\.connect\(\);\s*if \(!conn\.info\?\.capabilities\?\.includes\?\.\(SOUND_CAPABILITY\)\)/.test(client), 'THREE-TOUCH: stream-audio-result is in the client\'s id-keyed routing set; the method is capability-gated');
+  // (the THREE-TOUCH pin of src/agentd/client.js: MOVED to the fast scripts/test-stream-sound-op-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const raw = await dm._request({ op: 'stream-audio', sid: 'nope', on: true, timeoutMs: 5000 });
   ok(raw && raw.result && raw.result.ok === false && raw.result.code === 'not_found', 'a raw request is answered BY ID (not a timeout): an unknown session is not_found', raw);
 }

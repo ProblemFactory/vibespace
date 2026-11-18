@@ -229,10 +229,7 @@ await leg('①', async () => {
   ok(sweeps === 1 && sweptReq === N && sweptPartial === false && wholes === 1 && c2.requests === N && !c2.partial, `① the warm ends ⇒ the sweep runs ONCE on the whole ledger (${sweptReq} requests), the pools are decided again (onWhole ×${wholes}), costBetweenMulti whole: ${c2.requests} requests, $${c2.total}`, { sweeps, sweptReq, wholes, c2: c2.requests });
   ue.ratesFor('ident-1'); ue.flushRates?.(); // usage-ledger-walk B3: written once a tick
   ok(fs.existsSync(path.join(ad, 'rates.json')), '① on the whole ledger the rates are learned and written again (the first ask after the warm)');
-  // the wiring: the engine's two money writers stand behind the gate
-  const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
-  const auto = eng.slice(eng.indexOf('function maybePoolAutoSwitchForPool('), eng.indexOf('function maybePoolAutoSwitchForPool(') + 600);
-  ok(/function sweepUsageAnchors\(\) \{ return _wholeLedger\.run\(sweepUsageAnchorsNow\); \}/.test(eng) && /if \(_wholeLedger\.holds\(\)\) return;/.test(auto) && /wholeLedgerGate\(\{\s*ledger: usageHistory/.test(eng), '① the wiring: the pool engine\'s sweep goes through the gate, its automatic decision returns while it holds');
+  // (① the wiring pin of src/server/usage-pool-engine.js: MOVED to the fast scripts/test-ledger-whole-law-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 });
 
 console.log('② A RELOAD MID-WARM RESTARTS THE WARM — 5000 rows three times, three steps in, the dedup ends');
@@ -1451,12 +1448,7 @@ await leg('⑲', async () => {
       `⑲ (12) timedSync arms its name before the call: the witness's live slot names it (${inflight ? inflight.store : '—'}), disarmed after (${armedNow}), its words «${words.slice(0, 60)}» (9a0d429d: recorded only once the call returned — a hung call never named its store)`, { inflight, armedNow });
   }
 
-  // ── 13. THE STANDING ITEM IS NOT A DECISION ROW — its own action.type (the cards stay hub-act-ask) ──
-  {
-    const HA = require(REPO + '/src/server/hub-act-ask.js');
-    ok(HA.STANDING_TYPE === 'hub-act-standing' && HA.ACTION_TYPE === 'hub-act-ask' && /type: STANDING_TYPE, askId: st\.askId/.test(fs.readFileSync(REPO + '/src/server/hub-act-ask.js', 'utf8')),
-      `⑲ (13) a background subject's standing item files with its OWN action.type (${HA.STANDING_TYPE || 'hub-act-ask, like a card'}) — never a decision row (9a0d429d: hub-act-ask, which lane wake-approve-card's registry makes a decision row: its no-longer-asked close and the owner's reopen refused)`);
-  }
+  // (⑲ (13) the standing item is not a decision row — its own action.type, a source pin of src/server/hub-act-ask.js: MOVED to the fast scripts/test-ledger-whole-law-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 });
 console.log('⑳ F4 A SET FILE IS A GENERATION · A MONTH THAT NEEDS NO HOLD NEVER WAITS · THE COUNT IS THE GENERATION\'S · EVERY WAIT IS BOUNDED AND SAID (round 9)');
 await leg('⑳', async () => {
@@ -1676,15 +1668,7 @@ await leg('⑳', async () => {
       { n0, s1, n1, items });
   }
 
-  // ── 9. THE STANDING ITEM IS A NOTICE — filed `kind: 'notice'`, its type in no answer list (rendered: test-user-todos-layout) ──
-  {
-    const HA = require(REPO + '/src/server/hub-act-ask.js'), src = fs.readFileSync(REPO + '/src/server/hub-act-ask.js', 'utf8');
-    const row = fs.readFileSync(REPO + '/src/lib/user-todos-row.js', 'utf8'), lay = fs.readFileSync(REPO + '/src/lib/inbox-window-layout.js', 'utf8'), act = fs.readFileSync(REPO + '/src/lib/user-todos-actions.js', 'utf8'), rep = require(REPO + '/src/inbox-reply.js');
-    const filed = /kind: 'notice', by: 'agent', sessionName: 'Machines',[^\n]*\n\s*action: \{ type: STANDING_TYPE/.test(src);
-    const answered = [row, lay, act].filter((s) => s.includes(`'${HA.STANDING_TYPE}'`)).length + ((rep.ANSWER_ACTION_TYPES || []).includes(HA.STANDING_TYPE) ? 1 : 0);
-    ok(HA.STANDING_TYPE === 'hub-act-standing' && filed && answered === 0,
-      `⑳ (9) the standing item files as a notice (${filed ? 'kind notice' : 'kind action'}) and ${answered} answer list(s) name its type — no Allow once / Always / Deny drawn (3c4fa614: kind action, 4 answer lists — rendered with the 60 s card's three answers)`, { filed, answered });
-  }
+  // (⑳ (9) the standing item is a notice — the source pins of src/server/hub-act-ask.js and the answer lists of src/lib/user-todos-row.js, src/lib/inbox-window-layout.js, src/lib/user-todos-actions.js, src/inbox-reply.js: MOVED to the fast scripts/test-ledger-whole-law-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 });
 console.log('㉑ F4 A NOTICE CLOSES WHEN WHAT IT NAMES IS READ · A NOTICE NAMES A REAL FILE · EVERY WAIT IS SAID · EVERY DEFERRED ANSWER CARRIES retryAfter · A COUNT IS SAID EVEN WHEN NOTHING COMES BACK · NOTHING IS UNLINKED UNREAD · A ROW THAT FITS IS NEVER PUSHED OUT · A FOLD NEVER CROSSES A HOLD (round 10)');
 await leg('㉑', async () => {

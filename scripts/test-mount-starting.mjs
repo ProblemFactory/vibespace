@@ -190,12 +190,7 @@ try {
     ok(cm && cm.given === cm.local && !cm.oldAfter, '⑨ NEGATIVE CONTROL: the witness skipped ⇒ the DIRTY cache moves and its old dir (the un-uploaded write) is deleted (red)', JSON.stringify(cm));
   }
 
-  // ── the row: no Connect while starting, the line says what it waits for ──
-  const sb = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/\} else if \(!isCred && !m\.starting\) \{/.test(sb) && /if \(!isCred && !m\.starting\) \{\s*row\.classList\.add\('mounts-row-clickable'\)/.test(sb), 'the row offers NO Connect (button or row click) while starting');
-  ok(/sl\.dataset\.key = 'mount-start:' \+ m\.id/.test(sb) && /if \(!sl\.isConnected\) \{ clearInterval\(tick\); return; \} sl\.textContent = words\(\);/.test(sb), 'the starting line is keyed and its elapsed time is patched in place');
-  const key = 'Starting — rebuilding its cache index ({files} files), {elapsed} so far; it mounts by itself when the scan ends (waits up to {max} min)';
-  ok(sb.includes(key) && ['zh', 'ja'].every((l) => fs.readFileSync(path.join(REPO, `src/lib/i18n-${l}.js`), 'utf8').includes(JSON.stringify(key) + ':')), 'the starting words are translated (zh/ja)');
+  // (the row's source pins of src/lib/sidebar-mounts.js + the zh/ja words: MOVED to the fast scripts/test-mount-starting-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 } finally {
   for (const g of all) for (const m of g._state.mounts) { try { g._killMountDaemon(g.pathOf(m)); } catch {} }
   await sleep(1200);

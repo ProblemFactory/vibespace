@@ -31,7 +31,6 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
-import { moduleText, readTexts } from './mic-helper-embed.mjs';
 import { writeFakeMic, winFacts, macFacts, toneRatio, writeFakeDecoder, pcmPages, realFfmpeg, framedVoice } from './fixtures/stream/mic-fakes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -115,18 +114,7 @@ const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const CAP_LIST = /capabilities: \[([^\]]*)\]/;
 const capsOf = (txt) => { const m = CAP_LIST.exec(txt); return m ? m[1].split(',').map((x) => x.trim()).filter(Boolean) : null; };
 
-console.log('§0 the helpers\' sources');
-{
-  ok(fs.readFileSync(path.join(REPO, 'src/mic-helper-source.js'), 'utf8') === moduleText(readTexts()), 'src/mic-helper-source.js is the generated text of tools/vibespace-mic/ (run node scripts/mic-helper-embed.mjs after editing them)');
-  const S = require(path.join(REPO, 'src/mic-helper-source.js'));
-  ok(/static int Main\(string\[\] args\)/.test(S.WIN) && /cmd == "facts"/.test(S.WIN) && /cmd == "render"/.test(S.WIN) && /cmd == "setdefault"/.test(S.WIN) && /GetEnvironmentVariable\("VS_MIC_DEVICE"\)/.test(S.WIN) && /GetEnvironmentVariable\("VS_MIC_SPEAKERS"\)/.test(S.WIN) && !/args\[1\]/.test(S.WIN), 'the Windows helper: facts / render / setdefault; its names come from the ENV (VS_MIC_DEVICE / VS_MIC_SPEAKERS), never argv');
-  // lane speaker-passthrough-v1: the `loopback` verb (the machine's SOUND for the stream) captures the SPEAKER's mix — never a microphone
-  const noLoop = S.WIN.slice(0, S.WIN.indexOf('[ComImport, Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317")')) + S.WIN.slice(S.WIN.indexOf('interface IAudioRenderClient {'), S.WIN.indexOf('static int Loopback()')) + S.WIN.slice(S.WIN.indexOf('/// setdefault:'));
-  ok(/AUTOCONVERTPCM|0x80000000/.test(S.WIN) && /SetDefaultEndpoint/.test(S.WIN) && /f8679f50-850a-41cf-9c72-430f290290c8/.test(S.WIN) && !/Capture|IAudioCaptureClient/.test(noLoop.replace(/flow == 0 \? "render" : "capture"/g, '').replace(/\/\/[^\n]*/g, '')) && !/GetDefaultAudioEndpoint\(1/.test(S.WIN), 'it renders (shared mode, the engine converts) and sets the default capture endpoint (IPolicyConfig) — outside the `loopback` verb (the machine\'s sound: the SPEAKER\'s mix, lane speaker-passthrough-v1) it captures nothing, and it never opens a microphone');
-  ok(/case "render": exit\(render\(\)\)/.test(S.MAC) && /kAudioFormatOpus/.test(S.MAC) && /env\["VS_MIC_DEVICE"\]/.test(S.MAC) && /kAudioHardwarePropertyDefaultInputDevice/.test(S.MAC) && !/AVCaptureDevice|kAudioObjectPropertyScopeInput, &a, 0, nil, &size, &p\b/.test(S.MAC), 'the Mac helper: renders length-framed Opus (AudioToolbox decodes) to a device by UID from the ENV; it never reads a microphone (no TCC grant needed)');
-  ok(/#define kDeviceUID "VibeSpaceMic_UID"/.test(S.PLUGIN_C) && /CFSTR\("VibeSpace Microphone"\)/.test(S.PLUGIN_C) && /<string>app\.vibespace\.audio\.mic<\/string>/.test(S.PLUGIN_PLIST) && /6C2F3A8E-1B7D-4E5A-9C0F-3D2B1A4E5F60/.test(S.PLUGIN_PLIST), 'the plug-in keeps the UID the owner\'s installed copy answers (VibeSpaceMic_UID), its name and its factory');
-  ok(S.PLUGIN_C.split('\n').slice(10).join('\n') === fs.readFileSync(path.join(REPO, 'scripts/probes/stream-audio/mac/vsmic/vsmic.c'), 'utf8').split('\n').slice(fs.readFileSync(path.join(REPO, 'scripts/probes/stream-audio/mac/vsmic/vsmic.c'), 'utf8').split('\n').findIndex((l) => l.startsWith('#include'))).join('\n'), 'the plug-in\'s code IS the probe\'s measured build (only its head differs)');
-}
+// (§0 the helpers' sources (src/mic-helper-source.js, the generated text of tools/vibespace-mic/): MOVED to the fast scripts/test-stream-mic-op-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('§1 the op: the facts, by id, and PARITY with the module');
 setFacts(winFacts());
@@ -139,8 +127,7 @@ ok(f1.ok && f1.platform === 'win32' && f1.state.state === 'installed' && f1.stat
 const local = DMIC.createMic({ platform: 'linux', spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: { PATH: process.env.PATH, HOME: home }, lookupEnv: process.env, home, helperPath: FAKE });
 const f1b = await local.facts();
 ok(JSON.stringify({ e: f1.endpoints, d: f1.defaults, s: f1.state }) === JSON.stringify({ e: f1b.endpoints, d: f1b.defaults, s: f1b.state }), 'PARITY: the op\'s answer = src/desktop-mic.js run in-process over the same machine (one implementation where the facts live)');
-const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
-ok(/m\.op === 'stream-mic-result'/.test(cli) && /daemon lacks stream-mic \(capabilities gate\)/.test(cli), 'THREE-TOUCH: stream-mic-result is in the client\'s id-keyed routing set; the method is capability-gated');
+// (the THREE-TOUCH pin of src/agentd/client.js: MOVED to the fast scripts/test-stream-mic-op-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('§2 THE WINDOWS ROAD: Opus → Ogg pages → ffmpeg (the fake decoder) → PCM → «CABLE Input»');
 {
