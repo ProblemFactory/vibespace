@@ -118,7 +118,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   // box). unmount() must not resolve until the daemon is GONE, and mount()
   // must never spawn onto a path a stale daemon still serves.
   ok('unmount() verifies the daemon died before resolving (kills survivors)',
-    /ensureDaemonGone[\s\S]{0,400}_daemonAlive\(mp(?:, \{ witness: false \})?\)[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));   // B-e783: the teardown road never waits on «can't tell»
+    /ensureDaemonGone[\s\S]{0,400}_daemonAlive\(mp, \{ witness: false \}\)[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));   // B-e783: the teardown road never waits on «can't tell»
   ok('…and every fuse unmount path goes through it (3 call sites: fusermount3/fusermount/umount -l)', (src.match(/ensureDaemonGone\(/g) || []).length >= 3);
   ok('mount() kills a stale daemon before spawning (never stack)',
     /stale daemon still on[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));

@@ -21,6 +21,7 @@
 //      that merely holds the log (a sleep child) is no daemon.
 //   ⑬ (r7) a connect neither adopts nor spawns while the walk cannot tell; the spawned daemon is recorded at once (one stat
 //      line, never the pool); the log dir's real path is asked under the walk's bound.
+//   ⑮ (the cure) the wait's hung kill by identity; a partial walk's named daemon alive; a recycled pid on the record roads.
 //   ⑭ (r8, r9) «can't tell» at a connect names its process (in the journal) and waits at most CANT_TELL_MS from the first refusal
 //      of its episode; a refused connect keeps the ask unless the person unmounted meanwhile; a press
 //      on a mounted record moves no generation; a removed record's verdict is dropped; the witness's child that never started
@@ -37,6 +38,7 @@ const SRC = path.join(REPO, 'src');
 const { ok, report } = checker();
 const MSRC = fs.readFileSync(path.join(SRC, 'mounts.js'), 'utf8');
 if (!/this\._procOpts/.test(MSRC)) { console.log('  SKIP test-mounts-proc-walk: this tree\'s src/mounts.js has no planted-/proc seam (an older tree) — its kills would walk the REAL /proc'); report(); }
+for (const k of Object.keys(process.env)) if (/^VIBESPACE_(S3_|CEPHFS_)/.test(k)) delete process.env[k];   // the cure's readers: the constructor imports deployment storage (and saves) before make() can stub _save
 const tmp0 = scratch('mprocwalk'); fs.mkdirSync(tmp0, { recursive: true });
 const tmp = fs.realpathSync(tmp0);   // the planted links state REAL paths (as readlink does)
 const P = path.join(tmp, 'proc'), E = path.join(tmp, 'no-proc'), D = path.join(tmp, 'data'), DL = path.join(tmp, 'data-link');
@@ -98,7 +100,13 @@ const cuts = [
   ['spawnErr', " && !r.spawnErr; }", " && (globalThis.__mpCut.spawnErr || !r.spawnErr); }"],
   ['bumpEarly', "  async mount(id) {\n", "  async mount(id) {\n    if (globalThis.__mpCut.bumpEarly) this._bumpGen(id);\n"],
   ['adoptStrict', "await this._daemonPids(mp, { strict: true })", "await this._daemonPids(mp, { strict: !globalThis.__mpCut.adoptStrict })"],
-  ['realBound', "await read(null, fs.promises.realpath(this._logDir))", "await (globalThis.__mpCut.realBound ? fs.promises.realpath(this._logDir) : read(null, fs.promises.realpath(this._logDir)))"],
+  ['realBound', "      await read(null, p);   // bounded like every read of the walk", "      await (globalThis.__mpCut.realBound ? p : read(null, p));"],
+  ['realOne', "const p = this._logDirRealP || (this._logDirRealP = ", "const p = (globalThis.__mpCut.realOne ? null : this._logDirRealP) || (this._logDirRealP = "],
+  ['waitKill', "          const r = ident ? PI.signalIdentity(ident, 'SIGKILL', popts) : { ok: false, why: 'unknown-identity' };", "          const r = globalThis.__mpCut.waitKill ? (popts.kill(pid, 'SIGKILL'), { ok: true }) : ident ? PI.signalIdentity(ident, 'SIGKILL', popts) : { ok: false, why: 'unknown-identity' };"],
+  ['recKilled', "  _record(mp, id) { if (this._killed && this._killed.has(id.pid + ':' + id.starttime)) return;", "  _record(mp, id) { if (!globalThis.__mpCut.recKilled && this._killed && this._killed.has(id.pid + ':' + id.starttime)) return;"],
+  ['partialAlive', "catch (e) { if (e && e.partial && e.partial.length) { this._record(mp, e.partial[0]); return 'alive'; } return 'unknown'; }", "catch (e) { if (!globalThis.__mpCut.partialAlive && e && e.partial && e.partial.length) { this._record(mp, e.partial[0]); return 'alive'; } return 'unknown'; }"],
+  ['recAliveId', "    const a = PI.aliveIdentity(rec, o);", "    const a = globalThis.__mpCut.recAliveId ? true : PI.aliveIdentity(rec, o);"],
+  ['recKillId', "      const r = PI.signalIdentity(id, 'SIGKILL', opts);", "      const r = globalThis.__mpCut.recKillId ? (opts.kill(id.pid, 'SIGKILL'), { ok: true }) : PI.signalIdentity(id, 'SIGKILL', opts);"],
   ['sync', "  async _daemonPids(mp, { strict = false } = {}) {\n", "  async _daemonPids(mp, { strict = false } = {}) {\n    if (globalThis.__mpCut.sync) " + SYNC_WALK + "\n"],
   ['gen', "    if (gen !== this._driveAuthGen) return { error:", "    if (!globalThis.__mpCut.gen && gen !== this._driveAuthGen) return { error:"],
 ];
@@ -232,8 +240,9 @@ const r7legs = async (MM) => {   // ⑬
   out.found = await make(MM)._adoptable(MP); out.none = await make(MM)._adoptable(MP3 + '-none'); out.noproc = await make(MM, { root: E })._adoptable(MP);
   { const mm = make(MM); mm._seedDaemonId(MP, P1); out.seeded = !!(mm._daemonIds && mm._daemonIds.get(MP)); }   // at once: no await, no pool
   { const mm = make(MM); mm._readMs = 60; const rp = fs.promises.realpath, keep = setInterval(() => { }, 1000);
-    fs.promises.realpath = async function (q, ...a) { if (String(q) === path.join(D, 'mount-logs')) return new Promise(() => { }); return rp.call(this, q, ...a); };   // a parked pool at the first walk
-    try { out.realStall = await Promise.race([mm._daemonState(MP), new Promise((r) => { const t = setTimeout(() => r('hung'), 500); t.unref?.(); })]); }
+    let rpN = 0; fs.promises.realpath = async function (q, ...a) { if (String(q) === path.join(D, 'mount-logs')) { rpN++; return new Promise(() => { }); } return rp.call(this, q, ...a); };   // a parked pool at the first walk
+    const race = () => Promise.race([mm._daemonState(MP), new Promise((r) => { const t = setTimeout(() => r('hung'), 500); t.unref?.(); })]);
+    try { out.realStall = await race(); if (out.realStall === 'unknown') { out.realStall2 = await race(); out.realCalls = rpN; } }   // the cure: a second walk JOINS the stalled realpath
     finally { fs.promises.realpath = rp; clearInterval(keep); } }
   return out;
 };
@@ -270,6 +279,32 @@ const r8legs = async (MM) => {   // ⑭
     g._daemonState = async () => 'unknown'; g._zombieAt = async (mp, ms) => { seen.push(ms); return false; };
     g.unmount = async () => { }; g._probeLiveness = async () => ({ verdict: 'moved' });
     await g._healthSweep(); out.attrMs = seen[0]; }
+  return out;
+};
+const cureLegs = async (MM) => {   // ⑮ the cure (主开发 12:38Z)
+  const out = {};
+  { const sig = [], g = make(MM, { kill: (pid, s) => sig.push([pid, s]) }); g.isMounted = () => false;   // the wait's hung kill, by identity
+    g._startingT = { progressTicks: 1e9, hungMs: 0, ceilingMs: 1e9, pollMs: 5 };
+    out.hung = { verdict: await g._waitMounted(g._state.mounts[0], P1), sig: sig.slice() }; }
+  { const sig = [], g = make(MM, { kill: (pid, s) => sig.push([pid, s]) }); g.isMounted = () => false;   // its pid recycled between the first tick and the kill
+    g._startingT = { progressTicks: 1e9, hungMs: 25, ceilingMs: 1e9, pollMs: 5 };
+    const ct = g._cpuTicks.bind(g); let n = 0; g._cpuTicks = (p) => { const r = ct(p); if (++n === 2) daemon(1, 2000); return r; };   // after the first tick took its identity
+    try { out.recycled = { verdict: await g._waitMounted(g._state.mounts[0], P1), sig: sig.slice() }; } finally { daemon(1, 1000); } }
+  { unplant(P1); daemon(1, 1000); const z = fake(19, 'rclone', 1910, 'S', { out: '/dev/null', argv: ['/usr/bin/rclone', 'version'] });   // named P1, then stalled on a later process
+    const rd = fs.promises.readdir, rf = fs.promises.readFile, keep = setInterval(() => { }, 1000);
+    fs.promises.readdir = async function (q, ...a) { const r = await rd.call(this, q, ...a); return String(q) === P ? r.slice().sort() : r; };   // P1 first (the walk's order made sure)
+    fs.promises.readFile = async function (q, ...a) { if (String(q) === path.join(P, String(z), 'cmdline')) return new Promise(() => { }); return rf.call(this, q, ...a); };
+    try { const mm = make(MM); mm._readMs = 60; out.partial = { state: await mm._daemonState(MP), rec: (mm._daemonIds && mm._daemonIds.get(MP) || {}).pid || null };
+      const m2 = make(MM); m2._readMs = 60; out.partial.pids = await m2._daemonPids(MP).catch((e) => 'threw ' + (e && e.code)); }   // the probe's road keeps it too (its CPU witness)
+    finally { fs.promises.readdir = rd; fs.promises.readFile = rf; clearInterval(keep); unplant(z); } }
+  { const sig = [], g = make(MM, { kill: (pid, s) => sig.push([pid, s]) }); const NB = B + 4;   // a recorded identity whose pid is now ANOTHER process (bash, start 1300)
+    g._record(MP, { pid: NB, starttime: 999 }); out.recAlive = !!g._recordedAlive(MP); out.recCleared = !(g._daemonIds && g._daemonIds.has(MP));
+    g._record(MP, { pid: NB, starttime: 999 }); await g._killMountDaemon(MP); out.recSig = sig.filter(([p]) => p === NB).length; }
+  { const g = make(MM); g._killed = new Map([[P1 + ':1000', Date.now()]]); g._record(MP, { pid: P1, starttime: 1000 }); out.killedRec = !!(g._daemonIds && g._daemonIds.has(MP)); }   // a daemon this manager killed (lingering) is never recorded
+  { const sig = [], g = make(MM, { root: E, kill: (pid, s) => sig.push([pid, s]) }); g.isMounted = () => false; let psN = 0;   // no /proc (a hub on macOS): the identity by ps, ONCE, at the first tick
+    g._procOpts.ps = () => { psN++; return { ran: true, state: 'S', lstart: psN === 1 ? 'Wed Nov 18 00:00:00 2026' : 'Wed Nov 18 00:00:09 2026' }; };   // its lstart changes before the kill: recycled
+    g._startingT = { progressTicks: 1e9, hungMs: 0, ceilingMs: 1e9, pollMs: 5 };
+    out.mac = { verdict: await g._waitMounted(g._state.mounts[0], process.pid), sig: sig.slice(), ps: psN }; }   // its CPU read is the release's kill(pid, 0) fallback on this process — a signal 0, nothing sent
   return out;
 };
 const drive = async (MM) => {   // ⑪
@@ -335,7 +370,7 @@ try {
   const r13 = await r7legs(MountManager);
   ok(r13.cantTell === null && r13.found === P1 && r13.none === 0 && r13.noproc === 0, '⑬ a connect neither adopts nor spawns while the walk cannot tell (a sleeper it could not read); it adopts the daemon it names, spawns when there is none or no /proc (the release)', r13);
   ok(/const pid0 = await this\._adoptable\(this\.pathOf\(m\), id\);\n    if \(pid0 === null\) \{[\s\S]{0,1600}?this\._errors\.set\(id, [\s\S]{0,300}?return false;\n    \}\n    if \(pid0\) \{/.test(MSRC), 'the wiring: _mountInner asks _adoptable and stops on «can\'t tell» before any spawn');
-  ok(r13.seeded === true && r13.realStall === 'unknown', '⑬ the spawned daemon is recorded at once (one stat line, never through the pool); the log dir\'s real path is asked under the walk\'s bound — a parked pool at the first walk is «can\'t tell», never a walk that never ends', r13);
+  ok(r13.seeded === true && r13.realStall === 'unknown' && r13.realStall2 === 'unknown' && r13.realCalls === 1, '⑬ the spawned daemon is recorded at once (one stat line, never through the pool); the log dir\'s real path is asked under the walk\'s bound — a parked pool at the first walk is «can\'t tell», never a walk that never ends', r13);
   console.log('⑭ r8: «can\'t tell» bounded and named, the ask kept, a removed record\'s verdict, the witness\'s child, its patience');
   const r14 = await r8legs(MountManager);
   ok(r14.first === null && J(r14.named) === J([B + 18]) && r14.second === null && r14.bounded === 0 && r14.said.length === 1 && r14.stale === null, '⑭ «can\'t tell» at a connect names the process it could not read and waits at most CANT_TELL_MS from the FIRST refusal (the second within it waits too) — then it connects, said in the journal by the record id; an entry from an episode long over waits again', r14);
@@ -344,7 +379,14 @@ try {
   ok(MSRC.includes("if (!(opts && opts.internal)) { this._bumpGen(id); this._cantTell?.delete(this.pathOf(m)); }") && MSRC.includes('this._mountGen?.delete(id); this._cantTell?.delete(mpRemoved);'), 'the wiring: the person\'s Unmount and remove() end a «can\'t tell» wait');
   ok(r14.pressMoves === false && r14.gone && !r14.gone.err && J(r14.gone.calls) === J([['od', false]]) && r14.gone.words === null && r14.gone.verdict === 'moved' && r14.gone.teardown === false,
     '⑭ a press on a mounted record moves no generation; a record removed while its probe ran (no generation: adopted at boot) has its verdict dropped — no words, no teardown, no «moved» callers act on', { press: r14.pressMoves, gone: r14.gone });
-  ok(r14.spawnErr === false && r14.attrMs === 6000, '⑭ the witness\'s `ls -d` that never started answers nothing (never «dead»); the sweep hands the row\'s attr patience to the witness (6 s for a OneDrive row — the probe\'s own; no row with a daemon declares another today)', { spawnErr: r14.spawnErr, attrMs: r14.attrMs });
+  ok(r14.spawnErr === false && r14.attrMs === require(path.join(SRC, 'mount-liveness.js')).probeCell(null).attrMs, '⑭ the witness\'s `ls -d` that never started answers nothing (never «dead»); the sweep hands the row\'s attr patience to the witness (6 s for a OneDrive row — the probe\'s own; no row with a daemon declares another today)', { spawnErr: r14.spawnErr, attrMs: r14.attrMs });
+  console.log('⑮ the cure: the wait\'s kill by identity, a partial walk\'s daemon alive, a recycled pid on the record roads');
+  const c15 = await cureLegs(MountManager);
+  ok(c15.hung.verdict === 'hung' && J(c15.hung.sig) === J([[P1, 'SIGKILL']]) && c15.recycled.verdict === 'hung' && c15.recycled.sig.length === 0, '⑮ the wait for a mount kills a hung daemon by its identity (taken at its first tick); a pid recycled before the kill is never signalled', { hung: c15.hung, recycled: c15.recycled });
+  ok(c15.partial.state === 'alive' && c15.partial.rec === P1 && J(c15.partial.pids) === J([P1]), '⑮ a walk that NAMED this mount point\'s daemon and then stalled on a later process answers «alive» for it (and records it) — never «unknown»; the probe\'s road keeps its pid', c15.partial);
+  ok(c15.killedRec === false && c15.mac.verdict === 'hung' && c15.mac.sig.length === 0 && c15.mac.ps === 2, '⑮ a daemon this manager killed is never recorded; no /proc: the identity is asked ONCE by ps at the first tick, and a pid whose start changed before the kill is not signalled', { killedRec: c15.killedRec, mac: c15.mac });
+  ok(c15.recAlive === false && c15.recCleared === true && c15.recSig === 0, '⑮ a recorded identity whose pid is now another process (its start time differs) is not alive, is cleared, and is never signalled', { a: c15.recAlive, c: c15.recCleared, s: c15.recSig });
+  ok(MSRC.includes('    this._seedDaemonId(mp, child.pid);') && /const gen0 = this\._mountGen\?\.get\(m\.id\);[\s\S]{0,1600}?, gen0 \};/.test(MSRC), 'the wiring: the spawn seeds its daemon\'s record; the probe carries the generation it began with');
   console.log('⑪ startDriveAuth');
   const d = await drive(MountManager);
   ok(/cancelled or started again/.test((d.ra && d.ra.error) || '') && d.spawnedA === false && /cancelled or started again/.test((d.rb1 && d.rb1.error) || '') && d.spawnedB1 === false, '⑪ a Cancel, or a newer press, while the orphan sweep runs: that press spawns nothing and says why', d);
@@ -375,7 +417,9 @@ try {
     for (const [k, w] of [['lookStart', 'starting'], ['lookConn', 'connecting'], ['lookMounted', 'unmounted'], ['lookGen', 'again']]) x[k] = await cut(k, () => secondLook(MG, w));
     x.probeGen = await cut('probeGen', () => probeTeardown(MG));
     x.gen = await cut('gen', () => drive(MG));
-    x.adoptStrict = await cut('adoptStrict', () => r7legs(MG)); x.realBound = await cut('realBound', () => r7legs(MG));
+    x.adoptStrict = await cut('adoptStrict', () => r7legs(MG)); x.realBound = await cut('realBound', () => r7legs(MG)); x.realOne = await cut('realOne', () => r7legs(MG));
+    { const cc = await cut(['waitKill', 'partialAlive', 'recAliveId', 'recKillId', 'recKilled'], () => cureLegs(MG));   // five cuts on five independent sub-legs: one run (the fast row)
+      for (const k of ['waitKill', 'partialAlive', 'recAliveId', 'recKillId', 'recKilled']) x[k] = cc; }
     for (const k of ['bound', 'episode', 'turn', 'turnWait', 'desired', 'bumpEarly', 'gone', 'spawnErr']) x[k] = await cut(k, () => r8legs(MG));
     ok(J(x.fd1.pids) === '[]' && x.fd1.sig.length === 0, 'CONTROL (no naming by the log): this mount\'s sleeping daemon is never adopted or killed (red)', x.fd1);
     ok(J(x.here.pids) === '[]', 'CONTROL (only the first record on a mount point): the child\'s daemon is not found — the sweep would call it dead every sweep (red)', x.here);
@@ -394,6 +438,10 @@ try {
     ok(x.bound.bounded === null && x.episode.stale === 0 && x.turn.turn.desired === 'mounted' && x.turnWait.turn.waitLeft === true && x.desired.desired === 'unmounted' && x.bumpEarly.pressMoves === true && x.gone.gone.calls.length === 2 && x.spawnErr.spawnErr === true,
       'CONTROL (no bound / no episode gap / no turn check / the wait kept after it / the ask dropped / the press bumps / no removed check / a spawn error counted): «can\'t tell» forever, a stale wait connects at once, the person\'s Unmount overruled, a later connect skips its wait, the edit\'s mount left down, a press drops the probe\'s verdict, a teardown of a removed record, «dead» without an answer (red)',
       { b: x.bound.bounded, e: x.episode.stale, t: x.turn.turn, tw: x.turnWait.turn.waitLeft, d: x.desired.desired, p: x.bumpEarly.pressMoves, g: x.gone.gone, s: x.spawnErr.spawnErr });
+    ok(x.recKilled.killedRec === true && x.waitKill.mac.sig.length === 1, 'CONTROL (a killed daemon recorded / the wait\'s bare-pid kill with no /proc): the lingering daemon is adopted again; the recycled pid is signalled (red)', { k: x.recKilled.killedRec, m: x.waitKill.mac.sig });
+    ok(x.realOne.realCalls === 2 && J(x.waitKill.recycled.sig) === J([[P1, 'SIGKILL']]) && x.partialAlive.partial.state === 'unknown' && x.recAliveId.recAlive === true && x.recKillId.recSig === 1,
+      'CONTROL (a realpath per walk / the wait\'s bare-pid kill / a partial walk «unknown» / no start-time judgement / a raw kill of the record): a second pool thread, the recycled pid signalled, the named daemon not killed at a teardown, a stranger taken for the daemon and signalled (red)',
+      { r: x.realOne.realCalls, w: x.waitKill.recycled.sig, p: x.partialAlive.partial, a: x.recAliveId.recAlive, k: x.recKillId.recSig });
     ok(x.gen.spawnedA === true && x.gen.spawnedB1 === true, 'CONTROL (no turn): the cancelled press and the superseded one spawn anyway (red)', x.gen);
   }
 } finally {

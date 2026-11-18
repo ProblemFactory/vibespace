@@ -1365,18 +1365,24 @@ class MountManager {
    *  'ceiling' — the last two SIGKILL it. Progress = utime+stime. */
   _waitMounted(m, pid) {
     const T = this._startingT || MountManager.STARTING;
+    const o = this._procOpts || {}, popts = { ...(o.procRoot ? { procRoot: o.procRoot } : {}), ...(o.kill ? { kill: o.kill } : {}), ...(o.ps ? { ps: o.ps } : {}), what: 'the daemon of a storage mount point' };
     return new Promise((resolve) => {
       const t0 = Date.now();
-      let mark = null, markAt = t0;   // B-e783: the first tick takes the mark (it runs at t0)
+      let mark = null, markAt = t0, ident = null, asked = false;   // B-e783: the first tick takes the mark (it runs at t0) and the daemon's identity
       const tick = async () => {
         if (this.isMounted(m)) return resolve('mounted');
         const cpu = await this._cpuTicks(pid);
         if (cpu == null) return resolve('died');
         if (mark == null) mark = cpu;
+        if (!asked) { asked = true; const rec = this._daemonIds && this._daemonIds.get(this.pathOf(m)); ident = rec && rec.pid === pid ? rec : PI.identityOf(pid, popts); }   // B-e783 cure: ONCE, at the first tick, while it lives — the record (the spawn's, the adopt's) or its own stat line (no /proc: PI's ps, once)
         const now = Date.now();
         if (cpu - mark >= T.progressTicks) { mark = cpu; markAt = now; }
         const verdict = now - markAt >= T.hungMs ? 'hung' : now - t0 >= T.ceilingMs ? 'ceiling' : null;
-        if (verdict) { try { process.kill(pid, 'SIGKILL'); } catch {} return resolve(verdict); }
+        if (verdict) {   // B-e783 cure: by identity, like every road (a recycled pid is never signalled; a refusal is said)
+          const r = ident ? PI.signalIdentity(ident, 'SIGKILL', popts) : { ok: false, why: 'unknown-identity' };
+          if (!r.ok) console.warn(`[mounts] mount ${m.id}: the ${verdict} daemon was not signalled (${r.why})`);   // the record id, never its name
+          return resolve(verdict);
+        }
         setTimeout(tick, T.pollMs);
       };
       tick();
@@ -1610,7 +1616,7 @@ class MountManager {
   async _daemonState(mp) {
     if (!hasProc(this._procOpts)) return 'noproc';
     if (this._recordedAlive(mp)) return 'alive';
-    let w; try { w = await this._walk({ mp }); } catch { return 'unknown'; }
+    let w; try { w = await this._walk({ mp }); } catch (e) { if (e && e.partial && e.partial.length) { this._record(mp, e.partial[0]); return 'alive'; } return 'unknown'; }   // B-e783 cure: what the walk NAMED before a stall is alive (recorded)
     if (w.ids.length) return 'alive';
     return w.unread > 0 ? 'unknown' : 'dead';
   }
@@ -1623,13 +1629,14 @@ class MountManager {
   _recordedAlive(mp) {
     const rec = this._daemonIds && this._daemonIds.get(mp);
     if (!rec) return null;
+    if (this._killed && this._killed.has(rec.pid + ':' + rec.starttime)) { this._daemonIds.delete(mp); return null; }   // killed by this manager: never alive for it again
     const o = this._procOpts && this._procOpts.procRoot ? { procRoot: this._procOpts.procRoot } : undefined;
     const a = PI.aliveIdentity(rec, o);
     if (a === true) return rec;
     if (a === false) this._daemonIds.delete(mp);
     return null;
   }
-  _record(mp, id) { (this._daemonIds || (this._daemonIds = new Map())).set(mp, { pid: id.pid, starttime: id.starttime }); }
+  _record(mp, id) { if (this._killed && this._killed.has(id.pid + ':' + id.starttime)) return; (this._daemonIds || (this._daemonIds = new Map())).set(mp, { pid: id.pid, starttime: id.starttime }); }   // a daemon this manager killed is never recorded (it lingers)
 
   /** The daemon THIS hub spawned is known from its first moment: the pid and its start time — ONE stat line, read at once (no
    *  memory-map lock; never through the pool, which a wedged mount may hold — the record is what judges and kills with no walk). */
@@ -1647,7 +1654,7 @@ class MountManager {
     let pids;
     try { const p = (await this._daemonPids(mp, { strict: true }))[0] || 0; ct.delete(mp); return p; }
     catch (e) {
-      if (e && e.partial && e.partial.length) { ct.delete(mp); return e.partial[0].pid; }
+      if (e && e.partial && e.partial.length) { ct.delete(mp); this._record(mp, e.partial[0]); return e.partial[0].pid; }
       if (e && e.code === 'no_proc') return 0;
       pids = (e && e.unreadPids) || [];
     }
@@ -1666,7 +1673,9 @@ class MountManager {
     if (!hasProc(this._procOpts)) throw Object.assign(new Error('no /proc'), { code: 'no_proc' });
     const rec = this._recordedAlive(mp);
     if (rec) return [rec.pid];
-    const w = await this._walk({ mp });
+    let w;
+    try { w = await this._walk({ mp }); }
+    catch (e) { if (e && e.partial && e.partial.length) { this._record(mp, e.partial[0]); return e.partial.map((x) => x.pid); } throw e; }   // B-e783 cure: what the walk NAMED before a stall is alive (the probe keeps its CPU witness)
     if (w.ids.length) this._record(mp, w.ids[0]);
     else if (strict && w.unread > 0) throw Object.assign(new Error('a process could not be read'), { code: 'walk_unknown', partial: [], unreadPids: w.unreadPids });
     return w.ids.map((x) => x.pid);
@@ -1760,7 +1769,10 @@ class MountManager {
 
   /** Every record's own log — its daemon's stdout — as readlink states it (the log dir and its real path, the rotation): → id. */
   async _logOwners(read = (k, p) => p) {
-    if (!this._logDirReal) this._logDirReal = await read(null, fs.promises.realpath(this._logDir)).catch(() => null);   // a dir not made yet: asked again; bounded like every read of the walk
+    if (!this._logDirReal) {   // a dir not made yet: asked again; ONE realpath in flight — a stalled one is joined by every walk, never a second pool thread
+      const p = this._logDirRealP || (this._logDirRealP = fs.promises.realpath(this._logDir).then((r) => { this._logDirReal = r; }, () => { }).finally(() => { this._logDirRealP = null; }));
+      await read(null, p);   // bounded like every read of the walk
+    }
     const out = new Map();
     for (const m of this._state.mounts) {
       for (const d of new Set([this._logDir, this._logDirReal].filter(Boolean))) { const f = path.join(d, `${m.id}.log`); out.set(f, m.id); out.set(f + '.1', m.id); }
