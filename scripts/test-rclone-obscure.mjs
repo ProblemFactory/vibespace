@@ -111,7 +111,7 @@ const RCLONE_SAMPLES = [
   // the MUTANT: the pre-fix _obscure (the sync `rclone obscure <plain>` child) restored ⇒ the fake runs ⇒ its /proc cmdline carries the plaintext
   const src = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
   const NEW = '    return rcloneObscure(String(plain));';
-  const OLD = "    return execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();";
+  const OLD = "    return require('child_process').execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();";   // B-323e: src/mounts.js imports no execFileSync any more (it starts no synchronous child) — the plant brings its own
   ok(src.split(NEW).length === 2, '§4 the mutant anchor exists once (the in-process _obscure body)');
   const MUT = MC.load('src/mounts.js', src.replace(NEW, OLD), 'argv-mutant').MountManager;
   fs.writeFileSync(cap, '');

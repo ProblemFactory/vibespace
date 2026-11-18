@@ -60,8 +60,6 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/server/cli-cmd.js', 'resolveCmd', 'child:execFileSync', 1, DEBT, 'boot — module constants (dtach, xset, xauth) + per refreshXEnv: /usr/bin/which, 2 s'],
     ['src/codex-fork-ledger-purge.js', 'purgeCodexForkReplays', 'walk', 1, DEBT, 'boot, once — a migration (the run-at-most-once ledger)'],
     ['src/server/migrations.js', 'create > removeDesignKit > walk', 'walk', 1, DEBT, 'boot, once — a migration (the run-at-most-once ledger)'],
-    ['src/mounts.js', 'MountManager._rcloneHasFlag', 'child:execFileSync', 1, DEBT, 'per mount start (the boot\'s remounts too) — rclone --help, 10 s'],
-    ['src/mounts.js', 'MountManager.rcloneAvailable', 'child:execFileSync', 1, DEBT, 'per GET /api/mounts — every mounts-panel read (mounts-plugins-wiring), and the pinned-rclone upgrade check (maybeUpgradePinnedRclone): rclone version, 5 s'],
     ['src/vnc.js', 'which', 'child:execFileSync', 1, DEBT, 'per act — a display start looks up the X server and dbus-launch on PATH, 2 s each'],
     ['src/routes/files.js', 'route:GET /api/fonts', 'child:execFileSync', 1, DEBT, 'per act — the fonts list (fc-list), 3 s'],
     ['src/routes/files.js', 'route:POST /api/format > tryFormat', 'child:execFileSync', 1, DEBT, 'per act — format a file (prettier / ruff …)'],
@@ -81,7 +79,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 26;   // B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26)
+  const DEBT_MAX = 24;   // B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);

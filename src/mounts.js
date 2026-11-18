@@ -41,7 +41,7 @@ const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on
 const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
 const hasProc = (opts) => { const k = (opts && opts.procRoot) || ''; if (!hasProcMemo.has(k)) hasProcMemo.set(k, PI.hasProc(opts)); return hasProcMemo.get(k); };
 const crypto = require('crypto');
-const { spawn, execFile, execFileSync } = require('child_process');
+const { spawn, execFile } = require('child_process');
 // At-rest encryption is THE shared primitive (src/secret-box.js, design
 // §14.7): same aes-256-gcm `iv.tag.data` bytes as the former inline
 // `_enc`/`_dec` (parity-pinned by scripts/test-secret-box.mjs), but the key
@@ -55,6 +55,7 @@ const { obscure: rcloneObscure } = require('./rclone-obscure.js'); // lane mount
  *  the caller's RCLONE_CONFIG_* — never the hub's whole env (its tokens, an agent conversation's, a cloud key) in a mount
  *  daemon that lives for days (detached, it survives server restarts). */
 const rcloneEnv = (cfg = {}) => serviceEnv(process.env, { keep: RCLONE_ENV_KEEP, egress: true, add: cfg });
+const PROBE_OUT_MAX = 1024 * 1024;   // B-323e: a probe's output bound — the old road's (execFile's default maxBuffer; past it the child was ended and the answer read no proof)
 const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
 // The vfsMeta walk, run in a CHILD node (never the loop, never the threadpool: 164 788 files over NFS): each file judged
@@ -408,9 +409,30 @@ class MountManager {
     } catch { return false; }
   }
 
-  rcloneAvailable() {
-    try { execFileSync(this.rcloneBin(), ['version'], { timeout: 5000, stdio: 'pipe' }); return true; }
-    catch { return false; }
+  /** B-323e: is rclone there? Asked of THE STARTER (`rclone version`, 5 s) and KEPT — never a synchronous fork of the hub per
+   *  Storage-panel read (each read held the loop the child's whole run; the panel re-reads at every mounts / hosts broadcast).
+   *  → true · false · null (no answer: a dead or slow starter — the panel then offers no install; nothing is kept). */
+  rcloneAvailable() { return this._toolKnown('rclone', this.rcloneBin(), ['version'], 5000); }
+
+  /** B-323e: a program's presence (`<bin> <argv>` exits 0), asked of THE STARTER and kept for the process: a yes for good, a
+   *  no asked again at most once a minute (a hand install is seen), an install drops both (the generation). One ask at a
+   *  time; no answer keeps nothing and answers null. */
+  _toolKnown(key, bin, argv, timeoutMs, { fresh = false } = {}) {
+    const known = (this._tools = this._tools || new Map()), c = known.get(key);
+    if (c && c.v === true) return Promise.resolve(true);
+    if (c && c.v === false && !fresh && Date.now() - c.at < 60000) return Promise.resolve(false);
+    if (c && c.ask) return c.ask;
+    const gen = this._toolsGen || 0;
+    const ask = require('./server/child-starter').childStarter().run(bin, argv, { timeoutMs, envAdd: { PATH: process.env.PATH || '' } })   // resolved on the hub's PATH, as the direct start resolved it (B-e783's meeting)
+      .then((r) => {
+        if (!r || r.unknown || r.timedOut) return null;   // no answer, or slower than its bound: no proof either way, nothing kept
+        const v = r.code === 0;
+        if ((this._toolsGen || 0) === gen) known.set(key, { v, at: Date.now() });
+        return v;
+      }, () => null)
+      .finally(() => { const e = known.get(key); if (e && e.ask === ask) { if (e.v === undefined) known.delete(key); else known.set(key, { v: e.v, at: e.at }); } });
+    known.set(key, { ...(c || {}), ask });
+    return ask;
   }
 
   async installRclone() {
@@ -432,9 +454,10 @@ class MountManager {
     fs.chmodSync(path.join(binDir, 'rclone'), 0o755);
     try { fs.unlinkSync(zipPath); } catch {}
     this._rcloneAEFlag = undefined; // re-probe flags with the new binary
-    this._rcloneFlagsHelp = undefined;
+    this._rcloneFlagsHelp = undefined; this._rcloneFlagsGen = (this._rcloneFlagsGen || 0) + 1; this._rcloneFlagsAsk = null; this._rcloneFlagsUnsaid = false;
     this._fastBinMemo = undefined;
-    if (!this.rcloneAvailable()) throw new Error('installed binary failed to run');
+    this._toolsGen = (this._toolsGen || 0) + 1; this._tools?.delete('rclone');   // B-323e: the kept answer was about the old binary
+    if ((await this.rcloneAvailable()) === false) throw new Error('installed binary failed to run');   // no answer is no proof of failure
     return { version: ver, path: path.join(binDir, 'rclone') };
   }
 
@@ -452,12 +475,15 @@ class MountManager {
       // needs rclone and the PATH has none (a user's own PATH rclone is
       // respected; we never shadow it).
       const needsRclone = this._state.mounts.some((m) => rowFor(this, m).rclone !== false);
-      if (needsRclone && !this.rcloneAvailable()) {
+      // B-323e: asked of the starter (never a synchronous fork at boot); only a NO installs — no answer is no proof
+      if (needsRclone) this.rcloneAvailable().then((has) => {
+        if (has === null && !this._reinstallAskedAgain) { this._reinstallAskedAgain = true; setTimeout(() => this.maybeUpgradePinnedRclone(), 60000).unref?.(); return; }   // no answer at boot: once more, a minute on
+        if (has !== false) return;
         console.log(`[mounts] data/bin/rclone missing and no PATH rclone — installing ${MountManager.RCLONE_PIN}`);
         this.installRclone().then(
           (r) => console.log(`[mounts] rclone ${r.version} installed`),
           (e) => console.warn(`[mounts] rclone install failed: ${e.message}`));
-      }
+      });
       return;
     }
     execFile(local, ['version'], { timeout: 10000 }, (err, out) => {
@@ -1263,6 +1289,7 @@ class MountManager {
     try { dest = await this._ensureMountpointDir(mp, { quarantine: true }); }
     catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; } // mount()'s finally clears _connecting
     if (dest) this._noteStranded(m, dest);
+    await this._rcloneFlagsReady();   // B-323e: the help text through THE STARTER first — the argv's flag checks below then read the cache
     const { env, remote } = this._rcloneFor(m);
     // The argv is ONE PURE builder (src/mount-argv.js) over the record's EFFECTIVE row — read+write vfs cache on a
     // PERSISTENT per-mount --cache-dir (dirty writes survive a daemon crash), bounded timeouts, the row's directory
@@ -1565,29 +1592,42 @@ class MountManager {
     let env, remote;
     try { ({ env, remote } = this._rcloneFor(m)); } catch { return Promise.resolve('ok'); }
     if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
-    const args = ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'];
-    if (rowFor(this, m).s3Backend?.(m.parentId ? this._connOf(m) : m) && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
-    return new Promise((resolve) => {
-      let done = false;
-      const child = execFile(this.rcloneBin(), args, { env, timeout: timeoutMs },
-        (err, _o, stderr) => {
-          if (done) return; done = true;
-          if (!err) return resolve('ok');
-          const s = String(stderr || err.message || '');
-          if (err.killed || /ETIMEDOUT/.test(s)) return resolve('hung');
-          // "unauthenticated"/"invalid_grant"/"InvalidAuthenticationToken" are
-          // the OAuth-refresh-token death phrasings (rclone onedrive / Google /
-          // MS Graph) — a real OneDrive incident failed every read with
-          // "unauthenticated: Unauthenticated" and matched NOTHING here.
-          if (/401|403|Unauthorized|unauthenticated|invalid_grant|InvalidAuthenticationToken|AccessDenied|Access Denied|expired|Forbidden|SignatureDoesNotMatch|InvalidAccessKeyId|no longer valid/i.test(s)) return resolve('denied');
-          // A NON-auth lsf failure is NOT a revocation — SMB especially fails
-          // to enumerate the server root while the mounted share lists fine
-          // (real report: a working NAS mount kept flashing "access denied").
-          // 'unknown' → callers do not surface a scary revoked/denied banner.
-          return resolve('unknown');
-        });
-      child.on('error', () => { if (!done) { done = true; resolve('denied'); } });
+    const s3 = !!rowFor(this, m).s3Backend?.(m.parentId ? this._connOf(m) : m);
+    // B-323e: started by THE STARTER with the child's WHOLE env as rcloneEnv built it — never a fork of the hub from its sweep;
+    // an s3 backend's flag check reads the help text the starter fetched (`_rcloneFlagsReady`), never two synchronous forks
+    return (s3 ? this._rcloneFlagsReady() : Promise.resolve()).then(() => {
+      const args = ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'];
+      if (s3 && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
+      return this._rcloneProbeRun(args, env, timeoutMs);
+    }).then((r) => {
+      // NO ANSWER (a dead or slow starter): 'unanswered' — no proof either way; every caller reads it as 'unknown', and the
+      // access error's re-probe leaves the banner as it is (no banner flips on it). A program that never started: 'unknown'
+      // (the old road read a start error so: execFile's own callback answered before the 'error' listener)
+      if (!r || r.unknown) return 'unanswered';
+      if (!r.started) return 'unknown';
+      if (r.timedOut) return 'hung';
+      if (String(r.stdout || '').length >= PROBE_OUT_MAX) return 'unknown';   // past the old road's 1 MB bound: execFile ended it and read no proof
+      if (r.code === 0) return 'ok';
+      const s = String(r.stderr || '');
+      if (/ETIMEDOUT/.test(s)) return 'hung';
+      // "unauthenticated"/"invalid_grant"/"InvalidAuthenticationToken" are
+      // the OAuth-refresh-token death phrasings (rclone onedrive / Google /
+      // MS Graph) — a real OneDrive incident failed every read with
+      // "unauthenticated: Unauthenticated" and matched NOTHING here.
+      if (/401|403|Unauthorized|unauthenticated|invalid_grant|InvalidAuthenticationToken|AccessDenied|Access Denied|expired|Forbidden|SignatureDoesNotMatch|InvalidAccessKeyId|no longer valid/i.test(s)) return 'denied';
+      // A NON-auth lsf failure is NOT a revocation — SMB especially fails
+      // to enumerate the server root while the mounted share lists fine
+      // (real report: a working NAS mount kept flashing "access denied").
+      // 'unknown' → callers do not surface a scary revoked/denied banner.
+      return 'unknown';
     });
+  }
+
+  /** B-323e: ONE rclone run of a sweep probe, through THE STARTER (src/server/child-starter.js), its child's WHOLE env as
+   *  rcloneEnv built it (`wholeEnv`: the starter starts this one child with exactly it and keeps nothing). The env is never
+   *  said — the probes return a word, never the child's output or its env. */
+  _rcloneProbeRun(args, env, timeoutMs) {
+    return require('./server/child-starter').childStarter().run(this.rcloneBin(), args, { timeoutMs, capture: true, maxBuffer: PROBE_OUT_MAX, env, wholeEnv: true });
   }
 
   /** DOWNLOAD probe (2.368.8): the OneDrive incident's failure mode passes
@@ -1600,20 +1640,18 @@ class MountManager {
     let env, remote;
     try { ({ env, remote } = this._rcloneFor(m)); } catch { return Promise.resolve('ok'); }
     if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
-    return new Promise((resolve) => {
-      execFile(this.rcloneBin(), ['lsf', remote, '--files-only', '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'],
-        { env, timeout: timeoutMs }, (err, out) => {
-          const file = String(out || '').split('\n').filter(Boolean)[0];
-          if (err || !file) return resolve('unknown'); // list handled by the access probe; no root file → can't tell
-          const target = remote.endsWith(':') || remote.endsWith('/') ? remote + file : `${remote}/${file}`;
-          execFile(this.rcloneBin(), ['cat', '--count', '1', target, '--retries', '1', '--low-level-retries', '2'],
-            { env, timeout: timeoutMs }, (err2, _o2, stderr2) => {
-              if (!err2) return resolve('ok');
-              const s = String(stderr2 || err2.message || '');
-              if (/401|403|Unauthorized|unauthenticated|invalid_grant|InvalidAuthenticationToken|AccessDenied|Forbidden/i.test(s)) return resolve('denied');
-              return resolve('unknown');
-            });
-        });
+    // B-323e: both runs through THE STARTER (the access probe's road); no answer is 'unknown'
+    return this._rcloneProbeRun(['lsf', remote, '--files-only', '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'], env, timeoutMs).then((r) => {
+      const file = String((r && r.stdout) || '').split('\n').filter(Boolean)[0];
+      if (!r || r.unknown || !r.started || r.timedOut || r.code !== 0 || !file || String(r.stdout).length >= PROBE_OUT_MAX) return 'unknown'; // list handled by the access probe; no root file (or past the old 1 MB bound) → can't tell
+      const target = remote.endsWith(':') || remote.endsWith('/') ? remote + file : `${remote}/${file}`;
+      return this._rcloneProbeRun(['cat', '--count', '1', target, '--retries', '1', '--low-level-retries', '2'], env, timeoutMs).then((r2) => {
+        if (!r2 || r2.unknown || !r2.started) return 'unknown';
+        if (r2.code === 0 && !r2.timedOut) return 'ok';
+        const s = String(r2.stderr || '');
+        if (/401|403|Unauthorized|unauthenticated|invalid_grant|InvalidAuthenticationToken|AccessDenied|Forbidden/i.test(s)) return 'denied';
+        return 'unknown';
+      });
     });
   }
 
@@ -1971,7 +2009,9 @@ class MountManager {
       const again = healthOf(await this._probeMountpoint(mp));
       if (again === 'unknown' || again === 'hung') return undefined;   // B-91aa (its readers): no answer, or a hang, is no proof either way — the banner stands; only a listing clears it
       if (again !== 'error') return null;
-      if ((await this._probeBackendAccess(m)) === 'ok') return null;
+      const acc = await this._probeBackendAccess(m);
+      if (acc === 'ok') return null;
+      if (acc === 'unanswered') return undefined;   // B-323e: the starter gave no answer — no proof, the banner stands as it is
       return this._accessErrorMsg(m); // persistently broken → honest message
     }
     return null; // healthy + not revocable → definitely fine
@@ -2590,6 +2630,30 @@ class MountManager {
     return payload;
   }
 
+  /** B-323e: the help text the flag checks read (`rclone help flags` + `rclone mount --help`), asked of THE STARTER
+   *  (src/server/child-starter.js) — never two synchronous forks of the hub from its sweep or a mount start. Cached for the
+   *  process once both runs ANSWERED (a run that failed or timed out reads '' — as the synchronous road read it). No answer
+   *  (a dead or slow starter) is asked AGAIN, up to three times: the starter is replaced after its first fault and takes its old
+   *  road (an async start) after its second, so the third ask is answered — never a synchronous fork. One ask at a time; an
+   *  install in between (the generation) discards the old binary's answer and asks the new one. */
+  _rcloneFlagsReady(timeoutMs = 10000) {
+    if (this._rcloneFlagsHelp !== undefined) return Promise.resolve(true);
+    if (this._rcloneFlagsAsk) return this._rcloneFlagsAsk;
+    const once = () => {
+      const gen = this._rcloneFlagsGen || 0, bin = this.rcloneBin(), S = require('./server/child-starter').childStarter();
+      return Promise.all([['help', 'flags'], ['mount', '--help']].map((argv) => S.run(bin, argv, { timeoutMs, capture: true, maxBuffer: 4 * 1024 * 1024, envAdd: { PATH: process.env.PATH || '' } })))
+        .then((rs) => {
+          if (rs.some((r) => !r || r.unknown) || gen !== (this._rcloneFlagsGen || 0)) return false;
+          if (this._rcloneFlagsHelp === undefined) this._rcloneFlagsHelp = rs.map((r) => (r.code === 0 && !r.timedOut ? String(r.stdout || '') : '')).join('');
+          return true;
+        }, () => false);
+    };
+    const ask = (async () => { for (let i = 0; i < 3; i++) { if (this._rcloneFlagsHelp !== undefined || await once()) return true; } return false; })()
+      .finally(() => { if (this._rcloneFlagsAsk === ask) this._rcloneFlagsAsk = null; });
+    this._rcloneFlagsAsk = ask;
+    return ask;
+  }
+
   _rcloneSupportsAcceptEncodingFlag() {
     if (this._rcloneAEFlag !== undefined) return this._rcloneAEFlag;
     this._rcloneAEFlag = this._rcloneHasFlag('use-accept-encoding-gzip');
@@ -2602,12 +2666,12 @@ class MountManager {
    *  an unknown flag makes rclone refuse to start at all, so gate every
    *  version-sensitive flag through this. */
   _rcloneHasFlag(flag) {
+    // B-323e: the help text is fetched through THE STARTER first (`_rcloneFlagsReady` — every road that reads a flag awaits it:
+    // the s3 sweep probe, the mount start). Never a synchronous fork of the hub here: a text never read (three asks with no
+    // answer) leaves the version-gated flag OFF for this call — said once — and is asked again by the next road.
     if (this._rcloneFlagsHelp === undefined) {
-      let out = '';
-      for (const argv of [['help', 'flags'], ['mount', '--help']]) {
-        try { out += execFileSync(this.rcloneBin(), argv, { encoding: 'utf-8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 }); } catch {}
-      }
-      this._rcloneFlagsHelp = out;
+      if (!this._rcloneFlagsUnsaid) { this._rcloneFlagsUnsaid = true; console.warn('[mounts] rclone\'s help text was not read (the starter gave no answer) — its version-gated flags are left off until it is'); }
+      return false;
     }
     return this._rcloneFlagsHelp.includes(flag);
   }
@@ -2955,8 +3019,14 @@ class MountManager {
 
   // ── Minting (mc service account → STS AssumeRole fallback) ──
 
-  async mcAvailable() {
-    return new Promise((resolve) => execFile('mc', ['--version'], (err) => resolve(!err)));
+  /** B-323e: is `mc` there? Asked of THE STARTER and kept (`_toolKnown`) — never a fork of the hub per Storage-panel read.
+   *  A SHARE'S ACT (`act: true` — a mint, a revoke) never reads «no answer» as «no mc»: it asks afresh (a kept no is not
+   *  enough), and when the starter gives no answer it asks the old way, once (a revoke that skipped `mc` would leave a
+   *  never-expiring key alive; a mint would make a 7-day link the panel did not promise). */
+  async mcAvailable({ act = false } = {}) {
+    const v = await this._toolKnown('mc', 'mc', ['--version'], 10000, { fresh: act });
+    if (v !== null || !act) return v === true;
+    return new Promise((resolve) => execFile('mc', ['--version'], { timeout: 30000 }, (err) => resolve(!err)));
   }
 
   _sharePolicy(bucket, prefix, mode) {
@@ -2987,7 +3057,7 @@ class MountManager {
     prefix = String(prefix || '').replace(/^\/+|\/+$/g, '');
     const policy = this._sharePolicy(bucket, prefix, mode);
     let cred, method;
-    if (await this.mcAvailable()) {
+    if (await this.mcAvailable({ act: true })) {
       cred = await this._mintViaMc({ endpoint, ownerAccessKey, ownerSecretKey, policy, name });
       method = 'service-account';
     } else {
@@ -3126,7 +3196,7 @@ class MountManager {
     if (share.method === 'service-account') {
       // need the OWNER credential again — my-storage env is the canonical owner
       const env = this.envStorage();
-      if (env && await this.mcAvailable()) {
+      if (env && await this.mcAvailable({ act: true })) {
         const mcEnv = this._mcEnv(share.endpoint, env.accessKey, env.secretKey);
         await new Promise((resolve) => {
           execFile('mc', ['admin', 'accesskey', 'rm', 'vsshare/', share.accessKey], { env: mcEnv }, (err) => {

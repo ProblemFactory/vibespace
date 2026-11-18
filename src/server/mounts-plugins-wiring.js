@@ -752,8 +752,7 @@ app.get('/api/mounts', async (req, res) => {
     shares: mounts.listShares(),
     env: cfg ? { endpoint: cfg.endpoint, bucket: cfg.bucket, prefix: cfg.prefix, accessKey: cfg.accessKey, configured: cfg.configured, importedFromEnv: cfg.importedFromEnv } : null,
     mountBase: mounts.mountBase,
-    mcAvailable: await mounts.mcAvailable(),
-    rcloneAvailable: mounts.rcloneAvailable(),
+    ...(await Promise.all([mounts.mcAvailable(), mounts.rcloneAvailable()]).then(([mcAvailable, rcloneAvailable]) => ({ mcAvailable, rcloneAvailable }))),   // B-323e: kept, asked of the starter side by side — never a synchronous fork per read
   });
 });
 app.post('/api/mounts', (req, res) => {
@@ -849,7 +848,7 @@ app.post('/api/mounts/rclone-conf/import', async (req, res) => {
 });
 
 // rclone availability + one-click install (data/bin, pinned verified version)
-app.get('/api/mounts/rclone', (req, res) => res.json({ available: mounts.rcloneAvailable(), bin: mounts.rcloneBin() }));
+app.get('/api/mounts/rclone', async (req, res) => res.json({ available: await mounts.rcloneAvailable(), bin: mounts.rcloneBin() }));
 app.post('/api/mounts/rclone/install', async (req, res) => {
   try { res.json({ success: true, ...(await mounts.installRclone()) }); }
   catch (e) { res.status(400).json({ error: e.message }); }

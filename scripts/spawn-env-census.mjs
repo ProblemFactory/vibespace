@@ -76,12 +76,12 @@ export function filesOf(repo) {
 /** scan(repo, { patch: { file: text } }) → { sites, copies, errors } — `patch` swaps a file's text (the mutants) */
 export function scan(repo, { patch = {}, files = filesOf(repo) } = {}) {
   const acorn = createRequire(path.join(repo, 'package.json'))('acorn');
-  const sites = [], copies = [], errors = [], roads = [], defs = [];
+  const sites = [], copies = [], errors = [], roads = [], defs = [], wholes = [];
   for (const f of files) {
     const src = Object.prototype.hasOwnProperty.call(patch, f) ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
     // a file with no call of those names and no whole-env copy holds no site (only a cheap text test before the parse)
     if (!/\b(?:spawn|execFile|fork|exec)\s*\(/.test(src) && !/(?:\.\.\.|Object\.(?:entries|assign|fromEntries)\()[^;\n]{0,40}process\.env\b/.test(src)
-      && !/\(\s*['"](?:ssh|rsync|scp|sftp)['"]\s*,|\bsshEnv\b/.test(src)) continue;
+      && !/\(\s*['"](?:ssh|rsync|scp|sftp)['"]\s*,|\bsshEnv\b/.test(src) && !/\bwholeEnv\b/.test(src)) continue;
     let ast = null;
     for (const sourceType of ['script', 'module']) { try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true }); break; } catch { } }
     if (!ast) { errors.push(f); continue; }
@@ -101,6 +101,12 @@ export function scan(repo, { patch = {}, files = filesOf(repo) } = {}) {
       if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier') decls.push({ name: n.left.name, start: n.start, init: n.right, scope });
       if (n.type === 'CallExpression') calls.push({ n, stack: st });
       if (isProcessEnv(n)) envs.push({ n, stack: st });
+      // B-323e THE WHOLE ENV: a request handing the starter its child's WHOLE env (`wholeEnv: true`) — each one a WHOLE_ROWS row
+      if (n.type === 'Property' && !n.computed && (n.key.name === 'wholeEnv' || n.key.value === 'wholeEnv') && n.value.type === 'Literal' && n.value.value === true) {
+        const fn = stack[stack.length - 1], up = fn && parent.get(fn);
+        const name = !fn ? '(top)' : (fn.id && fn.id.name) || (up && up.type === 'VariableDeclarator' && up.id.name) || (up && (up.type === 'MethodDefinition' || up.type === 'Property') && (up.key.name || up.key.value)) || '(anonymous)';
+        wholes.push({ file: f, line: n.loc.start.line, fn: name });
+      }
       for (const c of kidsOf(n)) { parent.set(c, n); visit(c, st); }
     };
     visit(ast, []);
@@ -260,7 +266,7 @@ export function scan(repo, { patch = {}, files = filesOf(repo) } = {}) {
   }
   // a copy inside a raw spawn site's env (or the declaration it resolved to) belongs to that site's row
   for (const cp of copies) cp.site = sites.find((s) => s.file === cp.file && s.k === 'raw' && s.spans.some(([a, b]) => a <= cp.pos && cp.pos <= b)) || null;
-  return { sites, copies, errors, roads, defs, files };
+  return { sites, copies, errors, roads, defs, files, wholes };
 }
 
 const PROBE = 'a short-lived helper the hub awaits — bounded by its exit / its timeout';
@@ -323,7 +329,7 @@ export const ROWS = Object.freeze([
   ['src/machine-mounts.js', "'sh'", 'probe', 1, PROBE + ' (a mount path check, 6 s)'],
   ['src/machine-mounts.js', "'ls'", 'probe', 1, PROBE + ' (the mount liveness read, and a released pull folder\'s emptiness — B-fcc7: one site, lsChild)'],
   ['src/machine-probes.js', 'cmd', 'probe', 1, PROBE + ' (the machine facts probes)'],
-  ['src/server/child-starter-proc.js', 'cmd', 'upstream', 1, "B-91aa THE STARTER: the hub's timer sites' programs (the mount liveness `ls`, the port scan's `sh`, the belt's X tools) — the starter was BORN of serviceEnv (src/server/child-starter.js) and adds only the names a request carries (the X / locale names, DOCKER_*)"],
+  ['src/server/child-starter-proc.js', 'cmd', 'upstream', 1, "B-91aa THE STARTER: the hub's timer sites' programs (the mount liveness `ls`, the port scan's `sh`, the belt's X tools) — the starter was BORN of serviceEnv (src/server/child-starter.js) and adds only the names a request carries (the X / locale names, DOCKER_*); B-323e: a request marked `whole` starts its child with exactly the request's env, built by its site through serviceEnv (WHOLE_ROWS)"],
   ['src/mounts.js', "'sh'", 'probe', 2, PROBE + ' (the rclone binary copy, the modprobe shim)'],
   ['src/mounts.js', "'curl'", 'probe', 3, PROBE + ' (the rclone download, two OAuth callback pokes)'],
   ['src/mounts.js', "'unzip'", 'probe', 1, PROBE],
@@ -337,7 +343,7 @@ export const ROWS = Object.freeze([
   ['src/mounts.js', "'rmdir'", 'probe', 1, PROBE],
   ['src/mounts.js', 'cmd', 'probe', 1, PROBE + ' (a mount command, 8 s)'],
   ['src/mounts.js', "'umount'", 'probe', 1, PROBE],
-  ['src/mounts.js', "'mc'", 'probe', 1, PROBE + ' (mc --version)'],
+  ['src/mounts.js', "'mc'", 'probe', 1, PROBE + " (mc --version: B-323e — only a share's act (a mint, a revoke) whose ask the starter left unanswered; every other ask rides the starter)"],
   ['src/opslog.js', "'sudo'", 'probe', 2, PROBE + ' (the ops log ceph mount, sudo -n)'],
   ['src/plugins/tailscale.js', 'run[0]', 'probe', 1, PROBE + ' (5 s)'],
   ['src/plugins/tailscale.js', 'prog', 'probe', 1, PROBE + ' (run(): pgrep / sudo -n true / sudo -n kill / tar — lane hub-sync-holds rank 13: every one async with its timeout, never a sync child on the loop)'],
@@ -426,10 +432,25 @@ export function priorityJudge(read, files) {
   return red;
 }
 export const KINDS = Object.freeze(['probe', 'upstream', 'default', 'self', 'debt']);
+/** B-323e THE WHOLE ENV (主开发's ruling (A)): a request that hands THE STARTER (src/server/child-starter.js) its child's WHOLE env
+ *  (`wholeEnv: true` + `env`) — the starter starts that one child with exactly it. Each such request is a ROW:
+ *  [file, the function it is in, count, why — where its env is BUILT (a builder: serviceEnv, or an ENV_FUNCS function)].
+ *  A request with no row, a row with no request (DEAD) or a count that differs ⇒ RED. */
+export const WHOLE_ROWS = Object.freeze([
+  ['src/mounts.js', '_rcloneProbeRun', 1, "the mount sweep's rclone probes (the backend access probe, the OAuth read probe): their env from _rcloneFor = rcloneEnv = serviceEnv + the egress door + the provider's RCLONE_CONFIG_VS_* (ENV_FUNCS above); the hub's own secret prefixes refused by the starter"],
+]);
 
 /** judge(scan) → { red: [sentences], table: [{ site, class }] } */
-export function judge({ sites, copies, errors, roads = [], defs = [], files = [] }, { rows = ROWS, copyRows = COPIES, fixed = FIXED, sshRows = SSH_ROWS, derived = DERIVED, envFuncs = ENV_FUNCS } = {}) {
+export function judge({ sites, copies, errors, roads = [], defs = [], files = [], wholes = [] }, { rows = ROWS, copyRows = COPIES, fixed = FIXED, sshRows = SSH_ROWS, derived = DERIVED, envFuncs = ENV_FUNCS, wholeRows = WHOLE_ROWS } = {}) {
   const red = [];
+  // B-323e THE WHOLE ENV: every whole env handed to the starter is a row
+  for (const w of wholes) if (!wholeRows.some(([file, fn]) => file === w.file && fn === w.fn)) red.push(`WHOLE ENV UNLISTED ${w.file}:${w.line} (${w.fn}) hands the starter a whole env — build it through serviceEnv (or an ENV_FUNCS function) and add a WHOLE_ROWS row naming where`);
+  for (const [file, fn, count] of wholeRows) {
+    if (!files.includes(file)) continue;
+    const n = wholes.filter((w) => w.file === file && w.fn === fn).length;
+    if (!n) red.push(`WHOLE ENV DEAD row ${file} ${fn} — no whole env handed there any more`);
+    else if (n !== count) red.push(`WHOLE ENV ${file} ${fn}: ${n} request(s), the row says ${count}`);
+  }
   for (const f of errors) red.push(`${f} did not parse — the census cannot see its children`);
   const groups = new Map();
   for (const s of sites.filter((x) => x.k === 'raw')) { const key = s.file + '\0' + s.cmd; const g = groups.get(key) || { file: s.file, cmd: s.cmd, lines: [], why: s.why }; g.lines.push(s.line); groups.set(key, g); }

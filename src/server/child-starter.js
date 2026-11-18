@@ -21,6 +21,12 @@
  *  · HYGIENE: the starter is born with serviceEnv (the service list, never the hub's secrets); a request carries the
  *    names its site sets (`envAdd`: DISPLAY / XAUTHORITY / a locale / DOCKER_*), never a secret-shaped name; argv as the
  *    site had it. A child gets the starter's env + those names — never more than the site gave before.
+ *  · THE WHOLE ENV (B-323e, ruled (A)): a site that BUILT its child's whole env through the lawful builder (serviceEnv — the
+ *    mount sweep's rclone probes: rcloneEnv, whose proxy names and RCLONE_CONFIG_VS_* credential the name rule would drop)
+ *    sends it whole (`wholeEnv: true` + `env`): the starter starts THAT ONE child with exactly it — the env the old road
+ *    gave it — and keeps nothing. The hub's OWN secret prefixes (THE one secret shape's first half) are refused in it, a
+ *    guard against a mistake (a site handing process.env whole). It is never said: no part of it reaches a journal, a log
+ *    line or an error's words (the refusal is said once, as a count).
  */
 const path = require('path');
 const { spawn } = require('child_process');
@@ -31,12 +37,21 @@ const GUARD_MS = 2000;            // a request's answer may come this long after
 const NO_BOUND_MS = 60000;        // a request with no bound of its own is answered `unknown` past this
 const REARM_MS = 60 * 60000;      // the old road is not for the process's life: a fresh starter is tried again AT MOST once an hour (a fault after a re-arm falls back for the hour)
 const SECRET_NAME = SECRET_SHAPE;   // its read (S): THE one secret shape (src/agent-env.js), never a second, weaker copy
+const HUB_OWN = ((h) => (h ? new RegExp(h[0], 'i') : SECRET_SHAPE))(/^\^\([^)]*\)/.exec(SECRET_SHAPE.source));   // B-323e: THE one shape's first half — the hub's own prefixes (VIBESPACE_ / CLAUDE_ / …), read from it, never retyped (a reshaped shape: all of it, refused — test-mount-probe-starts ③ says so)
 
 function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = GUARD_MS, rearmMs = REARM_MS } = {}) {
   let proc = null, seq = 0, restarted = false, direct = false, directAt = 0, directSince = 0, said = false, buf = '';
   const mono = () => performance.now();   // the re-arm's clock never steps with the wall clock (its read: a clock stepped back kept the old road an hour longer)
   const pending = new Map();      // id → { resolve, settled, onTimeout, onLateExit, timer, started, pid }
-  const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0, rearmed: 0 };
+  const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0, rearmed: 0, refused: 0 };
+  let saidRefused = false;
+  /** B-323e: a whole env's names, the hub's own prefixes refused (counted; said once as a count — never a name, never a value) */
+  function wholeOf(env) {
+    const out = {}; let n = 0;
+    for (const [k, v] of Object.entries(env || {})) { if (typeof v !== 'string') continue; if (HUB_OWN.test(k)) { n++; continue; } out[k] = v; }
+    if (n) { stats.refused += n; if (!saidRefused) { saidRefused = true; try { log.warn?.(`[child-starter] a whole env carried ${n} name(s) of the hub's own secret prefixes — refused (a site must build its child's env through serviceEnv)`); } catch { } } }
+    return out;
+  }
 
   function start() {
     stats.starts++;
@@ -78,14 +93,16 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     }
   }
   /** run(cmd, args, {timeoutMs, maxBuffer, capture, env, envAdd, onLateExit}) → {started, timedOut, unknown, code, signal, stdout, stderr, error}.
-   *  `env` is the site's own env, used ONLY on the old road; `envAdd` the names it sets, the only ones sent to the starter. */
+   *  `env` is the site's own env, used ONLY on the old road; `envAdd` the names it sets, the only ones sent to the starter —
+   *  or, with `wholeEnv: true`, `env` IS the child's whole env (built through serviceEnv), sent whole (B-323e). */
   function run(cmd, args = [], o = {}) {
     stats.requests++;
+    if (o.wholeEnv) o = { ...o, env: wholeOf(o.env) };   // B-323e: the same refused names on both roads (the starter's and the old one)
     if (direct && mono() - directAt >= rearmMs) { direct = false; restarted = true; stats.rearmed++; }   // a fresh starter, tried again (a whole-box stall is not for good) — ONE: a fault after the re-arm falls back for the hour
     if (direct) return runDirect(cmd, args, o);
     if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); return direct ? runDirect(cmd, args, o) : Promise.resolve({ unknown: true, why: 'no starter' }); } }
-    const id = ++seq, add = {};
-    for (const [k, v] of Object.entries(o.envAdd || {})) if ((typeof v === 'string' || v === null) && !SECRET_NAME.test(k)) add[k] = v;   // null = the site's env lacks it (removed)
+    const id = ++seq, add = o.wholeEnv ? o.env : {};
+    if (!o.wholeEnv) for (const [k, v] of Object.entries(o.envAdd || {})) if ((typeof v === 'string' || v === null) && !SECRET_NAME.test(k)) add[k] = v;   // null = the site's env lacks it (removed)
     return new Promise((resolve) => {
       const bound = (o.timeoutMs > 0 ? o.timeoutMs : NO_BOUND_MS) + guardMs;
       const q = { resolve, settled: false, started: false, pid: 0, onTimeout: o.onTimeout || null, onLateExit: o.onLateExit || null, timer: null };
@@ -98,7 +115,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       pending.set(id, q); refs();
       const p = proc;
       if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { });   // a pipe the starter closed is never an uncaught 'error' (§101)
-      try { p.stdin.write(JSON.stringify({ op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture }) + '\n'); }
+      try { p.stdin.write(JSON.stringify({ op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture }) + '\n'); }
       catch { fault('the pipe to the starter broke'); }
     });
   }

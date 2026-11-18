@@ -102,7 +102,7 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   // pull therefore DELETES the copy old releases committed — boot must
   // reinstall when a mount needs rclone and the PATH has none.
   ok('the binary is gitignored (never tracked again)', /^data\/bin\/rclone$/m.test(read('.gitignore')) && /^data\/bin\/rclone-dl\.zip$/m.test(read('.gitignore')));
-  ok('a missing binary is reinstalled at boot when mounts need it', /needsRclone && !this\.rcloneAvailable\(\)[\s\S]{0,300}installRclone\(\)/.test(src));
+  ok('a missing binary is reinstalled at boot when mounts need it (B-323e: asked of the starter; only a NO installs)', /if \(needsRclone\) this\.rcloneAvailable\(\)\.then\(\(has\) => \{[\s\S]{0,400}if \(has !== false\) return;[\s\S]{0,300}installRclone\(\)/.test(src));
   ok('…and restore() wires it', /async restore\(\)\s*{\s*\n\s*this\.maybeUpgradePinnedRclone\(\)/.test(src));
   ok('the read probe classifies the OAuth-death phrasings too', /_probeBackendRead[\s\S]{0,1400}401\|403\|Unauthorized\|unauthenticated\|invalid_grant/.test(src));
 }
