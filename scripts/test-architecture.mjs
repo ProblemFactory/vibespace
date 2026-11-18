@@ -7889,7 +7889,7 @@ await section(async () => {
   ok(judge110([['src/x.js', "// a comment naming '/tmp/x'\nconst b = path.join(os.homedir(), 'y');\n"]]).fresh.length === 0 && judge110([['src/x.js', "const d = path.join(os.tmpdir(), 'fixed-name');\n"]]).fresh.length === 1, '§110 CONTROL: a whole-line comment and a home path are not temp names; a new fixed name is');
 });
 
-// §109 EVERY SERVED STYLESHEET PARSES CLEAN (lane phone-six round 2 — the acceptance's MAJOR: a new block was spliced
+// §111 EVERY SERVED STYLESHEET PARSES CLEAN (lane phone-six round 2 — the acceptance's MAJOR: a new block was spliced
 // over the OPENER of the next rule's comment, its tail `(Task Group log → Backlog): … */` sat outside any comment, and the
 // browser dropped the `.bl-prio` rule that followed on every client — no gate saw it; esbuild warned, nobody read it).
 // A stylesheet the product serves raw (public/) or bundles (src/) is read by esbuild's CSS parser (transformSync, the
@@ -7897,18 +7897,18 @@ await section(async () => {
 // CONTROL: the 6f4f858c shape — a block that eats the next comment's opener — planted into style.css is red; the file
 // itself is green.
 await section(async () => {
-  console.log('\n§109 every served stylesheet parses clean (lane phone-six r2): esbuild\'s CSS parser, 0 warnings');
-  const esb109 = (await import('node:module')).createRequire(import.meta.url)('esbuild');
-  const warn109 = (src, f) => esb109.transformSync(src, { loader: 'css', logLevel: 'silent', sourcefile: f }).warnings;
-  const files109 = trackedFiles(REPO, 'public', 'src').filter((f) => /\.css$/.test(f));
-  const bad109 = [];
-  for (const f of files109) for (const w of warn109(read(f), f)) bad109.push(`${f}:${w.location?.line}: ${w.text}`);
-  ok(files109.length >= 5 && files109.includes('public/style.css') && !bad109.length, `§109 ${files109.length} stylesheets (public/ + src/), 0 esbuild CSS warnings${bad109.length ? ' — RED: ' + bad109.slice(0, 4).join(' | ') : ''}`);
-  const style109 = read('public/style.css');
-  const cut109 = style109.replace('/* backlog priority chip (Task Group log', '.planted-109 { color: red; } (Task Group log');
-  const mut109 = warn109(cut109, 'public/style.css');
-  ok(cut109 !== style109 && mut109.length >= 1 && !warn109(style109, 'public/style.css').length,
-    `§109 CONTROL: a block spliced over the next comment's opener (the 6f4f858c shape) warns (${mut109.length}: ${mut109[0]?.text || 'none — WRONG'}); the real style.css does not`);
+  console.log('\n§111 every served stylesheet parses clean (lane phone-six r2): esbuild\'s CSS parser, 0 warnings');
+  const esb111 = (await import('node:module')).createRequire(import.meta.url)('esbuild');
+  const warn111 = (src, f) => esb111.transformSync(src, { loader: 'css', logLevel: 'silent', sourcefile: f }).warnings;
+  const files111 = trackedFiles(REPO, 'public', 'src').filter((f) => /\.css$/.test(f));
+  const bad111 = [];
+  for (const f of files111) for (const w of warn111(read(f), f)) bad111.push(`${f}:${w.location?.line}: ${w.text}`);
+  ok(files111.length >= 5 && files111.includes('public/style.css') && !bad111.length, `§111 ${files111.length} stylesheets (public/ + src/), 0 esbuild CSS warnings${bad111.length ? ' — RED: ' + bad111.slice(0, 4).join(' | ') : ''}`);
+  const style111 = read('public/style.css');
+  const cut111 = style111.replace('/* backlog priority chip (Task Group log', '.planted-111 { color: red; } (Task Group log');
+  const mut111 = warn111(cut111, 'public/style.css');
+  ok(cut111 !== style111 && mut111.length >= 1 && !warn111(style111, 'public/style.css').length,
+    `§111 CONTROL: a block spliced over the next comment's opener (the 6f4f858c shape) warns (${mut111.length}: ${mut111[0]?.text || 'none — WRONG'}); the real style.css does not`);
 });
 
 await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor

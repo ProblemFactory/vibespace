@@ -37,7 +37,8 @@
 //     the head of the pane not on show only makes it the one on show, the head of the pane on show opens the switcher;
 //     ⑦d «Split» on a minimized window's row restores it beside the window on show, and a pane's window minimized ends
 //     the split, said, the pair dropped; ⑦e 669 × 867 beside the list column: a files window titled by a long path shows
-//     its folder's own name (the path in the title attribute), drawn whole or ≥ 8 em, a conversation's name too
+//     its folder's own name (the path in the title attribute), drawn whole or ≥ 8 em, a conversation's name too; a name
+//     that needs the room folds ⚙ into ⋯ (its row opens the settings), a short one («home») folds nothing
 // RED: the same file run on the base tree (`--tree <a 91bf7e18 checkout, built>`) — every leg red, printed in the lane
 // report. Requires google-chrome (SKIP without) and a fresh `npm run build` of the tree.
 // Run: node scripts/test-phone-six-chrome.mjs [--tree <dir>] [--font dejavu|box] [--legs 1,2,3,4,5,6,7] [--shots <dir>]
@@ -69,6 +70,12 @@ const root = mintRoot('phone-six');
 const wt = path.join(root, 't');
 const fakeHome = path.join(root, 'home');
 for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
+// ⑦e's files window shows a folder NAMED AT LENGTH (the 2.369.411 checkpoint's red): the boot helper's home is «home» — four
+// letters that fit beside the list column with nothing yielded, so ⚙ never folded and ⋯ held no row to read. Before §57c the
+// suite's home was /tmp/vs-phone-six-home-<pid>, whose readable minimum «vs-phone-six…» (114 px) made the ladder reach ⚙
+// (the 11-17 hosted run); this folder keeps that minimum wherever the helper mints the root
+const FILES_DIR = path.join(fakeHome, 'vs-phone-six-home-folder');
+fs.mkdirSync(FILES_DIR, { recursive: true });
 const chromeDir = scratch('phone-six-chrome');
 const stubDir = scratch('phone-six-stub');
 const fontsDir = scratch('phone-six-fonts');
@@ -206,7 +213,7 @@ try {
   [A, B, C, D] = await evalJs(`[${[0, 1, 2, 3].map((i) => winOf(i) + '?.id').join(', ')}]`);
   DESK = await evalJs(`(async () => { const wm = app.wm, dm = app.desktopManager; const one = dm.activeDesktopId;
     wm.createTabChain(wm.windows.get(${JSON.stringify(C)}), wm.windows.get(${JSON.stringify(D)})); await new Promise((r) => setTimeout(r, 800));
-    const b = dm.createDesktop('Desk B'); await dm.switchTo(b); await new Promise((r) => setTimeout(r, 1300)); app.openFileExplorer();
+    const b = dm.createDesktop('Desk B'); await dm.switchTo(b); await new Promise((r) => setTimeout(r, 1300)); app.openFileExplorer(${JSON.stringify(FILES_DIR)});
     for (let i = 0; i < 40 && ![...wm.windows.values()].some((w) => w.type === 'files'); i++) await new Promise((r) => setTimeout(r, 200));
     await new Promise((r) => setTimeout(r, 1300)); const c = dm.createDesktop('Desk C'); await dm.switchTo(c); await new Promise((r) => setTimeout(r, 1300));
     await dm.switchTo(one); await new Promise((r) => setTimeout(r, 1300)); wm.focusWindow(${JSON.stringify(A)});
@@ -630,7 +637,11 @@ try {
     const mn0 = await minW(e0.text);
     check(`⑦e …drawn whole or ≥ the release's readable minimum (${Math.round(mn0)} px — navTitleMinText, 主开发 09:33Z) — the bar's buttons yield before the name`, e0.w + 0.5 >= Math.min(e0.textW, mn0), { e0, mn0 });
     // what yielded is still one tap away: ⚙ folded into ⋯ («Global settings» opens the settings), the Desktops door stays
-    const g0 = await evalJs(`({ gear: getComputedStyle(document.getElementById('mobile-nav-gear')).display, desks: getComputedStyle(document.getElementById('mobile-nav-desktops')).display, more: getComputedStyle(document.getElementById('mobile-nav-more')).display })`);
+    // the leg's premise, said by name (the checkpoint's red read yield '': the name fit, nothing yielded, ⋯ held no row): the
+    // folder's readable minimum needs the room only ⚙'s fold gives (phone-head.js: this column leaves 104 px after 'win')
+    check(`⑦e …the name needs the room: «${e0.text}» keeps ${Math.round(mn0)} px only once ⚙ folds — the ladder reached 'gear' (it read «${e0.yield}»)`, e0.yield === 'gear', { e0, mn0 });
+    const BAR = `({ gear: getComputedStyle(document.getElementById('mobile-nav-gear')).display, desks: getComputedStyle(document.getElementById('mobile-nav-desktops')).display, more: getComputedStyle(document.getElementById('mobile-nav-more')).display })`;
+    const g0 = await evalJs(BAR);
     const m0 = await realClick('#mobile-nav-more');
     await waitFor(`!!document.querySelector('.taskbar-context-menu .taskbar-context-menu-item')`, 3000);
     const mRows = await evalJs(`[...document.querySelectorAll('.taskbar-context-menu .taskbar-context-menu-item')].map((x) => x.textContent.trim())`);
@@ -639,6 +650,13 @@ try {
     const gs = await waitFor(`[...document.querySelectorAll('.global-settings-popover')].some((p) => getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().width > 0)`, 4000);
     await evalJs(`document.querySelectorAll('.global-settings-popover, .taskbar-context-menu').forEach((e) => e.remove()); true`);
     check('⑦e …what yielded is one tap away: ⚙ folded into ⋯ — its «Global settings» row opens the settings —, the Desktops door and ⋯ stay on the bar', g0.gear === 'none' && g0.desks !== 'none' && g0.more !== 'none' && m0 && gRow && g1 && gs, { g0, m0, mRows, gRow, g1, gs, e0yield: e0.yield });
+    // …and the bar yields ONLY for a name that needs the room (the law's other half, read from the checkpoint's red: «home»
+    // beside the list column — yield '', ⚙ on the bar): the same window shows the home folder
+    const HN = path.basename(fakeHome);
+    await evalJs(`app.wm.windows.get(${JSON.stringify(FILES)})?._explorer?.navigate(${JSON.stringify(fakeHome)}); true`);
+    await waitFor(`document.getElementById('mobile-nav-title')?.textContent === ${JSON.stringify(HN)}`, 6000); await sleep(1200);
+    const e2 = await evalJs(HEAD), g2 = await evalJs(BAR);
+    check(`⑦e …a short name («${HN}») needs no room: nothing yields — ⚙, the Desktops door and ⋯ stay on the bar`, e2.text === HN && e2.yield === '' && g2.gear !== 'none' && g2.desks !== 'none' && g2.more !== 'none', { e2, g2 });
     await evalJs(`app._mobileNav.switchDesktop(${JSON.stringify(DESK.one)}); true`); await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(DESK.one)} && app.wm.windows.has(${JSON.stringify(A)})`, 8000);
     await evalJs(`app.wm.revealWindow(${JSON.stringify(A)}); true`); await waitFor(`app.wm.activeWindowId === ${JSON.stringify(A)}`, 4000); await sleep(2500);
     const e1 = await evalJs(HEAD);

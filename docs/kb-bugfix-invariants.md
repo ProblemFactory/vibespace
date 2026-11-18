@@ -1499,9 +1499,9 @@ The five removers that did exist deleted whole directories synchronously on the 
 
 ## A NEW CSS BLOCK ATE THE NEXT COMMENT'S OPENER AND EVERY CLIENT LOST THE RULE AFTER IT (lane phone-six round 2, 2026-10-27 — the acceptance of 6f4f858c, confirmed twice in Chrome)
 - MEASURED: the round-1 block «THE TAB STRIP ON A PHONE» was spliced over the line `/* backlog priority chip (Task Group log → Backlog): … */` — its opener `/* backlog priority chip` was replaced, its tail ` (Task Group log → Backlog): high = accent, low = muted, normal = none */` stood after the block's `}` as bare tokens. CSS reads them plus the next selector as ONE rule with an invalid prelude and drops it: `.bl-prio` (9 px, line-height 14 px, padding 0 5 px, the radius, the border) was lost on EVERY client — Chrome computed 13 px / 0. style.css is served raw (index.html's `<link>`), so no build step failed; esbuild's CSS parser warned (`Unexpected "("`, 1 warning on the lane tree, 0 on the base) and nothing read the warning.
-- FIX: the comment restored. THE FENCE: test-architecture §109 runs esbuild's CSS parser (`transformSync`, loader css — the build's own) over every TRACKED stylesheet under public/ and src/ and wants 0 warnings; its control plants the 6f4f858c shape (a block spliced over the next comment's opener) and must warn, while the real file must not.
+- FIX: the comment restored. THE FENCE: test-architecture §111 runs esbuild's CSS parser (`transformSync`, loader css — the build's own) over every TRACKED stylesheet under public/ and src/ and wants 0 warnings; its control plants the 6f4f858c shape (a block spliced over the next comment's opener) and must warn, while the real file must not.
 - 不变量 = **every served stylesheet parses with zero warnings — a warning is a rule some browser drops.**
-- GATES: test-architecture §109 (RED on 6f4f858c: `public/style.css:8003: Unexpected "("`); test-phone-six-chrome ⑦a (`.bl-prio` computed 9 px / padding 5 px / line 14 px — RED on 6f4f858c: 13 px / 0).
+- GATES: test-architecture §111 (RED on 6f4f858c: `public/style.css:8003: Unexpected "("`); test-phone-six-chrome ⑦a (`.bl-prio` computed 9 px / padding 5 px / line 14 px — RED on 6f4f858c: 13 px / 0).
 
 ## THE CHAT'S COPY AND WRAP COVERED THE WORDS THEY SERVE (the owner 2026-11-07 17:56 PT, from a phone; lane think-tools-phone, .399)
 
