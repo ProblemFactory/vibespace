@@ -1,6 +1,6 @@
 # Design: Background Work — agent-detachable Services, Long Tasks, and Cron
 
-Status: **IMPLEMENTED 2.342.0** (2026-08-17, owner-approved; per-machine only — cross-machine execution parked pending owner design). This doc remains the authoritative spec; deferred residue: remote hostId, resource caps, --publish deep wiring, port-sweep suppression, taskbar badge segment, Session Properties row, systemd/crontab one-click import, panel tier-2 iframe. Session Properties: the owned-jobs list landed (B-70f9 ②, 2026-10-02); the kill dialog half is open.
+Status: **IMPLEMENTED 2.342.0; B-70f9 DECIDED 2026-11-18 (the owner, option A — «推荐没问题»): jobs run on the hub's machine only.** Built for it: a job says where it runs and a remote conversation's folder the hub lacks is refused by name (§8a); ending or archiving a conversation names the jobs it still runs with «Stop these too» (§9). Decided NOT to be: cross-machine jobs (a job on a named paired machine, a job that follows its conversation — PARKED until the owner asks), the one-press import of system units and crontab lines, the second panel tier, the taskbar badge segment, more resource limits (none until an incident names one), the stored stop-with-owner flag (retired). This doc remains the authoritative spec for what IS built.
 v1→v2: three-lens red team (40 findings, 5 critical) incorporated.
 v2→v3 (owner decisions 2026-08-17): ① services must survive a pod rebuild via
 boot replay — that is sufficient; long tasks need NOT survive pod rebuilds.
@@ -466,10 +466,8 @@ session-start jobs digest (§6.3b) so resumed sessions rediscover their work
 ## 9. UI / UX
 
 **Entry points**: rail icon (stack/gears glyph) + ⚙ menu "Background Work" +
-window type `jobs` (openSpec `openJobs`, replayable); taskbar shows a
-severity-segmented badge (red failed · amber awaiting-user · green
-done-unacked) reusing the 2.339.0 segmented-badge pattern; every count
-clickable → panel filtered to that state.
+window type `jobs` (openSpec `openJobs`, replayable). ~~A taskbar severity-segmented badge~~ — DROPPED (B-70f9, 2026-11-18): the
+rail and the panel's own summary carry the counts.
 
 **Jobs window** (two-line rows; live via `jobs-updated`, no polling; countdown
 humanized on a 30 s unref'd tick):
@@ -514,14 +512,15 @@ done/failed (with job name + one-click open), panel arrival. Quiet-success
 crons show nothing (their `notify-on fail` default only surfaces failures).
 
 **Session Properties** gains "Background work": jobs owned by this
-conversation; killing a session never blocks on jobs — informational dialog
-with per-job stop checkboxes, default keep-running (detachment is the thesis);
-`--stop-with-owner` jobs are pre-checked.
+conversation (BUILT, B-70f9 ②). Ending a conversation never blocks on jobs — BUILT (B-70f9, 2026-11-18) as ONE non-blocking
+notice where a person ends or archives it: the jobs it still runs, named, and «Stop these too» stops them all in one press
+(no press = they keep running: detachment is the thesis). The per-job checkbox dialog was not built (the one press is the
+whole choice); `--stop-with-owner` is RETIRED (0 of 2 950 stored jobs carried it) — asked for, it is refused by name.
 
 **Escape visibility (M1)**: a collapsed "Outside the registry" section lists
 detected `systemd --user` units + crontab entries read-only, so hand-rolled
-escapes are at least visible where the registry lives; M2 import = register +
-disable source atomically.
+escapes are at least visible where the registry lives (BUILT). The one-press import (register + disable the source
+atomically) — NOT BUILT, decided (B-70f9, 2026-11-18): the read-only listing stays.
 
 ## 10. Milestones & gates
 
@@ -537,15 +536,17 @@ disable source atomically.
   entries, kb + CHANGELOG same-commit.
 - **M1.5**: Interaction Panels tier 1 (§6.4) + `--stdin-open` + answers
   long-poll + `job-interact` window.
-- **M2**: remote hostId via agentd ops (capability-gated, three-touch, parity,
-  remote-secrets subsection) · resource caps (prlimit; cgroup where available) ·
-  `--publish` deep integration · systemd/crontab import (register + disable
-  source atomically).
-- **M3**: job templates (deploy monitor, health watchdog + remediation, patrol
-  battery) · fleet/admin aggregate view · panel tier 2 (sandboxed iframe) if
-  tier 1 proves insufficient.
+- **M2** (as decided 2026-11-18, B-70f9 option A): remote hostId via agentd ops — NOT BUILT: jobs run on the hub's machine
+  only; a job says so and a remote conversation's missing folder is refused by name (BUILT). The two larger forms (a job on a
+  named paired machine; a job that follows its conversation) are PARKED until the owner asks. Resource caps: the per-job memory
+  bound is BUILT (`--memory`, lane jobs-memory-bound); MORE limits — none until an incident names one. `--publish` deep
+  integration — as shipped. systemd/crontab import — NOT BUILT (the read-only listing stays).
+- **M3**: job templates (deploy monitor, health watchdog + remediation, patrol battery) · fleet/admin aggregate view — not
+  scheduled. Panel tier 2 (sandboxed iframe) — CLOSED (B-70f9, 2026-11-18): tier 1 holds.
 
 ## 11. Remaining open questions
+
+None of the B-70f9 kind is open (decided 2026-11-18, the status line above). The tuning questions below stay as they were:
 
 1. Retention defaults: runs ring 20 / logs 50 MB per job (rotated) / done-task
    records 14 d — tune?
