@@ -329,9 +329,16 @@ class HostManager {
     const rep = fn(this._state);
     this._save();
     this._reachChanged('reshape');
-    this.flushThrottled();   // B-48a4 cure: a migration's reshape is ON DISK before its ledger says done (a boot-time kill leaves no unmigrated file under a stamped ledger)
+    // B-48a4 cure: a migration's reshape is ON DISK before its ledger says done (a boot-time kill leaves no unmigrated file under a
+    // stamped ledger) — by the flush's OWN answer (the census of the class, 2.369.411): a file it LEFT (the storage held the writer
+    // past its bound, or the write failed) THROWS, so the runner counts the migration failed and runs it again at the next boot
+    // (each reshape through here is idempotent); the queued write still lands when the writer can
+    if (!this._flushLanded()) throw new Error('data/hosts.json is not on disk yet (the store writer has not written it: held by the storage past its bound, a failed write, or the hub is exiting) — the migration runs again at the next boot');
     return rep;
   }
+  /** B-48a4 cure: hosts.json written NOW (the named flush) → true only when the writer's own answer says nothing of it is left
+   *  owed (never «not failed»: a write still queued or held is not on disk either) */
+  _flushLanded() { const r = this.flushThrottled(); return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === this._file) && !this.whyNotDurable(); }   // its read (N1): another store's held write is not this file's
 
   /**
    * A WRITE THAT CAN WITHDRAW REACH TELLS THE ONE RE-JUDGE (verify-r3 A-r3a). A machine's `exit` lists live on its
@@ -384,14 +391,14 @@ class HostManager {
     this._throttle.set(key, t);
     return false;
   }
-  /** Flush every pending throttled write now (SIGTERM / a suite). */
+  /** Flush every pending throttled write now (SIGTERM / a suite). → the writer's flush answer ({written, left, deferred}) or null */
   flushThrottled() {
     let pending = false;
     for (const t of (this._throttle || new Map()).values()) if (t.timer) { clearTimeout(t.timer); t.timer = null; pending = true; }
     if (pending) this._save();
     // B-48a4: what the store writer still owes of hosts.json is written NOW (its own bounded synchronous flush — a suite's read of
     // the file, the stop; during the exit the writer's exit flush writes it once)
-    try { (this._storeWriter || require('./store-writer.js').storeWriter()).flushSync([this._file], { waitedBy: 'hosts.flushThrottled' }); } catch { }
+    try { return (this._storeWriter || require('./store-writer.js').storeWriter()).flushSync([this._file], { waitedBy: 'hosts.flushThrottled' }) || null; } catch { return null; }
   }
 
   /**
@@ -539,9 +546,21 @@ class HostManager {
       if (hash && !this.dialTokenHash(devId)) this.setDialToken(devId, hash);
     }
     const ok = Object.entries(all).every(([devId, hash]) => !hash || this.dialTokenHash(devId));
-    if (ok) fs.renameSync(file, file + '.migrated');
-    else console.warn('[hosts] dial-token migration incomplete — legacy file kept');
-    return ok;
+    if (!ok) { console.warn('[hosts] dial-token migration incomplete — legacy file kept'); return false; }
+    // B-48a4 (its law, a checkpoint's red: test-machine-migrate): every save of hosts.json is the store writer's — queued, not on
+    // disk yet. The hashes are written NOW (the named flush), and the legacy file is renamed only once the writer says they ARE on
+    // disk: a kill between a queued save and the rename would lose every hash (each daemon in the field locked out for good)
+    if (!this._flushLanded()) {
+      console.warn('[hosts] dial-token migration: hosts.json is not on disk yet — the legacy file is kept until it is (renamed then, in this process; if the hub ends first, the next boot runs it again)');
+      // its read (S1): the file must not outlive this process's state — an unpair before the next boot would be undone by a rerun
+      // (the old hash folded back in). Memory is the authority: once the writer says the state is on disk, every hash still held
+      // is there and one that is gone was removed on purpose — the file goes then (asked again each minute until it does)
+      const later = () => this.persisted().then((on) => { if (on) fs.rename(file, file + '.migrated', () => { }); else { const t = setTimeout(later, 60000); t.unref?.(); } }, () => { });
+      later();
+      return false;
+    }
+    fs.renameSync(file, file + '.migrated');
+    return true;
   }
 
   add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash }) {

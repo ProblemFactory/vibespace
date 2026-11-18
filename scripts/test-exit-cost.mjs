@@ -29,7 +29,10 @@
 //   ⑦ THE CURE (the readers' SHOULDs on the taken unit): (a) a save the store writer cannot make durable says why (whyNotDurable) and the
 //      person-act doors await it (pins); (b) a migration's reshape is ON DISK before its ledger says done; (c) a rotation's rename the storage
 //      refuses keeps the ring recording; (d) generateKey reads the key fresh (the kept facts dropped); (e) a removal from the group DURING
-//      the user's ask is refused at the stillGranted verdict — each with its red control
+//      the user's ask is refused at the stillGranted verdict; (f) THE CHECKPOINT CURE (2.369.411): the dial-token migration renames its
+//      legacy file only once hosts.json holds the hashes (read AT the rename), and a flush that left the file keeps it — renamed in this
+//      process once the writer says it is on disk; (g) a reshape the writer left is a FAILED migration (the REAL runner stamps no ledger;
+//      the exit's deferred flush and a silent writer too) — each with its red control
 //   ⑥ U3 — THE AMPLIFIER LAW (a slow hub is never sent more requests because it is slow): the REAL CLI `vibespace-exit run` against a
 //      stand-in hub that answers the run only after the 1 s note was said ⇒ ONE request; RED CONTROL: today's note (a copy outside the
 //      tree, scripts/mutant-copy.mjs), side by side ⇒ a second request, GET /api/agent/exit (causal: the hub answers its run after it)
@@ -363,7 +366,7 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   const wb = await world(); await wb.hm.persisted();
   wb.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; });
   const nb = JSON.parse(fs.readFileSync(path.join(wb.dataDir, 'hosts.json'), 'utf8')).hosts[0].name;
-  const HMr = compileAt('src/hosts.js', [["    this.flushThrottled();   // B-48a4 cure: a migration's reshape", "    // (control) // B-48a4 cure: a migration's reshape"]]);
+  const HMr = compileAt('src/hosts.js', [["    if (!this._flushLanded()) throw new Error('data/hosts.json is not on disk yet", "    if (false) throw new Error('data/hosts.json is not on disk yet"]]);
   const wbc = await world({ HM: HMr.HostManager }); await wbc.hm.persisted();
   wbc.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; });
   const nbc = JSON.parse(fs.readFileSync(path.join(wbc.dataDir, 'hosts.json'), 'utf8')).hosts[0].name;
@@ -397,6 +400,59 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   const EPn = compileAt('src/exit-proxy.js', [["    const ctxNow = this._ctxAgain(session, sessionId, j.ctx, accNow.run);", "    const ctxNow = j.ctx;"]]);
   const ranC = await askRemoval(EPn.ExitProxyManager);
   ok(refused.code === 'not_granted' && refused.ran === 0 && ranC.ran === 1, `a removal from the group during the user's ask ⇒ refused (${refused.code}, ${refused.ran} run); CONTROL (RED): the membership as judged ⇒ the command ran (${ranC.ran})`);
+  // (f) the checkpoint's red (heavy test-machine-migrate, 2.369.411 block 1): the dial-token migration renames its legacy file only
+  // once the hashes ARE on disk — read the file at the rename itself (the moment a kill would lose them)
+  const migrate = async (HMx) => {
+    const w = await world({ HM: HMx }); await w.hm.persisted();
+    const legacy = path.join(w.dataDir, 'agentd', 'dial-tokens.json'); fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(legacy, JSON.stringify({ standin: 'a'.repeat(64), 'paired-only': 'b'.repeat(64) }));
+    const real = fs.renameSync; let atRename = null;
+    fs.renameSync = function (from, to) { if (from === legacy) { try { atRename = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'hosts.json'), 'utf8')); } catch { atRename = null; } } return real.apply(this, arguments); };
+    let ok1;
+    try { ok1 = w.hm.migrateDialTokenFile(legacy); } finally { fs.renameSync = real; }
+    const has = (st, id, h) => !!(st && Array.isArray(st.hosts) && st.hosts.some((x) => x.id === id && x.dialTokenHash === h));
+    await w.hm.persisted();
+    return { ok1, renamed: !fs.existsSync(legacy), onDisk: has(atRename, 'host-dial-standin', 'a'.repeat(64)) && has(atRename, 'host-dial-paired-only', 'b'.repeat(64)) };
+  };
+  const mf = await migrate(HostManager);
+  const HMf = compileAt('src/hosts.js', [["    if (!this._flushLanded()) {\n      console.warn('[hosts] dial-token migration", "    if (false) {\n      console.warn('[hosts] dial-token migration"]]);
+  const mfc = await migrate(HMf.HostManager);
+  ok(mf.ok1 === true && mf.renamed && mf.onDisk && mfc.renamed && !mfc.onDisk, `the dial-token migration renames its legacy file only once both hashes are ON DISK (at the rename: ${mf.onDisk}); CONTROL (RED): without the flush the legacy file is renamed while hosts.json lacks them (${mfc.onDisk}) — a kill there locks every paired daemon out`);
+  // (f2) its read (S1 + S2): a flush that LEFT hosts.json ⇒ the legacy file is KEPT at return, and renamed IN THIS PROCESS once the
+  // writer says the state is on disk (an unpair before the next boot is never undone by a rerun) — a writer stand-in that leaves it
+  const keptOf = async (HMx) => {
+    const w = await world({ HM: HMx }); await w.hm.persisted();
+    let land = null; const landed = new Promise((r) => { land = r; });
+    w.hm._storeWriter = { dirty: () => { }, durable: () => landed, whyNotDurable: () => null, flushSync: (names) => ({ written: [], left: (names || []).map((f) => ({ name: 'hosts.write', file: f, why: 'held' })) }) };
+    const legacy = path.join(w.dataDir, 'agentd', 'dial-tokens.json'); fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(legacy, JSON.stringify({ standin: 'a'.repeat(64) }));
+    const ret = w.hm.migrateDialTokenFile(legacy), keptAtReturn = fs.existsSync(legacy), held = w.hm.dialTokenHash('standin') === 'a'.repeat(64);
+    land(true); for (let i = 0; i < 50 && fs.existsSync(legacy); i++) await new Promise((r) => setTimeout(r, 10));
+    return { ret, keptAtReturn, held, renamedLater: !fs.existsSync(legacy) && fs.existsSync(legacy + '.migrated') };
+  };
+  const kf = await keptOf(HostManager);
+  const HMk2 = compileAt('src/hosts.js', [["    if (!this._flushLanded()) {\n      console.warn('[hosts] dial-token migration", "    if (!this.flushThrottled() && false) {\n      console.warn('[hosts] dial-token migration"]]);
+  const kfc = await keptOf(HMk2.HostManager);
+  ok(kf.ret === false && kf.keptAtReturn && kf.held && kf.renamedLater && kfc.ret === true && !kfc.keptAtReturn, `a flush that LEFT hosts.json: the legacy file is kept at return (${kf.keptAtReturn}, the hash held in memory), renamed in this process once the writer says it is on disk (${kf.renamedLater}); CONTROL (RED: the answer ignored): renamed at once (kept ${kfc.keptAtReturn}) while the file is not on disk`);
+  // (g) the census of the class (2.369.411): a reshape the writer LEFT (held past its bound, or a failed write) is no migration done —
+  // the REAL runner over a writer stand-in that leaves hosts.json: the ledger is NOT stamped (it runs again at the next boot)
+  const { runMigrations } = require(path.join(REPO, 'src/migration-runner.js'));
+  const stampOf = async (HMx, tag) => {
+    const w = await world({ HM: HMx }); await w.hm.persisted();
+    w.hm._storeWriter = { dirty: () => { }, durable: async () => false, whyNotDurable: () => null, flushSync: (names) => ({ written: [], left: (names || []).map((f) => ({ name: 'hosts.write', file: f, why: 'its write was still held by the storage at the bound' })) }) };
+    const ledgerPath = path.join(w.dataDir, `migrations-${tag}.json`);
+    const res = runMigrations({ ledgerPath, migrations: [{ id: 'standin-reshape', run: () => w.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; }) }], log: () => { }, warn: () => { } });
+    let led = null; try { led = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')); } catch { }
+    return { status: res[0] && res[0].status, stamped: !!(led && led.applied && led.applied['standin-reshape']) };
+  };
+  const sg = await stampOf(HostManager, 'g');
+  // its read (N2): the other «not on disk» answers — the exit's deferred flush, a writer that answers nothing — are failed runs too
+  const sgOf = async (flush, tag) => { const w = await world(); await w.hm.persisted(); w.hm._storeWriter = { dirty: () => { }, durable: async () => false, whyNotDurable: () => null, flushSync: flush }; const lp = path.join(w.dataDir, `migrations-${tag}.json`); const res = runMigrations({ ledgerPath: lp, migrations: [{ id: 'standin-reshape', run: () => w.hm.reshapeStore(() => ({ n: 0 })) }], log: () => { }, warn: () => { } }); return res[0] && res[0].status; };
+  const sgd = await sgOf(() => ({ written: [], left: [], deferred: true }), 'gd'), sgn = await sgOf(() => undefined, 'gn'), sgo = await sgOf((names) => ({ written: [], left: [{ name: 'other', file: '/elsewhere/other.json', why: 'held' }] }), 'go');
+  const HMg = compileAt('src/hosts.js', [["    if (!this._flushLanded()) throw new Error('data/hosts.json is not on disk yet", "    if (!this.flushThrottled() && false) throw new Error('data/hosts.json is not on disk yet"]]);
+  const sgc = await stampOf(HMg.HostManager, 'gc');
+  ok(sgd === 'failed' && sgn === 'failed' && sgo === 'ran', `the exit's deferred flush (${sgd}) and a writer that answers nothing (${sgn}) are not «on disk» either; another store's held write is not this file's (${sgo})`);
+  ok(sg.status === 'failed' && !sg.stamped && sgc.status === 'ran' && sgc.stamped, `a reshape the writer LEFT: the migration counts as failed (${sg.status}) and the ledger is NOT stamped (${sg.stamped}) — it runs again at the next boot; CONTROL (RED: the flush's answer ignored): «${sgc.status}», stamped (${sgc.stamped}) over a file not on disk`);
 }
 
 // ═══ ⑧ ═══
