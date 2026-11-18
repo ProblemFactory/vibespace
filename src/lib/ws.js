@@ -33,6 +33,7 @@ class WsManager {
     };
     this.ws.onmessage = (e) => {
       let d; try { d = JSON.parse(e.data); } catch { return; }
+      this.rxCount = (this.rxCount || 0) + 1;   // B-8165: the frames this page has handled — a wake asks whether any arrived it had missed
       // tiny attribution ring for the long-task telemetry (what was being
       // processed when the main thread stalled) — cheap, 16 entries
       try { const r = (window.__vsWsRing = window.__vsWsRing || []); r.push(d.type + (d.op ? ':' + d.op : '')); if (r.length > 16) r.shift(); } catch { }

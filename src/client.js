@@ -5,6 +5,7 @@ import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
 import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, installFetchTimingWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, installScreenWatch, installInputStamp, recentCompositorStalls } from './lib/telemetry-client.js';
 import { continueExit } from './lib/mobile-back.js';
+import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/page-wake.js'; // B-8165: the wake's kind, and whether the page fell behind (PURE)
 // lane phone-back-reload (round 2): an older VibeSpace page the phone's exit LANDED on goes on back and never boots the
 // app — the promise settles only if this page stays (its ONE named load)
 const exitHop = continueExit();
@@ -29,27 +30,32 @@ setTimeout(() => { try { const g = gpuRenderer(); window.__vsGpu = g; if (g) tra
 // gap: >45s between ticks = we were suspended.
 {
   let lastTick = Date.now();
+  const framesNow = () => { try { return Number(window.app?.ws?.rxCount) || 0; } catch { return 0; } };
+  // B-8165: the frames handled when the browser FROZE the page (Page Lifecycle `freeze`) — none is handled from then to the wake.
+  // A page only THROTTLED (hidden: one timer a minute) handled every frame live, so without a freeze the count is the wake's own.
+  let framesAtFreeze = null;
+  try { document.addEventListener('freeze', () => { framesAtFreeze = framesNow(); }, { capture: true }); } catch { }
   setInterval(() => {
     const now = Date.now();
     const gap = now - lastTick;
     lastTick = now;
-    if (gap > 45000) {
-      // SUSPEND vs MAIN-THREAD BLOCK (2.338.0): a JS task that blocks 45s+
-      // gaps this timer exactly like a page freeze — but it also shows up in
-      // the longtask ring. One covering most of the gap = OUR code blocked.
-      let verdict = 'suspend';
-      try {
-        // SUM, not max (review): the observed freeze shape is MANY medium
-        // tasks (per-window resets, context creation), not one giant task
-        const lt = recentLongTasks().filter((x) => Date.now() - x.at < gap + 5000);
-        const total = lt.reduce((s, x) => s + x.ms, 0);
-        if (total >= gap * 0.5) verdict = 'main-thread-block';
-      } catch { }
-      try { track('event', `page-${verdict === 'suspend' ? 'suspend' : 'block'}-wake`, `${Math.round(gap / 1000)}s`); } catch { }
+    const framesBefore = framesAtFreeze != null ? framesAtFreeze : framesNow();
+    framesAtFreeze = null;
+    // SUSPEND vs MAIN-THREAD BLOCK (2.338.0): a JS task that blocks 45s+ gaps this timer exactly like a page freeze — but it
+    // also shows up in the longtask ring; the PURE verdict (src/lib/page-wake.js) sums the gap's long tasks
+    let verdict = null;
+    try { verdict = wakeKind({ gap, longTasks: recentLongTasks(), now: Date.now() }); } catch { verdict = gap > WAKE_GAP_MS ? 'suspend' : null; }
+    if (verdict) {
+      try { track('event', `page-${verdict === 'suspend' ? 'suspend' : 'block'}-wake`, `${Math.round(gap / 1000)}s`); } catch { }   // measured at once — a page that freezes again inside the settle still says it
       // belt: re-request store deltas as if we had reconnected (the queued ws
       // frames usually already caught us up — this covers a dropped queue)
       try { getStateSync()?._stateHandler?.(true); } catch { } // was app.stateSync — never assigned, the belt was dead code
-      try { showToast(t('Browser suspended this page for {n}s — caught up now', { n: Math.round(gap / 1000) })); } catch { }
+      // B-8165: the toast answers what was MISSED, not the sleep — frames that reached the page after the freeze (the held ones,
+      // the belt's replies) beyond the count it froze with; a page nobody looks at tells nobody
+      setTimeout(() => {
+        if (document.visibilityState !== 'visible') return;
+        if (fellBehind({ framesBefore, framesAfter: framesNow() })) { try { showToast(t('Browser suspended this page for {n}s — caught up now', { n: Math.round(gap / 1000) })); } catch { } }
+      }, CATCH_UP_SETTLE_MS);
     }
   }, 5000);
 }

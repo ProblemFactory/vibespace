@@ -628,5 +628,56 @@ console.log('⑭ one rule, one measurement');
     ok('a trickle swallowed by a kernel with room is no drain: a ghost is cut on time', a.s.terminated === 1, a.s.drops); }
 }
 
+// ⑮ B-8165 (the follow-up this lane parked): THE UNLOCK TOAST ANSWERS WHAT WAS MISSED, NOT THE SLEEP — «Browser suspended this page
+// for {n}s — caught up now» fired on every freeze over 45 s (the 70 s and frozen+cut legs of the chrome suite) even when nothing had
+// happened meanwhile. Now: the wake is always measured and the stores always re-asked; the toast only when frames reached the page
+// after the wake beyond the count at the last tick before the gap (src/lib/page-wake.js; the frame count is src/lib/ws.js rxCount).
+console.log('\n⑮ B-8165: the wake toast only when the page fell behind (frames it had missed), the measurement and the belt always');
+{
+  const PW = await import(new URL('../src/lib/page-wake.js', import.meta.url).href);
+  const now = 10_000_000;
+  ok('⑮ wakeKind: no gap ⇒ null; a 70 s gap ⇒ suspend; long tasks covering half the gap ⇒ main-thread-block (summed, the tasks of the gap\'s span only)',
+    PW.wakeKind({ gap: 5000, now }) === null && PW.wakeKind({ gap: 45000, now }) === null && PW.wakeKind({ gap: 70000, longTasks: [], now }) === 'suspend'
+    && PW.wakeKind({ gap: 70000, longTasks: [{ at: now - 1000, ms: 20000 }, { at: now - 2000, ms: 16000 }], now }) === 'main-thread-block'
+    && PW.wakeKind({ gap: 70000, longTasks: [{ at: now - 200000, ms: 60000 }], now }) === 'suspend');
+  ok('⑮ fellBehind: frames after the wake beyond the count before the gap ⇒ true; none ⇒ false (an idle hub answers a resync with nothing)',
+    PW.fellBehind({ framesBefore: 41, framesAfter: 44 }) === true && PW.fellBehind({ framesBefore: 41, framesAfter: 41 }) === false && PW.fellBehind({}) === false);
+  const cj = read('src/client.js'), wsj = read('src/lib/ws.js');
+  const tickOf = (src) => { const a = src.indexOf('  let lastTick = Date.now();'), b = src.indexOf("window.addEventListener('DOMContentLoaded'", a); return a > 0 && b > a ? src.slice(a, b) : ''; };
+  const judge = (tick, ws) => ({
+    counted: /this\.rxCount = \(this\.rxCount \|\| 0\) \+ 1;/.test(ws),
+    before: /document\.addEventListener\('freeze', \(\) => \{ framesAtFreeze = framesNow\(\); \}, \{ capture: true \}\);/.test(tick) && /const framesBefore = framesAtFreeze != null \? framesAtFreeze : framesNow\(\);/.test(tick),
+    belt: /if \(verdict\) \{[\s\S]{0,500}getStateSync\(\)\?\._stateHandler\?\.\(true\);/.test(tick),
+    measured: /track\('event', `page-\$\{verdict === 'suspend' \? 'suspend' : 'block'\}-wake`/.test(tick),
+    gated: /if \(document\.visibilityState !== 'visible'\) return;\s*if \(fellBehind\(\{ framesBefore, framesAfter: framesNow\(\) \}\)\) \{ try \{ showToast\(t\('Browser suspended this page for \{n\}s — caught up now'/.test(tick) && (tick.match(/showToast\(/g) || []).length === 1,
+    settle: /\}, CATCH_UP_SETTLE_MS\);/.test(tick),
+  });
+  const live = judge(tickOf(cj), wsj);
+  ok('⑮ WIRING: ws.js counts every handled frame; the count before the gap is the freeze\'s (else the wake\'s own); the wake measured and the belt run at once; the ONE toast waits for the settle, a visible page and fellBehind', Object.values(live).every(Boolean), live);
+  // the tick's own text over a stub world: a freeze (the browser's `freeze` event), a 70 s gap, the frames after the wake; a page
+  // only throttled (no freeze, frames handled live); a page still hidden at the settle
+  const drive = (tick, { after = 0, freeze = true, live = 0, visible = true } = {}) => {
+    const evs = [], toasts = [], belts = []; let cb = null, timer = null, nowT = 1_000_000, rx = 40, onFreeze = null;
+    const W = { app: { ws: { get rxCount() { return rx; } } } };
+    const D = { addEventListener: (k, f) => { if (k === 'freeze') onFreeze = f; }, get visibilityState() { return visible ? 'visible' : 'hidden'; } };
+    const fn = new Function('window', 'document', 'setInterval', 'setTimeout', 'Date', 'recentLongTasks', 'track', 'getStateSync', 'showToast', 't', 'wakeKind', 'fellBehind', 'WAKE_GAP_MS', 'CATCH_UP_SETTLE_MS', `{\n${tick.trimEnd().replace(/\}$/, '')}\n}`);
+    fn(W, D, (f) => { cb = f; }, (f) => { timer = f; }, { now: () => nowT }, () => [], (k, n, d) => evs.push([k, n, d]), () => ({ _stateHandler: () => belts.push(1) }), (w) => toasts.push(w), (k, v) => k.replace('{n}', v.n), PW.wakeKind, PW.fellBehind, PW.WAKE_GAP_MS, PW.CATCH_UP_SETTLE_MS);
+    nowT += 5000; cb();                         // an ordinary tick
+    if (freeze && onFreeze) onFreeze(); else rx += live;   // frozen with 40 handled — or only throttled, handling frames live
+    nowT += 70000; cb();                        // the wake after 70 s
+    rx += after;                                // what reached the page after the wake (the held frames, the belt's replies)
+    if (timer) timer();
+    return { evs, toasts, belts };
+  };
+  const tick = tickOf(cj);
+  const quiet = drive(tick), busy = drive(tick, { after: 3 }), throttled = drive(tick, { freeze: false, live: 9 }), hidden = drive(tick, { after: 3, visible: false });
+  ok('⑮ the tick\'s own text: a 70 s freeze with NOTHING missed ⇒ the wake measured at once («70s», the release\'s event), the belt run, NO toast', quiet.toasts.length === 0 && quiet.belts.length === 1 && quiet.evs.length === 1 && quiet.evs[0][1] === 'page-suspend-wake' && quiet.evs[0][2] === '70s', JSON.stringify(quiet));
+  ok('⑮ …the same freeze with three frames it had missed ⇒ the toast «Browser suspended this page for 70s — caught up now»', busy.toasts.length === 1 && /for 70s — caught up now/.test(busy.toasts[0]), JSON.stringify(busy));
+  ok('⑮ …a page only THROTTLED (hidden: one timer a minute — no freeze) that handled nine frames live in the gap ⇒ NO toast; a page still hidden at the settle ⇒ NO toast', throttled.toasts.length === 0 && throttled.evs.length === 1 && hidden.toasts.length === 0, JSON.stringify({ throttled, hidden }));
+  let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/client.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
+  if (base) { const b = judge(tickOf(base), wsj); ok('⑮ RED CONTROL: the release b06f36e90\'s tick toasts on EVERY wake over 45 s (no count, no settle) — the legs above can go red', !b.before && !b.gated && /showToast\(t\('Browser suspended this page for \{n\}s — caught up now'/.test(tickOf(base)), b); }
+  else console.log('  · SKIP: the release b06f36e90 is not in this clone');
+}
+
 console.log(fail ? `\nFAILED: ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
