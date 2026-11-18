@@ -298,7 +298,7 @@ await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real pers
   await persistLegs(require(PERSIST));
   // THE WRITERS CENSUS: every road that writes a desktop record — each a row, or the reason it cannot list a traced id
   const src = (f) => read(f);
-  const PS = src('src/routes/persistence.js'), WS = src('src/ws-handler.js'), SV = src('server.js');
+  const PS = src('src/routes/persistence.js'), WS = src('src/ws-handler.js'), HR = src('src/server/home-rename.js');   // B-8033: the home rename left server.js for its own module
   const body = (t, name) => { const i = t.indexOf('function ' + name + '('); return i < 0 ? '' : t.slice(i, t.indexOf('\n  }\n', i)); };
   ok(/tracesTrue\(data\);/.test(body(PS, 'writeLayouts')) && /tracesTrue\(_layoutsCache\)/.test(body(PS, 'readLayouts')), '§2b census: writeLayouts (THE CHOKE POINT) and the first read of the file keep every trace true to its record (tracesTrue)');
   ok((PS.match(/writeJsonAtomic\(LAYOUTS_FILE/g) || []).length === 1 && /writeJsonAtomic\(LAYOUTS_FILE, _layoutsCache\)/.test(body(PS, 'flushLayouts')) && (PS.match(/_layoutsCache = /g) || []).length === 4 && /_layoutsCache = data;/.test(body(PS, 'writeLayouts')), '§2b census: layouts.json is written ONLY by flushLayouts, from the cache — and the cache is set only by its declaration, readLayouts (the disk, ×2) and writeLayouts', (PS.match(/.*_layoutsCache = .*/g) || []).map((l) => l.trim().slice(0, 80)));
@@ -306,7 +306,8 @@ await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real pers
   const counts = Object.fromEntries(Object.keys(ROWS).map((f) => [f, (src(f).match(/\bwriteLayouts\(/g) || []).length - (f === 'src/routes/persistence.js' ? 1 : 0)]));
   ok(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);
   const strays = ['src/server/incident-wiring.js', 'src/server/migrations.js', 'src/server/boot-restore.js'].filter((f) => fs.existsSync(path.join(REPO, f)) && /layouts\.json/.test(src(f)) && /writeFileSync|writeJsonAtomic|renameSync/.test(src(f).split('\n').filter((l) => /layouts/.test(l)).join('\n')));
-  ok(!strays.length && /\/home\/\$\{old\}/.test(SV) && /path\.join\(__dirname, 'data', 'layouts\.json'\)/.test(SV), '§2b census: the one other writer of layouts.json is server.js\'s HOME RENAME (/home/<old>/ → /home/<user>/ inside string values) — it rewrites paths only, never a window id or the windows a record lists, so it cannot make a record list a traced id', strays);
+  ok(!strays.length && /v\.split\(`\/home\/\$\{old\}\/`\)\.join\(`\/home\/\$\{user\}\/`\)/.test(HR) && /\['mounts\.json', 'layouts\.json', 'task-groups\.json', 'machine-mounts\.json'\]\.map\(\(f\) => path\.join\(dataDir, f\)\)/.test(HR),
+    '§2b census: the one other writer of layouts.json is the HOME RENAME (src/server/home-rename.js rewriteStores — /home/<old>/ → /home/<user>/ inside string values) — it rewrites paths only, never a window id or the windows a record lists, so it cannot make a record list a traced id', strays);
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

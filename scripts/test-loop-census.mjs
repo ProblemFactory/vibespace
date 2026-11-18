@@ -80,6 +80,7 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
     ['src/job-logs-sweep.js', 'conversation'], ['src/job-logs-sweep-worker.js', 'conversation'],   // a job's logs on its machine, judged against the wrapper's pid stamp in /proc (the design: the machine agent's)
     ['src/backend-caps.js', 'conversation'],   // the harness capability table — each harness descriptor's caps ARE its row; the pool reads one field through capsOf
     ['src/server/migrations.js', 'split:migrations'],   // the design's own split row: each service migrates its own stores — one registry holds six owners' reshapes
+    ['src/server/home-rename.js', 'split:home-rename'],   // B-8033 moved server.js's home-rename body here: claude's project folders AND the recorded paths in four owners' stores
     ['src/telemetry.js', 'interface'], ['src/migration-runner.js', 'interface'],   // STAY: telemetry's stringify runs at its own flush (a 2 s timer, the summary route, exit) and in the collector's door, never inside an engine's call; the runner holds no owner's store
   ];
   const smallsWrong = SMALLS.map(([p, id]) => [p, id, ownerOf(p)]).filter(([, id, got]) => got !== id);
