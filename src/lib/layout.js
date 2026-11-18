@@ -1730,28 +1730,31 @@ class LayoutManager {
   }
 
   /** A PAGE THAT LEAVES TAKES ITS LAST CHANGE WITH IT (B-46fc — measured on the demo 2026-10-26: a door tap, then a phone reload
-   *  1.8 s later ⇒ the reloaded page showed another conversation, the right one at 6 s): a save the person caused can wait
-   *  twice — the 500 ms debounce, and a GATE it was deferred past (the boot's 5 s, a desktop switch's 1 s, a remote apply's
-   *  1 s cooldown; _deferSave's 1.1 s re-ask) — and a page that leaves never runs either timer. At pagehide or when the page
-   *  turns hidden a save that is DUE goes NOW, over the socket that is still open, through _doAutoSave with the gates lowered
-   *  for that one call (they guard against echoing an apply's own churn — a person's act is no echo; the record sent is the held
-   *  record + what the page built, a window still coming stays held — desktop-manager recordFor) and set back after it. The
-   *  save keeps every other guard (a pointer still down re-arms it, the dirty expiry, the stale base, the breaker). A socket
-   *  that is not open queues it (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
+   *  soon after ⇒ the reloaded page showed another conversation): a save the person caused waits in the 500 ms debounce, and a page
+   *  that leaves never runs that timer. At pagehide or when the page turns hidden, a save that is DUE goes now through _doAutoSave
+   *  and every guard of it (a pointer still down re-arms it, the dirty expiry, the stale base, the breaker).
+   *  NO SAVE IN THE MIDDLE OF A RESTORE (the cure of the batch-4 verdict): while a gate is up — the boot's 5 s, a desktop switch's
+   *  1 s, a remote apply's cooldown — nothing leaves from here, hidden or leaving: the held save waits for the gate as it always
+   *  did. The price, said: a page that leaves INSIDE such a gate loses the act its deferral held (the first cut sent it with the
+   *  gates lowered; its own reader and the verdict's showed a mid-restore record could drop or misplace what the restore had not
+   *  built, and an add-only frame half-carried a move). A deferral re-arms the dirty bit only for a PERSON's act it holds
+   *  (`_deferUserAt`, the 1.1 s kind) — an owed-recipe deferral sends only its recipes (_doAutoSave's own road). A socket that is not
+   *  open queues the frame (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
   _flushOnLeave(why) {
     const timerDue = !!this._autoSaveTimer && this._saveAskedAt > (this._savedAt || 0), deferred = !!this._deferT; // asked AFTER the last save left (one asked in that same ms counts as left — a save sets _savedAt right after its own ask's debounce)
     if ((!timerDue && !deferred) || this.app.stage?.isActive) return false; // nothing due: the last asked save has left
+    const dm = this.app.desktopManager;
+    if (this._restoring || dm?._restoring) return false; // no save in the middle of a restore (above)
+    // the person's act a deferral holds and an apply cleared the dirty bit of: re-armed — never for the owed-recipe kind
+    const act = this._userDirty || (deferred && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));
     clearTimeout(this._autoSaveTimer); this._autoSaveTimer = null;
-    if (deferred) {
-      clearTimeout(this._deferT); this._deferT = null;
-      // the deferral's own re-arm (_deferSave): an apply meanwhile cleared the dirty bit, yet the person's act is newer than the last save
-      if (!this._userDirty && this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt)) this._userDirty = true;
-    }
-    const dm = this.app.desktopManager, was = [this._restoring, dm ? dm._restoring : false], before = this._savedAt;
-    this._restoring = false; if (dm) dm._restoring = false;
-    try { this._doAutoSave(); } finally { this._restoring = was[0]; if (dm) dm._restoring = was[1]; }
+    if (deferred) { clearTimeout(this._deferT); this._deferT = null; }
+    this._deferUserAt = null;
+    if (act && !this._userDirty) this._userDirty = true;
+    const before = this._savedAt;
+    this._doAutoSave();
     const sent = this._savedAt !== before;
-    if (sent) { try { window.__vsOp?.('layout-save-on-leave', { why, gated: !!(was[0] || was[1]) }); } catch { } }
+    if (sent) { try { window.__vsOp?.('layout-save-on-leave', { why }); } catch { } }
     return sent;
   }
 
@@ -1763,6 +1766,7 @@ class LayoutManager {
     if (!this._userDirty && !this._applying && !this._deferT && this._owedDesks().size) { this._deferT = setTimeout(() => { this._deferT = null; this.scheduleAutoSave(); }, 200); return; } // an owed recipe (r4 N1) waits for the gate too — asked again every 200 ms until it opens; no dirty bit, no input time
     if (!this._userDirty || this._applying || this._deferT) return;
     const at = this._lastUserInputAt || Date.now();
+    this._deferUserAt = at; // this kind holds a PERSON's act (B-46fc cure: a page leaving re-arms the dirty bit for it alone)
     this._deferT = setTimeout(() => {
       this._deferT = null;
       if (!this._userDirty && !(this._savedAt > at)) { this._userDirty = true; this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at); }

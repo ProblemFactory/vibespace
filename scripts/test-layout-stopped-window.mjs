@@ -970,7 +970,7 @@ await section('§9 B-b05e THE RING IS SPREAD OVER TIME — the REAL router resta
   ok(t2red.boots === 1 && J(t2red.firstIds) !== J(P_BEFORE().map((w) => w.winId)), '§9 CONTROL: one pin only ⇒ the point before the first restart is pushed out by the second burst (the leg above goes RED)', t2red);
 });
 
-await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL LayoutManager: a window opened, the page hidden while its save still waits', async () => {
+await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL LayoutManager: a window opened, the page hidden or left while its save still waits', async () => {
   // the page's own listeners, heard: LayoutManager adds them at construction (pagehide on window, visibilitychange on document)
   const scene = async (Lm, how, { timer = false, gate = null } = {}) => {
     const heard = { win: {}, doc: {} };
@@ -992,22 +992,45 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     if (how === 'hidden') { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); try { for (const fn of heard.doc.visibilitychange || []) fn({}); } finally { if (was.hidden) Object.defineProperty(document, 'hidden', was.hidden); else delete document.hidden; } }
     const at = W.syncs('desk-w').slice(before);
     const carried = at.some((m) => (m.state.windows || []).some((w) => w.winId === 'win-door'));
-    const gates = [W.lm._restoring, W.dm._restoring];
-    if (timer) await tick(gate ? 1200 : 550); // the debounce's / the deferral's own timer: nothing more to send (no second copy)
-    W.lm._restoring = false; W.dm._restoring = false;
+    const sent = at.length ? at[0].state.windows : null;
+    const gates = [W.lm._restoring, W.dm._restoring], stillDeferred = !!W.lm._deferT;
+    if (timer) await tick(gate ? 1200 : 550); // the debounce's / the deferral's own timer
     const after = W.syncs('desk-w').slice(before);
+    W.lm._restoring = false; W.dm._restoring = false;
     clearTimeout(W.lm._autoSaveTimer); clearTimeout(W.lm._deferT); W.lm._deferT = null;
-    return { before, now: at.length, carried, after: after.length, deferred, gates, W };
+    return { before, now: at.length, carried, sent, after: after.length, deferred, stillDeferred, gates, W };
   };
   const ph = await scene(LM, 'pagehide', { timer: true });
   ok(ph.before === 0 && ph.now === 1 && ph.carried, '§9 a window opened, then pagehide 50 ms into the 500 ms debounce ⇒ its save goes AT ONCE, carrying the window (b06f36e90: nothing until the timer — a reload in between showed another conversation)', { before: ph.before, now: ph.now, carried: ph.carried });
   ok(ph.after === 1, '§9 …and the debounce\'s own timer sends no second copy of that save', ph.after);
   const hd = await scene(LM, 'hidden');
-  ok(hd.now === 1 && hd.carried, '§9 …the page turning HIDDEN (a phone\'s app switch, a reload\'s first event) does the same', { now: hd.now, carried: hd.carried });
+  ok(hd.now === 1 && hd.carried, '§9 …the page turning HIDDEN with no gate up does the same', { now: hd.now, carried: hd.carried });
+  // NO SAVE IN THE MIDDLE OF A RESTORE (the cure of the batch-4 verdict): under a gate nothing leaves from here, hidden or leaving
   const bt = await scene(LM, 'pagehide', { gate: 'boot', timer: true });
-  ok(bt.deferred && bt.now === 1 && bt.carried && bt.gates[0] === true && bt.after === 1, '§9 THE MEASURED SCENE: the door tap inside the BOOT\'s 5 s gate (its save deferred past it), then pagehide ⇒ the save goes at once, carrying the window; the gate stands again after that one call; no second copy when the deferral\'s timer would have fired', { deferred: bt.deferred, now: bt.now, gates: bt.gates, after: bt.after });
+  ok(bt.deferred && bt.now === 0 && bt.after === 0 && J(bt.gates) === J([true, false]) && bt.stillDeferred, '§9 THE BOOT\'s 5 s GATE: the door tap\'s save deferred past it, then the page LEAVES ⇒ NOTHING leaves mid-restore (the gate never lowered, the deferral untouched) — the price, said: that act is lost on a leave inside the gate', { deferred: bt.deferred, now: bt.now, after: bt.after, gates: bt.gates });
   const sw = await scene(LM, 'hidden', { gate: 'switch' });
-  ok(sw.deferred && sw.now === 1 && sw.carried && sw.gates[1] === true, '§9 …the same inside a desktop SWITCH\'s 1 s gate, the page turning hidden', { deferred: sw.deferred, now: sw.now, gates: sw.gates });
+  ok(sw.deferred && sw.now === 0 && sw.stillDeferred, '§9 …a page turning HIDDEN under a gate (a tab switch, the page lives on) sends nothing — its held save waits for the gate as before', { now: sw.now, stillDeferred: sw.stillDeferred });
+  // a deferral that owed only RECIPES sends only them; a deferral that holds a PERSON's act re-arms it (even with a recipe owed elsewhere)
+  {
+    const owedScene = async (Lm, { user = false } = {}) => {
+      const W = world({ records: { 'desk-w': [files('w-0', 0)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w', Lm });
+      let recipes = 0; W.lm._saveOwedRecipes = () => { recipes++; }; W.lm._owedDesks = () => new Set(['desk-p']); // a recipe owed on another desktop
+      W.lm._userDirty = false; W.lm._lastUserInputAt = Date.now(); W.lm._savedAt = Date.now() - 5000; // an input newer than the last save
+      if (user) { W.lm._userDirty = true; W.lm._restoring = true; W.lm._deferSave(); W.lm._restoring = false; W.lm._userDirty = false; } // the 1.1 s kind deferred a person's act; an apply cleared the bit since
+      else W.lm._deferT = setTimeout(() => {}, 200); // the owed-recipe loop's deferral (_deferSave's 200 ms kind)
+      const n0 = W.syncs('desk-w').length;
+      W.lm._flushOnLeave('pagehide');
+      const out = { recipes, full: W.syncs('desk-w').length - n0, dirty: W.lm._userDirty };
+      clearTimeout(W.lm._deferT); W.lm._deferT = null; clearTimeout(W.lm._autoSaveTimer);
+      return out;
+    };
+    const o = await owedScene(LM), u = await owedScene(LM, { user: true });
+    ok(o.recipes === 1 && o.full === 0 && o.dirty === false, '§9 …a deferral that owed only RECIPES sends only them (_doAutoSave\'s own road) — never a whole desktop, the dirty bit never set for it', o);
+    ok(u.full === 1, '§9 …a deferral that holds a PERSON\'s act (an apply cleared its dirty bit) re-arms it and the act leaves — also with a recipe owed on another desktop (the verdict\'s reader: `owed` anywhere lost it)', u);
+    const { LayoutManager: LMo } = await mutantEsm('src/lib/layout.js', 'const act = this._userDirty || (deferred && this._deferUserAt != null && !(this._savedAt > this._deferUserAt));', 'const act = this._userDirty || (deferred && !!this._lastUserInputAt && !(this._savedAt > this._lastUserInputAt));');
+    const o0 = await owedScene(LMo);
+    ok(o0.recipes === 0 && o0.full === 1, '§9 CONTROL: a re-arm that ignores the deferral\'s kind (the first cut) turns the owed-only deferral into a whole save (the recipes leg goes RED)', o0);
+  }
   // nothing due ⇒ nothing sent (no echo of the same record), and nothing said
   {
     const W = world({ records: { 'desk-w': [files('w-0', 0)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w' });
@@ -1019,13 +1042,13 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     W.lm._pointerDown = true; const drag = W.lm._flushOnLeave('pagehide'); W.lm._pointerDown = false; clearTimeout(W.lm._autoSaveTimer);
     ok(drag === false && W.syncs('desk-w').length === 1, '§9 …a pointer still DOWN (an unfinished drag) sends no snapshot of it, and the flush says it sent nothing', drag);
   }
-  // RED CONTROLS: the pagehide listener taken out ⇒ the save waits for its timer; the gates kept up ⇒ the deferred save waits for a page that is gone
+  // RED CONTROLS: the pagehide listener taken out ⇒ the save waits for its timer; the gates lowered (the first cut) ⇒ a save mid-restore
   const { LayoutManager: LM0 } = await mutantEsm('src/lib/layout.js', "    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._flushOnLeave('pagehide'));\n", '');
   const red = await scene(LM0, 'pagehide', { timer: true });
   ok(red.now === 0 && red.after === 1, '§9 CONTROL: without the pagehide listener the save is NOT sent at pagehide (only by the 500 ms timer, after the page is gone) — the first leg goes RED', { now: red.now, after: red.after });
-  const { LayoutManager: LM2 } = await mutantEsm('src/lib/layout.js', '    this._restoring = false; if (dm) dm._restoring = false;\n', '');
+  const { LayoutManager: LM2 } = await mutantEsm('src/lib/layout.js', '    if (this._restoring || dm?._restoring) return false; // no save in the middle of a restore (above)', '    const was = [this._restoring, dm ? dm._restoring : false]; this._restoring = false; if (dm) dm._restoring = false; setTimeout(() => { this._restoring = was[0]; if (dm) dm._restoring = was[1]; }, 0); // the first cut: the gates lowered');
   const red2 = await scene(LM2, 'pagehide', { gate: 'boot' });
-  ok(red2.now === 0, '§9 CONTROL: the gates left up for the flush ⇒ the boot-gated save is deferred again and never leaves — the measured-scene leg goes RED', red2.now);
+  ok(red2.now === 1, '§9 CONTROL: the first cut (the gates lowered for the leave) sends a save in the middle of the restore — the boot-gate leg goes RED', red2.now);
 });
 
 await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the REAL LayoutManager: the door in each of its stopped windows\' Resume bar', async () => {
