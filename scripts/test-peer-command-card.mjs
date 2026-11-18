@@ -329,38 +329,79 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
     const MMb = require(MU.write('src/message-manager.js', MMsrc.replace(fromBg, ''), 'no-background'));
     ok(`CONTROL (B-d868): the copy that ignores the background answers «${MMb.turnByForAsk({ by: 'person' }, ['peer']).by}» for a peer's helper — the leg goes red`, MMb.turnByForAsk({ by: 'person' }, ['peer']).by === 'person');
   }
-  ok('B-d868: the opener lookups keep a VERDICT, never the transcript record (the delta read: up to 32 whole records); the background set is read off the CLI\'s own level set and each task\'s own start', CSsrc.includes('      cmdRecs.set(cmdUuid, v);') && !CSsrc.includes('cmdRecs.set(cmdUuid, rec)') && CSsrc.includes("if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) noteBackground(msg.tasks);") && CSsrc.includes("if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_id != null) noteTaskStarted(msg);"));
-  const fromStart = "msg.command_uuid && !turnOpen.live) turnOpen.cmd = msg.command_uuid;", fromEnd = "      setTurnBy({ by: 'unrecorded', source: 'turn-ended' });\n";
-  ok(`B-d868 wiring: the stamp is kept; a command start counts only BETWEEN turns; the init decides; the turn's records and the result follow`, CSsrc.includes("if (msg.type === 'frame_stamp' && typeof msg.cli_uuid === 'string' && msg.cli_uuid) { personUuids.add(msg.cli_uuid);") && CSsrc.includes(fromStart)
-    && CSsrc.includes("if (msg.type === 'system' && msg.subtype === 'init') noteTurnInit(msg);") && CSsrc.includes("else if (msg.type === 'user' || msg.type === 'assistant') noteTurnRecord(msg);") && CSsrc.includes("if (msg.type === 'result') noteTurnEnded();")
-    && CSsrc.includes('noteCmdRecord(cmdUuid, rec);') && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1, 'the opener reads the peer card\'s ONE transcript lookup (one findSessionJsonlPath in the file, as at the base — the reader\'s should 6: no second sync read per turn)');
-  const consumer = (src, name) => {
-    const CSx = require(MU.write('src/server/stdout/claude-stream-json.js', src, name));
-    const ax = CSx.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
-    const cid = 'c1d00000-0000-4000-8000-99999999999' + name.length % 10, sx = { mode: 'chat', backend: 'claude', name: 'x', cwd: CWD, host: null, claudeSessionId: cid, backendSessionId: cid, sockName: 'cw-' + name, buffer: '', createdAt: Date.now() };
-    sx._normalizer = createMessageManager('claude', 'w-' + name); activeSessions.set('w-' + name, sx); const px = fakePty(); ax.attach(sx, 'w-' + name, px, helpers);
-    return { sx, px, done: () => activeSessions.delete('w-' + name) };
-  };
-  if (anchor(CSsrc, fromStart, 'B-d868 decide-at-the-start')) {
-    const c = consumer(CSsrc.replace(fromStart, 'msg.command_uuid) { turnOpen.cmd = msg.command_uuid; noteTurnInit({}); }'), 'at-start');
-    c.px.data(J({ type: 'frame_stamp', msg_id: 'web-9', cli_uuid: U(9) })); c.px.data(J(started(U(9)))); c.px.data(J(assistant));
-    ok(`CONTROL (B-d868): the copy that decides at a command's start calls the steer after a restart «${c.sx._turnBy && c.sx._turnBy.by}» — the leg goes red`, !!c.sx._turnBy && c.sx._turnBy.by === 'person');
-    c.done();
+  // THE ONE IMPLEMENTATION (主开发's as-if-must (2), 11:37Z): the opener's machine lives in session-brain, fed by the parse (every
+  // record it sees) and the device stream (claudeSideEffects: the records the parse has not seen); the parse holds no inline twin
+  const SBsrc = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
+  ok('B-d868: ONE opener for both feeds — the parse feeds session-brain\'s noteTurnOpener (and its attach resets it), the device feed\'s claudeSideEffects feeds the same; the lookups keep a VERDICT; one transcript lookup in the parse',
+    CSsrc.includes("try { TO.noteTurnOpener(session, msg, 'parse'); } catch { }") && CSsrc.includes("try { require('../session-brain.js').noteTurnAttach(session); } catch { }") && CSsrc.includes('TO.noteTurnCmdRecord(session, cmdUuid, rec);')
+    && !/personUuids|noteTurnInit|turnOpen\./.test(CSsrc) && SBsrc.includes("    try { noteTurnOpener(session, msg, 'device'); } catch { }") && SBsrc.includes('  st.cmdRecs.set(cmdUuid, v);') && (CSsrc.match(/findSessionJsonlPath\(/g) || []).length === 1);
+  // PARITY, record for record: the same stream through the parse alone, the device feed alone, and the two interleaved (each
+  // record first through one feed, then the other — the opener takes it once)
+  const SB = require(path.join(REPO, 'src/server/session-brain.js'));
+  const brain = SB.create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { } });
+  const V = (k) => 'd8680000-0000-4000-8000-0000000002' + k;
+  const seq = [
+    { type: 'frame_stamp', msg_id: 'web-p1', cli_uuid: V('01') },
+    { type: 'system', subtype: 'init', uuid: V('02'), session_id: 'x', user_message_uuids: [V('01')] },
+    { type: 'system', subtype: 'task_started', uuid: V('03'), task_id: 'bg-p', tool_use_id: 'toolu_p', is_backgrounded: true, task_type: 'local_agent' },
+    { type: 'system', subtype: 'background_tasks_changed', uuid: V('04'), tasks: [{ task_id: 'bg-p', task_type: 'local_agent' }] },
+    { type: 'assistant', uuid: V('05'), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } },
+    { type: 'result', uuid: V('06'), subtype: 'success', session_id: 'x' },
+    { type: 'system', subtype: 'init', uuid: V('07'), session_id: 'x' },
+    { type: 'user', uuid: V('08'), origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>done</task-notification>' } },
+    { type: 'system', subtype: 'background_tasks_changed', uuid: V('09'), tasks: [] },
+    { type: 'result', uuid: V('10'), subtype: 'success', session_id: 'x' },
+    { type: 'command_lifecycle', state: 'started', uuid: V('11'), command_uuid: V('12') },
+    { type: 'system', subtype: 'init', uuid: V('13'), session_id: 'x' },
+    { type: 'assistant', uuid: V('14'), message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } },
+  ];
+  const facts = (sx) => `${(sx._turnBy && sx._turnBy.by) || 'unrecorded'}|${JSON.stringify(sx._turnByBackground || [])}`;
+  const viaParse = mkSession('w-par-parse'), viaDev = { name: 'dev', host: 'h9', backend: 'claude' }, viaMix = mkSession('w-par-mix');
+  const fP = [], fD = [], fM = [];
+  seq.forEach((r, i) => {
+    viaParse.p.data(J(r)); fP.push(facts(viaParse.s));
+    brain.claudeSideEffects(viaDev, 'dev', r); fD.push(facts(viaDev));
+    if (i % 2) { brain.claudeSideEffects(viaMix.s, 'mix', r); viaMix.p.data(J(r)); } else { viaMix.p.data(J(r)); brain.claudeSideEffects(viaMix.s, 'mix', r); }
+    fM.push(facts(viaMix.s));
+  });
+  ok(`B-d868 PARITY (as-if-must (2)): the same stream through the parse alone, the device feed alone and both interleaved gives the same opener record for record (${fP.join(' · ')})`,
+    JSON.stringify(fP) === JSON.stringify(fD) && JSON.stringify(fP) === JSON.stringify(fM) && fP[1].startsWith('person|') && fP[5].startsWith('unrecorded|') && fP[7].startsWith('task|') && fP[12].startsWith('unrecorded|'), JSON.stringify({ fP, fD, fM }));
+  // (as-if-must (1)) AFTER A RE-ATTACH THE OPENER IS UNKNOWN until a turn starts in its sight: the person's turn, then a fresh
+  // attach of the SAME session (a dead bridge healed, a parse gap) — never the previous «you»
+  const ra = mkSession('w-reattach');
+  ra.p.data(J({ type: 'frame_stamp', msg_id: 'web-r', cli_uuid: U('r') })); ra.p.data(J(init([U('r')])));
+  const before = said(ra.s);
+  attach(ra.s, 'w-reattach', fakePty(), helpers);
+  const after = said(ra.s);
+  ok(`B-d868 (as-if-must (1)): a re-attach makes the opener unknown (${before.by} → ${after.by}, ${after.source}) until a turn starts in its sight`, before.by === 'person' && after.by === 'unrecorded' && after.source === 'attach', JSON.stringify({ before, after }));
+  // RED CONTROLS on the one implementation (session-brain), each anchored — a missing anchor fails BY NAME
+  const brainOf = (src, name) => MU.load('src/server/session-brain.js', src, name);
+  const run = (B, records, s0 = {}) => { const sx = { name: 'ctl', backend: 'claude', ...s0 }; B.noteTurnAttach(sx); for (const r of records) B.noteTurnOpener(sx, r, 'parse'); return sx; };
+  const fromStart = "{ if (st.live === false) st.cmd = msg.command_uuid; return; }", fromEnd = "    setTurnBy(session, { by: 'unrecorded', source: 'turn-ended' });\n";
+  const fromSay = "function sayBackground(session, st) { session._turnByBackground = [...new Set(st.bgLive.map((k) => st.launched.get(k) || 'unknown'))]; }";
+  if (anchor(SBsrc, fromStart, 'B-d868 decide-at-the-start')) {
+    const sx = run(brainOf(SBsrc.replace(fromStart, "{ st.live = true; if (st.persons.has(msg.command_uuid)) setTurnBy(session, { by: 'person', source: 'frame-stamp' }); return; }"), 'at-start'),
+      [{ type: 'frame_stamp', cli_uuid: U(9) }, started(U(9)), assistant]);
+    ok(`CONTROL (B-d868): the copy that decides at a command's start calls the steer after a restart «${sx._turnBy && sx._turnBy.by}» — the leg goes red`, !!sx._turnBy && sx._turnBy.by === 'person');
   }
-  if (anchor(CSsrc, fromEnd, 'B-d868 the result ends it')) {
-    const c = consumer(CSsrc.replace(fromEnd, ''), 'no-end');
-    c.px.data(J({ type: 'frame_stamp', msg_id: 'web-a', cli_uuid: U(1) })); c.px.data(J(init([U(1)]))); c.px.data(J(result(M3)));
-    ok(`CONTROL (B-d868): the copy whose result does not end the fact still says «${c.sx._turnBy && c.sx._turnBy.by}» between turns — the leg goes red`, !!c.sx._turnBy && c.sx._turnBy.by === 'person');
-    c.done();
+  if (anchor(SBsrc, fromEnd, 'B-d868 the result ends it')) {
+    const sx = run(brainOf(SBsrc.replace(fromEnd, ''), 'no-end'), [{ type: 'frame_stamp', cli_uuid: U(1) }, init([U(1)]), result(M3)]);
+    ok(`CONTROL (B-d868): the copy whose result does not end the fact still says «${sx._turnBy && sx._turnBy.by}» between turns — the leg goes red`, !!sx._turnBy && sx._turnBy.by === 'person');
   }
-  const fromSay = "    const sayBackground = () => { session._turnByBackground = [...new Set(bgLive.map((k) => launched.get(k) || 'unknown'))]; };";
-  if (anchor(CSsrc, fromSay, 'B-d868 the opener at launch')) {
-    const c = consumer(CSsrc.replace(fromSay, "    const sayBackground = () => { session._turnByBackground = [...new Set(bgLive.map(() => openerKey(session._turnBy)))]; };"), 'at-the-set');
-    c.px.data(J({ type: 'frame_stamp', msg_id: 'web-c', cli_uuid: U('c') })); c.px.data(J(init([U('c')])));
-    c.px.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bg-x', task_type: 'local_agent' }] }));
-    const v = require(path.join(REPO, 'src/message-manager.js')).turnByForAsk(c.sx._turnBy, c.sx._turnByBackground);
+  if (anchor(SBsrc, fromSay, 'B-d868 the opener at launch')) {
+    const sx = run(brainOf(SBsrc.replace(fromSay, "function sayBackground(session, st) { session._turnByBackground = [...new Set(st.bgLive.map(() => openerKeyOf(session._turnBy)))]; }"), 'at-the-set'),
+      [{ type: 'frame_stamp', cli_uuid: U('c') }, init([U('c')]), { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bg-x', task_type: 'local_agent' }] }]);
+    const v = require(path.join(REPO, 'src/message-manager.js')).turnByForAsk(sx._turnBy, sx._turnByBackground);
     ok(`CONTROL (B-d868): the copy that gives a running task the opener of the turn running when the set names it says «${v && v.by}» for a helper nobody saw start — the leg goes red`, !!v && v.by === 'person');
-    c.done();
+  }
+  const fromAttach = "    try { require('../session-brain.js').noteTurnAttach(session); } catch { }";
+  if (anchor(CSsrc, fromAttach, 'B-d868 the attach resets it')) {
+    const CSx = require(MU.write('src/server/stdout/claude-stream-json.js', CSsrc.replace(fromAttach, ''), 'no-attach-reset'));
+    const ax = CSx.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
+    const rb = mkSession('w-reattach-ctl');
+    rb.p.data(J({ type: 'frame_stamp', msg_id: 'web-rc', cli_uuid: U('d') })); rb.p.data(J(init([U('d')])));
+    ax.attach(rb.s, 'w-reattach-ctl', fakePty(), helpers);
+    ok(`CONTROL (B-d868): the copy whose attach does not reset the opener keeps «${rb.s._turnBy && rb.s._turnBy.by}» across a re-attach — the leg goes red`, !!rb.s._turnBy && rb.s._turnBy.by === 'person');
   }
 }
 

@@ -285,7 +285,7 @@ console.log('⑤e WHO STARTED THE TURN (B-d868) — the «Allow for 1 hour» lin
   // the turn rides the fold's SUMMARY, always shown (a phone never opens a title)
   const vb = card({ by: 'person' }), ROW = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
   ok(!!vb && Array.isArray(vb.window.by) && vb.window.by[0].text === 'The turn running when this asked was started by you' && !('by' in (card(undefined) || { window: {} }).window)
-    && ROW.includes("<summary>${win.by ? `<span class=\"ut-run-hint ut-run-hint-window\">${segHtml(win.by)}</span> ` : ''}${win.short ? `<span class=\"ut-run-hint ut-run-hint-window ut-run-hint-short\">${segHtml(win.short)}</span> ` : ''}") && ROW.includes("(win.lines || []).filter((l) => !win.by || l !== segText(win.by))")
+    && ROW.includes("<summary>${win.by ? `<span class=\"ut-run-hint ut-run-hint-window\">${segHtml(win.by)}</span> ` : ''}${win.short ? `<span class=\"ut-run-hint ut-run-hint-window ut-run-hint-short\">${segHtml(win.short)}</span> ` : ''}") && (ROW.split("(win.lines || []).filter((l) => !win.by || l !== segText(win.by))").length - 1) === 2
     && last({ by: 'unrecorded', why: 'background' }) === 'Who started this is not recorded: background work another turn started is still running',
     'the strip: the card hands its window `by` (the same words) and the strip draws it in the fold\'s summary, beside the hour\'s short words — seen without opening anything', vb && vb.window);
   const FS = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), from = "    ...(w.turnBy && typeof w.turnBy === 'object' ? [turnByWords(w.turnBy, t)] : [])];";
