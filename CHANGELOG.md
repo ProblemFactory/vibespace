@@ -11,12 +11,19 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After you dismiss «Resume interrupted sessions?», each stopped window's bar offers «Resume all N» while two or more of them are still stopped.
 - A web login’s row and its «Use for…» dialog name its two-step code (or none), with a door to change or unbind it, and the passwords it keeps, with when.
 - A conversation window's right-click menu now has Fork…, as the conversation's card in the session list does.
+- In a Claude chat, Rewind to here on one of your own messages takes it and everything after it back in the same chat; files stay as they are.
+- An agent using a Gmail account's API is told which Google services its sign-in reaches, and a call refused for a missing permission names it.
 
 ### Changed
 - In a desktop app window, Show window frame and Scale mark the current choice with ✓ on a normal row, no longer greyed out; pressing it keeps it.
 - The agent update a paired machine downloads is about a fifth smaller.
 - A web login’s «Use for…» now covers that login only; «Any site…» and «Any account on a site…» sit on the Web logins header.
 - A wider grant shows on a login as «through» and is changed at its own door.
+- The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
+- The model and its thinking level are one button, tasks and workflows one «Background work» button, and rarely changed settings sit in «Conversation settings».
+- The Context button holds the cache, the token total, the turn time and the spend; the spend shows on the button only when you are billed per use.
+- The status bar shows names instead of raw ids: the model as «Fable 1M», the thinking level as «Ultra», the permission mode as «Allow all».
+- A tool that did not start is listed in Session Properties and ⚙ Diagnostics, and on a phone or tablet the search button sits in the top bar.
 
 ### Fixed
 - After you disconnect a Gmail account in Channels and sign in again, mail that arrived in between is read, also replies in conversations you already had.
@@ -77,6 +84,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening a conversation whose window waits on another desktop takes you to that window in every case, instead of opening a second copy of it.
 - After switching desktops, keyboard commands act on a window you can see, never on one left behind on the other desktop.
 - In the session list, History's «Show more» button and the empty rows of History and of a machine with no conversations now read in your language.
+- With many agent browsers kept, the conversation list no longer pauses on their saved folders; a Resume or Forget whose folder does not answer says so.
+- With many channel conversations, the Channels list and its counts no longer hold VibeSpace for seconds while the attention judge's settings are read.
+- With a large mailbox connected, checking a small channel account no longer reads every other account's conversations, so VibeSpace stays responsive.
+- With many agent groups, VibeSpace no longer stutters for several seconds right after it starts.
+- VibeSpace no longer waits on a network or cloud folder when it looks for the programs desktop apps need.
+- A Gmail account keeps working when the OAuth client it signed in with is replaced under the same name; a refusal for the wrong client now says so.
+- An agent's channel watch keeps a number such as 4,995 as one keyword, and says when a keyword is so short it matches almost every message.
+- A Lark picture in a reply is also looked for in the message it answers; one that still cannot be opened says why, and a recalled one says so.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
