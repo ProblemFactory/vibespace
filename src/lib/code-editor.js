@@ -173,7 +173,7 @@ class CodeEditor {
     const container = document.createElement('div'); container.className = 'editor-container';
 
     // Editor toolbar — left: save indicator, right: controls
-    const toolbar = this._toolbarEl = document.createElement('div'); toolbar.className = 'editor-toolbar';
+    const toolbar = document.createElement('div'); toolbar.className = 'editor-toolbar';
 
     const toolbarLeft = document.createElement('div'); toolbarLeft.className = 'editor-toolbar-left';
     this.saveIndicator = document.createElement('span'); this.saveIndicator.className = 'save-indicator';
@@ -461,7 +461,7 @@ class CodeEditor {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, selection: EditorSelection.cursor(prevHead) });
       view.scrollDOM.scrollTop = prevScroll;
       this.modified = false;
-      this._diskChip.style.display = 'none'; this._toolbarEl?.classList.remove('ce-disk-changed');
+      this._diskChip.style.display = 'none';
       if (this._previewing) this._renderPreviewNow();
       this._formatStatus('⟳ ' + t('Reloaded from disk'), 'var(--green)', 2000);
       await this._baselineMtime();
@@ -569,7 +569,7 @@ class CodeEditor {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)';
-      this._diskChip.style.display = 'none'; this._toolbarEl?.classList.remove('ce-disk-changed');
+      this._diskChip.style.display = 'none';
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
       setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);

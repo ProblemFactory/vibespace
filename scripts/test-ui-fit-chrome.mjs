@@ -250,20 +250,41 @@ try {
   })()`);
   check(`④ a guided window opened while the tour is up: the tour steps aside (${tour && tour.during.vis}) while the window is up, and is back (${tour && tour.after.vis}) once it closes`, !!tour && tour.during.dialog && tour.during.yield && tour.during.vis === 'hidden' && tour.cancelled && !tour.after.yield && tour.after.vis === 'visible', tour);
 
-  // ⑤ THE DISK NOTICE ON A PHONE
+  // ⑤ THE DISK NOTICE ON A PHONE — the need line on its OWN row under the toolbar (the restack for 2.369.411: ui-needs-a-button's need
+  // line MEETS ui-phone-and-fit's wrap mark; 主开发's ruling 2026-11-11 14:09Z, restated 2026-11-18 20:10Z): the toolbar stays ONE line
+  // at a phone width with the notice shown and after each of its two doors is pressed. RED CONTROL: the notice put back INTO the bar
+  // (where the release drew it) — the plant proven first — and the leg reads it red
   const file = path.join(CWD, 'notes.txt'); fs.writeFileSync(file, 'notes\n\nfirst\n');
   await phone(); await load();
   await evalJs(`app.openEditor(${JSON.stringify(file)}, 'notes.txt'); true`);
   const opened = await waitFor(`!!document.querySelector('.editor-toolbar') && !!document.querySelector('.cm-content')`, 15000);
+  const BAR = `(() => { const bar = document.querySelector('.editor-toolbar'); if (!bar) return null; const kids = [...bar.children].filter((e) => e.getClientRects().length); const rows = new Set(kids.map((e) => Math.round(e.getBoundingClientRect().top))).size; const n = document.querySelector('.code-editor-disk-need'); const shown = !!n && getComputedStyle(n).display !== 'none' && n.getClientRects().length > 0; const r = n && n.getBoundingClientRect(), b = bar.getBoundingClientRect(); return { rows, h: Math.round(b.height), shown, inBar: !!n && bar.contains(n), below: !!r && shown && r.top >= b.bottom - 0.5, doors: n ? n.querySelectorAll('.need-door').length : 0, inside: !!r && r.left >= 0 && r.right <= innerWidth + 0.5, text: n ? n.textContent.trim().slice(0, 80) : '' }; })()`;
+  const edit = async (txt) => { await evalJs(`(() => { const c = document.querySelector('.cm-content'); c.focus(); document.execCommand('insertText', false, ${JSON.stringify(txt)}); return true; })()`); await sleep(400); };
+  const diskChange = async (txt) => { await sleep(1100); fs.writeFileSync(file, txt); await evalJs(`window.dispatchEvent(new Event('focus')); true`); return waitFor(`(() => { const n = document.querySelector('.code-editor-disk-need'); return !!n && getComputedStyle(n).display !== 'none'; })()`, 8000); };
+  const gone = () => waitFor(`(() => { const n = document.querySelector('.code-editor-disk-need'); return !n || getComputedStyle(n).display === 'none'; })()`, 8000);
   if (opened) {
     await sleep(1500);
-    await evalJs(`(() => { const c = document.querySelector('.cm-content'); c.focus(); document.execCommand('insertText', false, 'mine '); return true; })()`); await sleep(400);
-    await sleep(1100); fs.writeFileSync(file, 'notes\n\nchanged on disk\n');
-    await evalJs(`window.dispatchEvent(new Event('focus')); true`);
-    await waitFor(`!!document.querySelector('.editor-toolbar.ce-disk-changed')`, 8000); await sleep(500);
-    const n = await evalJs(`(() => { const bar = document.querySelector('.editor-toolbar.ce-disk-changed'); if (!bar) return null; const chip = [...bar.querySelectorAll('.editor-toolbar-left > *')].find((e) => e.getClientRects().length && /磁盘|disk/i.test(e.textContent)); if (!chip) return { bar: true }; const r = chip.getBoundingClientRect(); return { text: chip.textContent.trim(), w: Math.round(r.width), cut: chip.scrollWidth > chip.clientWidth + 1, inside: r.left >= 0 && r.right <= innerWidth + 0.5, ownLine: Math.round(r.top) < Math.round(bar.querySelector('.editor-toolbar-right').getBoundingClientRect().top) }; })()`);
+    await edit('mine ');
+    const s1 = await diskChange('notes\n\nchanged on disk\n');
+    const shown = await evalJs(BAR);
     await shot('disk-notice.390.png');
-    check(`⑤ 390 × 844: an edited file changed on disk ⇒ «${n && n.text}» drawn whole (${n && n.w} px, inside the screen) on its own line above the controls`, !!n && !!n.text && !n.cut && n.inside && n.ownLine, n);
+    check(`⑤ 390 × 844: an edited file changed on disk ⇒ the notice «${shown && shown.text}» on its OWN row under the toolbar (${shown && shown.doors} doors, inside the screen) and the toolbar ONE line`, s1 && !!shown && shown.shown && !shown.inBar && shown.below && shown.doors === 2 && shown.inside && shown.rows === 1, shown);
+    await press('.code-editor-disk-need .need-door[data-door="disk-keep"]'); await gone();
+    const kept = await evalJs(BAR);
+    check('⑤ …«Keep my changes» pressed: the notice goes and the toolbar is still ONE line', !!kept && !kept.shown && kept.rows === 1, kept);
+    await edit('more ');
+    const s2 = await diskChange('notes\n\nchanged again\n');
+    await press('.code-editor-disk-need .need-door[data-door="disk-reload"]');
+    const asked = await waitFor(`!!document.querySelector('.dialog-footer .btn-create')`, 8000);
+    if (asked) await press('.dialog-footer .btn-create');
+    await gone();
+    const reloaded = await evalJs(BAR);
+    check('⑤ …«Reload from disk» pressed (and confirmed): the notice goes and the toolbar is still ONE line', s2 && asked && !!reloaded && !reloaded.shown && reloaded.rows === 1, { s2, asked, reloaded });
+    await edit('red ');
+    await diskChange('notes\n\nchanged for the control\n');
+    const plant = await evalJs(`(() => { const n = document.querySelector('.code-editor-disk-need'), left = document.querySelector('.editor-toolbar .editor-toolbar-left'); if (!n || !left) return null; left.append(n); return true; })()`);
+    const red = await evalJs(BAR);
+    check('⑤ RED CONTROL: the plant is in place (the notice inside the bar, as the release drew it) — and the own-row leg reads it red', plant === true && !!red && red.inBar && !(red.shown && !red.inBar && red.below && red.rows === 1), { plant, red });
   } else check('⑤ the editor opened the file', false);
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) {

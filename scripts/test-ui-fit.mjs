@@ -113,14 +113,24 @@ check('④ a guided window opened from the tour (#welcome.onboarding) hides the 
   /const welcome = own && document\.getElementById\('welcome'\);/.test(FLOWS) && /welcome\.classList\.add\('ob-yield'\);\s*outcome\.finally\(\(\) => welcome\.classList\.remove\('ob-yield'\)\);/.test(FLOWS)
   && has('#welcome.onboarding.ob-yield', 'visibility: hidden'));
 
-// ⑤ THE DISK NOTICE TAKES ITS OWN LINE
+// ⑤ THE DISK NOTICE IS ITS OWN ROW (the restack for 2.369.411 — ui-needs-a-button's need line MEETS ui-phone-and-fit's wrap mark;
+// 主开发's ruling 2026-11-11 14:09Z, restated 2026-11-18 20:10Z): the notice is the NEED LINE on its own row under the toolbar, with its
+// two doors (reload from disk · keep my changes); the bar carries no wrap mark — nothing in the toolbar wraps. The phone-width
+// geometry (the bar one line with the notice shown and after each door) is test-ui-fit-chrome ⑤'s
 const ED = read('src/lib/code-editor.js'), VW = CSS['viewers.css'];
-const shows = (ED.match(/this\._diskChip\.style\.display = '';[^\n]*this\._toolbarEl\?\.classList\.add\('ce-disk-changed'\)/g) || []).length;
-const hides = (ED.match(/this\._diskChip\.style\.display = 'none';[^\n]*this\._toolbarEl\?\.classList\.remove\('ce-disk-changed'\)/g) || []).length;
-const allChip = (ED.match(/this\._diskChip\.style\.display = /g) || []).length;
-check(`⑤ every show of the disk notice marks the bar and every hide unmarks it (${shows} + ${hides} of ${allChip})`, shows >= 1 && hides >= 2 && shows + hides === allChip);
-check('⑤ the marked bar wraps and the notice takes a whole line, its words wrapping (never «● M» and nothing)',
-  /\.editor-toolbar\.ce-disk-changed \{ flex-wrap: wrap;/.test(VW) && /\.editor-toolbar\.ce-disk-changed > \.editor-toolbar-left \{ flex: 1 1 100%; overflow: visible; \}/.test(VW) && /> \.media-btn \{ white-space: normal;/.test(VW));
+const diskLaw = (ed, vw) => ({
+  ownRow: /container\.append\(toolbar, this\._diskChip, /.test(ed),
+  notInBar: !/toolbarLeft\.append\([^)\n]*this\._diskChip/.test(ed),
+  doors: /door: 'disk-reload'/.test(ed) && /door: 'disk-keep'/.test(ed),
+  noMark: !/ce-disk-changed/.test(ed) && !/ce-disk-changed/.test(vw),
+});
+const dl = diskLaw(ED, VW);
+check('⑤ the disk notice is the need line on its OWN row under the toolbar (both doors: reload from disk, keep my changes), never inside the bar — and the bar carries no wrap mark in the editor or viewers.css', dl.ownRow && dl.notInBar && dl.doors && dl.noMark, dl);
+// RED CONTROL, its plant proven first: the release's mark put back on the notice's show line
+const SHOW = "if (this.modified) { this._diskSeen = m; this._diskChip.style.display = ''; }";
+const plantedED = ED.replace(SHOW, "if (this.modified) { this._diskSeen = m; this._diskChip.style.display = ''; this._toolbarEl?.classList.add('ce-disk-changed'); }");
+const plantIn = ED.includes(SHOW) && plantedED !== ED && /classList\.add\('ce-disk-changed'\)/.test(plantedED);
+check('⑤ RED CONTROL: the plant is in its copy (the release\'s wrap mark on the show line) — and the law reads that copy red', plantIn && !diskLaw(plantedED, VW).noMark, { plantIn });
 
 // ⑥ THE CHECK ROW
 const ROW_SEL = '.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"])))';

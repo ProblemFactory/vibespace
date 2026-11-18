@@ -475,6 +475,56 @@ ok(fc.same === 'same' && fc.replaced1 === 0 && fc.added1 === 0 && fc.touched1 ==
 ok(fc.changed === 'patched' && fc.replaced2 === 0 && fc.dotNow === 'mounts-dot mounts-dot-err' && fc.chipBeforeActs && fc.errline, 'a CHANGED answer changes the dot and its words only: the dot\'s class and title, the chip before the actions, the failure line — every node the row had is the same node', fc);
 const pq2 = (() => { const src0 = fs.readFileSync(path.join(REPO, 'src/lib/mounts-live.js'), 'utf8'); const src = src0.replace("  if (hostFaceSame(prev, next)) return 'same';\n", '').replace("    if (dot.className !== cls) dot.className = cls;", "    { const nd = document.createElement('span'); nd.className = cls; dot.replaceWith(nd); } // CONTROL: the probe rebuilds what it shows"); return { file: 'src/lib/mounts-live.js', src, applies: src !== src0 && !src.includes("return 'same';\n  const dot") }; })();
 ok(pq2.applies && faceCase(await bundle('src/lib/mounts-live.js', pq2)).replaced1 > 0, 'CONTROL (p): a probe that rebuilds what it shows (the tip as it stood replaced the whole row twice) — the zero-replaced leg goes red');
+// THE MEETING AT THE RESTACK FOR 2.369.411 (主开发 20:03Z, ruling (a), both meanings): ui-needs-a-button's NEED LINE (its words and its
+// doors) is the row's failure line that B-a31a's probe patches IN PLACE — the face carries the need line's inputs, the builder draws it
+// (errOf). An answer with the SAME words builds nothing and writes nothing to the line; CHANGED words replace it and its fold once,
+// each in its own place, with doors that work
+const needCase = (M) => {
+  const row = el('div', 'mounts-row'); row._hostId = 'host-ssh';
+  const top = el('div', 'mounts-row-top mounts-host-top'); top.append(el('span', 'mounts-dot mounts-dot-err'), el('b', 'mounts-name', 'buildbox'), el('span', 'mounts-row-actions'));
+  row.appendChild(top);
+  let built = 0, pressed = 0;
+  const lineOf = (e) => {
+    built++;
+    const line = el('div', 'mounts-errline need-line'); line.setAttribute('title', e.title); line.appendChild(el('span', 'need-words', e.text));
+    const b = el('button', 'mounts-btn need-door', e.refused ? 'Copy the public key to add' : 'Try again'); b.addEventListener('click', () => { pressed++; }); line.appendChild(b);
+    const fold = el('details', 'mounts-errline-details'); fold.append(el('summary', '', 'Details'), el('pre', '', e.title));
+    return [line, fold];
+  };
+  const E1 = { text: 'Can’t reach me@buildbox: the connection was refused.', title: 'Connection refused', refused: false, target: 'me@buildbox' };
+  const F1 = { dot: 'err', dotTip: 'Connection refused', badge: '', chip: { kind: 'error', text: 'unreachable', title: 'Connection refused' }, errline: E1 };
+  for (const n of lineOf(E1)) row.appendChild(n);                                    // the builder's own draw
+  row.insertBefore(el('div', 'mounts-key-shown', 'ssh-ed25519 AAAA'), row.children.find((k) => k._cls.includes('mounts-errline-details')));   // a key answer between them
+  built = 0;
+  const line0 = row.children.find((k) => k._cls.includes('mounts-errline')), fold0 = row.children.find((k) => k._cls.includes('mounts-errline-details'));
+  let writes = 0;
+  const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(line0), 'textContent');
+  for (const n of [line0, fold0]) {
+    for (const k of ['setAttribute', 'remove', 'replaceWith', 'appendChild', 'append', 'after', 'insertBefore']) { const f = n[k].bind(n); n[k] = (...a) => { writes++; return f(...a); }; }
+    Object.defineProperty(n, 'textContent', { get() { return desc.get.call(this); }, set(v) { writes++; desc.set.call(this, v); }, configurable: true });
+  }
+  const makers = { chipOf: (c) => el('span', 'host-state-chip host-state-' + c.kind, c.text), badgeOf: (h) => el('span', 'mounts-badge', h), errOf: lineOf };
+  const F1b = { ...F1, chip: { kind: 'error', text: 'unreachable', title: 'Connection refused (2)' } };
+  const same = M.patchHostFace(row, F1, { ...F1 }, makers);                           // the identical answer
+  const sameOther = M.patchHostFace(row, F1, F1b, makers);                            // the same words, the chip moved
+  const kept = { built, writes, line: row.children.includes(line0), fold: row.children.includes(fold0) };
+  const E2 = { text: 'Can’t sign in to me@buildbox: it refused the key.', title: 'Permission denied (publickey)', refused: true, target: 'me@buildbox' };
+  const changed = M.patchHostFace(row, F1b, { ...F1b, errline: E2 }, makers);
+  const line1 = row.children.find((k) => k._cls.includes('mounts-errline')), fold1 = row.children.find((k) => k._cls.includes('mounts-errline-details'));
+  const doors = line1 ? line1.all.filter((k) => k._cls.includes('need-door')) : [];
+  for (const d of doors) d.fire('click');
+  const order = row.children.map((k) => (k._cls.includes('mounts-errline-details') ? 'fold' : k._cls.includes('mounts-errline') ? 'line' : k._cls.includes('mounts-key-shown') ? 'key' : '')).filter(Boolean).join(',');
+  return { same, sameOther, kept, changed, built, replaced: !!line1 && line1 !== line0 && !!fold1 && fold1 !== fold0, doors: doors.length, pressed, words: line1 && line1.textContent, foldText: fold1 && fold1.textContent, lines: row.children.filter((k) => k._cls.includes('mounts-errline')).length, order };
+};
+const nd = needCase(ML);
+ok(nd.same === 'same' && nd.sameOther === 'patched' && nd.kept.built === 0 && nd.kept.writes === 0 && nd.kept.line && nd.kept.fold, 'THE MEETING (ruling (a), the restack for 2.369.411): a probe answer with the SAME words builds nothing and writes nothing to the need line or its fold (the identical answer ⇒ «same»; the same words with the chip moved ⇒ the chip patched, the line at zero writes)', nd);
+ok(nd.changed === 'patched' && nd.built === 1 && nd.replaced && nd.lines === 1 && nd.doors === 1 && nd.pressed === 1 && /refused the key/.test(nd.words || '') && /publickey/.test(nd.foldText || '') && nd.order === 'line,key,fold', '…CHANGED words replace the need line and its fold ONCE, each in its own place (a key answer between them stays): its door is there and works', nd);
+// RED CONTROL (v), its plant proven first: the release's patch — the failure line's words written IN PLACE — takes the doors
+const pnd = patched('src/lib/mounts-live.js', '  if (errOf) {\n', "  if (false) { // CONTROL: the release's in-place text\n");
+const plantOk = pnd.applies && /if \(false\) \{ \/\/ CONTROL/.test(pnd.src) && /if \(e\.textContent !== next\.errline\.text\) e\.textContent = next\.errline\.text;/.test(pnd.src);
+const ndr = plantOk ? needCase(await bundle('src/lib/mounts-live.js', pnd)) : null;
+ok(plantOk && !!ndr && ndr.doors === 0, 'CONTROL (v): the plant is in its copy (the builder\'s branch off, the release\'s text write live) — CHANGED words write over the line and its doors are gone: the door leg goes red', { plantOk, doors: ndr && ndr.doors });
+ok(/errOf: \(e\) => this\._hostErrLine\(h, e, row\)\.nodes/.test(SM) && /const \{ nodes, place \} = this\._hostErrLine\(h, face\.errline, row\);/.test(SM) && /errline: st && !st\.ok \? this\._hostErrFacts\(h, st\) : null/.test(SM), 'the wiring: the face carries the need line\'s inputs; the builder and the in-place patch draw it through ONE door (_hostErrLine)');
 const tipProbe = SM.replace(/(\n    _autoTestHosts\(hosts, hlist\) \{[\s\S]*?)this\._patchHostFace\(h, hlist\)/, '$1this._swapHostRow(h, hlist)');
 ok(tipProbe !== SM && !wiring(tipProbe).inPlace, 'CONTROL (q): _autoTestHosts swapping the row (the tip as it stood) — the in-place wiring goes red');
 const renderProbe = SM.replace("        // (the render's own probe runs at its END, through the on-screen gate, once the list is on the page — _mountsDotsNow)", "        this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);"); // stale-pins: kept — control (u) BUILDS the old line

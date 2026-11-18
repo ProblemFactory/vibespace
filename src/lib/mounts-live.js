@@ -126,8 +126,9 @@ export function hostFaceSame(a, b) { return !!a && !!b && faceKey(a) === faceKey
 /** Patch a machine row's status face IN PLACE (`row` = the .mounts-row; its .mounts-host-top holds the dot, the badge and the
  *  chip): an equal face ⇒ 'same' and no node touched; else the dot's class and words, the tools badge (replaced only when its
  *  words changed), the state chip (added / replaced / removed) and the row's failure line (its words in place, added /
- *  removed) — every other node of the row stays the same node. `chipOf(chip)` / `badgeOf(html)` make the new nodes. */
-export function patchHostFace(row, prev, next, { chipOf, badgeOf } = {}) {
+ *  removed) — every other node of the row stays the same node. `chipOf(chip)` / `badgeOf(html)` make the new nodes; with
+ *  `errOf(errline)` the failure line is the builder's need line and its fold, each replaced whole when the words change. */
+export function patchHostFace(row, prev, next, { chipOf, badgeOf, errOf } = {}) {
   const top = kid(row, 'mounts-host-top');
   if (!top || !next) return 'none';
   if (hostFaceSame(prev, next)) return 'same';
@@ -148,7 +149,19 @@ export function patchHostFace(row, prev, next, { chipOf, badgeOf } = {}) {
   else if (oldChip) oldChip.remove();
   else if (chip) { const acts = kid(top, 'mounts-row-actions'); if (acts) top.insertBefore(chip, acts); else top.appendChild(chip); }
   const oldErr = kid(row, 'mounts-errline');
-  if (next.errline) {
+  if (errOf) {
+    // lane ui-needs-a-button MEETS B-a31a (the restack for 2.369.411, 主开发 20:03Z, ruling (a)): the failure line is the NEED LINE —
+    // its words and its doors — with its Details fold, drawn by the builder (`errOf(errline)` → [line, fold]). Each is replaced WHOLE,
+    // in its own place (a key answer between them stays), only when the words or the title change — never written in place (a text
+    // write would take the doors); the same words build nothing and touch nothing
+    const pe = prev && prev.errline, ne = next.errline;
+    if (!(ne && oldErr && pe && pe.text === ne.text && pe.title === ne.title)) {
+      const oldMore = kid(row, 'mounts-errline-details');
+      const [nErr = null, nMore = null] = ne ? [].concat(errOf(ne)) : [];
+      if (oldErr && nErr) oldErr.replaceWith(nErr); else if (oldErr) oldErr.remove(); else if (nErr) row.appendChild(nErr);
+      if (oldMore && nMore) oldMore.replaceWith(nMore); else if (oldMore) oldMore.remove(); else if (nMore) row.appendChild(nMore);
+    }
+  } else if (next.errline) {
     const e = oldErr || document.createElement('div');
     if (!oldErr) { e.className = 'mounts-errline'; row.appendChild(e); }
     if (e.textContent !== next.errline.text) e.textContent = next.errline.text;

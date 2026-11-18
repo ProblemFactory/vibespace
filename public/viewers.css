@@ -436,12 +436,6 @@
   display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden;
 }
 .editor-toolbar-right { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
-/* lane ui-phone-and-fit #3 (the walk, a phone: «● M» and nothing of «磁盘上的文件已更改» — the right group squeezed the left to a
-   sliver): while the disk-change notice stands, the bar WRAPS and the save mark + the notice take their own whole line —
-   the notice is read in full, its press reloads, the controls follow on the next line (every class: a narrow window too) */
-.editor-toolbar.ce-disk-changed { flex-wrap: wrap; row-gap: 4px; }
-.editor-toolbar.ce-disk-changed > .editor-toolbar-left { flex: 1 1 100%; overflow: visible; }
-.editor-toolbar.ce-disk-changed > .editor-toolbar-left > .media-btn { white-space: normal; text-align: left; }
 /* lane viewer-download: on a phone the right group no longer runs off the screen — Download leads it, the rest scrolls */
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .editor-toolbar-right { flex-shrink: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; } .editor-toolbar-right .file-download-btn { order: -1; flex: none; } }
 .editor-toolbar-sep {

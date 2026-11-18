@@ -977,8 +977,42 @@ export function installSidebarMounts(Sidebar) {
         badge: (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : ''),
         chip: testing ? { kind: 'pending', text: tr('testing…'), title: tr('Checking the connection…') } : (st && !st.ok ? { kind: 'error', text: tr('unreachable'), title: st.error || '' } : null),
         // a FAILED probe surfaced in the row itself (real report: the error lived only in the dot's hover tooltip)
-        errline: st && !st.ok ? { text: tr('Couldn’t connect:') + ' ' + String(st.error || 'unreachable').slice(0, 300), title: String(st.error || '') } : null,
+        errline: st && !st.ok ? this._hostErrFacts(h, st) : null,   // + the need line's inputs (the meeting with ui-needs-a-button)
       };
+    },
+    /** lane ui-needs-a-button (machines-1), carried into the face at the restack for 2.369.411 (the meeting with B-a31a, ruling (a)):
+     *  a failed probe's reason in the reader's language (hostErrorWords) — the need line's words, the system's own text (its title
+     *  and its Details fold), and whether the key door is offered */
+    _hostErrFacts(h, st) {
+      const raw = String(st.error || 'unreachable');
+      const target = `${h.user ? h.user + '@' : ''}${h.host || h.name || ''}`;
+      const { refused, words } = hostErrorWords(raw, target);
+      return { text: words, title: raw, refused, target };
+    },
+    /** lane ui-needs-a-button (machines-1): THE NEED LINE and its Details fold drawn from the face's failure line — the reason and its
+     *  doors ON THE LINE: the public key to add (a READ: GET /api/hosts/:id/public-key, never a new key) and a retry; the system's own
+     *  text in a fold. The builder's and the in-place patch's one door (patchHostFace's errOf) → { nodes: [line, fold], place } */
+    _hostErrLine(h, e, row) {
+      const raw = String(e.title || ''), target = e.target, refused = !!e.refused;
+      const doors = [];
+      let more = null;
+      // reader follow-up #0 / #8: the door's answer lands on THIS row — the key copied, or shown in a field to select, or the cause by code
+      // verifier #2: …and it is the PANEL's, per machine (`_keyAnswers`): every row a render builds for this machine gets it back, until
+      // the person dismisses it, the machine is removed or a re-test passes
+      const place = (n) => { for (const o of [...row.querySelectorAll('.mounts-key-shown')]) o.remove(); row.insertBefore(n, more); (this._keyAnswers ||= new Map()).set(h.id, n); };
+      if (refused) doors.push({ label: tr('Copy the public key to add'), kind: 'primary', door: 'public-key', run: () => this._publicKeyDoor(h, target, place) });
+      doors.push({ label: tr('Try again'), kind: refused ? 'secondary' : 'primary', door: 'retest', run: async () => {
+        this._hostStatus = this._hostStatus || {};
+        try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch (x) { this._hostStatus[h.id] = { ok: false, error: String((x && x.message) || x) }; }
+        this._renderMounts();
+      } });
+      const err = needLine({ words: e.text, doors, tone: 'fail', cls: 'mounts-errline' });
+      err.title = raw;
+      more = document.createElement('details'); more.className = 'mounts-errline-details';
+      const sm = document.createElement('summary'); sm.textContent = tr('Details');
+      const pre = document.createElement('pre'); pre.textContent = raw.slice(0, 2000);
+      more.append(sm, pre);
+      return { nodes: [err, more], place };
     },
     /** B-a31a cure 2: the row's status face patched IN PLACE (mounts-live.js patchHostFace) → 'same' | 'patched' | 'none' */
     _patchHostFace(h, hlist) {
@@ -991,6 +1025,7 @@ export function installSidebarMounts(Sidebar) {
       const did = patchHostFace(row, row._face, face, {
         chipOf: (c) => hostStateChip(c.kind, { text: c.text, title: c.title }),
         badgeOf: (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; },
+        errOf: (e) => this._hostErrLine(h, e, row).nodes,   // the need line + its fold, replaced whole when their words or title change (the meeting with ui-needs-a-button)
       });
       row._face = face;
       return did;
@@ -1208,30 +1243,12 @@ export function installSidebarMounts(Sidebar) {
       // no visible reason — the error lived only in the dot's hover tooltip,
       // invisible on touch and undiscoverable on a 6px target). Same errline
       // pattern as storage rows; full text in title.
-      if (!isDial && st && !st.ok) {
-        // lane ui-needs-a-button (machines-1): the reason in the reader's language and its doors ON THE LINE — the public key to add
-        // (a READ: GET /api/hosts/:id/public-key, never a new key) and a retry; the system's own text in a fold
-        const raw = String(st.error || 'unreachable');
-        const target = `${h.user ? h.user + '@' : ''}${h.host || h.name || ''}`;
-        const { refused, words } = hostErrorWords(raw, target);
-        const doors = [];
-        // reader follow-up #0 / #8: the door's answer lands on THIS row — the key copied, or shown in a field to select, or the cause by code
-        // verifier #2: …and it is the PANEL's, per machine (`_keyAnswers`): every row a render builds for this machine gets it back, until
-        // the person dismisses it, the machine is removed or a re-test passes
-        const place = (n) => { for (const o of [...row.querySelectorAll('.mounts-key-shown')]) o.remove(); row.insertBefore(n, more); (this._keyAnswers ||= new Map()).set(h.id, n); };
-        if (refused) doors.push({ label: tr('Copy the public key to add'), kind: 'primary', door: 'public-key', run: () => this._publicKeyDoor(h, target, place) });
-        doors.push({ label: tr('Try again'), kind: refused ? 'secondary' : 'primary', door: 'retest', run: async () => {
-          this._hostStatus = this._hostStatus || {};
-          try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch (e) { this._hostStatus[h.id] = { ok: false, error: String((e && e.message) || e) }; }
-          this._renderMounts();
-        } });
-        const err = needLine({ words, doors, tone: 'fail', cls: 'mounts-errline' });
-        err.title = raw;
-        row.appendChild(err);
-        const more = document.createElement('details'); more.className = 'mounts-errline-details';
-        const sm = document.createElement('summary'); sm.textContent = tr('Details');
-        const pre = document.createElement('pre'); pre.textContent = raw.slice(0, 2000);
-        more.append(sm, pre); row.appendChild(more);
+      // lane ui-needs-a-button (machines-1) MEETS B-a31a at the restack for 2.369.411 (主开发 20:03Z, ruling (a), both meanings): the
+      // face's failure line carries the need line's inputs (_hostErrFacts); the builder draws the need line and its Details fold
+      // from it (_hostErrLine), and the probe's in-place patch replaces them WHOLE only when their words or title change (errOf)
+      if (face && face.errline) {
+        const { nodes, place } = this._hostErrLine(h, face.errline, row);
+        for (const n of nodes) row.appendChild(n);
         const kept = this._keyAnswers?.get(h.id);
         if (kept) place(kept);
       }
