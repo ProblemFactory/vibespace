@@ -143,9 +143,18 @@ const MSG_PAIRS = new Map([['(', ')'], ['[', ']'], ['{', '}'], ['「', '」'], [
 const HEAD_PIECE_RE = /^([`"'*<({\[,;]{0,3})(-{0,2})([A-Za-z_][A-Za-z0-9_.\-]{0,80})[:=]$/;   // r7: KV_HEAD's own prefix (a wrapper, dashes) allowed
 const OPENER_PIECE_RE = /^[`"'*<({\[,;:\/=]{1,3}$/;   // a head's own opener, a wrapper's closing twin
 function maskedChunk(c) { if (c.length > 200 || c.indexOf(REDACTED) < 0) return false; return c.split(REDACTED).every((x) => { if (!x || plainChunk(x) || OPENER_PIECE_RE.test(x)) return true; const h = HEAD_PIECE_RE.exec(x); return !!h && holderName(h[3]); }); }   // r6/r7: a head piece only when it IS a secret-named head
-const isAlnumCode = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+// cure 2 (主开发 08:42Z, MUST 1): a first chunk that opens on a LETTER or a DIGIT of any script is a value this mode recognises — it
+// ends at a blank or a CJK stop like any other («session: 已修好 @beta 请验收» masks «已修好» alone); a mark, a stop or an open pair still not
+const OPENS_VALUE_RE = /^[\p{L}\p{N}]/u;
 const isMention = (tok, mset) => { if (!mset || tok.length > 81 || tok.charCodeAt(0) !== 64) return false; let e = tok.length; while (e > 1 && '.,;:!?'.includes(tok[e - 1])) e--; const nm = tok.slice(1, e).toLowerCase(); return nm.length > 0 && mset.has(nm); };
 const EDGE_TAIL_RE = /\p{P}+$/u;
+// cure 2 (MUST 1): R5's token (`password <token>`) in a message, when it opens on a MEMBER's @ — the @ to a CJK stop or a mask, spared;
+// what a stop glues behind it is masked (the line rule's), a mask there is itself (a second pass) → null: no member's @
+const MENTION_LEAD_RE = /^@[^\s«、。，；：！？「」『』（）【】《》〈〉]{1,80}/;
+function mentionLead(tok, mset) {
+  const at = MENTION_LEAD_RE.exec(tok), rest = at ? tok.slice(at[0].length) : '';
+  return at && isMention(at[0], mset) ? at[0] + (!rest || rest === REDACTED ? rest : REDACTED) : null;
+}
 // r4 (the read's F1): a HEAD inside the region — KV_HEAD's own shape at a place KV_HEAD can open — ends the region there, and the main
 // scan judges that head with every rule (a quoted key, a blank before `=`, a header, a credential word, a quoted value)
 const HEAD_AT = /(-{0,2})(["']?)([A-Za-z_][A-Za-z0-9_.\-]{0,80})\2[ \t]*[:=]/y;
@@ -153,6 +162,9 @@ const KV_OPEN = new Set([...' \t\n\r,;{([:/=`"\'*<'].map((ch) => ch.charCodeAt(0
 function headAt(text, p, e) { HEAD_AT.lastIndex = p; const h = HEAD_AT.exec(text); return h && HEAD_AT.lastIndex <= e && holderName(h[3]) ? h : null; }
 // r4 (F2): a GROUPED secret — an app password's four groups, a TOTP key's groups: a first chunk of 4–8 of one class, then chunks of its shape
 const groupOf = (c) => (/^[a-z0-9]{4,8}$/.test(c) ? `l${c.length}` : /^[A-Z0-9]{4,8}$/.test(c) ? `u${c.length}` : null);
+// cure 2 (the test machine's run of the cure at dcdd8d590): a LATER chunk is of the group without its trailing prose marks — the last
+// group before a comma («zwhp orlo ufnb qmjf, auth: …») stayed in clear
+const groupAt = (c) => groupOf(c.length > 16 ? '' : c.replace(/[.,;:!?)\]}"'»”’…—–-]+$/, ''));
 /** The message mode's rewrite of a value region [s, e) → { out, end } (end = where a head inside the region begins, else e) — or null:
  *  the LINE RULE (the region masked whole). Chunks split at blanks and CJK stops (both kept). THE FIRST CHUNK: the mask itself, or a
  *  member's @ under a `:` head, is kept; a pair closed on its line has its inside masked (the pair kept); anything opening on a mark, a
@@ -161,6 +173,10 @@ const groupOf = (c) => (/^[a-z0-9]{4,8}$/.test(c) ? `l${c.length}` : /^[A-Z0-9]{
  *  value through a stop or a pair (no blank between) is the value's own; masked chunks that only blanks part become ONE mask. */
 function messageValue(text, s, e, { sepColon = false, mentions = null, twin = '', later = false } = {}) {
   let out = '', i = s, first = !later, takeNext = false, masking = false, glued = false, group = null, prevWord = '';
+  // cure 2 (主开发 08:42Z): ONE judgement of a later chunk `c` (its word `w`) — MUST 1: a MEMBER's @ is never a value, not glued, not the
+  // word after a credential word; then the next-chunk, glued and group rules and a plain word — MUST 2: THE PIECE BEFORE AN INNER HEAD
+  // is judged by it too («auth: password hunter,token=x» masks «hunter»)
+  const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) || (!takeNext && !(glued && /^[\x00-\x7f]*$/.test(w.length <= 64 ? w : 'xĀ') && !maskedChunk(w)) && !(group && groupAt(w) === group) && (plainChunk(c) || maskedChunk(w)));
   while (i < e) {
     /*msg-step*/
     let j = i;
@@ -180,7 +196,7 @@ function messageValue(text, s, e, { sepColon = false, mentions = null, twin = ''
     let k = j;
     while (k < e && !isBlankCode(text.charCodeAt(k)) && !MESSAGE_STOPS.has(text.charCodeAt(k))) { /*msg-step*/ k++; }
     if (!first && !later) {   // a head inside the region ends it: the main scan takes it from there
-      for (let p = j; p < k; p++) { /*msg-step*/ const pc = p === j ? (blank ? 32 : -1) : text.charCodeAt(p - 1); if (KV_OPEN.has(pc) && headAt(text, p, e)) { if (p > j) { const pre = text.slice(j, p); out += blank + (plainChunk(pre) || OPENER_PIECE_RE.test(pre) ? pre : REDACTED); } else out += blank; return { out, end: p }; } }
+      for (let p = j; p < k; p++) { /*msg-step*/ const pc = p === j ? (blank ? 32 : -1) : text.charCodeAt(p - 1); if (KV_OPEN.has(pc) && headAt(text, p, e)) { if (p > j) { const pre = text.slice(j, p); let t = pre.length; while (t > 0 && pre.length - t < 3 && KV_OPEN.has(pre.charCodeAt(t - 1))) { /*msg-step*/ t--; } const w = pre.slice(0, t); out += blank + (OPENER_PIECE_RE.test(pre) || !w || keeps(pre, w) ? pre : REDACTED + pre.slice(t)); } else out += blank; return { out, end: p }; } }
     }
     let chunk = text.slice(j, k), tail = '';
     if (first && twin) { let t = chunk.length; while (t > 1 && chunk[t - 1] === twin) { /*msg-step*/ t--; } tail = chunk.slice(t); chunk = chunk.slice(0, t); }
@@ -188,17 +204,15 @@ function messageValue(text, s, e, { sepColon = false, mentions = null, twin = ''
     if (first) {
       if (chunk === REDACTED) keep = true;
       else if (sepColon && isMention(chunk, mentions)) keep = true;
-      else if (!isAlnumCode(chunk.charCodeAt(0))) return null;   // THE LAW: an opener with no rule here ⇒ the line rule
+      else if (!OPENS_VALUE_RE.test(chunk)) return null;   // THE LAW: an opener with no rule here ⇒ the line rule (cure 2: a letter or a digit of any script is one)
       const w = chunk.length <= 40 ? chunk.replace(EDGE_TAIL_RE, '').toLowerCase() : '';
       takeNext = !keep && (AUTH_SCHEMES.has(w) || SECRET_WORDS.has(w));
       group = keep ? null : groupOf(chunk);
       glued = !keep;
     } else {
-      const ascii = /^[\x00-\x7f]*$/.test(chunk.length <= 64 ? chunk : 'xĀ');
-      if (takeNext || (glued && ascii && !maskedChunk(chunk)) || (group && groupOf(chunk) === group)) keep = false;
-      else keep = plainChunk(chunk) || maskedChunk(chunk) || (chunk.charCodeAt(0) === 64 && isMention(chunk, mentions));
+      keep = keeps(chunk, chunk);
       if (takeNext && !group) group = groupOf(chunk);   // r5: a group seeded by the value after a credential word too
-      if (!(group && groupOf(chunk) === group)) group = null;
+      if (!(group && groupAt(chunk) === group)) group = null;
       // a head glued behind a CJK stop (no opener the main scan reads): its value is the next chunk
       takeNext = chunk.length <= 82 && (((chunk.endsWith(':') || chunk.endsWith('=')) && holderName(chunk.slice(0, -1).replace(/^[^A-Za-z_]+/, ''))) || ((chunk === ':' || chunk === '=') && !!prevWord && holderName(prevWord)));
       prevWord = chunk.length <= 82 ? chunk.replace(/^[^A-Za-z_]+|[^A-Za-z0-9_]+$/g, '') : '';   // r8 (the test machine's first corpus run): the last WORD seen, masked or kept — «…，password : x» masks x
@@ -316,11 +330,11 @@ function redactKv(text, { message = false, say = null, mentions = null } = {}) {
   // the cure r5 (the read's F2): a bare value's region (what the line rule hides) is JUDGED to its end even when a head inside it ends
   // the region early and that head's own rule ends sooner (a closed quote, a JSON closer, a typed scalar, a flag): the text between is
   // filtered by the plain-words rule before it is copied (`filterTo` = the furthest region end so far)
-  let filterTo = -1;
+  let filterTo = -1, filterHead = '';
   const emitGap = (to) => {
     if (!message || last >= filterTo || to <= last) return;
     const g = Math.min(to, filterTo), raw = text.slice(last, g), fv = messageValue(text, last, g, { later: true, mentions });
-    if (fv && fv.out !== raw) { out += fv.out; n++; } else out += raw;
+    if (fv && fv.out !== raw) { out += fv.out; n++; if (say && filterHead) say(filterHead); } else out += raw;   // cure 2: the gap's mask is named (the region's head)
     last = g;
   };
   KV_HEAD.lastIndex = 0;
@@ -384,7 +398,7 @@ function redactKv(text, { message = false, say = null, mentions = null } = {}) {
       if (mv !== null) {   // null: no value this mode recognises — the line rule below; mv.end: a head inside the region begins there
         const resume = mv.end < valEnd ? mv.end - 1 : mv.end;   // a head inside the region: the scan resumes on its opener (KV_HEAD's own)
         emitGap(m.index + m[1].length);
-        filterTo = Math.max(filterTo, valEnd);
+        if (valEnd > filterTo) { filterTo = valEnd; filterHead = text.slice(nameStart - m[2].length - m[3].length, headEnd).trim(); }
         if (mv.out === text.slice(headEnd, mv.end)) { out += text.slice(last, mv.end); last = mv.end; KV_HEAD.lastIndex = resume; continue; }   // nothing to hide (a member's @, the mask itself) — copied as it is, so no later gap re-reads it (r6)
         n++;
         out += text.slice(last, headEnd) + mv.out;
@@ -645,7 +659,7 @@ function redactSecrets(raw, { runs = false, message = false, said = null, mentio
     text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; if (say) say(bearer || basic); return `${bearer || basic}${REDACTED}`; });
     const jwt = redactJwt(text); text = jwt.text; n += jwt.n; if (say && jwt.n) say('a JWT (eyJ…)');   // verify r4 F3: the JWT scan, before the bounded prefixes
     text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); if (say) say(`${h ? h[1] : ''}…`); return `${h ? h[1] : ''}${REDACTED}`; });
-    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });   // the cure of batch 6: no mention exemption here (a mention is spared only under a `:` head)
+    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { const tok = m.slice(w.length + sp.length), ml = mset && mentionLead(tok, mset); if (ml === tok) return m; n++; if (say) say(w); return `${w}${sp}${ml || REDACTED}`; });   // cure 2 (MUST 1): a MEMBER's @ is spared (the caller's set, a message only)
     text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });
     text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
     if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; if (say) say('a key-material run'); return REDACTED; });

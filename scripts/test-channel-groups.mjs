@@ -2538,6 +2538,23 @@ console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the r
   ok(JSON.stringify(live.p.masked) === '["session:"]' && Array.isArray(live.plain.masked) && live.plain.masked.length === 0, '…the answer names what was masked, as the sender wrote it (a message with nothing secret: none)', JSON.stringify(live.p.masked));
   ok(live.atB === '@beta' && live.atPick === '@beta' && live.pk.ok && live.pk.message.mentions.length === 1 && live.pk.message.mentions[0].id === C && !live.pk.message.text.includes(V),
     '…the @ places sit on the KEPT words: a scanned @ after a mask, and the owner\'s picked place moved by the mask before it', JSON.stringify([live.atB, live.atPick]));
+  // cure 2 (主开发 08:42Z, MUST 1): a value that opens on a CJK letter is ONE value (it ends at its blank), never the line rule — the
+  // owner's picked @ after it lands on its place, the message is sent and the member woken; an agent's typed @ the same (its own fixture:
+  // a wake floors its target for 30 s)
+  {
+    const f2 = fixture('blmsg-cjk');
+    const g2 = (await f2.eng.create({ by: G.OWNER, name: 'cjk', members: [A, B, C], quiet: true })).group.id;
+    const CJK = 'session: 已修好 @beta 请验收', atc = CJK.indexOf('@beta');
+    const pc = await f2.eng.post({ group: g2, from: G.OWNER, text: CJK, mentions: [{ id: B, start: atc, end: atc + 5 }] });
+    const pt = await f2.eng.post({ group: g2, from: A, text: 'session: 已修好 @gamma 请验收' });
+    f2.close();
+    const placeIn = (q, id) => { const m = q && q.ok && q.message.mentions.find((x) => x.id === id); return m && m.pos && m.pos[0] ? q.message.text.slice(m.pos[0][0], m.pos[0][1]) : null; };
+    const shown = (q) => JSON.stringify(q && q.ok ? { text: q.message.text, woke: (q.woke || []).map((x) => x.member), masked: q.masked } : q);
+    ok(pc.ok && placeIn(pc, B) === '@beta' && (pc.woke || []).concat(pc.queued || []).some((x) => x.member === B) && pc.message.text === 'session: «redacted» @beta 请验收' && JSON.stringify(pc.masked) === '["session:"]',
+      'SEND (cure 2): «session: 已修好 @beta 请验收» with the owner\'s picked @beta — the CJK value alone is masked, the message is sent, beta is woken', shown(pc));
+    ok(pt.ok && placeIn(pt, C) === '@gamma' && (pt.woke || []).concat(pt.queued || []).some((x) => x.member === C) && pt.message.text.endsWith(' @gamma 请验收'),
+      '…and an agent\'s typed @gamma after a CJK value is scanned on the kept words and wakes gamma', shown(pt));
+  }
   // RED CONTROLS (patched copies of the engine through the SAME drive)
   const M = mutantCopies('blmsg-ge', REPO);
   const LATE = 'const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });';

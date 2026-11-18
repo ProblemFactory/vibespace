@@ -935,7 +935,7 @@ await section('§7 controls (patched copies)', async () => {
     R2: ["    const kv = redactKv(text, { message: !!message, say, mentions: mset && mset.size ? mset : null }); text = kv.text; n += kv.n;", ''],
     R3: ["    text = text.replace(HTTP_RE, (m, bearer, basic) => { n++; if (say) say(bearer || basic); return `${bearer || basic}${REDACTED}`; });", ''],
     R4: ["    text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); if (say) say(`${h ? h[1] : ''}…`); return `${h ? h[1] : ''}${REDACTED}`; });", ''],
-    R5: ["    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });   // the cure of batch 6: no mention exemption here (a mention is spared only under a `:` head)\n    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });", ''],
+    R5: ["    text = text.replace(WORD_NEXT_RE, (m, w, sp) => { const tok = m.slice(w.length + sp.length), ml = mset && mentionLead(tok, mset); if (ml === tok) return m; n++; if (say) say(w); return `${w}${sp}${ml || REDACTED}`; });   // cure 2 (MUST 1): a MEMBER's @ is spared (the caller's set, a message only)\n    text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; if (say) say(w); return `${w}${sp}${REDACTED}`; });", ''],
     R6: ["    text = text.replace(REG_RE, (m, ind, name, sep) => { if (!REG_NAME_RE.test(name)) return m; n++; if (say) say(name); return `${ind}${name}${sep}${REDACTED}`; });   // verify r4 F7: before R5", ''],
   };
   let ruleCopies = 0;

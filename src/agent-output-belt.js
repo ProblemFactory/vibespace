@@ -91,9 +91,12 @@ function compiledFor(v, vr) {
  * the belt finds the vault); omit it (or point at a locked vault) and only the shape census runs. Returns the masked
  * string — never throws (both scrubbers are internally bounded and swallow their own faults; `maskText` throws only on a
  * value under its MIN, which we filter out first).
- * lane bl-msg B-3e61: `message: true` = a MESSAGE another agent reads (the group log, the msg stash) — the shape census in its
- * message mode (a bare value is ONE token, the rest of the line arrives); `said: []` collects what triggered each mask, so
- * the sender's answer names it instead of reading a shorter count as a cut.
+ * lane bl-msg B-3e61 (THE LAW of its cure): `message: true` = a MESSAGE another agent reads (the group log, the msg stash, the
+ * prose sinks) — the shape census in its message mode: a masked value's region is the line rule's own, and inside it only PLAIN
+ * WORDS stay (the first chunk is always masked; a value that opens on a mark, a stop or an open pair takes the line rule whole);
+ * `mentions` = the members' names / ids — a member's @ alone is never a value; `said: []` collects what triggered each mask (the
+ * gap filter's too), so the sender's answer names it instead of reading a shorter count as a cut ⇒ kb-file-structure.md
+ * («src/secret-shapes.js», THE MESSAGE MODE).
  */
 function maskForSink(text, { dataDir, message = false, said = null, mentions = null } = {}) {
   let s = String(text == null ? '' : text);

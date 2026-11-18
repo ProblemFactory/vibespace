@@ -526,7 +526,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   const SEPS = [':', '=', ': ', '= ', ' : '];
   const PAIRS = { '(': ')', '[': ']', '{': '}', '「': '」', '『': '』', '（': '）', '【': '】', '〔': '〕', '〈': '〉', '《': '》', '«': '»', '‘': '’', '“': '”' };
   // every opener class, glued to the value — and the marks that come with a blank (`=> `, `:= `, `- `, `( `: the value is the NEXT word)
-  const OPENERS = ['', 'a', '7', ...'!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', ...'「『（【〔〈《«‘“，、。：；！？', '=> ', ':= ', '- ', '( ', ': ', '「 '];
+  const OPENERS = ['', 'a', '7', '已', 'é', 'Ж', '٣', 'Ｘ', ...'!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~', ...'「『（【〔〈《«‘“，、。：；！？', '=> ', ':= ', '- ', '( ', ': ', '「 '];
   const rnd = (n, alpha) => Array.from(crypto.randomBytes(n), (x) => alpha[x % alpha.length]).join('');
   const LET = 'abcdefghijklmnopqrstuvwxyz', UP = LET.toUpperCase(), MIX = LET + UP + '0123456789';
   // the core of a value and the tokens that must never stay where the line rule hid them (`w` / `groups`: only when the value's first
@@ -557,48 +557,81 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       .map((f) => () => { const w = rnd(7, LET), v = 'R5' + rnd(10, MIX); return { t: f(w, v), must: [w, v] }; }),
   ];
   const STOPS = '、。，；：！？「」『』（）【】《》〈〉';
-  const chunks = (t) => t.split(new RegExp(`[\\s${STOPS}]+`, 'u')).filter(Boolean);
+  // cure 2 (the test machine's run at dcdd8d590): the MASK is a separator too — the line rule's «api_key:«redacted»» and the message
+  // mode's «api_key:「«redacted»」» hold the same head piece «api_key:» (a chunk compare read it as a kept piece)
+  const chunks = (t) => t.split(new RegExp(`[\\s${STOPS}]+|«redacted»`, 'u')).filter(Boolean);
   // an INDEPENDENT, stricter plain word than the module's: lowercase ≤ 12, Capitalized ≤ 12, an acronym ≤ 3, or a run of CJK, with
   // edge marks from a short list; a head's own name stays in both. A chunk the module keeps that this calls not plain is a loosening
   const EDGE = '.,;:!?()[]{}"\'«»“”‘’—-…=`〔〕';
   const HEADWORDS = new Set(['password', 'auth', 'Authorization', 'secret', 'user', 'app', 'redacted']);
-  const ownShape = (c) => c.includes('«redacted»') && c.split('«redacted»').every((x) => !x || /^[`"'*<({\[,;:=/)\]}»«]{1,3}$/.test(x) || /^[`"'*<({\[,;]{0,3}-{0,2}[A-Za-z_][A-Za-z0-9_.-]{0,80}[:=][({\[«「『（【‘“`"']{0,2}$/.test(x) || plainT(x));   // r8: a head glued to its value's opener («api_key:(«redacted»)»)
-  const plainT = (c) => { if (ownShape(c)) return true; let a0 = 0, b0 = c.length; while (a0 < b0 && EDGE.includes(c[a0])) a0++; while (b0 > a0 && EDGE.includes(c[b0 - 1])) b0--; const core = c.slice(a0, b0);
+  // a HEAD PIECE the corpus itself wrote (one of its own names, with its opener and its separator — «,token=», «{"password":», «--api-key=»)
+  const HEAD_NAMES = new Set(['session', 'password', 'token', 'api_key', 'DB_PASSWORD', 'X-Auth-Token', 'test-session-schema', 'secret', 'recovery', 'auth', 'Authorization', 'user', 'api-key', 'id']);
+  const headPiece = (x) => { const h = /^[`"'*<({\[,;]{0,3}-{0,2}["']?([A-Za-z_][A-Za-z0-9_.-]{0,80})["']?[ \t]*[:=][({\[«「『（【〔〈《‘“`"']{0,2}$/.exec(x); return !!h && HEAD_NAMES.has(h[1]); };   // a2: every MSG_PAIRS opener (the run at a3bd41c23: «api_key:〔»)
+  const plainT = (c) => { if (headPiece(c)) return true; let a0 = 0, b0 = c.length; while (a0 < b0 && EDGE.includes(c[a0])) a0++; while (b0 > a0 && EDGE.includes(c[b0 - 1])) b0--; const core = c.slice(a0, b0);
     return core === '' ? c.length <= 3 : HEADWORDS.has(core) || /^(?:[a-z]{1,12}|[A-Z][a-z]{1,11}|[A-Z]{1,3})$/.test(core) || /^[぀-ヿ㐀-鿿]+$/u.test(core); };
-  const judge = (SSx, { stopAtFirst = false, rev = false } = {}) => {   // a control stops at its first leak (and walks the openers from the end)
+  const judge = (SSx, { stopAtFirst = false, rev = false, only = '' } = {}) => {   // a control stops at its first leak (and walks the openers from the end); `only` = one scene's rows
     const leaks = [], loose = [], nonIdem = []; let lines = 0, n0 = 0;
-    const one = (L, op, must, opt, allowed = []) => {
+    const one = (L, op, must, opt, allowed = [], scene = '') => {
       const lo = SSx.redactSecrets(L).text, mo = SSx.redactSecrets(L, { message: true, ...opt }).text;
       lines++;
       if (!stopAtFirst && SSx.redactSecrets(mo, { message: true, ...opt }).text !== mo) nonIdem.push(L + ' ⇒ ' + mo);   // r5: a second pass changes nothing
-      if (must.some((t) => !lo.includes(t) && mo.includes(t))) leaks.push({ L, op, mo });
+      if (must.some((t) => !lo.includes(t) && mo.includes(t))) leaks.push({ L, op, mo, scene });
       const lt = chunks(lo), extra = chunks(mo).filter((x) => { const at = lt.indexOf(x); if (at >= 0) { lt.splice(at, 1); return false; } return true; });
-      if (extra.some((x) => !plainT(x) && !allowed.includes(x))) loose.push(L + ' ⇒ ' + mo);
+      const allowedIn = (x) => { const y = x.replace(/[.,;:!?]+$/, ''); return allowed.some((w) => y === w || (y.endsWith(w) && headPiece(y.slice(0, -w.length)))); };   // cure 2: «@beta,» and «session:@beta» (a head glued to it) are the member's @ too
+      if (extra.some((x) => !plainT(x) && !allowedIn(x))) loose.push(L + ' ⇒ ' + mo);
     };
-    const ops = rev ? [...OPENERS].reverse() : OPENERS;
+    const ops = only ? [] : rev ? [...OPENERS].reverse() : OPENERS;
     for (const op of ops) for (const closed of PAIRS[op.trim()] ? [false, true] : [false]) for (const h of HEADS) for (const sep of SEPS) {
       if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
       const sh = SHAPES[n0 % SHAPES.length](), tl = TAILS[(n0 * 7 + 3) % TAILS.length](); n0++;
       const must = [...sh.must, ...tl.must, ...(sh.w && op === '' ? sh.w : [])];
       one(h + sep + op + sh.core + (closed ? PAIRS[op.trim()] : '') + (h.startsWith('`') ? '`' : '') + tl.t, op, must, {});
     }
-    for (const sh0 of SHAPES) for (const tlf of TAILS) for (const h of HEADS) {   // the product of shapes × tails on every head, no opener
+    for (const sh0 of only ? [] : SHAPES) for (const tlf of TAILS) for (const h of HEADS) {   // the product of shapes × tails on every head, no opener
       if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
       const sh = sh0(), tl = tlf();
       one(h + ': ' + sh.core + (h.startsWith('`') ? '`' : '') + tl.t, '', [...sh.must, ...tl.must, ...(sh.w || [])], {});
     }
     // a MEMBER's mention under a `:` head is kept (the caller names its members) — and every secret after it is still hidden
-    for (const h of HEADS) for (const sep of [':', ': ']) for (const tlf of TAILS) { const tl = tlf(), L = `${h}${sep}@beta${tl.t}`; one(L, '@', tl.must, { mentions: ['beta'] }, ['@beta']); if (!stopAtFirst && !SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text.includes('@beta')) leaks.push({ L: L + ' (the member\'s @ was lost)', op: '@', mo: '' }); }   // r6: the member's @ survives too
+    for (const h of !only || only === 'mentions' ? HEADS : []) for (const sep of [':', ': ']) for (const tlf of TAILS) { const tl = tlf(), L = `${h}${sep}@beta${tl.t}`; one(L, '@', tl.must, { mentions: ['beta'] }, ['@beta']); if (!stopAtFirst && !SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text.includes('@beta')) leaks.push({ L: L + ' (the member\'s @ was lost)', op: '@', mo: '' }); }   // r6: the member's @ survives too
+    // cure 2 (主开发 08:42Z, MUST 1): a MEMBER's @ after a CJK value, glued behind a stop, after a credential word, after «password» in
+    // prose — it survives, and every secret around it is still hidden
+    for (const tlf of !only || only === 'mentions' ? TAILS : []) {
+      const tl = tlf(), x = 'Q9' + rnd(8, MIX);
+      const rows = [...HEADS.flatMap((h) => [[`${h}: 已修好 @beta${tl.t}`, 'cjk', []], [`${h}: ${x}，@beta${tl.t}`, 'glued', [x]], [`${h}: password @beta${tl.t}`, 'next', []]]), [`I reset the password @beta${tl.t}`, 'r5', []]];
+      for (const [L, scene, own] of rows) {
+        one(L, '@', [...tl.must, ...own], { mentions: ['beta'] }, ['@beta'], scene);
+        if (!SSx.redactSecrets(L, { message: true, mentions: ['beta'] }).text.includes('@beta')) leaks.push({ L: L + ' (the member\'s @ was lost)', op: '@', mo: '', scene });
+      }
+    }
+    // cure 2 (MUST 2): THE PIECE BEFORE A GLUED INNER HEAD is judged like any chunk — the word after a credential word or a scheme, a
+    // group's last group, ASCII glued to the value through a stop; and a group's last group before a comma (the run at dcdd8d590)
+    for (const h of !only || only === 'pre' ? HEADS : []) for (const sep of SEPS) {
+      const w = rnd(7, LET), v = 'R7' + rnd(10, MIX), x = 'Q9' + rnd(8, MIX), gr = [0, 1, 2, 3].map(() => rnd(4, LET)), tw = h.startsWith('`') ? '`' : '';
+      for (const [L, must, scene] of [[`${h}${sep}password ${w},token=${v}`, [w, v], 'pre'], [`${h}${sep}Bearer ${w}(password=${v} ok`, [w, v], 'pre'], [`${h}${sep}${gr.join(' ')},token=${v}`, [...gr, v], 'pre'],
+        [`${h}${sep}${x}，${w}(password=${v}`, [x, w, v], 'pre'], [`${h}${sep}${gr.join(' ')}, done`, gr, 'group']]) {
+        if (stopAtFirst && leaks.length) return { leaks, loose, lines, nonIdem };
+        one(L + tw, '', must, {}, [], scene);
+      }
+    }
+    if (!only || only === 'pre') { const w = rnd(7, LET); one(`auth: password ${w},token=${rnd(7, LET)}`, '', [w], {}, [], 'pre'); }   // the readers' own line
     return { leaks, loose, lines, nonIdem };
   };
   const g = judge(SS);
-  ok(g.lines > 5000 && g.leaks.length === 0, `THE LAW, a differential over ${g.lines} generated lines (every opener class × ${HEADS.length} heads × ${SEPS.length} separators, closed and open pairs; ${SHAPES.length} value shapes × ${TAILS.length} tails on every head — secrets after stops, brackets, plain words, a second head in 8 spellings, letters-only and grouped secrets; a member's mention): where the line rule hides a token, the message mode hides it too${g.leaks.length ? ' — LEAKS: ' + g.leaks.slice(0, 4).map((x) => J(x.L + ' ⇒ ' + x.mo)).join(' · ') : ''}`);
+  ok(g.lines > 5000 && g.leaks.length === 0, `THE LAW, a differential over ${g.lines} generated lines (every opener class × ${HEADS.length} heads × ${SEPS.length} separators, closed and open pairs; ${SHAPES.length} value shapes × ${TAILS.length} tails on every head — secrets after stops, brackets, plain words, a second head in 8 spellings, letters-only and grouped secrets; a member's mention after a CJK value, a stop, a credential word, «password» in prose; the piece before a glued inner head): where the line rule hides a token, the message mode hides it too${g.leaks.length ? ' — LEAKS: ' + g.leaks.slice(0, 4).map((x) => J(x.L + ' ⇒ ' + x.mo)).join(' · ') : ''}`);
   ok(g.loose.length === 0, `…and every chunk the message mode keeps beyond the line rule is a plain word by a STRICTER, independent rule (or the member's @)${g.loose.length ? ' — ' + g.loose.slice(0, 3).map(J).join(' · ') : ''}`);
   ok(g.nonIdem.length === 0, `…and a second message pass over its own output changes nothing, on all ${g.lines} lines (the group log belts twice)${g.nonIdem.length ? ' — ' + g.nonIdem.slice(0, 3).map(J).join(' · ') : ''}`);
   // r5 (the read's F1): a message mode that FAILS is the line rule — never the partial text a throw left (a control throws on purpose)
   { const TH = M.load('src/secret-shapes.js', SRC.replace('function messageValue(text, s, e, {', 'function messageValue(text, s, e, {') .replace("  let out = '', i = s, first = !later,", "  if (text.includes('THROWME')) throw new Error('control'); let out = '', i = s, first = !later,"), 'throws');
     const L = 'session: THROWME ghp_' + 'A'.repeat(36) + ' and Bearer ' + 'b'.repeat(30), a = TH.redactSecrets(L, { message: true }).text, b0 = TH.redactSecrets(L).text;
     ok(a === b0 && !a.includes('A'.repeat(36)), 'a message mode that throws gives the LINE result whole (the token after it hidden, not skipped)', J(a)); }
+  // cure 2 (主开发 08:42Z): a mask made by the GAP FILTER is named in the sender's answer — the head whose region it filtered
+  { const X = 'Q9' + rnd(10, MIX), L = `session: @beta password: "${rnd(8, LET)}" then ${X}`, said = [], o = SS.redactSecrets(L, { message: true, mentions: ['beta'], said }).text;
+    ok(!o.includes(X) && o.includes('@beta') && said.includes('session:') && said.includes('password:'), 'a mask made by the gap filter is named in the answer (the region\'s head «session:»), beside the inner head\'s own', J({ o, said }));
+    const GAP = 'if (say && filterHead) say(filterHead); }';
+    ok(SRC.split(GAP).length === 2, 'the control «the gap names nothing» finds its line');
+    const s2 = []; M.load('src/secret-shapes.js', SRC.replace(GAP, '}'), 'gap-unnamed').redactSecrets(L, { message: true, mentions: ['beta'], said: s2 });
+    ok(!s2.includes('session:'), 'RED CONTROL (the gap names nothing): «session:» is missing from the answer — the leg above goes red', J(s2)); }
   // RED CONTROLS: this round's musts compiled back in — each must find a leak OF ITS OWN SCENE (the opener of the line that leaked)
   const W1 = 'if (MESSAGE_STOPS.has(text.charCodeAt(j))) { if (first) return null;', W1B = '      if (ce < 0) return null;', W2 = 'else if (sepColon && isMention(chunk, mentions)) keep = true;';
   ok(SRC.split(W1).length === 2 && SRC.split(W1B).length === 2 && SRC.split(W2).length === 2, 'the three controls find their lines');
@@ -608,6 +641,21 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   ok(r1b.leaks.length > 0 && PAIRS[r1b.leaks[0].op.trim()], `RED CONTROL (must 1, its bracket half — an open pair stays in clear): the corpus finds it on a pair opener, e.g. ${J(r1b.leaks[0] ? r1b.leaks[0].L : '')}`);
   const r2 = judge(M.load('src/secret-shapes.js', SRC.replace(W2, 'else if (chunk.charCodeAt(0) === 64) keep = true;'), 'must2'), { stopAtFirst: true });
   ok(r2.leaks.length > 0 && /(?:^|[:=] ?)@/.test(r2.leaks[0].L), `RED CONTROL (must 2 — any @ value is a mention): the corpus finds it on an @ value, e.g. ${J(r2.leaks[0] ? r2.leaks[0].L : '')}`);
+  // cure 2's RED CONTROLS: each of its rules compiled back out — the corpus finds a leak OF ITS OWN SCENE (a control whose line is gone
+  // fails by name, RULES 06:25Z)
+  const c2 = (from, to, name) => { ok(SRC.split(from).length === 2, `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', SRC.replace(from, to), name); };
+  const C2 = {
+    'an ASCII-only opener (MUST 1)': [c2('      else if (!OPENS_VALUE_RE.test(chunk)) return null;', '      else if (!/^[A-Za-z0-9]/.test(chunk)) return null;', 'c2-ascii'), 'mentions', 'cjk'],
+    'the glued rule eats a member (MUST 1)': [c2('const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'const keeps = (c, w) => (!glued && w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'c2-glued'), 'mentions', 'glued'],
+    'the word after a credential word eats a member (MUST 1)': [c2('const keeps = (c, w) => (w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'const keeps = (c, w) => (!takeNext && w.charCodeAt(0) === 64 && isMention(w, mentions)) ||', 'c2-next'), 'mentions', 'next'],
+    '«password» in prose eats a member (MUST 1)': [c2('ml = mset && mentionLead(tok, mset);', 'ml = null;', 'c2-r5'), 'mentions', 'r5'],
+    'the piece before an inner head kept when plain (MUST 2)': [c2('out += blank + (OPENER_PIECE_RE.test(pre) || !w || keeps(pre, w) ? pre : REDACTED + pre.slice(t));', 'out += blank + (plainChunk(pre) || OPENER_PIECE_RE.test(pre) ? pre : REDACTED);', 'c2-pre'), 'pre', 'pre'],   // stale-pins: kept (the OLD line is the mutant compiled back in, never an anchor)
+    'a group read with its comma': [c2('!(group && groupAt(w) === group)', '!(group && groupOf(w) === group)', 'c2-group'), 'pre', 'group'],
+  };
+  for (const [name, [SSc, only, scene]] of Object.entries(C2)) {
+    const rc = judge(SSc, { only }), hit = rc.leaks.find((x) => x.scene === scene);
+    ok(!!hit, `RED CONTROL (${name}): the corpus finds a leak of its own scene «${scene}»${hit ? ', e.g. ' + J(hit.L + ' ⇒ ' + hit.mo) : ' — none found'}`);
+  }
   // the main loop's guard: a COUNT of steps, never a clock — every message-mode loop is marked, each character read a bounded number of times
   ok(SRC.split('/*msg-step*/').length - 1 >= 9, 'the step marks are in every message-mode loop');
   const ST = M.load('src/secret-shapes.js', SRC.split('/*msg-step*/').join('globalThis.__msgSteps = (globalThis.__msgSteps || 0) + 1;'), 'steps');
