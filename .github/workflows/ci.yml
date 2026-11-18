@@ -2,7 +2,7 @@
 # locally, run on every push/PR so a bypassed or missing local hook still gets
 # caught in minutes. Self-hosters see the badge state before pulling an update.
 #
-# TWO JOBS since the fast/heavy split (2026-09-07): `fast` is the one whose red
+# TWO TIERS since the fast/heavy split (2026-09-07; the fast tier runs as two parts since B-7353): `fast` is the one whose red
 # X must arrive quickly — THE TIER RULE in scripts/ci.mjs (B-f4cb, 2026-09-27):
 # build + PURE / in-process suites under 10 s + the named LAW pins + the one
 # real haiku turn — and `heavy` is everything that boots a scratch server,
@@ -21,14 +21,25 @@ on:
   pull_request:
 jobs:
   fast:
+    name: fast ${{ matrix.part }}/2
     runs-on: ubuntu-24.04
-    # 25 (2026-11-17, the int407 seam). The whole fast tier runs in this one job. On 2026-10-04 it took about
+    # TWO PARTS (B-7353, lane bl-ci 2026-11-17 — the structural cure the int407 seam below named): `ci.mjs --fast-part i/2`
+    # runs one part of the tier, packed by the rows' stated times (fastPartPlan, the heavy shards' LPT; the serial group whole
+    # in part 1, the `last` rows — test-fixture-isolation — at the end of EVERY part), so each job holds about half
+    # of the ≈ 566 s the tier takes at a 1.0× runner. 25 min less a minute of setup holds a part at about 5×; the bound
+    # stays 25 until two releases' parts are read (then a refresh, never a raise). The heavy gate's verdict reads both
+    # jobs by name (judgeMirrorRun: `fast i/n`, from this workflow's own matrix).
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
+    # 25 (2026-11-17, the int407 seam). The whole fast tier ran in this one job. On 2026-10-04 it took about
     # 4 min here, and 15 was a wide bound. It is 599 suites now: the gate step took 550 s at this runner's 0.97×
     # (2.369.406's release mirror), 645 s at 1.15×, and 837 s at 1.48× (2.369.407's prep mirror, job
     # 134022738541: every step green, cancelled by the 15-minute limit in the second it finished). 837 s plus
     # about a minute of setup IS the old limit. 25 min less a minute of setup leaves 1440 s, which holds a
-    # runner of about 2.5× (the tier is ≈ 566 s at 1.0×). The structural cure, two hosted jobs or a smaller
-    # tier, is a parked row, not this bound.
+    # runner of about 2.5× (the tier is ≈ 566 s at 1.0×). The structural cure was then a parked row (B-7353 —
+    # the two parts above).
     # Before (B-f4cb): it was CANCELLED at 15 on .202/.203/.205, when the tier had grown back to 269 suites run
     # one after another; lane fast-budget (2026-10-04) moved every suite over 10 s and runs the tier over
     # min(4, cpus) lanes + a serial lane for the clock judges (scripts/ci.mjs FAST LANES).
@@ -98,7 +109,7 @@ jobs:
       - name: npm ci (3 attempts on a registry blip)
         run: bash scripts/ci-npm.sh ci
         timeout-minutes: 6
-      - run: node scripts/ci.mjs
+      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2
         env:
           # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
@@ -112,7 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         timeout-minutes: 5
         with:
-          name: ci-fast-fail-logs-${{ github.sha }}
+          name: ci-fast-fail-logs-${{ github.sha }}-${{ matrix.part }}
           path: data/ci-fast/fail-logs/*.log
           if-no-files-found: ignore
           retention-days: 7

@@ -192,7 +192,7 @@ console.log('\n§2 tier hygiene');
     const ci = stripComments(rd('scripts/ci.mjs'));
     const gate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('function writeGreenMarker('));
     const judged = gate.indexOf('judgeFastReadings(fast, timings, sha, { load0: l0 })'), green = gate.indexOf('ALL GREEN — fast gate');
-    ok(judged > 0 && judged < green && /if \(!absent\.length && !isolate\) \{\s*const falseRows = judgeFastReadings/.test(gate) && /console\.log\(`\[ci\] WARNING: \$\{falseRowLine\(f\)\}/.test(gate) && !/falseRows\.length\) \{[^}]*return 1/.test(gate),
+    ok(judged > 0 && judged < green && /if \(!absent\.length && !isolate && !part\) \{[^\n]*\n\s*const falseRows = judgeFastReadings/.test(gate) && /console\.log\(`\[ci\] WARNING: \$\{falseRowLine\(f\)\}/.test(gate) && !/falseRows\.length\) \{[^}]*return 1/.test(gate),
       'WIRING: the fast tier judges its readings after a WHOLE in-place tier, before ALL GREEN, and SAYS each false row — it never reds the push on them (the verdict may not depend on load)');
     const verb = ci.slice(ci.indexOf('function falseRowsVerb('), ci.indexOf('/**\n * THE FAST TIER.') > 0 ? ci.indexOf('/**\n * THE FAST TIER.') : ci.indexOf('async function fastGate('));
     ok(/if \(arg\('false-rows'\)\) return exitFlushed\(falseRowsVerb\(\)\);/.test(ci) && /return rows\.length \? 1 : 0;/.test(verb) && /if \(mine < 2\)[^\n]*return 2; \}/.test(verb),
@@ -222,8 +222,28 @@ console.log('\n§2 tier hygiene');
     'the tracked pre-push hook checks the heavy verdict AND launches the heavy tier');
   ok(hook.indexOf('--check-heavy') < hook.indexOf('node scripts/ci.mjs ||'),
     'the hook asks for the heavy verdict BEFORE it spends the fast tier');
-  ok(/node scripts\/ci\.mjs\s*$/m.test(wf) && wf.includes('node scripts/ci.mjs --heavy'),
-    'the Actions mirror runs BOTH tiers');
+  ok(/node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2\s*$/m.test(wf) && wf.includes('node scripts/ci.mjs --heavy'),
+    'the Actions mirror runs BOTH tiers (the fast tier as its parts)');
+  // THE FAST TIER IN PARTS (B-7353): the hosted fast job is a matrix of parts, each a cut of the tier by the rows' stated times
+  { const C = await import('./ci.mjs');
+    const fp = C.workflowFastPartsAt(wf), tierRows = fast;
+    ok(fp && fp.n === 2 && fp.slots.join() === '1,2' && /name: fast \$\{\{ matrix\.part \}\}\/2/.test(wf) && /ci-fast-fail-logs-\$\{\{ github\.sha \}\}-\$\{\{ matrix\.part \}\}/.test(wf),
+      `ci.yml's fast job is a matrix of ${fp ? fp.n : '?'} parts, named fast i/n, its fail logs one artifact per part (two jobs cannot share an artifact name)`);
+    const srcOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf-8'); } catch { return ''; } };
+    const plan = C.fastPartPlan(tierRows, 2, { sourceOf: srcOf });
+    const lastRows = C.FAST_SERIAL.filter((r) => r.last).map((r) => r.name), all = plan.parts.flat().map((x) => x.name).filter((n) => !lastRows.includes(n));
+    ok(all.length === tierRows.length - lastRows.length && new Set(all).size === all.length && plan.parts.every((x) => x.length),
+      `the ${plan.parts.length} parts run the ${tierRows.length - lastRows.length} other fast suites each exactly once (${plan.parts.map((x) => x.length).join(' + ')})`);
+    ok(lastRows.length > 0 && plan.last.join() === lastRows.join() && plan.parts.every((p) => lastRows.every((n) => p.filter((x) => x.name === n).length === 1))
+      && plan.parts.every((p) => { const o = C.scheduleFastLanes(p, { sourceOf: srcOf }).serial.map((x) => x.name); return o.slice(-lastRows.length).join() === lastRows.join(); }),
+      `the \`last\` rows (${lastRows.join(', ')}) run ONCE in EVERY part, at its very end — each part's runner sweeps the litter of its own suites`);
+    ok(plan.serial.length > 0 && plan.serial.every((n) => plan.parts[0].some((x) => x.name === n)), `the serial lane's ${plan.serial.length} suites run whole in part 1 (${plan.serial.join(', ')})`);
+    ok(Math.max(...plan.loads) / Math.min(...plan.loads) < 1.1, `LPT over the stated times balances them: ${plan.loads.map((x) => Math.round(x / 1000)).join(' / ')} s (max/min < 1.1)`);
+    const flip = C.fastPartPlan([...tierRows].reverse(), 2, { sourceOf: srcOf }), sig = (p) => p.parts.map((x) => x.map((y) => y.name).sort().join()).join('|');
+    ok(sig(flip) === sig(plan), 'the SAME table gives the SAME cut in every job — not a function of the table order');
+    const ci = read('scripts/ci.mjs'), gate = ci.slice(ci.indexOf('async function fastGate('), ci.indexOf('function writeGreenMarker('));
+    ok(/if \(part\) fast = fastPartPlan\(tier, part\.n, \{ sourceOf \}\)\.parts\[part\.i - 1\];/.test(gate) && /if \(!absent\.length && !isolate && !part\)/.test(gate) && /else if \(part\) console\.log\(`\[ci\] green marker not written/.test(gate),
+      'WIRING: a part runs its own cut; it records no readings and writes no green marker (neither is the whole tier)'); }
   ok(/"ci:heavy"\s*:/.test(pkg) && /"ci:status"\s*:/.test(pkg), 'package.json exposes ci:heavy + ci:status');
   // `npm run ci:heavy` is the command the block message tells a blocked
   // developer to run, so it has to be able to WRITE the marker that clears the
@@ -568,7 +588,7 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
     `every npm install goes through scripts/ci-npm.sh (${v.doorSteps} steps: the claude CLI + npm ci in fast and heavy) and both scripts/ci.mjs steps are one plain line, once per job, after the door's npm ci (${v.suiteSteps})`, v.bad.join('\n'));
   // the controls: mutant copies of ci.yml, each RED for its own reason
   const ci = files.find(([f]) => f === 'ci.yml')[1];
-  const FAST_RUN = '      - run: node scripts/ci.mjs\n', HEAVY_RUN = /( {6}- run: )(node scripts\/ci\.mjs --heavy [^\n]*)/;
+  const FAST_RUN = '      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2\n', HEAVY_RUN = /( {6}- run: )(node scripts\/ci\.mjs --heavy [^\n]*)/;
   const MUTANTS = [
     ['the fast job\'s npm ci bare again', (t) => t.replace('run: bash scripts/ci-npm.sh ci', 'run: npm ci'), /an install outside the door: npm ci$/m],
     ['the claude CLI installed bare', (t) => t.replace('run: bash scripts/ci-npm.sh install -g', 'run: npm i -g'), /an install outside the door: npm i -g @anthropic-ai\/claude-code/],
@@ -578,9 +598,9 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
     ['an until loop in a run block', (t) => t.replace(FAST_RUN, '      - run: |\n          until node scripts/ci.mjs; do sleep 20; done\n'), /not ONE plain line: run: \| ⏎ until node scripts\/ci\.mjs/],
     ['a retry action around ci.mjs', (t) => t.replace(FAST_RUN, '      - uses: nick-fields/retry@v3\n        with:\n          max_attempts: 3\n          command: node scripts/ci.mjs\n'), /not ONE plain line: uses: nick-fields\/retry@v3/],
     ['a second ci.mjs step if: failure()', (t) => t.replace(FAST_RUN, FAST_RUN + '        env:\n          VIBESPACE_CI_OAT: x\n      - if: failure()\n        run: node scripts/ci.mjs\n'), /job 1: scripts\/ci\.mjs runs in 2 steps/],
-    ['continue-on-error on the suite step', (t) => t.replace(FAST_RUN, FAST_RUN + '        continue-on-error: true\n'), /not ONE plain line: run: node scripts\/ci\.mjs ⏎ continue-on-error: true/],
+    ['continue-on-error on the suite step', (t) => t.replace(FAST_RUN, FAST_RUN + '        continue-on-error: true\n'), /not ONE plain line: run: node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2 ⏎ continue-on-error: true/],
     ['ci.mjs handed to the door', (t) => t.replace(FAST_RUN, '      - run: bash scripts/ci-npm.sh node scripts/ci.mjs\n'), /not ONE plain line: run: bash scripts\/ci-npm\.sh node scripts\/ci\.mjs/],
-    ['the door\'s npm ci moved after ci.mjs', (t) => t.replace(/( {6}- name: npm ci \(3 attempts on a registry blip\)\n(?: {8}.*\n)+)( {6}- run: node scripts\/ci\.mjs\n)/, '$2$1'), /job 1: scripts\/ci\.mjs with no `scripts\/ci-npm\.sh ci` before it/],
+    ['the door\'s npm ci moved after ci.mjs', (t) => t.replace(/( {6}- name: npm ci \(3 attempts on a registry blip\)\n(?: {8}.*\n)+)( {6}- run: node scripts\/ci\.mjs --fast-part=[^\n]*\n)/, '$2$1'), /job 1: scripts\/ci\.mjs with no `scripts\/ci-npm\.sh ci` before it/],
   ];
   const reds = MUTANTS.map(([label, edit, why]) => {
     const t = edit(ci), mv = verdictOf(files.map(([f, x]) => [f, f === 'ci.yml' ? t : x]));
@@ -790,9 +810,9 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
     if (!fast || !heavy) return { bad: [`no ${fast ? 'heavy-shards' : 'fast'} job`] };
     const isUpload = (st) => /^actions\/upload-artifact@v\d+$/.test(st.action || '');
     const field = (st, k) => (new RegExp(`^\\s*${k}:\\s*(.+?)\\s*$`, 'm').exec(st.text) || [])[1] ?? null;
-    const suite = fast.findIndex((st) => st.run === 'node scripts/ci.mjs'), at = fast.findIndex((st) => isUpload(st) && st.text.split('\n').some((l) => l.trim() === `path: ${CI.FAST_FAIL_LOGS}/*.log`));
+    const suite = fast.findIndex((st) => /^node scripts\/ci\.mjs(?: --fast-part=\$\{\{ matrix\.part \}\}\/\d+)?$/.test(st.run || '')), at = fast.findIndex((st) => isUpload(st) && st.text.split('\n').some((l) => l.trim() === `path: ${CI.FAST_FAIL_LOGS}/*.log`));
     const hu = heavy.find((st) => isUpload(st) && /data\/ci-heavy\/fail-logs\/\*\.log/.test(st.text));
-    if (suite < 0) bad.push('the fast job runs no plain `node scripts/ci.mjs`');
+    if (suite < 0) bad.push('the fast job runs no `node scripts/ci.mjs` (whole, or its part --fast-part=${{ matrix.part }}/n)');
     if (at < 0) { bad.push(`the fast job uploads no ${CI.FAST_FAIL_LOGS}/*.log`); return { bad }; }
     const up = fast[at];
     if (at < suite) bad.push('the fast job\'s upload runs before its suites');
@@ -809,7 +829,7 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
     ['the heavy tier\'s dir uploaded instead', (t) => t.replace(`path: ${CI.FAST_FAIL_LOGS}/*.log`, 'path: data/ci-heavy/fail-logs/*.log'), /the fast job uploads no data\/ci-fast\/fail-logs\/\*\.log/],
     ['not failure-only', (t) => t.replace(UP, (m) => m.replace('        if: failure()\n', '')), /not failure-only \(if: null\)/],
     ['kept 1 day', (t) => t.replace(UP, (m) => m.replace('retention-days: 7', 'retention-days: 1')), /keeps its fail logs 1 day\(s\), the heavy shards 7/],
-    ['before the suites', (t) => t.replace(UP, '').replace('      - run: node scripts/ci.mjs\n', (m) => UP.exec(t)[1] + m), /the fast job's upload runs before its suites/],
+    ['before the suites', (t) => t.replace(UP, '').replace(/ {6}- run: node scripts\/ci\.mjs[^\n]*\n/, (m) => UP.exec(t)[1] + m), /the fast job's upload runs before its suites/],
   ];
   const reds = MUTANTS.map(([label, edit, why]) => { const t = edit(yml), m = uploadOf(t); return { label, applied: t !== yml, red: m.bad.some((b) => why.test(b)), bad: m.bad }; });
   const missed = reds.filter((r) => !r.applied || !r.red);

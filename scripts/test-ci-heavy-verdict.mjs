@@ -33,7 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW } from './ci.mjs';
+import { launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
@@ -52,7 +52,8 @@ const SHA = 'a'.repeat(40);
 const HOSTED = ['test-hosted-a', 'test-hosted-b'];
 const runOf = (over = {}) => ({ id: 42745258349, run_attempt: 1, name: 'ci', path: MIRROR_WORKFLOW, event: 'push', head_branch: 'ci/cut388', head_sha: SHA,
   status: 'completed', conclusion: 'success', run_started_at: '2026-11-10T02:52:00Z', repository: { full_name: SLUG }, head_repository: { full_name: SLUG }, ...over });
-const jobsOf = (n = SH ? SH.n : 6, over = {}) => ['fast', ...Array.from({ length: n }, (_, k) => `heavy ${k + 1}/${n}`), 'heavy']
+const FP = workflowFastPartsAt(WF), FAST_JOBS = ['fast 1/2', 'fast 2/2'];   // B-7353: the fast tier as its parts — the names written out, never read back from the parser under test
+const jobsOf = (n = SH ? SH.n : 6, over = {}, fastJobs = FAST_JOBS) => [...fastJobs, ...Array.from({ length: n }, (_, k) => `heavy ${k + 1}/${n}`), 'heavy']
   .map((name) => ({ name, status: 'completed', conclusion: over[name] === undefined ? 'success' : over[name] }))
   .filter((j) => j.conclusion !== null);
 const judge = (o = {}) => judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(o.run), jobs: o.jobs || jobsOf(), totalJobs: o.total, workflow: o.workflow || WF });
@@ -60,7 +61,7 @@ const refused = (v, re) => !v.ok && re.test(v.why || '');
 
 console.log('§1 THE JUDGE — every condition, every refusal by name');
 ok(!!SH && SH.n >= 1, `the workflow in this tree defines a readable heavy matrix (${SH ? SH.n : '?'} shards)`);
-{ const v = judge(); ok(v.ok && v.jobs.length === (SH ? SH.n : 0) + 2 && v.jobs[0] === 'fast' && v.jobs[v.jobs.length - 1] === 'heavy', `a green push run of the ci workflow on exactly the sha is ACCEPTED (${(v.jobs || []).join(', ')})`); }
+{ const v = judge(); ok(v.ok && v.jobs.length === (SH ? SH.n : 0) + FAST_JOBS.length + 1 && v.jobs.slice(0, FAST_JOBS.length).join() === FAST_JOBS.join() && v.jobs[v.jobs.length - 1] === 'heavy', `a green push run of the ci workflow on exactly the sha is ACCEPTED (${(v.jobs || []).join(', ')})`); }
 ok(refused(judge({ run: { repository: { full_name: 'someone/vibespace' } } }), /belongs to someone\/vibespace, not ProblemFactory\/vibespace/), 'another repository\'s run is refused BY NAME');
 ok(refused(judge({ run: { head_repository: { full_name: 'forker/vibespace' } } }), /head is forker\/vibespace \(a fork\)/), 'a fork\'s run is refused BY NAME');
 ok(refused(judge({ run: { path: '.github/workflows/secret-scan.yml' } }), /workflow \.github\/workflows\/secret-scan\.yml, not \.github\/workflows\/ci\.yml/), 'another workflow is refused by its PATH');
@@ -77,7 +78,20 @@ ok(refused(judge(ONE_FAILED), new RegExp(`«heavy 3/${N}» is failure, not succe
 ok(refused(judge({ jobs: jobsOf(undefined, { [hj(5)]: 'skipped' }) }), new RegExp(`«heavy 5/${N}» is skipped`)), 'a SKIPPED shard is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { [hj(N)]: null }) }), new RegExp(`no job «heavy ${N}/${N}»`)), 'a MISSING shard is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { heavy: null }) }), /no job «heavy»/), 'a missing heavy GATE is refused');
-ok(refused(judge({ jobs: jobsOf(undefined, { fast: 'failure' }) }), /«fast» is failure/), 'a failed fast job is refused');
+ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[FAST_JOBS.length - 1]]: 'failure' }) }), new RegExp(`«${FAST_JOBS[FAST_JOBS.length - 1]}» is failure`)), `a failed fast job is refused (${FAST_JOBS[FAST_JOBS.length - 1]})`);
+// B-7353 THE FAST TIER IN PARTS: the verdict reads the fast jobs from the workflow AT THE SHA — a part missing is refused; a
+// workflow of ONE fast job (every commit before the split) still needs exactly «fast»
+ok(FP && FP.n === 2 && FP.slots.join() === '1,2', `the workflow in this tree runs the fast tier as the jobs fast 1/2 and fast 2/2 (its parser reads ${JSON.stringify(FP)})`);
+{ const job = (name, parts, next = '  heavy-shards:\n    runs-on: x\n') => `jobs:\n  fast:\n    name: ${name}\n    runs-on: ubuntu-24.04\n    strategy:\n      fail-fast: false\n      matrix:\n        part: [${parts}]\n    steps:\n      - run: x\n${next}`;
+  const three = workflowFastPartsAt(job('fast ${{ matrix.part }}/3', '1, 2, 3')), gap = workflowFastPartsAt(job('fast ${{ matrix.part }}/3', '1, 3')), off = workflowFastPartsAt(job('fast ${{ matrix.part }}/2', '1, 2, 3')), other = workflowFastPartsAt(job('quick ${{ matrix.part }}/2', '1, 2'));
+  ok(three && three.n === 3 && three.slots.join() === '1,2,3' && gap === null && off === null && other === null,
+    `the parser over fixtures: a 3-part matrix is read (${JSON.stringify(three)}); slots that are not 1..n, a name whose n disagrees, another job name — none`); }
+ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[0]]: null }) }), new RegExp(`no job «${FAST_JOBS[0]}»`)), 'a MISSING fast part is refused by name');
+{ const ONE = WF.replace(/\n    name: fast \$\{\{ matrix\.part \}\}\/2\n/, '\n'), CUT = ONE.replace(/\n    strategy:\n      fail-fast: false\n      matrix:\n        part: \[1, 2\]\n/, '\n');
+  ok(ONE !== WF && CUT !== ONE && workflowFastPartsAt(CUT) === null && workflowFastPartsAt(ONE) === null, 'fixture: the workflow of ONE fast job (the shape before the split) defines no fast parts');
+  ok(judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(), jobs: jobsOf(undefined, {}, ['fast']), workflow: CUT }).ok
+    && refused(judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(), jobs: jobsOf(), workflow: CUT }), /no job «fast»/),
+    'a commit whose workflow has ONE fast job needs exactly «fast» (its parts are not its jobs); a run of parts under it is refused'); }
 { const dupBad = [...jobsOf(), { name: hj(2), status: 'completed', conclusion: 'failure' }], dupOk = [...jobsOf(), { name: hj(2), status: 'completed', conclusion: 'success' }];
   ok(refused(judge({ jobs: dupBad }), new RegExp(`«heavy 2/${N}» is failure \\(one of 2 jobs of that name\\)`)), 'a DUPLICATE job name with one failure is refused — every job of a needed name must be success');
   ok(judge({ jobs: dupOk }).ok, '…two jobs of one name, both success, are accepted'); }

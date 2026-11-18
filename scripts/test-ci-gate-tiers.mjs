@@ -704,7 +704,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   const known = cli('--keep-going'), typo = cli('--keep-goin');
   ok(known.status === 2 && !/does not know --keep-going/.test(known.stderr) && /--keep-going: every red listed/.test(known.stderr) && typo.status === 2 && /does not know --keep-goin /.test(typo.stderr),
     'ci.mjs KNOWS --keep-going (the usage says it; a typo of it is refused by name and runs nothing)');
-  ok(/\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\) \}\)/.test(src),
+  ok(/\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)/.test(src),   // B-7353: --fast-part's part rides the same call
     'WIRING: main() hands --keep-going to fastGate (and fastGate to runFastLanes — test-ci-gate §2i pins that line)');
 }
 

@@ -174,7 +174,7 @@
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
 // the only VERDICTS; 2/3/4 all mean "no verdict was written", and none of them
 // may ever be 0, because the Actions heavy job's only signal is the exit code.
-// Mirrored in .github/workflows/ci.yml (fast as one job; heavy as a matrix of
+// Mirrored in .github/workflows/ci.yml (fast as a matrix of --fast-part parts, B-7353; heavy as a matrix of
 // --shard slices plus one aggregate `heavy` status — see SHARDS).
 // Gate for this file: scripts/test-ci-gate.mjs.
 import { spawn, spawnSync } from 'node:child_process';
@@ -3418,6 +3418,16 @@ export function workflowShardsAt(text) {
   const n = Number(nm[1]);
   return n > 0 && slots.length === n && slots.every((v, k) => v === k + 1) ? { n, slots } : null;
 }
+/** The fast parts a ci.yml TEXT defines (B-7353): { n, slots } when its fast job's `part: [..]` list is 1..n and its name says
+ *  `fast ${{ matrix.part }}/n`; else null (a workflow of ONE fast job). */
+export function workflowFastPartsAt(text) {
+  const t = String(text || ''), job = /\n  fast:\n([\s\S]*?)(?=\n  [\w-]+:\n|$)/.exec(t);
+  if (!job) return null;
+  const mat = /^\s+part:\s*\[([\d,\s]+)\]\s*$/m.exec(job[1]), nm = /^ {4}name:\s*fast \$\{\{ matrix\.part \}\}\/(\d+)\s*$/m.exec(job[1]);
+  if (!mat || !nm) return null;
+  const slots = mat[1].split(',').map((x) => Number(x.trim())), n = Number(nm[1]);
+  return n > 1 && slots.length === n && slots.every((v, k) => v === k + 1) ? { n, slots } : null;
+}
 /** The HOSTED heavy names of the COMMIT's plan (LAW B, r3): its ci.mjs must be byte-for-byte the module running (same git blob),
  *  and every heavy suite's source is read from the COMMIT (`git cat-file --batch`) — a working tree, a skip-worktree flag or an
  *  unstaged edit cannot move the list. → { names } | { err }. */
@@ -3459,7 +3469,8 @@ export function judgeMirrorRun({ sha, slug, run, jobs, totalJobs, workflow } = {
   if (Number.isFinite(totalJobs) && totalJobs > list.length) return no(`the job list is paged (${list.length} of ${totalJobs}) — every job cannot be seen`);
   const shards = workflowShardsAt(workflow);
   if (!shards) return no(`${MIRROR_WORKFLOW} at ${sha.slice(0, 9)} defines no readable heavy matrix`);
-  const need = ['fast', ...shards.slots.map((i) => `heavy ${i}/${shards.n}`), 'heavy'];
+  const fp = workflowFastPartsAt(workflow); // B-7353: the fast tier as `fast i/n` jobs; a workflow before the split has ONE «fast»
+  const need = [...(fp ? fp.slots.map((i) => `fast ${i}/${fp.n}`) : ['fast']), ...shards.slots.map((i) => `heavy ${i}/${shards.n}`), 'heavy'];
   for (const name of need) {
     const these = list.filter((x) => x && x.name === name);
     if (!these.length) return no(`the run has no job «${name}» (the workflow at ${sha.slice(0, 9)} defines ${shards.n} heavy shards)`);
@@ -3661,6 +3672,22 @@ export function scheduleFastLanes(suites, { serial = FAST_SERIAL, fixtures = mac
   plan.serial = [...plan.serial.filter((s) => !last.has(s.name)), ...plan.serial.filter((s) => last.has(s.name))];
   return plan;
 }
+// THE FAST TIER IN PARTS (B-7353, lane bl-ci 2026-11-17). The hosted fast job ran all 599 suites in ONE job: 837 s at a
+// runner of 1.48× on the .407 prep mirror, cancelled by its 15-min limit in the second it finished (the .407 seam raised it to
+// 25 — a symptom cure). The tier's COUNT grew (+330 suites in six weeks; the 10 s rule keeps each one short), so the job is two:
+// `--fast-part <i>/<n>` runs ONE part, packed by shardPlan's LPT over the rows' STATED times (every fast row states one; the
+// serial group whole in part 1, counted lanes×; the `last` rows end EVERY part). Every job computes the same split from the table alone. A part writes no
+// green marker and records no readings (neither is the whole tier); the pre-push hook and a lane still run the whole tier.
+/** PURE: the fast tier cut in `n` parts → { parts, serial, loads }. */
+export function fastPartPlan(suites, n, { serial = FAST_SERIAL, fixtures = machineGlobalFixtures, sourceOf = () => '', lanes = FAST_MAX_LANES } = {}) {
+  // the `last` rows (test-fixture-isolation: «runs after every suite that could write one») run at the end of EVERY part — a part's
+  // suites leave their litter on that part's runner, so each part sweeps its own; the rest of the tier is cut once
+  const lastNames = new Set(serial.filter((r) => r.last).map((r) => r.name)), last = suites.filter((s) => lastNames.has(s.name));
+  const rest = suites.filter((s) => !lastNames.has(s.name));
+  const timings = Object.fromEntries(rest.map((s) => [s.name, fastRuleFindings(s, '').measuredMs]).filter(([, ms]) => ms != null));
+  const plan = shardPlan(rest, n, { serial, fixtures, sourceOf, timings, lanes });
+  return { parts: plan.shards.map((p) => [...p, ...last]), serial: plan.serial, loads: plan.loads, last: last.map((s) => s.name) };
+}
 /** PURE: the closing report — the ten slowest suites, and a WARNING line per suite over FAST_MAX_MS (informational: a clock gate flakes). */
 export function fastTimingReport(timings, { top = 10, maxMs = FAST_MAX_MS } = {}) {
   const sorted = [...timings].sort((x, y) => y.ms - x.ms);
@@ -3803,10 +3830,11 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
  * and printed ALL GREEN. The closing line now NAMES its subject either way, so
  * "ALL GREEN" can never again be a sentence about a tree nobody is publishing.
  */
-async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
+async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null } = {}) {
   const t0 = Date.now(), l0 = load1();
   markCiRun('fast');
-  const fast = SUITES.filter((s) => s.tier === 'fast');
+  const tier = SUITES.filter((s) => s.tier === 'fast');
+  let fast = tier; // B-7353: --fast-part runs one part of the tier (the hosted fast jobs); the cut is fixed once the run's root is known
   const sha = wantSha || gitOut(['rev-parse', 'HEAD']);
   let runRoot = repo, wt = null, cleaned = false;
   const inflight = new Set();
@@ -3826,8 +3854,9 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
     if (isolate) { wt = addScratchWorktree(sha, 'fast'); runRoot = wt; }
     const lanes = fastLaneCount();
     const sourceOf = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+    if (part) fast = fastPartPlan(tier, part.n, { sourceOf }).parts[part.i - 1];
     const plan = scheduleFastLanes(fast, { sourceOf });
-    console.log(`release gate — FAST tier: build + ${fast.length} suites (heavy tier: ${SUITES.filter((s) => s.tier === 'heavy').length} suites, runs after the push)${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}`);
+    console.log(`release gate — FAST tier${part ? ` PART ${part.i}/${part.n} (${fast.length} of its ${tier.length} suites)` : ''}: build + ${fast.length} suites (heavy tier: ${SUITES.filter((s) => s.tier === 'heavy').length} suites, runs after the push)${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}`);
     if (!runBuild({ cwd: runRoot }).ok) { console.error('\n✗ build FAILED — release gate is RED, do not push\n'); return 1; }
     if (!runSecretScan({ cwd: runRoot, sha }).ok) { console.error('\n✗ secret-scan RED — release gate is RED, do not push (GitHub push protection refuses these shapes: build token shapes at runtime by concatenation)\n'); return 1; }
     console.log(`[ci] ${lanes} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}: ${plan.serial.map((s) => s.name).join(', ')}`);
@@ -3873,18 +3902,19 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false } = {}) {
     const sum = timings.reduce((n, t) => n + t.ms, 0);
     console.log(`[ci] lanes: ${lanes} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round(serMs / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     for (const line of fastTimingReport(timings)) console.log(line);
-    if (!absent.length && !isolate) { // a WHOLE in-place tier only (B-eedd): its readings recorded, its false rows SAID (the red is --false-rows)
+    if (!absent.length && !isolate && !part) { // a WHOLE in-place tier only (B-eedd; a part is no whole tier — B-7353): its readings recorded, its false rows SAID (the red is --false-rows)
       const falseRows = judgeFastReadings(fast, timings, sha, { load0: l0 });
       for (const f of falseRows) console.log(`[ci] WARNING: ${falseRowLine(f)} — not a red here (the verdict may not depend on load); \`node scripts/ci.mjs --false-rows\` is`);
     }
     const ran = fast.length - absent.length - skippedByName.length;
     const subject = isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)';
-    console.log(`\nALL GREEN — fast gate passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}`);
+    console.log(`\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}`);
     if (absent.length) console.log(`[ci] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     // The marker's contract is "HEAD, clean, passed", so an isolated run at
     // some other commit must not write one — it proves nothing about the tree
     // the next push would skip the tier for (⑫: say so, do not go quiet).
     if (isolate) console.log(`[ci] green marker not written: this run gated ${shortSha(sha)} in a scratch worktree, not the tree you have checked out`);
+    else if (part) console.log(`[ci] green marker not written: part ${part.i}/${part.n} is not the whole fast tier`);
     else writeGreenMarker();
     return 0;
   } finally { cleanup(); }
@@ -4694,9 +4724,9 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
-  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first)
+  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first · --fast-part=<i>/<n>: one part, the hosted fast jobs)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
   --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
   --heavy-verdict <sha> --gh-run <id> --markers=<dir>   the CI mirror's green run of exactly <sha>, verified through gh, as the HOSTED half's listed green (B-e381)
@@ -4774,7 +4804,11 @@ function main(argv) {
   }
   // `--isolate [--sha=<x>]` gates the COMMIT rather than this working tree —
   // the hook uses it when a pushed ref's tip is not HEAD.
-  fastGate({ sha: str('sha'), isolate: !!arg('isolate'), keepGoing: !!arg('keep-going') })
+  // --fast-part=<i>/<n> (or --fast-part <i>/<n>): ONE part of the fast tier (B-7353, the hosted fast jobs); a bad spec is a loud exit 2
+  const partArg = str('fast-part') !== null ? str('fast-part') : (argv.includes('--fast-part') ? (argv[argv.indexOf('--fast-part') + 1] || '') : null);
+  const part = partArg === null ? null : parseShard(partArg);
+  if (partArg !== null && !part) { console.error(`✗ --fast-part wants <i>/<n> with 1 ≤ i ≤ n (got «${partArg}») — nothing started`); return exitFlushed(2); }
+  fastGate({ sha: str('sha'), isolate: !!arg('isolate'), keepGoing: !!arg('keep-going'), part })
     .then((code) => exitFlushed(code), (e) => { console.error('[ci] crashed: ' + (e && e.stack || e)); exitFlushed(1); });
 }
 
