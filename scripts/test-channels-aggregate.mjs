@@ -415,8 +415,7 @@ console.log('③b a failed pass is said at once: the retry instant, no "last syn
   ok(Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1] && !v1.lastOkAt && v1.backoff && v1.backoff.kind === 'failure', 'after ONE failed pass the view carries the retry instant (backoffUntil), the back-off\'s kind (failure) and no last GOOD sync', JSON.stringify({ backoffUntil: v1.backoffUntil, backoff: v1.backoff, lastOkAt: v1.lastOkAt }));
   const ps1 = typeof caps.passStateText === 'function' ? caps.passStateText(v1, { now: clock }) : { note: '', lastOkAt: 'n/a' };
   ok(/transport failure/.test(ps1.note) && /retrying in 30 s/.test(ps1.note) && ps1.lastOkAt === null, 'the card\'s line builder says "transport failure — retrying in 30 s" from the FIRST failure, and there is no "last sync" to print', JSON.stringify(ps1));
-  const panelSrc = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
-  ok(/chanCaps\.passStateText\(a, /.test(panelSrc) && !/last sync \{ago\}', \{ ago: agoText\(a\.lastPass\.at\)/.test(panelSrc), 'the panel words its sync + retry through that builder (never "last sync" from lastPass.at, which a failure stamps)');
+  // (③b the card's line builder wiring pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const waited = await er.pass('ratey');
   ok(waited.ok === false && waited.why === 'backoff', 'FIXTURE: inside the back-off a timer pass waits');
   clock += 31e3;
@@ -956,9 +955,7 @@ console.log('③c channel settings: the input clamps to the schema and says so; 
   ok(cl && cl.value === 900 && cl.bound === 'max', 'clampToSchema(pollColdSec, 1800) ⇒ 900 at the maximum', JSON.stringify(cl));
   const lo = typeof schemaMod.clampToSchema === 'function' ? schemaMod.clampToSchema(S['channels.pollHotSec'], 5) : null;
   ok(lo && lo.value === 10 && lo.bound === 'min' && schemaMod.clampToSchema(S['channels.pollHotSec'], 45).bound === null, '…5 s for the busy tier ⇒ 10 at the minimum; an in-range value passes untouched', JSON.stringify(lo));
-  const ui = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf-8');
-  const numBranch = ui.slice(ui.indexOf("if (schema.type === 'number') {"), ui.indexOf("if (schema.type === 'enum') {"));
-  ok(/clampToSchema\(schema, num\)/.test(numBranch) && /showToast\(/.test(numBranch) && /input\.value = /.test(numBranch), 'the Settings number input clamps through clampToSchema, writes the clamped value back into the field and TOASTS it');
+  // (③c the Settings number branch pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const B = ENG.SETTING_BOUNDS || {};
   const rows = Object.entries(S).filter(([k, v]) => /^channels\./.test(k) && v.type === 'number' && k !== 'channels.pushCoalesceSeconds');
   const drift = rows.filter(([k, v]) => !B[k] || B[k].min !== v.min || B[k].max !== v.max || B[k].dflt !== v.default).map(([k, v]) => `${k}: schema ${v.default}/${v.min}/${v.max} engine ${JSON.stringify(B[k] || null)}`);
@@ -1298,18 +1295,9 @@ async function backoffBurst(ENGmod, label) {
   ok(r.ownerCalls === 1 && r.owner.ok === false && r.owner.code === 'transport' && r.failuresAfterOwner === 2, `the owner's OWN Refresh press still runs (human-gated: ${r.ownerCalls} call), fails by name and counts as one more failure (${r.failuresAfterOwner})`, JSON.stringify(r.owner));
   // r4: the failed press answers the wait it just escalated into (Retry-After rides readerAnswer; the toast words it) — a bare "failed" invited the next press
   ok(r.owner.retryAfterSec > 0 && r.owner.retryAfterSec <= ENG.BACKOFF_MS[2] / 1000 && Number(r.owner.backoffUntil) === Number(r.backoffAfterOwner), `…and its answer carries the retry instant of the back-off it escalated into (retry in ${r.owner.retryAfterSec} s)`, JSON.stringify({ owner: r.owner, backoffAfterOwner: r.backoffAfterOwner }));
-  const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
-  ok(/case 'rate-limited': case 'transport': case 'backoff': \{/.test(words) && /retrying in \{s\} s/.test(words), 'the owner\'s toast words a refused fetch with its code and the wait (channel-words: rate-limited / transport / backoff), never the bare English sentence');
+  // (⑥d the owner's back-off words pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok(r.after.ok && r.after.appended === 1, 'once the back-off has passed the agent\'s refresh fetches again', JSON.stringify(r.after));
-  // the two route maps, the CLI and the panel/window contracts around the new code
-  const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
-  const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
-  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf-8');
-  ok(/code === 'refresh-floor' \|\| code === 'backoff' \? 429/.test(rsrc) && /code === 'vendor-budget' \|\| code === 'backoff' \? 429/.test(asrc), 'both route maps answer `backoff` as 429 (+ Retry-After from retryAfterSec)');
-  ok(/const REFRESH_REFUSED = \[[^\]]*'backoff'[^\]]*\]/.test(cli) && /REFRESH_REFUSED\.includes\(j\.code\)\) return \{ refused: true/.test(cli), 'the CLI treats `backoff` as a refusal (exit 4, "not refreshed: … (retry in N s)"), never an error — through the ONE refused set test-channels-agent-cli\'s census keeps equal to the route\'s (r7)');
-  const panel = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
-  const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
-  ok(/app\.ws\.onStateChange\?\.\(onState\)/.test(panel) && /app\.ws\.offStateChange\?\.\(onState\)/.test(panel) && /app\.ws\.onStateChange\?\.\(onState\)/.test(win) && /app\.ws\.offStateChange\?\.\(onState\)/.test(win), 'the panel and the window re-read on every ws reconnect (a broadcast sent while the socket was down never arrives) and remove that listener by name on teardown');
+  // (⑥d the route maps, the CLI and the panel/window contracts — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // CONTROL: the shipped refresh (no back-off gate on the agent's verb or the loop) hammers the vendor and escalates the back-off
   const M6d = mutantCopies('chan-agg-backoff', REPO);
   // (re-pointed at the drain, r5; r9: the PURE drain's two back-off lines — the judgement gate AND the fetch-time owner check, both stripped: a new guard layer is removed from the old control too)
@@ -2423,34 +2411,7 @@ async function capRace2(ENGmod, label) {
 // points at Grant access…; a number past its bound is clamped VISIBLY; the retired
 // single-assignment verb is gone from the code and the dictionaries; every string is
 // textContent (the XSS judge over the editor, with a planted control).
-console.log('⑨d R4 UI wiring: two operations, the picker = the access list, visible clamps, no innerHTML');
-{
-  const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8');
-  const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
-  const notifyBody = ED.slice(ED.indexOf('export async function showNotifyDialog('), ED.indexOf('export function showGrainMenu('));
-  ok(/const principals = st\.access\.map\(/.test(notifyBody) && (notifyBody.match(/principals\s*=/g) || []).length === 1 && /watcherRow\(list, \{ w, f: filter, st, principals,/.test(notifyBody), 'the Notify picker is built from the grain\'s ACCESS list — one assignment, handed to every watcher row, nothing else');
-  ok(/if \(!principals\.length\) \{[\s\S]*?Grant access first — use "Grant access…"[\s\S]*?showGrantAccessDialog\(app, target\)/.test(notifyBody), 'an EMPTY picker says "Grant access first" and its button opens Grant access… (access is the prerequisite)');
-  const mutated = notifyBody.replace('const principals = st.access.map(', 'const principals = principalChoices(app, st.access).map(');
-  ok(mutated !== notifyBody && !/const principals = st\.access\.map\(/.test(mutated), 'CONTROL: a picker built from every live principal is caught by the same pin');
-  const acctOrder = [...PANEL.matchAll(/registerMenuItem\(\{ menu: M, group: '1_rows', order: (\d+), when: \(c\) => !A\(c\)\.builtin, label: \(\) => t\('([^']+)'\)/g)].map((m) => `${m[1]}:${m[2]}`);
-  ok(acctOrder.join() === '9:Reach & policy…,10:Grant access…,11:Notify…,12:Conversations matching a rule…', 'the account ⋯: Reach & policy… (9 — lane account-policy-door: the whole account\'s policy + access + Notify door), Grant access… (10), Notify… (11), then the rule grain (12)', acctOrder.join());
-  ok(/label: \(\) => t\('Grant access…'\),\s*\n\s*run: \(c\) => showGrantAccessDialog\(c\.app, \{ kind: 'conversation', conv: c\.conv \}\)/.test(PANEL) && /label: \(\) => t\('Notify…'\),\s*\n\s*run: \(c\) => showNotifyDialog\(c\.app, \{ kind: 'conversation', conv: c\.conv \}\)/.test(PANEL), 'the conversation row menu offers the same two operations');
-  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
-  const RETIRED = ['Hand to an agent…', 'Handed to an agent — edit…', 'Handed to {who}', 'Hand the whole account to an agent — {label}', 'Assign to an agent…', 'Unassign', 'by assignment'];
-  const srcAll = ['src/lib/channels-panel.js', 'src/lib/channel-filter-editor.js', 'src/lib/channel-window.js', 'src/lib/channel-words.js', 'src/lib/channel-reach-editor.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf-8')).join('\n');
-  const alive = RETIRED.filter((k) => srcAll.includes(`t('${k}')`) || k in zh || k in ja);
-  ok(!alive.length, `the retired single-assignment verb and its words are gone from the code AND both dictionaries (${RETIRED.length} keys)`, alive.join(' | '));
-  // channel-polish: the three plain questions — each clamp is said under ITS answer's field while that answer is chosen
-  // (channel-render verify round 2 made the cap ITS OWN line under both answers — its note is drawn whatever the `how`;
-  //  round 4 found this pin still spelling the pre-round-2 third-answer form: the heavy row was red on the lane)
-  ok(/digestClamp\.textContent = howNow\(\) === 'digest' \? d\.note : ''/.test(ED) && /capClamp\.textContent = c\.note;/.test(ED) && /clampNoteText\(max, 'max'\)/.test(ED), 'a number past its bound is CLAMPED VISIBLY in the Notify dialog (the digest window and the daily cap each say "kept at the maximum, N" under their own field)');
-  // block comments FIRST, then whole-line // comments (the other order drops a JSDoc's closing
-  // `*/` line and lets the block pattern swallow the code up to the NEXT comment's end)
-  const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const judge = (x) => [...strip(x).matchAll(/\.(innerHTML|outerHTML)\s*=\s*([^;\n]+)|insertAdjacentHTML\(([^;\n]+)/g)].map((m) => (m[2] || m[3] || '').trim()).filter((r) => !/^UI_ICONS\[|^''$|^""$/.test(r));
-  ok(judge(ED).length === 0, 'XSS: the access / notify editor writes no innerHTML — every principal name, rule and estimate is textContent', JSON.stringify(judge(ED)));
-  ok(judge(ED.replace("row.dataset.principal = r.key;", "row.innerHTML = r.key;")).length === 1, 'CONTROL: a planted `row.innerHTML = r.key` in the editor is flagged by the same judge');
-}
+// (⑨d the R4 UI wiring (each checker with its planted control) — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ═══ ⑩ restart + migration ═══════════════════════════════════════════════
 console.log('⑩ a restart keeps everything; the migration turns tracked into hot');
@@ -2483,8 +2444,7 @@ console.log('⑩ a restart keeps everything; the migration turns tracked into ho
   ok(em.adapterRecords().adapters[0].linkedAt === clock, 'the account is stamped linkedAt');
   const again = em.migrateAggregated(); await again.write;
   ok(again.hot.length === 0 && again.readStamped === 0 && again.cleared === 0 && again.linked.length === 0, 'a second run changes nothing (idempotent)');
-  const src = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf-8');
-  ok(/id: '2026-09-channels-aggregated-im'/.test(src) && /migrateAggregated\(\)/.test(src), 'the migration is REGISTERED in src/server/migrations.js through the engine\'s serialized door');
+  // (⑩ the migration's registration pin — MOVED to the fast scripts/test-channels-aggregate-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   em.stop();
 }
 

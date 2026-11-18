@@ -740,8 +740,7 @@ try {
     const wsrc = fs.readFileSync(path.join(repo, 'src/lib/inbox-window.js'), 'utf8');
     const LANE = '    c.ta.disabled = false;', PRE = '    c.ta.disabled = !v.reply.enabled;';
     check('control: the lane\'s line is in the window module exactly once (the patched copy swaps it back to the pre-lane line)', wsrc.split(LANE).length === 2 && !wsrc.includes(PRE));
-    check('vault-run-ask (the run card) renders VERBATIM, never markdown — its type is in the isCmd command list so a `*` or `#` in the command line shows as typed (SEAM int330, q-043 P0-f)', /const isCmd = [^;]*vault-run-ask/.test(wsrc), (wsrc.match(/const isCmd = [^;]*;/) || [])[0]);
-    check('vault-grant-ask (the agent\'s request card) renders VERBATIM, never markdown — its type is in the `plain` list so the entry ref and the agent\'s OWN words (a `*`, a `# y`, two lines) show as typed, escaped (SEAM int331, q-043 P0-c / vault-scrub-forms §8)', /const plain = [^;]*vault-grant-ask/.test(wsrc), (wsrc.match(/const plain = [^;]*;/) || [])[0]);
+    // (the two cards render VERBATIM — source pins — MOVED to the fast scripts/test-inbox-window-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     const MUT = mutantCopies('inbox-window-ui-dead', repo);
     const bundleText = await buildPatchedBundle(MUT, 'src/lib/inbox-window.js', wsrc.split(LANE).join(PRE), 'pre-lane');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '⑳ ' })) check(row.name, row.pass, row.detail);

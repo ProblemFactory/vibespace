@@ -330,10 +330,7 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
     const edgeEvery = drive(rep(601, 0).map((g, i) => (i ? g : 2100)), -1, Object.fromEntries(Array.from({ length: 601 }, (_, i) => [i, 2100])));
     ok(edgeEvery.at === 46200, `r4: a loop held 2.1 s inside EVERY turn's poll phase, nothing in the socket: still bounded — the 21st turn (${edgeEvery.at} ms; the held-before-the-tick loop above: the 20th, 42 000)`);
   }
-  const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-  const refresh = src.slice(src.indexOf('  async function refreshAccessToken('), src.indexOf('  function bearerNow('));
-  ok(/what: 'lark token refresh', liveMs: REFRESH_BOUND_MS,/.test(refresh) && !/AbortSignal\.timeout/.test(refresh), 'the refresh POST carries the live bound and no AbortSignal.timeout');
-  ok(/method: 'POST', what: 'lark token exchange', liveMs: REFRESH_BOUND_MS,/.test(src), 'r2: the consent\'s code exchange carries the same live bound (① X proves it across the hold)');
+  // (the refresh + the code exchange carry the live bound — source pins — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── ③ R2: a lost answer — by the request's own `sent` fact; a dropped bearer is never handed back; a lifetime from the send ──
@@ -684,9 +681,7 @@ console.log('\n⑤ R4: the words name the MEASURED stall');
   const planted = census({ ...zh, [hoursKey]: `${zh[hoursKey]} Feishu` }, ja);
   ok(planted.length === 1 && planted[0] === hoursKey, `r3: the census knows the Latin spelling — «Feishu» planted in the zh hours key is named (${JSON.stringify(planted)})`);
   ok(KIND_KEYS.every((k) => !keys.includes(k) && VENDOR_RE.test(zh[k]) && VENDOR_RE.test(ja[k])), `r3: the dictionaries' own vendor words (zh «${zh.Feishu}», ja «${ja.Feishu}») are {kind} values — exempt by KEY (none is a cause key), and the census regex would name them`);
-  const acts = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf-8');
-  const lay = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-layout.js'), 'utf-8');   // int361 (主开发's seam): the rule lives in owner-press-attended's ONE renderer, saidLine
-  ok(acts.includes('const said = (l) => saidLine(l, t') && lay.includes("if (typeof v.key === 'string') return t(v.key, v.params || undefined);"), 'the For-you renderer (`said` → saidLine) fills a words-param with its own params — the rule this suite renders by');
+  // (the For-you line's cause words — source pin — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
   try {
     const it = ut.add('channels', { origin: 'channels', kind: 'action', text: 'x: sign-in expired — re-authorize', urgency: 'urgent', by: 'agent', i18n: { text: { key: '{account}: sign-in expired — re-authorize ({cause})', params: { account: 'x', cause: { key: 'k {seconds}', params: { seconds: 21 } } } } } });
@@ -695,9 +690,7 @@ console.log('\n⑤ R4: the words name the MEASURED stall');
     try { ut.add('channels', { origin: 'channels', kind: 'action', text: 'y: sign-in expired — re-authorize', urgency: 'urgent', by: 'agent', i18n: { text: { key: '{account}: sign-in expired — re-authorize ({cause})', params: { account: 'y', cause: { key: 'k {seconds}', params: { seconds: 21, junk: { a: 1 } } } } } } }); } catch (e) { msg = e.message; }
     ok(/params\.cause\.params\.junk must be a string or a finite number \(object refused\)/.test(msg), `r2: …and REFUSES any other shape by name (r1 dropped it silently and the row said «{…}»): «${msg}»`);
   } finally { try { ut.stop(); } catch { } }
-  // the producer files its words WITHOUT a refused shape (never a literal on the screen) — its store refusal is said
-  const eng0 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  ok(/the For-you store refused the dead sign-in's cause words/.test(eng0) && /it = fileWith\(false\)/.test(eng0), 'r2: the producer (speakSignin) says a refusal in the log and files the item without the refused words');
+  // (the producer's refused-shape sentence — source pin — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── ⑥ R5 r2: a landing on a dead sign-in VERIFIES — never «works again» before a request answered, red ONCE with its own cause ──
@@ -790,21 +783,7 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
       && !logC.some((x) => /the new sign-in \(landed .*\) was refused/.test(x)) && logC.some((x) => /the sign-in works again \(the first requests with the new sign-in went through\)/.test(x)),
       `r4 C5: the dead sign-in's bearer, refused after a landing made during its pass, is never the landing's verdict — no red flap, no item re-filed (${fC.join(' → ')}, an open item after the landing: ${reopened}; c79d74b0: verifying → expired → ok), the log: ${JSON.stringify(logC.map((x) => x.slice(0, 120)))}`);
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
-  // the re-authorize dialog: a landing missed while the socket was down is read ONCE on reconnect; Escape on a running
-  // sign-in asks first (the dialog-yield seam) — source facts here, the chrome leg in test-integrations-ui (l)
-  const dlg = fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf-8');
-  ok(/app\.ws\.onStateChange\(onState\)/.test(dlg) && /fetchJson\('\/api\/channels\?scope=accounts'\)\.then\(\(d\) => \{ if \(d && Array\.isArray\(d\.adapters\)\) judge/.test(dlg), 'r2: the dialog\'s watcher re-reads the account ONCE on every reconnect (a landing broadcast missed while the socket was down)');
-  const md = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf-8');
-  ok(/escapeToClose: true, onEscape: \(\) => escapeAsk\(\) \}\)/.test(md) && /tr\('Cancel the sign-in\?'\)/.test(md) && /askFirst: showConfirmDialog/.test(dlg), 'r2: the re-authorize dialog\'s Escape on a RUNNING sign-in asks «Cancel the sign-in?» (onEscape, the OAT shape)');
-  ok(/onClose: closed, escapeToClose: true/.test(md) && /onClose: \(\) => \{ closed = true; if \(watcher\) \{ watcher\.off\(\); watcher = null; \} \}/.test(dlg), 'r3: every close of the dialog (✕, backdrop, Escape, its finish) tears its watcher down — the chrome count in test-integrations-ui (r)');
-  // r4 (acceptance r3): a watcher its start makes AFTER the close (✕ while the reauthorize POST waits) is taken at once, and
-  // the dialog shows no consent page for a close during its start; `poll` / `stopPoll` stand BEFORE the shell handed `closed`
-  // (the dialog-yield seam: a raised form's end runs it early)
-  ok(/watcher = authWatcher\(app, a\.id, [^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(closed\) \{ watcher\.off\(\); watcher = null; \}/.test(dlg) && /const promise = start\(/.test(md) && /const r = await promise;[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(gone\(\)\) \{ if \(typeof cancel === 'function'\)/.test(md) && /const gone = \(\) => !status\.isConnected/.test(md),   // lane gmail-connect-wall r4: the start's answer is awaited as `promise` (the press in flight is recorded first) and the close check is `gone()` (disconnected, or — live — closed); the same law
-    'r4: a close while «Preparing authorization…» takes the watcher made after it, opens no consent page and cancels the consent — the chrome count in test-integrations-ui (r)');
-  const rd = md.slice(md.indexOf('export function reauthDialog('), md.indexOf('\nexport ', md.indexOf('export function reauthDialog(') + 1));
-  const iStop = rd.indexOf('const stopPoll = () =>'), iShell = rd.indexOf('createModalShell(');
-  ok(iStop > 0 && iShell > iStop && rd.indexOf('const stopPoll = () =>', iStop + 1) < 0 && rd.indexOf('createModalShell(', iShell + 1) < 0, `r4: reauthDialog declares \`poll\` / \`stopPoll\` ONCE, before its createModalShell call that is handed \`closed\` (stopPoll at ${iStop}, the shell at ${iShell} of its body)`);
+  // (the re-authorize dialog's seams — source pins — MOVED to the fast scripts/test-lark-refresh-stall-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 await worker.terminate();

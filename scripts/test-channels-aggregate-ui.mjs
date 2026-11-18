@@ -1198,11 +1198,7 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
 // and the phone width; a bot's line wears the bot mark.
 {
   const MF = require(path.join(repo, 'src/mail-frame.js'));
-  // WIRING PIN (lane-mirror-197, 2026-09-29): the DOM half re-judges the live set after every APPLIED height — a row that
-  // slides into the visible band because a frame above shrank crosses no observer threshold and fires no scroll, the two
-  // triggers the reconcile had; the runner saw the 7th of 7 short mails on screen as a blank box
-  { const cmf = fs.readFileSync(path.join(repo, 'src/lib/channel-mail-frame.js'), 'utf8'); const APPLY = "s.h = hv.h; s.frame.style.height = hv.h + 'px'; s.box.dataset.h = String(hv.h);"; const at = cmf.indexOf(APPLY); const fnEnd = cmf.indexOf('\n  }\n', at); const nextLater = cmf.indexOf('later();', at);
-    ok(at > 0 && cmf.split(APPLY).length === 2 && nextLater > at && nextLater < fnEnd, 'WIRING PIN: an APPLIED height re-judges the live set — `later()` follows the apply inside applyHeight (channel-mail-frame.js)'); }
+  // (the mail frame's applied-height wiring pin — MOVED to the fast scripts/test-channels-aggregate-ui-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const MAIL = 'fake-push-mail';
   let n = 0;
   for (let i = 0; i < 160; i++) { const d = await api('GET', `/api/channels/fake-push/${MAIL}/messages?limit=60`); n = (d.json.records || []).length; if (n >= MAIL_N + 6) break; await sleep(250); }
