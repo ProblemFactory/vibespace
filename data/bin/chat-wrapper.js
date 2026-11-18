@@ -684,7 +684,11 @@ function deliverHeldInterrupt(why) {
  *  a session's first turn is the witness). No witness ⇒ null, «cannot say»: every rider stays kept, as before (a CLI
  *  before 2.1.307, a build that stopped writing the field, a stand-in that never names — the wrong «kept» costs a
  *  repeated message, a wrong «landed» tells the person the agent read words it never saw). The midturn-order r4 rule
- *  read every omission as unknown and left a rider the model HAD read drawn «Unread when stopped». */
+ *  read every omission as unknown and left a rider the model HAD read drawn «Unread when stopped».
+ *  ONE SHAPE IS UNRECORDED (主开发 10:59Z — the law: when the wrapper cannot know, its mistake is «kept»): a Stop with a rider
+ *  the CLI still holds AND a background notification, merged by the CLI into ONE follow-up whose init names nothing (the rider
+ *  as a queued_command attachment). The wrapper cannot see that attachment — the CLI says nothing on stdout about a frame it
+ *  takes in (the head of this file) and records it in the transcript only — so here it would read «landed». unmeasured: read it at the next recording of a real CLI through the integrator's fenced suite. */
 let initNamesSeen = false;
 function initNames(msg, seen) {
   if (Array.isArray(msg.user_message_uuids)) return msg.user_message_uuids.map(String);
