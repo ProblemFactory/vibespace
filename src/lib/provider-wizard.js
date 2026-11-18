@@ -27,7 +27,7 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
   const { body, close, raised, ready, live } = createModalShell({ id: 'provider-wizard', key: backend, title: t('Add a third-party model'), minWidth: 'min(620px, 94vw)', kind: 'form' });
   if (raised) return;
   if (!(await ready)) return;
-  const list = await fetchJson('/api/providers');
+  const list = await post('/api/providers/list');   // a person's read, through the person verdict (U1 cure (B))
   if (!live()) return;
   if (!list || list.error || !Array.isArray(list.shipped)) { body.textContent = t('Could not read the providers — {reason}', { reason: (list && list.error) || t('server unreachable') }); return; }
   const fitsHere = (s) => !!(s.fits && s.fits[backend] && s.fits[backend].ok);

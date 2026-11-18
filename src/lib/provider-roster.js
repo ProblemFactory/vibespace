@@ -46,7 +46,7 @@ export async function renderProviderRows(body, backend, { refresh = () => { } } 
   sec.dataset.backend = backend;
   sec.hidden = true;
   body.appendChild(sec);
-  const r = await fetchJson('/api/providers');
+  const r = await fetchJson('/api/providers/list', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });   // a person's read (U1 cure (B))
   const rows = (r && Array.isArray(r.providers) ? r.providers : []).filter((p) => p.fits && p.fits[backend] && p.fits[backend].ok);
   if (!rows.length || !sec.isConnected) { sec.remove(); return; }   // no provider serves this harness: no section (the add door is the roster's own)
   const head = document.createElement('div'); head.className = 'acct-providers-head';

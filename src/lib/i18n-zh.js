@@ -10334,6 +10334,7 @@ export default {
   "The provider answered {status}": "提供方返回了 {status}", // lane models-at-session
   "The provider’s list is larger than 1 MB — nothing was kept": "提供方的列表超过 1 MB — 未保存任何内容", // lane models-at-session
   "The provider’s answer is not a model list": "提供方的回应不是模型列表", // lane models-at-session
+  "The list could not be saved — try again": "列表未能保存——请重试", // lane lg-providers U1 cure
   "Only a person on this page can refresh the list": "只有在此页面上的人才能刷新列表", // lane models-at-session
   "This account’s provider has no models — set them up first": "此账号的提供方没有模型 — 请先设置", // lane models-at-session
   "Models of {provider}": "{provider} 的模型", // lane models-at-session

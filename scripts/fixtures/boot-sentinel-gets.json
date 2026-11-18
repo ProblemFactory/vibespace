@@ -267,7 +267,6 @@
   "/api/plugins/manifests",
   "/api/plugins/manifests/:id/capabilities",
   "/api/port-forwards",
-  "/api/providers",
   "/api/runtime",
   "/api/search",
   "/api/search/status",

@@ -10333,6 +10333,7 @@ export default {
   "The provider answered {status}": "提供元の応答は {status} でした", // lane models-at-session
   "The provider’s list is larger than 1 MB — nothing was kept": "提供元の一覧が 1 MB を超えています — 何も保存していません", // lane models-at-session
   "The provider’s answer is not a model list": "提供元の応答はモデル一覧ではありません", // lane models-at-session
+  "The list could not be saved — try again": "一覧を保存できませんでした — もう一度お試しください", // lane lg-providers U1 cure
   "Only a person on this page can refresh the list": "一覧を更新できるのは、このページを開いている人だけです", // lane models-at-session
   "This account’s provider has no models — set them up first": "このアカウントの提供元にはモデルがありません — 先に設定してください", // lane models-at-session
   "Models of {provider}": "{provider} のモデル", // lane models-at-session

@@ -18,6 +18,9 @@
 //      built-in id refused / setModels (listed ⇒ refused, errors by row and field, zero rows ⇒ none)
 //   ⑧ THE ROUTES: every roster account names its provider with its harness's rows; a projected `pv-` row; the save (400 by
 //      field, 409 listed, 403 an agent's bearer, 404); ⑨ wiring pins (the routes, the catalogs, the roster's 模型…, Test's id)
+//   U1 CURE (lane lg-providers, the coordinator's A/B/C): ⑭ the plain-http rule on the PARSED address (three shapes, three
+//      controls), the tail of a short key, the store writer's «failed» undone per act, the vault not set up, a preset's
+//      address at the add, «has a key» from the vault's names, the person-only list; ⑨ the change broadcast run for real
 //   ⑩–⑬ MODELS AT A SESSION (lane models-at-session = row P0c): the MENU of a provider (open / closed / EMPTY — the law:
 //      empty ⇔ no row) with its RED control ⑪ (a copy that never says empty = a silent empty menu); ⑫ a running
 //      conversation's pick re-resolved against its provider; ⑬ the listed-provider refresh's rules (the list URL per kind,
@@ -164,9 +167,10 @@ const PS = require(path.join(ROOT, 'src/server/provider-store.js'));
 let store = PS.create({ dataDir: DATA, catalogOf, log: (m) => logs.push(m) });
 ok(store.list().length === 4 && store.get('pv-anthropic-subscription').models.length === 11 && store.get('pv-openai-chatgpt').models.length === 3 && store.get('pv-google-subscription').models.length === 3 && !fs.existsSync(store.file), 'a fresh store: the four built-ins, each filled from its harness\'s catalog NOW; nothing written');
 const r1 = store.put({ id: 'pv-deepseek', kind: 'openai-chat', label: 'DeepSeek', keyRef: 'providers:pv-deepseek#key', modelsSource: 'configured', models: [{ id: 'deepseek-chat', context: '64k' }], aliases: { sonnet: 'deepseek-chat' } });
+const d1 = await store.durable();   // the store writer's thread writes it; a person's act awaits the disk (lane lg-providers U1 cure (C))
 const st1 = fs.statSync(store.file);
 const disk1 = JSON.parse(fs.readFileSync(store.file, 'utf-8'));
-ok(r1.ok && (st1.mode & 0o777) === 0o600 && disk1.v === 1 && disk1.providers.length === 1 && disk1.providers[0].models[0].context === 64000 && eq(Object.keys(disk1.providers[0]), M.PROVIDER_FIELDS), 'put: written whole (v 1, 0600), the closed fields, the row as kept', { mode: (st1.mode & 0o777).toString(8) });
+ok(r1.ok && d1 === true && (st1.mode & 0o777) === 0o600 && disk1.v === 1 && disk1.providers.length === 1 && disk1.providers[0].models[0].context === 64000 && eq(Object.keys(disk1.providers[0]), M.PROVIDER_FIELDS), 'put: written whole (v 1, 0600), the closed fields, the row as kept', { mode: (st1.mode & 0o777).toString(8) });
 const before = fs.readFileSync(store.file, 'utf-8');
 const r2 = store.put({ id: 'pv-bad', kind: 'openai-chat', label: 'Bad', modelsSource: 'configured', models: [{ id: '' }] });
 const r3 = store.put({ id: 'pv-anthropic-subscription', kind: 'anthropic-subscription', label: 'Mine' });
@@ -176,11 +180,13 @@ const r4 = store.setModels('pv-deepseek', { models: [{ id: 'deepseek-chat' }, { 
 ok(!r4.ok && r4.code === 'invalid' && eq(r4.errors, [{ index: 1, field: 'id', code: 'id-pattern' }]) && fs.readFileSync(store.file, 'utf-8') === before, 'setModels with a bad row ⇒ invalid, the error at row 1 / field id; nothing written', r4);
 const r5 = store.setModels('pv-deepseek', { models: [{ id: 'deepseek-chat', label: 'V3' }, { id: 'deepseek-reasoner', caps: ['reasoning'] }], aliases: { opus: 'deepseek-reasoner' }, defaultModel: 'deepseek-chat' });
 ok(r5.ok && r5.provider.modelsSource === 'configured' && r5.provider.models.length === 2 && eq(r5.provider.aliases, { opus: 'deepseek-reasoner' }) && store.editable('pv-deepseek') && !store.editable('pv-anthropic-subscription'), 'setModels: saved as configured; only a kept, unlisted record is editable');
+await store.durable();
 store = PS.create({ dataDir: DATA, catalogOf, log: (m) => logs.push(m) });
 ok(eq(store.get('pv-deepseek').models.map((m) => m.id), ['deepseek-chat', 'deepseek-reasoner']) && store.get('pv-deepseek').defaultModel === 'deepseek-chat', 'a new store over the same file reads the record back');
 const r6 = store.setModels('pv-deepseek', { models: [] });
 ok(r6.ok && r6.provider.modelsSource === 'none' && r6.provider.models.length === 0 && M.validateProvider(r6.provider).length === 0, 'zero rows ⇒ the record says none (never an empty configured)');
 store.put({ id: 'pv-ds2', kind: 'openai-chat', label: 'DS2', modelsSource: 'configured', models: [{ id: 'deepseek-chat' }] });
+await store.durable();
 const hand = JSON.parse(fs.readFileSync(store.file, 'utf-8'));
 hand.providers.push({ id: 'pv-hand', kind: 'openrouter', label: 'Hand', modelsSource: 'configured', models: [{ id: '' }] }, { id: 'pv-anthropic-api', kind: 'anthropic-api', label: 'Shadow' });
 fs.writeFileSync(store.file, JSON.stringify(hand));
@@ -210,7 +216,7 @@ try {
   const [, a3] = await get(key);
   ok(a2.provider.id === 'pv-openai-chatgpt' && eq(a2.provider.models.map((m) => m.id), ['gpt-5.5', 'gpt-5.5-codex', 'gpt-5.5-mini']) && a3.provider.id === 'pv-anthropic-api' && a3.provider.models.length === 11 && !JSON.stringify(a3).includes('qqqq'), 'a ChatGPT login names its provider with codex\'s catalog; the Console key names Anthropic API (and the answer carries no key)');
   const [s4, a4] = await get('pv-ds2');
-  ok(s4 === 200 && a4.account.type === 'provider' && a4.provider.kind === 'openai-chat' && a4.editable === true, 'a projected third-party row (pv-…): its record, editable');
+  ok(s4 === 200 && a4.account.type === 'provider' && a4.provider.kind === 'openai-chat' && a4.editable === true && !('keyRef' in a4.provider) && !('baseUrl' in a4.provider) && !('tail' in a4.provider), 'a projected third-party row (pv-…): its record, editable — never where the vault keeps its key, its address or its tail (a GET from the person\'s plain-http page carries no Origin: this door answers what anyone may read; U1 cure (B))');
   const [s5, a5] = await put('pv-ds2', { models: [{ id: 'deepseek-chat' }, { id: '' }] });
   ok(s5 === 400 && a5.code === 'invalid' && eq(a5.errors, [{ index: 1, field: 'id', code: 'id-pattern' }]), 'PUT a row with an empty id ⇒ 400, the refusal at row 1 / field id (the dialog marks it)', a5);
   const [s6, a6] = await put('pv-ds2', { models: [{ id: 'deepseek-chat', context: '64k', caps: ['tools'] }, { id: 'deepseek-reasoner' }], aliases: { opus: 'deepseek-reasoner' } });
@@ -226,6 +232,21 @@ console.log('⑨ wiring pins');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf-8');
 const aur = read('src/server/account-usage-routes.js');
 ok(/require\('\.\/provider-store\.js'\)\.create\(\{ dataDir: path\.join\(rootDir, 'data'\), catalogOf:/.test(aur) && aur.includes("require('../routes/account-models.js').registerAccountModelRoutes(app, { accounts, providers });"), 'account-usage-routes makes the ONE store (data/providers.json, the harness catalogs) and registers the two routes');
+// THE CHANGE BROADCAST'S WIRING (U1 cure — a leg for what had none): the hub's own onChange line, RUN with a stand-in
+// broadcastAll and a REAL AccountManager — a provider write tells every page (providers-changed) AND re-announces the
+// account lists (the rosters it fits read them)
+{
+  const OC = "registerProviderRoutes(app, { providers, tester, onChange: ";
+  const line = aur.split('\n').find((l) => l.includes(OC));
+  if (!line) throw new Error('the anchor of the broadcast leg (the onChange line) is not in the source');
+  const body = line.slice(line.indexOf(OC) + OC.length, line.lastIndexOf(' });'));
+  const wire = (text) => { const sent = [], lists = []; const bd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvbc-')); const acc = new AccountManager({ dataDir: bd, onChange: (l) => lists.push(l) }); const f = new Function('broadcastAll', 'accounts', `return (${text});`)((m) => sent.push(m), acc); f({ what: 'add', id: 'pv-bc1' }); fs.rmSync(bd, { recursive: true, force: true }); return { sent, lists }; };
+  const w = wire(body);
+  ok(eq(w.sent, [{ type: 'providers-changed', what: 'add', id: 'pv-bc1' }]) && w.lists.length === 1 && Array.isArray(w.lists[0].accounts), 'THE BROADCAST: a provider write sends providers-changed (what + id) to every page and the account manager re-announces its lists once', w);
+  const cut = body.replace("broadcastAll({ type: 'providers-changed', what, id });", '');
+  const wc = cut !== body ? wire(cut) : null;
+  ok(!!wc && wc.sent.length === 0 && wc.lists.length === 1, 'CONTROL: the line without its broadcast tells no page ⇒ the broadcast leg goes RED');
+}
 ok(read('server.js').includes('getModels: () => AVAILABLE_MODELS,'), 'server.js hands the routes the live harness catalogs (AVAILABLE_MODELS)');
 const ma = read('src/lib/manage-agents.js');
 const items = ma.match(/items\.push\(\{ label: t\('Models…'\)[^\n]*openAccountModelsDialog\(\{ accountId: id, name: a\?\.name \|\| '', onTest: \(model\) => doTest\(model\) \}\) \}\);/g) || [];
@@ -288,7 +309,7 @@ const pMany = M.parseListed(many);
 ok(pMany.rows.length === M.REFRESH.maxRows && pMany.skipped === 5 && M.validateProvider({ ...orFresh, models: pMany.rows }).length === 0 && codes(M.validateProvider({ ...orFresh, models: [...pMany.rows, { id: 'v/x' }] })).includes('too-many') && codes(M.validateProvider({ ...cfg, models: pMany.rows.slice(0, 201) })).includes('too-many'), `a provider may list up to ${M.REFRESH.maxRows} rows (more are skipped, counted); an owner's configured table stays at ${M.MODELS_MAX}`);
 ok(M.validateProvider(orFresh).length === 0 && codes(M.validateProvider({ ...orFresh, keyRef: 'sk-or-v1-abcdef' })).includes('key-ref'), 'a key named by its Vault reference — an Integrations row\'s `apiKey` field (integrations:openrouter#apiKey) — validates; a key VALUE still never does');
 ok(M.accountProviderId({ id: 'acct-1', backend: 'claude', type: 'api', providerId: 'pv-ds' }) === 'pv-ds' && M.accountProviderId({ id: 'acct-1', backend: 'claude', type: 'api', providerId: 'evil/../x' }) === 'pv-anthropic-api', 'an account that NAMES its third-party provider (providerId — the pool\'s member lookup reads the same field) rides it; a malformed name is ignored');
-ok(M.REFRESH.cooldownMs === 60000 && M.REFRESH.timeoutMs === 15000 && M.REFRESH.maxBytes === 1048576 && Object.keys(M.REFRESH_WORDS).length === 13, 'the door\'s numbers: once a minute, 15 s, 1 MB; every refusal has its words');
+ok(M.REFRESH.cooldownMs === 60000 && M.REFRESH.timeoutMs === 15000 && M.REFRESH.maxBytes === 1048576 && Object.keys(M.REFRESH_WORDS).length === 14, 'the door\'s numbers: once a minute, 15 s, 1 MB; every refusal has its words (14 with write-failed — lane lg-providers U1 cure)');
 
 // ── ⑭ THE THIRD-PARTY ROAD (lane lg-providers, B-d578 U1) ──────────────────────────────────────────────────
 console.log('⑭ the third-party road: shipped presets, fits, the key, the store over a real vault, the doors');
@@ -309,6 +330,26 @@ ok(eq(vk(`"${OAT}"`), ['key-subscription']) && eq(vk(`ANTHROPIC_AUTH_TOKEN=${OAT
 ok(eq(vk(''), ['key-empty']) && eq(vk('   '), ['key-empty']) && eq(vk('abc def ghij'), ['key-space']) && eq(vk('short'), ['key-short']) && eq(vk('k'.repeat(513)), ['key-long']) && eq(vk(OAT), ['key-subscription']) && eq(vk(' sk-provider-key-1234 '), []) && Object.keys(M.KEY_ERRORS).length === 14, 'the key: empty, a space inside, too short, too long ⇒ by code; an ANTHROPIC SUBSCRIPTION LOGIN ⇒ key-subscription (never sent to a third party); a good key (trimmed) passes');
 const recA = (o) => ({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm1' }), id: 'pv-c3', keyRef: M.keyRefOf('pv-c3'), ...o });
 ok(codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1' }))).includes('base-url-plain') && codes(M.validateProvider(recA({ baseUrl: 'http://llm.example.test/v1' }))).includes('base-url-plain') && ['http://127.0.0.1/v1', 'http://192.168.1.20/v1', 'http://10.1.2.3/v1', 'http://172.20.0.4/v1', 'http://gpu-box:8000/v1', 'http://lab.local/v1', 'http://[::1]:9/v1'].every((u) => codes(M.validateProvider(recA({ baseUrl: u }))).length === 0) && codes(M.validateProvider(recA({ baseUrl: 'http://203.0.113.7/v1', keyRef: null }))).length === 0, 'a record that names a key: plain http only on the person\'s own network (loopback, private ranges, .local, a dotless name) — a public host must be https (a record with no key is not judged)');
+// (A) THE PLAIN-HTTP RULE IS JUDGED ON THE PARSED ADDRESS (U1 cure — the coordinator's (A)): the platform's URL parser gives
+// the host, a literal is judged by its value. Shape 1 — a PUBLIC NAME that begins like a private range; shape 2 — the TEXT
+// and the parser disagree on the host (a user part, a `\` the parser reads as a path); shape 3 — an IPv6 group the parser
+// writes without its leading zeros. Each would send the key in clear over the internet.
+const SHAPE1 = ['http://10.example.com/v1', 'http://192.168.attacker.net/v1', 'http://127.0.0.1.nip.io/v1', 'http://172.16.example.org/v1', 'http://169.254.cloud.example/v1'];
+const SHAPE2 = ['http://evil.example\\@10.0.0.1/v1', 'http://10.0.0.1@evil.example/v1', 'http://u:pw@192.168.1.2/v1'];
+const SHAPE3 = ['http://[fc::1]/v1', 'http://[fe8::1]/v1'];
+const PUBLIC = ['http://172.32.0.1/v1', 'http://11.0.0.1/v1', 'http://192.169.1.1/v1', 'http://203.0.113.7/v1', 'http://[2001:db8::1]/v1', 'http://ai./v1', 'http://[::ffff:808:808]/v1', 'http://100.64.1.2/v1'];   // «ai.» a top-level domain; an IPv4-mapped public one; 100.64/10 the internet providers' shared range
+const OWN = ['http://127.0.0.1/v1', 'http://10.1.2.3:9/v1', 'http://172.31.0.4/v1', 'http://192.168.1.20/v1', 'http://169.254.1.1/v1', 'http://0x7f.1/v1', 'http://LOCALHOST/v1', 'http://gpu-box:8000/v1', 'http://lab.local./v1', 'http://[::1]:9/v1', 'http://[fd12:3456::1]/v1', 'http://[fe80::1]/v1', 'http://0.0.0.0/v1', 'http://gpu.localhost/v1', 'http://[::ffff:7f00:1]/v1'];   // 0.0.0.0 = this machine (what a local server prints); an IPv4-mapped loopback
+const ownOf = (X, list) => list.filter((u) => X.ownNetworkUrl(u));
+ok(ownOf(M, SHAPE1).length === 0 && ownOf(M, SHAPE2).length === 0 && ownOf(M, SHAPE3).length === 0 && ownOf(M, PUBLIC).length === 0 && ownOf(M, OWN).length === OWN.length, 'THE PARSED ADDRESS: a public name that begins like a private range, a host the text and the parser disagree on (a user part, a backslash), an IPv6 group written short, a public literal — NONE is the person\'s own network; every loopback / private / link-local literal (0x7f.1 is 127.0.0.1 to the parser), localhost, .local and a dotless name is', { s1: ownOf(M, SHAPE1), s2: ownOf(M, SHAPE2), s3: ownOf(M, SHAPE3), pub: ownOf(M, PUBLIC), own: OWN.filter((u) => !M.ownNetworkUrl(u)) });
+ok(SHAPE1.every((u) => codes(M.validateProvider(recA({ baseUrl: u }))).includes('base-url-plain')) && SHAPE1.every((u) => codes(M.validateProvider(recA({ baseUrl: u.replace('http:', 'https:') }))).length === 0), 'the record refuses each shape-1 address in plain http (base-url-plain — the key would leave in clear); the same host over https is taken');
+const mPrefix = mutant([['  if (u.username || u.password) return false;\n', "  if (u.username || u.password) return false;\n  if (/^(127|10|192\\.168|169\\.254|172\\.(1[6-9]|2\\d|3[01]))\\./.test(u.hostname)) return true;\n"]]);
+ok(ownOf(mPrefix, SHAPE1).length === SHAPE1.length && SHAPE1.every((u) => !codes(mPrefix.validateProvider(recA({ baseUrl: u }))).includes('base-url-plain')), 'CONTROL (A) shape 1: the rule as a PREFIX MATCH on the host text takes «10.example.com» and its kin as the person\'s network ⇒ the shape-1 leg goes RED');
+const mText = mutant([["  try { u = new URL(String(url || '')); } catch { return false; }\n  if (u.username || u.password) return false;\n", "  const m = /^https?:\\/\\/([^/?#]+)/i.exec(String(url || ''));\n  u = { hostname: (m ? m[1].replace(/^[^@]*@/, '') : '').replace(/:\\d+$/, '') };\n"]]);
+ok(ownOf(mText, SHAPE2).length >= 2 && ownOf(mText, ['http://evil.example\\@10.0.0.1/v1']).length === 1, 'CONTROL (A) shape 2: the host read off the TEXT with the user part cut by hand takes «evil.example\\@10.0.0.1» (the parser sends it to evil.example) and «u:pw@192.168.1.2» ⇒ the shape-2 leg goes RED', ownOf(mText, SHAPE2));
+const m6 = mutant([["/^f[cd][0-9a-f]{2}:/.test(v6) || /^fe[89ab][0-9a-f]:/.test(v6)", "/^f[cd][0-9a-f]{0,2}:/.test(v6) || /^fe[89ab][0-9a-f]?:/.test(v6)"]]);
+ok(ownOf(m6, SHAPE3).length === SHAPE3.length, 'CONTROL (A) shape 3: the IPv6 ranges matched without the full first group take «fc::1» (00fc — public) ⇒ the shape-3 leg goes RED');
+// (B) A SHORT KEY SHOWS NO HALF OF ITSELF: the tail only for a key of 20 characters or more
+ok(M.tailOf('sk-short-ky1') === null && M.tailOf('k'.repeat(19)) === null && M.tailOf('k'.repeat(19) + 'Z') === 'kkkZ' && M.tailOf(` ${'a'.repeat(16)}9z8y `) === '9z8y', 'the tail: none for a key under 20 characters (an 8- or 12-character key never shows a third or a half of itself); the last four of a longer one');
 ok(eq(codes(M.validateProvider(recA({ keyRef: M.keyRefOf('pv-other1') }))), ['key-ref-foreign']) && eq(codes(M.validateProvider(recA({ kind: 'openrouter', wire: 'openai-chat', models: [{ id: 'a/b' }], defaultModel: 'a/b' }))), ['wire-kind']), 'a record naming ANOTHER provider\'s sealed key is refused (key-ref-foreign — it would hand that key to this address); only a self-hosted one carries a wire');
 ok(codes(M.validateProvider({ ...M.draftOf('other', { baseUrl: 'https://user:pw@llm.example.test/v1', model: 'm1' }), id: 'pv-c1' })).includes('base-url-credentials') && codes(M.validateProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1?k=@x', model: 'm1' }), id: 'pv-c2' })).length === 0, 'an address carrying user:password@ is refused (it would ride codex\'s command line and every log — U2); an @ after the host is not one');
 ok(M.keyEntryOf('pv-a1') === 'provider:pv-a1' && M.keyRefOf('pv-a1') === 'secrets:provider:pv-a1#key' && M.providerOfKeyRef(M.keyRefOf('pv-a1')) === 'pv-a1' && M.providerOfKeyRef('integrations:openrouter#apiKey') === null && M.providerOfKeyRef('secrets:provider:pv-a1#value') === null && M.tailOf(' sk-provider-key-1234 ') === '1234' && M.tailOf('abc') === null, 'the key\'s vault entry provider:<id>, its reference secrets:provider:<id>#key (round trip; another store\'s or field\'s is not one), the tail = the last four characters');
@@ -320,7 +361,7 @@ const PW = 'correct horse battery staple';
 await vault.setup(PW, {});
 const KEY = ['sk-', 'prov', 'ider-', 'planted-', '7f3a9c'].join('');
 let pstore = PS.create({ dataDir: PDIR, catalogOf, vault: () => vault, now: () => 1792500000000, log: () => {} });
-const a1 = pstore.add({ preset: 'deepseek', key: ` ${KEY} `, label: '' });
+const a1 = await pstore.add({ preset: 'deepseek', key: ` ${KEY} `, label: '' });
 const disk = () => (fs.existsSync(pstore.file) ? fs.readFileSync(pstore.file, 'utf-8') : '');
 const pid = a1.ok ? a1.provider.id : null;
 const box = vault.secretGet(M.keyEntryOf(pid));
@@ -328,29 +369,119 @@ ok(a1.ok && /^pv-[0-9a-f]{12}$/.test(pid) && a1.provider.keyRef === M.keyRefOf(p
 ok(!disk().includes(KEY) && !disk().includes(KEY.slice(3, -4)) && JSON.parse(disk()).providers[0].tail === KEY.slice(-4), 'data/providers.json never holds the key (nor its middle) — only the tail');
 ok(eq(pstore.keyOf(pid), { ok: true, value: KEY }) && pstore.keyOf('pv-anthropic-api').code === 'unknown' && pstore.keyOf('pv-nobody').code === 'unknown', 'keyOf: the ONE reader answers the value for a kept record; a built-in or unknown id ⇒ unknown');
 const before2 = disk();
-const bad = [pstore.add({ preset: 'deepseek', key: OAT }), pstore.add({ preset: 'other', key: KEY }), pstore.add({ preset: 'zzz', key: KEY }), pstore.add({ preset: 'deepseek', key: 'x' })];
+const bad = await Promise.all([pstore.add({ preset: 'deepseek', key: OAT }), pstore.add({ preset: 'other', key: KEY }), pstore.add({ preset: 'zzz', key: KEY }), pstore.add({ preset: 'deepseek', key: 'x' })]);
 ok(eq(bad.map((r) => r.ok ? 'ok' : r.errors.map((e) => e.field + ':' + e.code).join('+')), ['key:key-subscription', 'baseUrl:base-url', 'preset:preset-unknown', 'key:key-short']) && disk() === before2 && vault.secretNames().filter((n) => n.name.startsWith('provider:')).length === 1, 'add refuses WHOLE by field (a Claude login, a self-hosted one with no address, an unknown preset, a short key) — nothing written, nothing sealed', bad.map((r) => r.errors));
 vault.lock('door');
-const lockedAdd = pstore.add({ preset: 'glm', key: KEY });
-ok(lockedAdd.code === 'vault_locked' && disk() === before2 && pstore.keyOf(pid).code === 'vault_locked' && pstore.rekey(pid, KEY + 'x').code === 'vault_locked', 'a LOCKED vault: add ⇒ vault_locked, nothing written; keyOf and rekey ⇒ vault_locked by name');
+const lockedAdd = await pstore.add({ preset: 'glm', key: KEY });
+ok(lockedAdd.code === 'vault_locked' && disk() === before2 && pstore.keyOf(pid).code === 'vault_locked' && (await pstore.rekey(pid, KEY + 'x')).code === 'vault_locked', 'a LOCKED vault: add ⇒ vault_locked, nothing written; keyOf and rekey ⇒ vault_locked by name');
 await vault.unlock(PW, {});
-const rk = pstore.rekey(pid, 'sk-provider-second-key-0042');
+const rk = await pstore.rekey(pid, 'sk-provider-second-key-0042');
 ok(rk.ok && rk.provider.tail === '0042' && pstore.keyOf(pid).value === 'sk-provider-second-key-0042' && !disk().includes('second-key'), 'rekey: the new key sealed over the old, the tail rewritten, still nothing of it in the file');
-const pt = pstore.patch(pid, { label: 'My DeepSeek', defaultModel: 'deepseek-reasoner' });
-const ptBad = pstore.patch(pid, { defaultModel: 'gpt-9' });
-ok(pt.ok && pt.provider.label === 'My DeepSeek' && pt.provider.defaultModel === 'deepseek-reasoner' && !ptBad.ok && codes(ptBad.errors).includes('default-dangling') && pstore.patch('pv-anthropic-api', { label: 'x' }).code === 'built-in', 'patch: rename + default (validated whole: a default not in the table refused); a built-in ⇒ built-in');
+const pt = await pstore.patch(pid, { label: 'My DeepSeek', defaultModel: 'deepseek-reasoner' });
+const ptBad = await pstore.patch(pid, { defaultModel: 'gpt-9' });
+ok(pt.ok && pt.provider.label === 'My DeepSeek' && pt.provider.defaultModel === 'deepseek-reasoner' && !ptBad.ok && codes(ptBad.errors).includes('default-dangling') && (await pstore.patch('pv-anthropic-api', { label: 'x' })).code === 'built-in', 'patch: rename + default (validated whole: a default not in the table refused); a built-in ⇒ built-in');
 pstore = PS.create({ dataDir: PDIR, catalogOf, vault: () => vault, log: () => {} });
 ok(pstore.get(pid).label === 'My DeepSeek' && pstore.thirdParty().length === 1 && PS.forDir(PDIR) === pstore, 'a new store over the same file reads it back (and is THE store of its data dir — the Vault row names its key by it)');
-ok(eq(pstore.patch(pid, { baseUrl: 'https://elsewhere.example.test/anthropic', key: KEY }).errors.map((e) => e.code), ['base-url-fixed']) && pstore.get(pid).baseUrl === 'https://api.deepseek.com/anthropic', 'a PRESET\'s address is VibeSpace\'s: a new one is refused (base-url-fixed) — the sealed key never moves to a host the preset does not name (adversarial read r1)');
-const own = pstore.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3', wire: 'anthropic-messages' });
-const mv1 = own.ok ? pstore.patch(own.provider.id, { baseUrl: 'https://gpu.example.test/v1' }) : null;
+ok(eq((await pstore.patch(pid, { baseUrl: 'https://elsewhere.example.test/anthropic', key: KEY })).errors.map((e) => e.code), ['base-url-fixed']) && pstore.get(pid).baseUrl === 'https://api.deepseek.com/anthropic', 'a PRESET\'s address is VibeSpace\'s: a new one is refused (base-url-fixed) — the sealed key never moves to a host the preset does not name (adversarial read r1)');
+const own = await pstore.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3', wire: 'anthropic-messages' });
+const mv1 = own.ok ? await pstore.patch(own.provider.id, { baseUrl: 'https://gpu.example.test/v1' }) : null;
 const afterMv1 = own.ok ? pstore.get(own.provider.id).baseUrl : null;   // read BEFORE the second patch moves it
-const mv2 = own.ok ? pstore.patch(own.provider.id, { baseUrl: 'https://gpu.example.test/v1', key: 'sk-new-key-for-gpu-7777' }) : null;
+const mv2 = own.ok ? await pstore.patch(own.provider.id, { baseUrl: 'https://gpu.example.test/v1', key: 'sk-new-key-for-gpu-7777' }) : null;
 ok(own.ok && own.provider.wire === 'anthropic-messages' && M.fitsHarness(own.provider, 'claude') && !mv1.ok && codes(mv1.errors).includes('key-empty') && afterMv1 === 'http://127.0.0.1:9/v1' && mv2.ok && mv2.provider.baseUrl === 'https://gpu.example.test/v1' && mv2.provider.tail === '7777' && pstore.keyOf(own.provider.id).value === 'sk-new-key-for-gpu-7777', 'a SELF-HOSTED one (the person said Anthropic Messages ⇒ Claude Code fits): a new address only WITH the key pasted again (without ⇒ refused, nothing moved; with ⇒ moved, the new key sealed, its tail)');
-pstore.remove(own.provider.id);
+await pstore.remove(own.provider.id);
 vault.secretPut(M.keyEntryOf('pv-orphan1'), 'sk-orphan-key-0001');
-const orph = pstore.remove('pv-orphan1');
-ok(orph.ok && orph.orphan === true && vault.secretGet(M.keyEntryOf('pv-orphan1')).value === null && pstore.remove('pv-never1').code === 'unknown', 'an ORPHANED key (its record gone) is still removed by the provider\'s own door — the Vault row\'s Remove never answers 404 for a key that is there; an id with neither ⇒ unknown');
+const orph = await pstore.remove('pv-orphan1');
+ok(orph.ok && orph.orphan === true && vault.secretGet(M.keyEntryOf('pv-orphan1')).value === null && (await pstore.remove('pv-never1')).code === 'unknown', 'an ORPHANED key (its record gone) is still removed by the provider\'s own door — the Vault row\'s Remove never answers 404 for a key that is there; an id with neither ⇒ unknown');
+const SSRC = path.join(ROOT, 'src/server/provider-store.js');
+const storeMutant = (pairs) => { let t = fs.readFileSync(SSRC, 'utf-8'); for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error('mutant anchor missing: ' + from.slice(0, 80)); t = t.replace(from, to); } const m = new Module(SSRC); m.filename = SSRC; m.paths = Module._nodeModulePaths(path.dirname(SSRC)); m._compile(t, SSRC); return m.exports; };
+// (C) THE STORE'S WRITES GO THROUGH THE STORE WRITER, AND ITS ANSWER DECIDES (U1 cure — the coordinator's (C)): a writer
+// that answers «failed» puts memory back for every act of a person — the record not kept, the sealed key not kept either
+// (a new key: the old one sealed again), nothing removed — and the act is refused write-failed by name.
+{
+  const FDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-f-'));
+  let answer = true; let hold = null; const marked = [];
+  const fakeW = { dirty: (file, o) => marked.push([path.basename(file), o.name, o.mode]), durable: () => (hold ? new Promise((r) => { const h = hold; hold = null; h(r); }) : Promise.resolve(answer)) };
+  const provNames = () => vault.secretNames().filter((n) => n.name.startsWith('provider:')).map((n) => n.name).sort();
+  const fst = PS.create({ dataDir: FDIR, catalogOf, vault: () => vault, writer: fakeW, log: () => {} });
+  const fk = await fst.add({ preset: 'kimi', key: KEY });
+  const fid = fk.ok ? fk.provider.id : null;
+  ok(fk.ok && eq(marked[0], ['providers.json', 'providers.write', 0o600]) && !fs.existsSync(fst.file), 'the act marks data/providers.json with THE STORE WRITER (its name, 0600) and the WRITER writes it — no write on the main loop (the suite\'s writer is a stand-in: nothing lands)', marked[0]);
+  answer = false;
+  const names0 = provNames();
+  const fa = await fst.add({ preset: 'glm', key: KEY });
+  const fr = await fst.rekey(fid, 'sk-provider-would-be-new-5555');
+  const fp = await fst.patch(fid, { label: 'Renamed' });
+  const ft = await fst.noteTested(fid, 'claude', 'ok', 1792500000001);
+  const fm = await fst.remove(fid);
+  ok([fa, fr, fp, ft, fm].every((r) => !r.ok && r.code === 'write-failed') && eq(fst.thirdParty().map((x) => x.id), [fid]) && eq(provNames(), names0), 'A FAILED SAVE: add · new key · rename · the Test\'s verdict · remove ⇒ each refused write-failed; memory holds what it held (one record), the vault the keys it held', [fa, fr, fp, ft, fm].map((r) => r.code));
+  ok(fst.keyOf(fid).value === KEY && fst.get(fid).tail === KEY.slice(-4) && fst.get(fid).label === fk.provider.label && !fst.get(fid).tested.claude && fst.get(fid) !== null, '…the new key\'s failed save SEALS THE OLD KEY AGAIN (the tail names the key the vault holds), the rename is undone, no verdict kept, the record not removed and its key still there');
+  // a write that came in BETWEEN the act's change and the writer's answer keeps its change (the undo is the act's own record)
+  answer = true;
+  hold = (r) => { hold = null; setImmediate(() => { fst.put({ id: 'pv-between1', kind: 'openai-chat', label: 'Between', modelsSource: 'configured', models: [{ id: 'm-1' }] }); r(false); }); };
+  const fb = await fst.patch(fid, { label: 'Renamed again' });
+  ok(fb.code === 'write-failed' && fst.get(fid).label === fk.provider.label && fst.get('pv-between1') !== null, 'the undo is the act\'s OWN record: a write that landed while the act waited for the disk keeps its change', { fb: fb.code });
+  // …and a write to the SAME record meanwhile (Train 1's models save — a new object) keeps ITS fields; the act's own is undone
+  const between = (fn) => { hold = (r) => { hold = null; setImmediate(() => { fn(); r(false); }); }; };
+  between(() => fst.setModels(fid, { models: [{ id: 'kimi-between' }] }));
+  const fc = await fst.patch(fid, { label: 'Renamed thrice' });
+  ok(fc.code === 'write-failed' && fst.get(fid).label === fk.provider.label && eq(fst.get(fid).models.map((m) => m.id), ['kimi-between']), 'the undo puts back ONLY the fields the act changed, where they still hold its value: a models save that landed on the SAME record meanwhile keeps its rows, the rename is undone', { label: fst.get(fid).label });
+  const PSs = storeMutant([["    for (const k of Object.keys(to)) if (!same(from[k], to[k]) && same(r[k], to[k])) back[k] = from[k];\n    return Object.keys(back).length ? { ...r, ...back } : r;\n", '    return r === to ? from : r;\n']]);
+  {
+    let hs = null;
+    const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-s-'));
+    const sst = PSs.create({ dataDir: sdir, catalogOf, vault: () => vault, writer: { dirty() { }, durable: () => (hs ? new Promise((r) => { const h = hs; hs = null; h(r); }) : Promise.resolve(true)) }, log: () => {} });
+    const sa = await sst.add({ preset: 'kimi', key: KEY });
+    hs = (r) => setImmediate(() => { sst.setModels(sa.provider.id, { models: [{ id: 'kimi-between' }] }); r(false); });
+    await sst.patch(sa.provider.id, { label: 'Renamed thrice' });
+    ok(sst.get(sa.provider.id).label === 'Renamed thrice', 'CONTROL (C): an undo by the record\'s IDENTITY (the first cut) finds a record another write replaced and undoes nothing — the refused rename stays ⇒ the same-record leg goes RED');
+    vault.secretDrop(M.keyEntryOf(sa.provider.id)); fs.rmSync(sdir, { recursive: true, force: true });
+  }
+  // the vault LOCKED while the act waited: the old key cannot be sealed again — the record keeps the act's fields (it names the
+  // key the vault holds) and its write stays owed; with NO key before, a failed new key is dropped (the vault as it was)
+  between(() => vault.lock('door'));
+  const fl = await fst.rekey(fid, 'sk-provider-locked-meanwhile-6666');
+  await vault.unlock(PW, {});
+  ok(fl.code === 'write-failed' && fst.keyOf(fid).value === 'sk-provider-locked-meanwhile-6666' && fst.get(fid).tail === '6666', 'the vault locked meanwhile: the new key stays (the old one could not be sealed again) and the record\'s tail names IT — never a record that names one key while the vault holds another', { tail: fst.get(fid).tail });
+  vault.secretDrop(M.keyEntryOf(fid));
+  answer = false;
+  const fn0 = await fst.rekey(fid, 'sk-provider-no-old-key-7777');
+  answer = true;
+  ok(fn0.code === 'write-failed' && fst.hasKey(fid) === false && fst.get(fid).tail === '6666', 'no key before: a new key whose save failed is DROPPED from the vault, the record as it was');
+  const PSu = storeMutant([['    records = undo(records);\n', '']]);
+  const udir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-u-'));
+  const ust = PSu.create({ dataDir: udir, catalogOf, vault: () => vault, writer: { dirty() { }, durable: async () => false }, log: () => {} });
+  const ua = await ust.add({ preset: 'glm', key: KEY });
+  ok(ua.code === 'write-failed' && ust.thirdParty().length === 1, 'CONTROL (C): a store that does not undo on the writer\'s «failed» keeps a record the disk never got (it would show, and be spent, until the next restart drops it) ⇒ the failed-save leg goes RED');
+  fs.rmSync(FDIR, { recursive: true, force: true }); fs.rmSync(udir, { recursive: true, force: true });
+}
+// THE VAULT NOT SET UP: the add refuses by name, nothing written, nothing sealed; the Test's reader says the same
+{
+  const NDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-n-'));
+  const nvault = VE.create({ dataDir: NDIR, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false });
+  const nst = PS.create({ dataDir: NDIR, catalogOf, vault: () => nvault, log: () => {} });
+  const na = await nst.add({ preset: 'deepseek', key: KEY });
+  const nn = PS.create({ dataDir: NDIR, catalogOf, vault: () => null, log: () => {} });
+  const nb = await nn.add({ preset: 'deepseek', key: KEY });
+  ok(nvault.state() === 'not_set_up' && na.code === 'vault_not_set_up' && nb.code === 'vault_not_set_up' && !fs.existsSync(nst.file) && nst.thirdParty().length === 0 && nvault.secretNames().length === 0, 'THE VAULT NOT SET UP (and no vault at all): the add ⇒ vault_not_set_up by name — no record, no file, no entry (the page asks the person to set the vault up)', { na, nb });
+  fs.rmSync(NDIR, { recursive: true, force: true });
+}
+// a PRESET's address is VibeSpace's AT THE ADD as at the patch; «has a key» asks the VAULT's names
+{
+  const fx = await pstore.add({ preset: 'deepseek', key: KEY, baseUrl: 'https://elsewhere.example.test/anthropic' });
+  const fy = await pstore.add({ preset: 'kimi', key: KEY, baseUrl: '   ' });
+  ok(!fx.ok && eq(fx.errors.map((e) => e.field + ':' + e.code), ['baseUrl:base-url-fixed']) && fy.ok && fy.provider.baseUrl === 'https://api.moonshot.ai/anthropic', 'the ADD refuses an address for a preset that has its own (base-url-fixed — as the patch does); an empty one is no address and the preset\'s stands', fx.errors);
+  const PSa = storeMutant([["      if (!shipped.baseRequired && typeof i.baseUrl === 'string' && i.baseUrl.trim()) errors.push({ field: 'baseUrl', code: 'base-url-fixed' });\n", '']]);
+  const adir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-a-'));
+  const ax = await PSa.create({ dataDir: adir, catalogOf, vault: () => vault, log: () => {} }).add({ preset: 'deepseek', key: KEY, baseUrl: 'https://elsewhere.example.test/anthropic' });
+  ok(ax.ok && ax.provider.baseUrl === 'https://elsewhere.example.test/anthropic', 'CONTROL: an add without the rule keeps DeepSeek\'s record pointed at another host (the key goes there) ⇒ the add leg goes RED');
+  if (ax.ok) vault.secretDrop(M.keyEntryOf(ax.provider.id));
+  fs.rmSync(adir, { recursive: true, force: true });
+  const hid = fy.provider.id;
+  const had = pstore.hasKey(hid);
+  vault.secretDrop(M.keyEntryOf(hid));   // the entry gone (a vault reset, the Vault window's own Remove of the key)
+  ok(had === true && pstore.hasKey(hid) === false && pstore.get(hid).keyRef === M.keyRefOf(hid) && pstore.hasKey('pv-anthropic-api') === false, '«has a key» asks the VAULT\'S NAMES (no key read): the record still names its entry, but the entry is gone ⇒ false');
+  await pstore.remove(hid);
+}
 const VIu = require(path.join(ROOT, 'src/vault-inventory.js'));
 const vrow = VIu.secretRowOf(vault.secretNames().find((n) => n.name === M.keyEntryOf(pid)), { providerName: (id) => pstore.get(id).label });
 ok(vrow && vrow.field === 'key' && vrow.kind === 'api-key' && vrow.label === 'Model provider key · My DeepSeek' && !JSON.stringify(vrow).includes('0042') && eq(VIu.doorsOf({ store: 'secrets', entry: M.keyEntryOf(pid), field: 'key' }).delete, { method: 'DELETE', path: `/api/providers/${pid}`, confirm: 'provider' }), 'the Vault window\'s row: «Model provider key · <its name>», no character of the key; its Remove = the provider\'s own DELETE (confirm words «provider»)', vrow);
@@ -368,10 +499,13 @@ const pbase = `http://127.0.0.1:${psrv.address().port}`;
 const SAME = { 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' };
 const call = async (method, p2, body, headers = SAME) => { const r = await fetch(pbase + p2, { method, headers, body: body ? JSON.stringify(body) : undefined }); return [r.status, await r.json()]; };
 try {
-  const [g1, l1] = await call('GET', '/api/providers', null, {});
-  const [g2, l2] = await call('GET', '/api/providers', null, { Authorization: 'Bearer vsst_planted' });
+  const [g1, l1] = await call('POST', '/api/providers/list', {});
+  const [g2, l2] = await call('POST', '/api/providers/list', {}, { ...SAME, Authorization: 'Bearer vsst_planted' });
+  const [g3, l3] = await call('POST', '/api/providers/list', {}, { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' });
+  const g4 = (await fetch(pbase + '/api/providers')).status;   // the old GET (a bare app answers 404 with no JSON)
+  const [g5, l5] = await call('POST', '/api/providers/list', {}, { 'Content-Type': 'application/json' });   // no Origin, no Sec-Fetch-Site: a script on this machine, not a page
   ok(g1 === 200 && l1.shipped.length === 6 && l1.shipped[0].fits.claude.ok && !l1.shipped[0].fits.codex.ok && l1.providers.length === 1 && l1.providers[0].id === pid && l1.providers[0].fits.claude.ok && l1.providers[0].hasKey === true && !('keyRef' in l1.providers[0]) && !JSON.stringify(l1).includes('second-key') && !JSON.stringify(l1).includes('secrets:provider'), 'GET: the shipped presets with what each fits, the kept records with theirs — no key, and not where the vault keeps it (hasKey only)');
-  ok(g2 === 403 && l2.code === 'human_only', 'GET by an agent\'s bearer ⇒ 403 human_only (the address and the tail are a page\'s to read)');
+  ok(g2 === 403 && l2.code === 'human_only' && g3 === 403 && l3.code === 'cross_site' && g4 === 404 && g5 === 403 && l5.code === 'cross_site' && !JSON.stringify([l2, l3, l5]).includes(KEY.slice(-4)) && !JSON.stringify([l2, l3]).includes('deepseek.com'), 'THE ROSTER IS THE PERSON\'S (U1 cure (B)): the list through the same person verdict as the writes — an agent\'s bearer ⇒ 403 human_only, another site ⇒ 403 cross_site, neither reads a label, an address or a tail; a caller with no page at all (no Origin, no Sec-Fetch-Site) neither; the old GET is gone (404)', { g2, g3, g4, g5 });
   const [b1, x1] = await call('POST', '/api/providers', { preset: 'glm', key: KEY }, { ...SAME, Authorization: 'Bearer vsst_planted' });
   const [b2, x2] = await call('POST', '/api/providers', { preset: 'glm', key: KEY }, { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' });
   const [b3] = await call('DELETE', `/api/providers/${pid}`, null, { Authorization: 'Bearer jbt_planted' });
@@ -389,6 +523,31 @@ try {
   const [d4] = await call('DELETE', `/api/providers/${gid}`);
   ok(d1 === 200 && z1.provider.tail === '9999' && d2 === 200 && z2.provider.label === 'GLM (work)' && d3 === 200 && z3.keyDropped === true && d4 === 404 && pstore.get(gid) === null && vault.secretGet(M.keyEntryOf(gid)).value === null && eq(changes.map((c) => c.what), ['add', 'rekey', 'patch', 'remove']), 'new key · rename · remove (the record AND its vault entry; a second remove ⇒ 404), each announced once');
 } finally { psrv.close(); }
+{
+  // CONTROL (B): the list without its person line answers a caller with no page — the label, the address, the tail
+  const RP = path.join(ROOT, 'src/routes/providers.js');
+  const LIST_LINE = "  app.post('/api/providers/list', (req, res) => {\n    if (!person(req, res)) return;\n";
+  const rsrc = fs.readFileSync(RP, 'utf-8');
+  if (!rsrc.includes(LIST_LINE)) throw new Error('the anchor of the control «the list\'s person line» is not in the source');
+  const rm = new Module(RP); rm.filename = RP; rm.paths = Module._nodeModulePaths(path.dirname(RP)); rm._compile(rsrc.replace(LIST_LINE, "  app.post('/api/providers/list', (req, res) => {\n"), RP);
+  const mapp = express(); mapp.use(express.json());
+  rm.exports.registerProviderRoutes(mapp, { providers: pstore });
+  const msrv = await new Promise((res) => { const s2 = mapp.listen(0, '127.0.0.1', () => res(s2)); });
+  try {
+    const r = await fetch(`http://127.0.0.1:${msrv.address().port}/api/providers/list`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const j = await r.json();
+    ok(r.status === 200 && JSON.stringify(j).includes('My DeepSeek'), 'CONTROL (B): a list door without the person verdict hands a script with no page the provider\'s name and tail ⇒ the person leg goes RED');
+  } finally { msrv.close(); }
+  // AN ACT THAT THROWS answers 500 with words — an async door's rejection never hangs the request (Express 4 answers none)
+  const tapp2 = express(); tapp2.use(express.json());
+  require(RP).registerProviderRoutes(tapp2, { providers: { thirdParty: () => [], hasKey: () => false, add: async () => { throw new Error('boom'); } } });
+  const tsrv2 = await new Promise((res) => { const s2 = tapp2.listen(0, '127.0.0.1', () => res(s2)); });
+  try {
+    let st = 0, j2 = null;
+    try { const r = await fetch(`http://127.0.0.1:${tsrv2.address().port}/api/providers`, { method: 'POST', headers: SAME, body: JSON.stringify({ preset: 'glm', key: KEY }), signal: AbortSignal.timeout(5000) }); st = r.status; j2 = await r.json(); } catch (e) { st = e.name; }
+    ok(st === 500 && j2 && j2.code === 'failed' && !JSON.stringify(j2).includes('boom'), 'an act that THROWS (a malformed body, a store fault) answers 500 «the provider could not be changed» — never a request left hanging, never the fault\'s own text', { st });
+  } finally { tsrv2.close(); }
+}
 
 console.log('⑭ RED controls');
 const mFits = mutant([["    else if (!k.harnesses.includes(h)) out[h] = { ok: false, code: 'wire' };\n", '']]);
@@ -399,13 +558,11 @@ const mAnchored = mutant([["  if (/sk-ant-(?:oat|ort|sid)/i.test(k)) return", " 
 ok(codes(M.validateKey(`"${OAT}"`)).join() === 'key-subscription' && codes(mAnchored.validateKey(`"${OAT}"`)).join() === 'key-shape' && codes(mAnchored.validateKey(`ANTHROPIC_AUTH_TOKEN=${OAT}`)).join() === 'key-shape' && codes(mAnchored.validateKey(JSON.stringify({ t: OAT }))).join() === 'key-shape', 'CONTROL: the rule ANCHORED at the start (the first cut) no longer names a quoted / NAME= / JSON-wrapped subscription login for what it is ⇒ the anywhere leg above goes RED');
 const mFitKind = mutant([["const fitKindOf = (p) => (p && p.kind === 'self-hosted' ? WIRE_KIND[p.wire] || 'openai-chat' : p && p.kind);", "const fitKindOf = (p) => p && p.kind;"]]);
 ok(!M.fitsHarness({ kind: 'self-hosted' }, 'claude') && mFitKind.fitsHarness({ kind: 'self-hosted' }, 'claude') && mFitKind.fitsHarness({ kind: 'self-hosted' }, 'codex'), 'CONTROL: fits by the kind\'s list alone (the first cut) tells a person with a Chat-only vLLM server that Claude Code AND Codex fit ⇒ RED');
-const SSRC = path.join(ROOT, 'src/server/provider-store.js');
-const storeMutant = (pairs) => { let t = fs.readFileSync(SSRC, 'utf-8'); for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error('mutant anchor missing: ' + from.slice(0, 80)); t = t.replace(from, to); } const m = new Module(SSRC); m.filename = SSRC; m.paths = Module._nodeModulePaths(path.dirname(SSRC)); m._compile(t, SSRC); return m.exports; };
 const PSm = storeMutant([['      const sealed = seal(id, i.key);\n', '      const sealed = { ok: true };\n']]);
 const MDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-m-'));
 vault.lock('door');
 const mstore = PSm.create({ dataDir: MDIR, catalogOf, vault: () => vault, log: () => {} });
-const ma1 = mstore.add({ preset: 'glm', key: KEY });
+const ma1 = await mstore.add({ preset: 'glm', key: KEY });
 ok(ma1.ok && fs.existsSync(mstore.file) && mstore.keyOf(ma1.provider.id).code === 'vault_locked', 'CONTROL: a store that skips the seal WRITES a record while the vault is locked (a provider whose key was never kept) ⇒ RED (the real one refuses vault_locked with the file untouched)');
 fs.rmSync(PDIR, { recursive: true, force: true }); fs.rmSync(MDIR, { recursive: true, force: true });
 
@@ -420,10 +577,10 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   await tvault.setup(PW, {});
   const tstore = PS.create({ dataDir: TDIR, vault: () => tvault, log: () => {} });
   const TKEY = ['sk-', 'third', '-party-', 'test-', '9b1e5a'].join('');
-  const addOther = (host, wire, label) => tstore.add({ preset: 'other', key: TKEY, baseUrl: `https://${host}/v1`, model: 'm-1', wire, label }).provider;
-  const P = { ok: addOther('llm.example.test', 'anthropic-messages', 'Good'), refuse: addOther('refuse.example.test', 'anthropic-messages', 'Refuse'), down: addOther('down.example.test', 'anthropic-messages', 'Down'),
-    nomodel: addOther('nomodel.example.test', 'anthropic-messages', 'NoModel'), slow: addOther('slow.example.test', 'anthropic-messages', 'Slow'), leak: addOther('leak.example.test', 'anthropic-messages', 'Leak'),
-    codex: addOther('llm.example.test', 'openai-responses', 'GoodCodex') };
+  const addOther = async (host, wire, label) => (await tstore.add({ preset: 'other', key: TKEY, baseUrl: `https://${host}/v1`, model: 'm-1', wire, label })).provider;
+  const P = { ok: await addOther('llm.example.test', 'anthropic-messages', 'Good'), refuse: await addOther('refuse.example.test', 'anthropic-messages', 'Refuse'), down: await addOther('down.example.test', 'anthropic-messages', 'Down'),
+    nomodel: await addOther('nomodel.example.test', 'anthropic-messages', 'NoModel'), slow: await addOther('slow.example.test', 'anthropic-messages', 'Slow'), leak: await addOther('leak.example.test', 'anthropic-messages', 'Leak'),
+    codex: await addOther('llm.example.test', 'openai-responses', 'GoodCodex') };
   // THE MACHINE'S OWN SIGN-IN, planted exactly where an unguarded child would find it (its HOME, its config variables)
   const MACHINE = path.join(TDIR, 'machine-home');
   fs.mkdirSync(path.join(MACHINE, '.claude'), { recursive: true }); fs.writeFileSync(path.join(MACHINE, '.claude', '.credentials.json'), '{"claudeAiOauth":{}}');
@@ -465,7 +622,7 @@ console.log('⑮ the provider test: a FAKE CLI, empty homes, a third party only,
   // THE REFUSALS — by name, NOTHING spawned (the fake writes no report)
   const putRec = (id, baseUrl) => { const r = tstore.put({ id, kind: 'self-hosted', label: id, preset: 'other', baseUrl, keyRef: M.keyRefOf(id), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] }); tvault.secretPut(M.keyEntryOf(id), TKEY); return r; };
   putRec('pv-vendor1', 'https://api.anthropic.com'); putRec('pv-vendor2', 'https://claude.ai./x'); putRec('pv-noaddr1', null); putRec('pv-vendor3', 'https://API.ANTHROPIC.COM/v1');
-  const nomod = tstore.add({ preset: 'other', key: TKEY, baseUrl: 'https://llm.example.test/v1', wire: 'anthropic-messages', label: 'NoRows' }).provider;
+  const nomod = (await tstore.add({ preset: 'other', key: TKEY, baseUrl: 'https://llm.example.test/v1', wire: 'anthropic-messages', label: 'NoRows' })).provider;
   const refusals = [];
   const refuse = async (what, Mod, id, harness, code, by) => { const x = await run(Mod, id, harness, by); refusals.push([what, x.r.code]); ok(!x.r.ok && x.r.code === code && x.rep === null, `REFUSED BY NAME (${code}), NOTHING SPAWNED — ${what}`, x.r); };
   await refuse('MUST 2: an address on the vendor\'s own hosts (api.anthropic.com)', runner, 'pv-vendor1', 'claude', 'vendor-own');
@@ -551,6 +708,7 @@ console.log('⑯ the wizard and the roster: rows per harness beside the accounts
   const noneRec = M.normalizeProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm-1' }), id: 'pv-r3', keyRef: M.keyRefOf('pv-r3') });
   const rows = M.rosterRowsOf([dsRec, cxRec, noneRec, M.presetOf('pv-anthropic-api')]);
   ok(eq(rows.map((r) => `${r.id}:${r.backend}`), ['pv-r1:claude', 'pv-r2:codex']) && rows[0].localOnly === true && M.rosterRowsOf([dsRec], { usable: false })[0].loggedIn === false && rows[0].loggedIn === true && rows[0].type === 'provider' && rows[0].name === 'DeepSeek' && rows[0].tail === 'ab12' && rows[0].model === 'deepseek-chat' && rows[0].provenance === 'third-party' && eq(rows[1].tested, { verdict: 'ok', at: 5 }) && !JSON.stringify(rows).includes('secrets:provider'), 'rosterRowsOf: ONE row per harness a provider fits (DeepSeek → Claude Code, a Responses service → Codex; a self-hosted one that said nothing → none; a built-in → none), type provider, its tail and model and last test — never where its key is');
+  ok(eq(M.rosterRowsOf([dsRec, cxRec], { usable: (p) => p.id === 'pv-r2' }).map((r) => r.loggedIn), [false, true]) && read('src/server/account-usage-routes.js').includes('usable: ((open) => (p) => open && providers.hasKey(p.id))('), 'a row is usable when the vault is open AND its record\'s entry is in it (read off the vault\'s names — U1 cure: a vault reset no longer leaves a row that says it can run); the hub hands that test');
   const RDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvrows-'));
   const am2 = new AccountManager({ dataDir: RDIR });
   am2.add({ name: 'Console', key: 'sk-ant-api03-' + 'r'.repeat(40) });
@@ -576,7 +734,7 @@ console.log('⑯ the wizard and the roster: rows per harness beside the accounts
   ok(['/api/providers\', { preset: s.id, key', '/api/providers/${encodeURIComponent(p.id)}/test`, { harness: h }', "/api/accounts/${encodeURIComponent(p.id)}/models`, { models:", '/api/providers/${encodeURIComponent(p.id)}`, { defaultModel: pick }, \'PATCH\''].every((x) => wiz.includes(x)) && wiz.includes('type="password"') && /<details class="pw-tech">/.test(wiz), 'the wizard asks only the doors that exist (add, the test per harness, the models save, the default) — the key in a password field, the technical details folded');
   ok(ma2.includes("...(!selectedHost ? [{ label: t('Add a third-party model…'), action: () => { done(); openProviderWizard({ backend: 'claude', onDone: refresh }); } }] : []),") && ma2.includes("openProviderWizard({ backend: 'codex', onDone: refresh })") && (ma2.match(/if \(!selectedHost\) renderProviderRows\(body, '(claude|codex)', \{ refresh \}\)/g) || []).length === 2 && ma2.includes("a.backend === 'codex' && a.type !== 'provider'") && ma2.includes("(x.backend || 'claude') === 'claude' && x.type !== 'provider'") && ma2.includes("a.backend === be && a.type !== 'provider'"), 'Manage agents: ONE «Add a third-party model…» door per roster and the providers\' rows under each — this machine only; NO roster (Claude Code, Codex, the others) draws a provider row as one of its own accounts');
   ok((app2.match(/accounts: accountRowsOf\((msg|d)\)/g) || []).length === 2 && meta.includes('export function accountRowsOf(answer)') && /answer\.providerRows/.test(meta), 'the page\'s account cache merges the providers\' rows at BOTH places it is set (the push and the read) — New Session, Billing and the badge list them');
-  ok(ros.includes("t('No usage reading'), t('paid by use')") && ['Test', 'Models…', 'Rename…', 'New key…', 'Remove…'].every((w) => ros.includes(`label: t('${w}')`)) && ros.includes("if (!rows.length || !sec.isConnected) { sec.remove(); return; }") && ros.indexOf('body.appendChild(sec);') < ros.indexOf("await fetchJson('/api/providers')") && !ros.includes("t('Add a third-party model…')") && ros.includes("key: id, title") && /\$\{DOTS\}/.test(ros), 'a roster row: «no usage reading · paid by use · tested …» and ⋯ (the roster\'s DOTS SVG) Test · Models… · Rename… · New key… · Remove…; its section takes its PLACE before the read (never drifts under another heading), leaves when no provider serves the harness, and adds no second add door; the new-key form is keyed by the provider\'s id');
+  ok(ros.includes("t('No usage reading'), t('paid by use')") && ['Test', 'Models…', 'Rename…', 'New key…', 'Remove…'].every((w) => ros.includes(`label: t('${w}')`)) && ros.includes("if (!rows.length || !sec.isConnected) { sec.remove(); return; }") && ros.indexOf('body.appendChild(sec);') > 0 && ros.indexOf('body.appendChild(sec);') < ros.indexOf("await fetchJson('/api/providers/list', { method: 'POST'") && !ros.includes("t('Add a third-party model…')") && ros.includes("key: id, title") && /\$\{DOTS\}/.test(ros), 'a roster row: «no usage reading · paid by use · tested …» and ⋯ (the roster\'s DOTS SVG) Test · Models… · Rename… · New key… · Remove…; its section takes its PLACE before the read (never drifts under another heading), leaves when no provider serves the harness, and adds no second add door; the new-key form is keyed by the provider\'s id');
   const ap = read('src/lib/app.js'), sp = read('src/lib/session-props.js'), sl = read('src/lib/session-lifecycle.js'), ra = read('src/resume-account.js');
   ok(ap.includes("if (a.type === 'provider') { opts.push(onHost ? [a.id, t('{name} (third party)', { name: a.name }) + ' — ' + t('this machine only'), true]") && sp.includes("if (x.type === 'provider') return !!rHost;") && sl.includes("if (a.type === 'provider') return rHostId ? t('A third-party model runs on this machine only for now") && ra.includes("if (a.type === 'provider') return { ok: false, why: 'remote-cannot-ship', since: null };"), 'on ANOTHER machine a provider row is never offered as usable — New Session (disabled, «this machine only»), Session Properties, the billing switcher (it would end the session and the create refuse) and the resume bar');
 

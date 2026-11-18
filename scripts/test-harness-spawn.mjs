@@ -232,8 +232,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   await vault.setup(PW, {});
   const store = PS.create({ dataDir: DATA, vault: () => vault, log: () => {} });
   const KEY = ['sk-', 'prov', 'ider-', 'spawn-', 'e4c1d2'].join('');   // built at runtime (never a token-shaped literal)
-  const ds = store.add({ preset: 'deepseek', key: KEY }).provider;
-  const lab = store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3-coder', label: 'Lab', wire: 'openai-responses' }).provider;   // the person said it speaks Responses (a self-hosted one fits by that)
+  const ds = (await store.add({ preset: 'deepseek', key: KEY })).provider;   // the store's acts await the store writer (lane lg-providers U1 cure (C))
+  const lab = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3-coder', label: 'Lab', wire: 'openai-responses' })).provider;   // the person said it speaks Responses (a self-hosted one fits by that)
   const am = new AccountManager({ dataDir: DATA });
   am.setProviderLookup((a) => store.forAccount(a));
   const wire = (harnessOf) => am.setProviderSpawn(PSP.create({ providers: store, dataDir: DATA, ...(harnessOf ? { harnessOf } : {}) }), (id, be, model) => PSP.modelFor(store, id, model));
@@ -267,15 +267,15 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   await refused('the vault locked (the key cannot be read: it never runs without it) — the frame carries its code (the page\'s unlock door)', { backend: 'claude', accountId: ds.id }, /^the vault is locked — unlock it to start a conversation on DeepSeek/, 'vault_locked');
   await vault.unlock(PW, {});
   await refused('a harness the provider does not serve (DeepSeek under Codex)', { backend: 'codex', accountId: ds.id }, /DeepSeek does not offer what Codex needs/);
-  const gone = store.add({ preset: 'glm', key: KEY }).provider;
-  store.remove(gone.id);
+  const gone = (await store.add({ preset: 'glm', key: KEY })).provider;
+  await store.remove(gone.id);
   await refused('a removed provider', { backend: 'claude', accountId: gone.id }, /unknown model provider/);
   await refused('a removed provider on a RESUME (never moved onto the machine\'s own login)', { backend: 'claude', accountId: gone.id, resume: true, resumeId: 'conv-gone-1', ignoreNoConvo: true }, /unknown model provider/);
   await refused('another machine (this train runs a provider here only)', { backend: 'claude', accountId: ds.id, hostId: 'host-box-1' }, /runs on this machine only/);
 
   // adversarial read r1 (MAJOR 2): THE MODEL is the provider's — another vendor's id refused, nothing ⇒ its default
   await refused('a model the provider does not serve (a ChatGPT id a resume carried)', { backend: 'claude', accountId: ds.id, model: 'gpt-5.5' }, /DeepSeek does not serve the model “gpt-5.5”/, 'model-not-served');
-  const bare = store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', wire: 'anthropic-messages', label: 'Bare' }).provider;
+  const bare = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', wire: 'anthropic-messages', label: 'Bare' })).provider;
   await refused('a provider with no model at all (never the CLI\'s own default at a third party)', { backend: 'claude', accountId: bare.id }, /Bare has no model yet/, 'model-none');
   const cm = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'deepseek-reasoner' }, { accounts: am });
   const cd = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am });

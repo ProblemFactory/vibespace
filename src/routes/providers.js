@@ -4,10 +4,11 @@
  * doors. Thin: the store (src/server/provider-store.js) keeps and seals, the PURE rules (src/model-providers.js SHIPPED ·
  * fits · validateKey · draftOf) decide; a route decides nothing.
  *
- *   GET    /api/providers
- *       → { shipped: [<preset> + fits], shippedAt, providers: [<record> + fits] } — the presets the wizard offers and the
- *         records kept; a record never carries its key, nor where the vault keeps it (only the last four characters, `tail`);
- *         a page's read — any Bearer (an agent) ⇒ 403 human_only; never cached (no-store)
+ *   POST   /api/providers/list
+ *       → { shipped: [<preset> + fits], shippedAt, providers: [<record> + fits + hasKey + keyVars] } — the presets the wizard
+ *         offers and the records kept; a record never carries its key, nor where the vault keeps it (only `tail` — the
+ *         last four characters of a key of 20 or more); THE PERSON'S read, through personVerdict like every write (U1 cure
+ *         (B): on an instance nobody signs in to, any other caller would read the labels, addresses and tails); never cached
  *   POST   /api/providers          { preset, key, region?, baseUrl?, label?, model?, wire? }
  *       → 201 { ok, provider } | 400 { code: 'invalid', errors: [{ field, code }] } | 423 vault_locked | 409 vault_not_set_up
  *   POST   /api/providers/:id/key  { key }           → { ok, provider } (a new key sealed over the old) | 400 · 404 · 423 · 409
@@ -27,7 +28,6 @@
  */
 const MP = require('../model-providers.js');
 const { personVerdict } = require('./vault.js');
-const anyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || ''));
 
 const PT = require('../provider-test-model.js');
 const STATUS = Object.freeze({ invalid: 400, unknown: 404, 'built-in': 409, vault_locked: 423, vault_not_set_up: 409, 'key-unreadable': 409, 'write-failed': 500,
@@ -48,10 +48,11 @@ function keyVarsOf(p, f) {
   return out;
 }
 /** a record as the page reads it — no key (there is none in it), not where the vault keeps it, + which harnesses it serves */
-const pub = (p) => { if (!p) return null; const { keyRef, ...rest } = p; const f = MP.fits(p); return { ...rest, hasKey: !!keyRef, fits: f, keyVars: keyVarsOf(p, f) }; };
+const pubOf = (providers) => (p) => { if (!p) return null; const { keyRef, ...rest } = p; const f = MP.fits(p); return { ...rest, hasKey: typeof providers.hasKey === 'function' ? providers.hasKey(p.id) : !!keyRef, fits: f, keyVars: keyVarsOf(p, f) }; };   // hasKey = the VAULT holds its entry (its names), not the record's reference
 const shippedPub = (s) => ({ ...s, fits: MP.fits({ kind: s.kind }) });
 
 function registerProviderRoutes(app, { providers, tester = null, onChange = () => { } }) {
+  const pub = pubOf(providers);
   const refuse = (res, r) => res.status(STATUS[r.code] || 400).json({ ok: false, code: r.code, error: WORDS[r.code] || r.code, ...(r.errors ? { errors: r.errors } : {}) });
   const person = (req, res) => {
     const who = personVerdict(req);
@@ -60,35 +61,37 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     return false;
   };
   const changed = (what, id) => { try { onChange({ what, id }); } catch { } };
+  // an async door's throw answers 500 with words — Express 4 never answers a rejected handler (the request would hang)
+  const door = (fn) => (req, res) => Promise.resolve().then(() => fn(req, res)).catch(() => { if (!res.headersSent) res.status(500).json({ ok: false, code: 'failed', error: 'the provider could not be changed' }); });
   app.use('/api/providers', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.get('/api/providers', (req, res) => {
-    if (anyBearer(req)) return res.status(403).json({ ok: false, code: 'human_only', error: 'the model providers are listed for a person\u2019s page only' });
+  app.post('/api/providers/list', (req, res) => {
+    if (!person(req, res)) return;
     res.json({ shipped: MP.SHIPPED.map(shippedPub), shippedAt: MP.SHIPPED_AT, providers: providers.thirdParty().map(pub) });
   });
-  app.post('/api/providers', (req, res) => {
+  app.post('/api/providers', door(async (req, res) => {
     if (!person(req, res)) return;
     const b = req.body || {};
-    const r = providers.add({ preset: b.preset, key: b.key, region: b.region, baseUrl: b.baseUrl, label: b.label, model: b.model, wire: b.wire });
+    const r = await providers.add({ preset: b.preset, key: b.key, region: b.region, baseUrl: b.baseUrl, label: b.label, model: b.model, wire: b.wire });
     if (!r.ok) return refuse(res, r);
     changed('add', r.provider.id);
     res.status(201).json({ ok: true, provider: pub(r.provider) });
-  });
-  app.post('/api/providers/:id/key', (req, res) => {
+  }));
+  app.post('/api/providers/:id/key', door(async (req, res) => {
     if (!person(req, res)) return;
-    const r = providers.rekey(String(req.params.id), (req.body || {}).key);
+    const r = await providers.rekey(String(req.params.id), (req.body || {}).key);
     if (!r.ok) return refuse(res, r);
     changed('rekey', r.provider.id);
     res.json({ ok: true, provider: pub(r.provider) });
-  });
-  app.patch('/api/providers/:id', (req, res) => {
+  }));
+  app.patch('/api/providers/:id', door(async (req, res) => {
     if (!person(req, res)) return;
     const b = req.body || {};
-    const r = providers.patch(String(req.params.id), { label: b.label, baseUrl: b.baseUrl, defaultModel: b.defaultModel, wire: b.wire, key: b.key });
+    const r = await providers.patch(String(req.params.id), { label: b.label, baseUrl: b.baseUrl, defaultModel: b.defaultModel, wire: b.wire, key: b.key });
     if (!r.ok) return refuse(res, r);
     changed('patch', r.provider.id);
     res.json({ ok: true, provider: pub(r.provider) });
-  });
-  app.post('/api/providers/:id/test', async (req, res) => {
+  }));
+  app.post('/api/providers/:id/test', door(async (req, res) => {
     if (!person(req, res)) return;
     if (!tester) return res.status(409).json({ ok: false, code: 'unfit', error: 'the provider test is not available on this hub' });
     let r;
@@ -96,14 +99,14 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ ok: false, code: r.code, error: PT.REFUSAL_WORDS[r.code] || WORDS[r.code] || r.error || r.code });
     if (r.verdict !== 'cli-missing') changed('test', String(req.params.id));
     res.json({ ok: true, harness: r.harness, verdict: r.verdict, words: PT.VERDICT_WORDS[r.verdict], detail: r.detail, at: r.at });
-  });
-  app.delete('/api/providers/:id', (req, res) => {
+  }));
+  app.delete('/api/providers/:id', door(async (req, res) => {
     if (!person(req, res)) return;
-    const r = providers.remove(String(req.params.id));
+    const r = await providers.remove(String(req.params.id));
     if (!r.ok) return refuse(res, r);
     changed('remove', r.id);
     res.json({ ok: true, id: r.id, keyDropped: r.keyDropped, ...(r.orphan ? { orphan: true } : {}) });
-  });
+  }));
 }
 
 module.exports = { registerProviderRoutes };

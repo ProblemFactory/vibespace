@@ -99,7 +99,7 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
       });
       const verdict = PT.classify(end);
       const at = now();
-      try { providers.noteTested(p.id, harness, verdict, at); } catch (e) { log(`[provider-test] ${p.id}: the result could not be kept (${e.message})`); }
+      try { const w = await providers.noteTested(p.id, harness, verdict, at); if (w && w.ok === false) log(`[provider-test] ${p.id}: the result could not be kept (${w.code})`); } catch (e) { log(`[provider-test] ${p.id}: the result could not be kept (${e.message})`); }
       return { ok: true, harness, verdict, detail: verdict === 'ok' ? '' : PT.redact(end.out, k.value, redactSecrets), at };
     } finally {
       inFlight.delete(slot);

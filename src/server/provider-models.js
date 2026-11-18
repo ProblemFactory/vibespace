@@ -59,7 +59,7 @@ async function readCapped(res, max) {
  * @param {(keyRef: string) => ({ ok: boolean, value?: string })} o.keyOf   the vault entry's value (vaultKeyOf)
  * @param {Function} [o.fetchImpl]   the request primitive (a suite hands a loopback one)
  */
-function create({ providers, vaultState = () => 'locked', keyOf = () => ({ ok: false, code: 'key-unreadable' }), fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(), log = (m) => console.log(m) } = {}) {
+function create({ providers, vaultState = () => 'locked', keyOf: readKey = () => ({ ok: false, code: 'key-unreadable' }), fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(), log = (m) => console.log(m) } = {}) {
   const fetch = fetchImpl;       // the request primitive by its census name (a suite hands in a loopback one)
   const lastAt = new Map();      // provider id → its last attempt (the cooldown's clock; in memory — fetchedAt carries it across a restart)
   const inFlight = new Set();
@@ -70,6 +70,7 @@ function create({ providers, vaultState = () => 'locked', keyOf = () => ({ ok: f
     const v = MP.refreshVerdict({ provider, vault: vaultState(), now: now(), lastAt: lastAt.get(provider && provider.id), inFlight: inFlight.has(provider && provider.id) });
     if (!v.ok) return v;
     lastAt.set(provider.id, now());
+    const keyOf = (ref) => readKey(ref, provider.id);   // the OWNER check on the one real call: a reference is read only for its own record (U1 cure)
     inFlight.add(provider.id);
     try {
       const key = provider.keyRef ? keyOf(provider.keyRef) : { ok: true, value: null };   // a reference to ANOTHER record's key never loads (validateProvider key-ref-foreign)
@@ -92,6 +93,7 @@ function create({ providers, vaultState = () => 'locked', keyOf = () => ({ ok: f
       const parsed = MP.parseListed(body);
       if (!parsed.ok) return parsed;
       const w = providers.setListed(provider.id, parsed.rows, now());
+      if (w && w.ok && typeof providers.durable === 'function' && !(await providers.durable())) return { ok: false, code: 'write-failed' };   // the cache on disk before the answer (the store writer)
       if (!w.ok) return w;
       log(`[providers] ${provider.id}: the provider listed ${parsed.rows.length} model(s)${parsed.skipped ? ` (${parsed.skipped} skipped)` : ''}`);
       return { ok: true, provider: w.provider, listed: parsed.rows.length, skipped: parsed.skipped, droppedAliases: w.droppedAliases || [] };

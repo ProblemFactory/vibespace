@@ -213,18 +213,36 @@ function testedOf(t) {
 }
 /** the interfaces a provider may speak — a self-hosted one's `wire` is one of them (lane lg-providers U1) */
 const WIRES = Object.freeze(['anthropic-messages', 'openai-responses', 'openai-chat']);
-/** plain http carries the key in clear: only to the person's OWN network (loopback, a private range, a .local / .lan / .internal
- *  name, a name with no dot); anything else must be https */
-function ownNetworkHost(host) {
-  const raw = String(host || '').toLowerCase();
-  const v6 = /^\[([^\]]+)\](?::\d+)?$/.exec(raw);   // a bracketed IPv6 host, with or without its port
-  const h = v6 ? v6[1] : raw.replace(/:\d+$/, '');
+/** plain http carries the key in clear: only to the person's OWN network. JUDGED ON THE PARSED ADDRESS (U1 cure (A)): the
+ *  platform's own URL parser (WHATWG — the one the CLIs use: a `\` is a path separator, a user part is cut off, IDNA applied)
+ *  gives the host; a LITERAL address is judged by its value (IPv4 loopback 127/8, 10/8, 172.16/12, 192.168/16, link-local
+ *  169.254/16; IPv6 ::1, fc00::/7, fe80::/10) — a NAME is the person's own only as `localhost`, a .local / .lan / .internal /
+ *  .home.arpa / .localhost name or a name with no dot and no trailing one (a host «10.example.com» is a public name, never a
+ *  private range; «ai.» a top-level domain); 0.0.0.0 is this machine; an IPv4 address written as IPv6 (::ffff:…) is judged
+ *  as itself; 100.64/10 (shared with internet providers) is not the person's own; an address with a user part never is. → true | false */
+function ownNetworkUrl(url) {
+  let u;
+  try { u = new URL(String(url || '')); } catch { return false; }
+  if (u.username || u.password) return false;
+  const full = /\.$/.test(u.hostname);   // «ai.» names a top-level domain — never a dotless name of the person's network
+  const h = u.hostname.toLowerCase().replace(/\.$/, '');
   if (!h) return false;
-  if (h === 'localhost' || h === '::1' || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^f[cd][0-9a-f]{2}:/.test(h)) return true;
-  if (/\.(local|lan|internal|home\.arpa)$/.test(h)) return true;
-  return !h.includes('.') && !h.includes(':');
+  const ownV4 = (a, b) => a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 0 && h === '0.0.0.0');   // 0.0.0.0 = this machine (what a local server prints)
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    if ([1, 2, 3, 4].some((k) => Number(v4[k]) > 255)) return false;
+    return ownV4(Number(v4[1]), Number(v4[2]));
+  }
+  if (h.startsWith('[') && h.endsWith(']')) {
+    const v6 = h.slice(1, -1);
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v6);   // an IPv4 address written as IPv6: judged as itself
+    if (mapped) { const hi = parseInt(mapped[1], 16); return ownV4(hi >> 8, hi & 255); }
+    return v6 === '::1' || /^f[cd][0-9a-f]{2}:/.test(v6) || /^fe[89ab][0-9a-f]:/.test(v6);   // the first group in FULL (the parser drops leading zeros: «fc::1» is 00fc, a public address)
+  }
+  if (/^[0-9.]+$/.test(h)) return false;   // a dotted number that is no IPv4 literal
+  if (h === 'localhost' || /\.(localhost|local|lan|internal|home\.arpa)$/.test(h)) return true;
+  return !full && !h.includes('.');
 }
-const hostOf = (url) => { const m = /^https?:\/\/([^/?#]+)/i.exec(String(url || '')); return m ? m[1].replace(/^[^@]*@/, '') : ''; };
 const TAIL_RE = /^[\x21-\x7e]{1,4}$/;
 /** Every error of a whole record (normalized first) — the store refuses a record with any. */
 function validateProvider(raw) {
@@ -242,7 +260,7 @@ function validateProvider(raw) {
   // …nor a query or a fragment on a keyed record's address (a `?api-key=` would ride the command line too — r1)
   else if (p.baseUrl !== null && p.keyRef !== null && /[?#]/.test(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-credentials' });
   // a record that names a KEY never sends it in clear past the person's own network (lane lg-providers U1)
-  else if (p.baseUrl !== null && p.keyRef !== null && /^http:\/\//i.test(p.baseUrl) && !ownNetworkHost(hostOf(p.baseUrl))) errors.push({ field: 'baseUrl', code: 'base-url-plain' });
+  else if (p.baseUrl !== null && p.keyRef !== null && /^http:\/\//i.test(p.baseUrl) && !ownNetworkUrl(p.baseUrl)) errors.push({ field: 'baseUrl', code: 'base-url-plain' });
   // a provider's own sealed key is ITS OWN: a reference to another record's entry would hand that key to this address
   if (p.keyRef !== null && /^secrets:provider:/.test(p.keyRef) && providerOfKeyRef(p.keyRef) !== p.id) errors.push({ field: 'keyRef', code: 'key-ref-foreign' });
   if (p.wire !== null && p.kind !== 'self-hosted') errors.push({ field: 'wire', code: 'wire-kind' });
@@ -432,6 +450,7 @@ const REFRESH_WORDS = Object.freeze({
   'bad-answer': i18nKey('The provider’s answer is not a model list'),
   human_only: i18nKey('Only a person on this page can refresh the list'),
   cross_site: i18nKey('Only a person on this page can refresh the list'),
+  'write-failed': i18nKey('The list could not be saved — try again'),   // the store writer's write failed (lane lg-providers U1 cure)
 });
 
 // ── THE SHIPPED PRESETS (q-045 D1 + §2.4, lane lg-providers U1): the third parties a person picks from, a PURE list in the
@@ -522,7 +541,9 @@ function validateKey(key) {
   if (/["'`{}<>\\]/.test(k) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(k)) return [{ field: 'key', code: 'key-shape' }];
   return [];
 }
-const tailOf = (key) => { const k = String(key == null ? '' : key).trim(); return k.length >= KEY_MIN ? k.slice(-4) : null; };
+// the last four characters, only of a key long enough that four are a small share (U1 cure (B): an 8-character key showed half)
+const TAIL_MIN = 20;
+const tailOf = (key) => { const k = String(key == null ? '' : key).trim(); return k.length >= TAIL_MIN ? k.slice(-4) : null; };
 /** A new record from a shipped preset and the person's choices (no id, no key: the store gives both) — the wizard's draft. */
 function draftOf(presetId, { region = null, baseUrl = null, label = null, model = null, wire = null } = {}) {
   const s = shippedOf(presetId);
@@ -544,14 +565,16 @@ function draftOf(presetId, { region = null, baseUrl = null, label = null, model 
 // it fits — { id: the record's own (pv-…), name, type: 'provider', backend, tail, model, … } — carried BESIDE the accounts
 // (list().providerRows), never inside them: the hub's account readers keep seeing only accounts.json's records; the page
 // merges both into its own cache (agent-meta accountRowsOf). ONE record, one row per harness it fits. ──
-function rosterRowsOf(records, { usable = true } = {}) {   // usable = the key can be read now (the vault open)
+function rosterRowsOf(records, { usable = true } = {}) {   // usable = the key can be read now (the vault open + its entry there): a flag, or a test of the record
   const out = [];
+  const can = typeof usable === 'function' ? usable : () => usable;
   for (const p of Array.isArray(records) ? records : []) {
     if (!p || presetOf(p.id) || !/^pv-/.test(String(p.id || ''))) continue;
     const f = fits(p);
+    const ready = !!can(p);
     for (const h of FIT_HARNESSES) {
       if (!f[h] || !f[h].ok) continue;
-      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: !!usable, localOnly: true, tail: p.tail || null,
+      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: ready, localOnly: true, tail: p.tail || null,
         model: resolveModel(p, '') || '', preset: p.preset || null, kind: p.kind, providerId: p.id, tested: (p.tested && p.tested[h]) || null, lastTestAt: p.lastTestAt || null, createdAt: p.createdAt || null });
     }
   }
@@ -596,5 +619,5 @@ module.exports = {
   normalizeProvider, validateProvider, listedRows, withListed, sameModel, namedModel, MODEL_NAME_MAX, resolveModel, servesModel, modelsOf, sourceOf,
   MENU_EMPTY, menuOf, resolvePick, REFRESH, LISTABLE_KINDS, REFRESH_WORDS, modelsEndpointOf, refreshable, refreshVerdict, authHeaders, parseListed,
   SHIPPED, SHIPPED_AT, shippedOf, REGIONS, REGION_WORDS, FIT_HARNESSES, fits, fitsHarness, FIT_WORDS, WIRES,
-  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf,
+  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf, ownNetworkUrl,
 };
