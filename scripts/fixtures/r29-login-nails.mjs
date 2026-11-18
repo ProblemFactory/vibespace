@@ -50,14 +50,14 @@ const SELF_PATH = fileURLToPath(import.meta.url);
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // B-518e (R29-4 / R29-5b, red on the hosted runner at ×1.38–1.40): a step waits on the FACT it needs — asked a bounded COUNT of
-// times — never a fixed sleep raced against the product's timers; the bound only ends a wait that never comes (300 asks), and
-// once ONE wait has run out every later wait asks once (a broken road fails several waits: the child's run stays inside the
-// parent's 30 s kill, so every leg still prints its red)
-let untilSpent = false;
+// times — never a fixed sleep raced against the product's timers; the bound only ends a wait that never comes. The asks come
+// from ONE pool for the child (1500): a wait takes at most 300 of what is left, so a broken road that fails several waits keeps
+// the child's run inside the parent's 30 s kill (every leg still prints its red), and a wait after one that ran out still has
+// asks of its own — its red is its own, never a side effect of an earlier wait's
+let askPool = 1500;
 const until = async (fn, { tries = 300, step = 10 } = {}) => {
-  const n = untilSpent ? 1 : tries;
-  for (let k = 0; k < n; k++) { if (await fn()) return true; await sleep(step); }
-  untilSpent = true;
+  const n = Math.max(1, Math.min(tries, askPool));
+  for (let k = 0; k < n; k++) { askPool = Math.max(0, askPool - 1); if (await fn()) return true; await sleep(step); }
   return Boolean(await fn());
 };
 const ALLOWED_ROAD_MODES = new Set(['mediated', 'scope', null]);
@@ -749,7 +749,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         // share), never on a 120 ms page timer raced against the HTTP fill; a word that never comes resolves it after a bounded
         // count of ticks. It is IN FLIGHT upstream before the fill starts (the relay saw it), never a 20 ms sleep
         const medPollP = medCdp.evalInDom(
-          'new Promise((r) => { let n = 0; const t = () => ((document.__r29GoPos || ++n > 2000) ? r(document.querySelector("#otp")?.value || "") : setTimeout(t, 5)); t(); })',
+          'new Promise((r) => { let n = 0; const t = () => ((document.__r29GoPos || ++n > 600) ? r(document.querySelector("#otp")?.value || "") : setTimeout(t, 5)); t(); })',
           { awaitPromise: true },
         );
         const sentUp = (mark) => relay.state.upstreamCalls.some((c) => c.method === 'Runtime.evaluate' && String(c.params?.expression || '').includes(mark));
@@ -1106,7 +1106,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
         ok(
           wipeDispatchesChangeAndBlur
-            && p2cLifted && windowOpen && p2cBack && p2eBack && navLifted
+            && p2cLifted && windowOpen && p2cBack && p2eSubmit?.action === 'continue' && p2eBack && navLifted
             && fOtp.ok === true
             && Boolean(p2cRearmed)
             && Boolean(readP2cOtp?.error && /login_fill_live/.test(String(readP2cOtp.error.message || '')))
@@ -1228,7 +1228,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         // (B-518e, also: the in-flight read resolves on the leg's WORD after the failing fill, never on a 180 ms page timer raced
         // against it; it is IN FLIGHT upstream before the fill starts — the relay saw it — never a 25 ms sleep)
         const inflightM10P = wsFull.evalInDom(
-          'new Promise((r) => { let n = 0; const t = () => ((document.__r29GoM10 || ++n > 2000) ? r("M10_SURVIVED") : setTimeout(t, 5)); t(); })',
+          'new Promise((r) => { let n = 0; const t = () => ((document.__r29GoM10 || ++n > 600) ? r("M10_SURVIVED") : setTimeout(t, 5)); t(); })',
           { awaitPromise: true },
         );
         const m10InFlight = await until(() => relay.state.upstreamCalls.some((c) => c.method === 'Runtime.evaluate' && String(c.params?.expression || '').includes('__r29GoM10')));
@@ -1496,7 +1496,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         const prevHook = relay.state.hook;
         let inWipe = null;
         relay.state.hook = async (m, x) => {
-          if (!inWipe && m && /^Runtime\./.test(String(m.method || ''))) inWipe = { word: holdOf(tidLock), held: Boolean(dialogs.liveFillOnTarget(PID, tidLock)) };
+          if (!inWipe && m && /^Runtime\./.test(String(m.method || ''))) inWipe = { method: String(m.method), word: holdOf(tidLock), held: Boolean(dialogs.liveFillOnTarget(PID, tidLock)) };
           return typeof prevHook === 'function' ? prevHook(m, x) : undefined;
         };
         // Trigger `M4` (`wipeAfterSameOriginSubmit` while locked with `sigs.length === 2` & `svs.length === 1`):
