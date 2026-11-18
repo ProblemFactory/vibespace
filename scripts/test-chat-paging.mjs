@@ -392,7 +392,9 @@ const fold = await evaljs(FOLD_RUN('fold test'));
 console.log('  fold:', JSON.stringify({ ...fold, notches: undefined }));
 for (const n of fold?.notches || []) console.log('    notch:', JSON.stringify(n));
 check('the fold-dominated view-only chat opened and paged at least twice', !!fold?.ok && fold.notches.length >= 2, JSON.stringify(fold));
-if (fold?.ok) {
+// B-1edb (nightly376: the view opened with scrollHeight 0 and NO notch — the legs below read N[0] and the suite died of a
+// TypeError mid-run): with no notch the check above is the red, by name, and the legs that need one are not read
+if (fold?.ok && Array.isArray(fold.notches) && fold.notches.length) {
   const N = fold.notches, ch = fold.ch;
   check(`the PIN BAND was constructed: the list is ${fold.band} px shorter than the rendered attach slab (${FOLD_BAND} ± 3 — inside the 50 px band where every scrollTop is "at the live tail"), the view pinned at the tail with history above (ws ${fold.ws0}); ${fold.open.rendered} cards opened ${fold.open.sh} px tall in a ${fold.open.ch} px list (${(fold.open.sh / Math.max(1, fold.open.rendered)).toFixed(2)} px per card — the fonts' share of the geometry, printed)`, Math.abs(fold.band - FOLD_BAND) <= 3 && fold.pin0 && fold.ws0 > 0, JSON.stringify(fold));
   check(`every notch that still has history above leaves the window ≥ 2 viewports tall (grow by HEIGHT) — (${N.map((n) => n.sh + '/' + n.ws).join(' ')})`, N.every((n) => n.ws === 0 || n.sh >= 2 * ch), JSON.stringify(N));
