@@ -224,18 +224,22 @@ const VAULT_DOOR_EVENT = 'vs-vault-door';
  *  while it waits are one open. A hub that answers nothing within DOOR_WAIT_MS (a held loop) gets the unlock dialog — it
  *  removes itself when the facts land, and the press is still answered then (unlocked: the Vault window; not set up: setup). */
 const DOOR_WAIT_MS = 3000;
-let bootRead = null, doorWait = null, doorHeard = false;
+let bootRead = null, doorWait = null, doorPast = false, doorHeard = false;
 function doorOpens() { if (facts && facts.state === 'unlocked') replayOpenSpec(appRef, { action: 'openVault' }); else if (facts && facts.state === 'not_set_up') showSetup(); else showUnlock(); }   // lane vault-one-door: the window, not the old ⚙ dialog
 function pressDoor() {
   if (facts) { doorOpens(); return; }
+  if (doorWait && doorPast) { showUnlock(); return; }   // a press AFTER the bound, the facts still unknown: the dialog again (raised, or back after 「稍后」) — never a silent press; the one answer still comes
   doorWait ||= (async () => {
     const read = (async () => { try { await bootRead; } catch { } if (!facts) await refreshVaultFacts().catch(() => null); })();
     const bound = new Promise((r) => setTimeout(r, DOOR_WAIT_MS));
     await Promise.race([read, bound]);
-    doorWait = null;
-    if (facts) { doorOpens(); return; }
+    if (facts) { doorWait = null; doorOpens(); return; }
+    doorPast = true;
     showUnlock();   // the state is not known yet: the dialog says what the door is for
-    read.then(() => { if (facts && facts.state !== 'locked') doorOpens(); });   // …and the press is answered once it is
+    await read;   // …and the press is answered once it is — a later press while it waits joins THIS answer (one window, never two)
+    doorWait = null;
+    doorPast = false;
+    if (facts && facts.state !== 'locked') doorOpens();
   })();
 }
 export function listenVaultDoor(app) {

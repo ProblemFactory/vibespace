@@ -962,11 +962,16 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   const held = (p) => (async () => {
     p.M.initVault({}); p.press(); await new Promise((r) => setTimeout(r, 80)); await tick();
     const bounded = p.seen.join();
+    p.press(); await tick();   // a SECOND press after the bound, the facts still unknown (the reader's should): it joins the same answer
     p.answer({ state: 'unlocked', startedAt: 7 }); await tick();
     return { bounded, seen: p.seen.join() };
   })();
   const h1 = await scene(short, held);
-  ok(h1.bounded === 'dialog:vault-unlock-dialog' && h1.seen === 'dialog:vault-unlock-dialog,window:openVault', 'a hub that answers nothing: after the bound the UNLOCK dialog (never a silent press); once the facts say unlocked, the Vault window (the dialog removes itself)', h1);
+  ok(h1.bounded === 'dialog:vault-unlock-dialog' && h1.seen === 'dialog:vault-unlock-dialog,dialog:vault-unlock-dialog,window:openVault', 'a hub that answers nothing: after the bound the UNLOCK dialog (never a silent press); a second press meanwhile gets the dialog again (raised, or back after 「稍后」) and joins the one answer; once the facts say unlocked, ONE Vault window', h1);
+  const hSilent = await scene((s0) => short(s0).replace("  if (doorWait && doorPast) { showUnlock(); return; }   // a press AFTER the bound, the facts still unknown: the dialog again (raised, or back after 「稍后」) — never a silent press; the one answer still comes\n", ''), held);
+  ok(hSilent.seen === 'dialog:vault-unlock-dialog,window:openVault', 'RED control: a press after the bound swallowed by the open wait (the cure\'s first shape) ⇒ the second press shows NOTHING (after 「稍后」 the person would see no dialog for as long as the hub holds)', hSilent);
+  const h2 = await scene((s0) => short(s0).replace('    await read;   // …and the press is answered once it is — a later press while it waits joins THIS answer (one window, never two)\n    doorWait = null;\n', '    doorWait = null;\n    await read;\n'), held);
+  ok((h2.seen.match(/window:openVault/g) || []).length === 2, 'RED control: the wait released at the bound (the first cure shape) ⇒ the second press opens a second dialog and a SECOND Vault window', h2);
   const hRed = await scene((s0) => short(s0).replace('    await Promise.race([read, bound]);\n', '    await read;\n'), held);
   ok(hRed.bounded === '', 'RED control: the wait without its bound ⇒ a press on a held hub shows NOTHING for as long as the hub holds', hRed);
   ok(/^dialog:vault-unlock-dialog/.test(bRed.meanwhile), 'RED control: the press decides at once (the .407 shape) ⇒ the UNLOCK dialog opens over the unlocked vault', bRed);
