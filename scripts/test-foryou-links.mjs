@@ -58,7 +58,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const seen = { q: links(keptQ), d: links(keptD), u: links(keptU), whole: links(whole), words: F.segmentText(keptQ).map((g) => g.s).join('') === keptQ };
   ok(keptQ.endsWith('/p/' + P10 + '…') && !seen.q.length && !seen.d.length && !seen.u.length && J(seen.whole) === J(['page:/p/pg8888888888']) && seen.words,
     'a page token the store\'s cut went through (pg + 10 kept, the mark after it — the question at 500, the detail at 8 000, a URL form) ⇒ no link, drawn as its words; a whole link ending at the cap ⇒ a link', seen);
-  const FY1 = read('src/lib/foryou-links.js'), ONE = '  return uncutLinks(src, segmentWords(src));';
+  const FY1 = read('src/lib/foryou-links.js'), ONE = '  return uncutLinks(src, segmentWords(src), whole ? FIELD_CAPS : null);';   // B-3f50: the whole-field road passes the caps
   // r10 (F2): A CONTROL COPY RESOLVES EVERY RELATIVE IMPORT OF THE MODULE IT COPIES — a data: URL copy resolves no relative
   // specifier, and a sibling lane adds imports (mask-value-shape r4: a second '../path-linkify.js' import + '../secret-shapes.js'):
   // every static `from '<./ or ../>…'` / `import '<…>'` is rewritten to the file it names, never only the ones this suite knew
@@ -79,7 +79,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const sw8 = sweep(F.segmentText), cjk = [links('请审阅 /p/pgaaaaaaaaaa，以及更多说明文字…'), links('请看/p/pgaaaaaaaaaa以及说明…'), links('see /home/u/a.md and then more…')];
   ok(sw8.n === 184 && sw8.through.length === 0 && sw8.first === sw8.n && J(cjk) === J([['page:/p/pgaaaaaaaaaa'], ['page:/p/pgaaaaaaaaaa'], ['path:/home/u/a.md']]),
     'r8 (X1) + r9 (Y2) the store\'s cut at every one of 184 positions through a URL (query and all), an absolute path, a relative path, a home path, a mailto:, a mail address and a path with its :line:col suffix (a cut right after either \':\' too) ⇒ never a link over the cut token (no other host, no truncated target); the uncut link before it a link at every position; a whole link a CJK mark, CJK words or a space ends before the cut stays a link', { through: sw8.through.slice(0, 6), first: sw8.first, n: sw8.n, cjk });
-  const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs) {')) + 2);
+  const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs, caps = null) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs, caps = null) {')) + 2);
   const r7seg = FY1.includes(ONE) && R7CUT.length > 40 ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(R7CUT, "function uncutLinks(src, segs) {\n  const runs = cutRuns(src).filter(([b, e]) => e > b);\n  if (!runs.length) return segs;\n  let at = 0;\n  return segs.map((g) => { const a = at; at += g.s.length; return g.t === 'link' && runs.some(([b, e]) => b < at && e > a) ? { t: 'text', s: g.s } : g; });\n}")))).segmentText : null;
   ok(r7seg, 'CONTROL needle present: the segmenter\'s cut-token rule (r8) — a tree without it has nothing to patch');
   const PROBE = "return '0' + open.reverse().join('');"; // r9's digit — since the .399 follow-up, the continuation's head (the closers follow it)
@@ -254,12 +254,12 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   // escaped words: the tray draws its words / detail through linkedHtml (every segment escaped); the window links TEXT nodes
   const ROW = read('src/lib/user-todos-row.js'), IW = read('src/lib/inbox-window.js');
   // lane foryou-honest (P1-2): ONE renderer — the row's words and detail AND the window's pane draw wordsHtml (= linkedHtml, escaped)
-  const wordsEscaped = (row) => /export const wordsHtml = \(text\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\) \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail\)\}<\/div>/.test(row) && /a\.textContent = g\.s;/.test(row) && !/\.innerHTML = g\./.test(row);
+  const wordsEscaped = (row) => /export const wordsHtml = \(text, \{ whole = false \} = \{\}\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\), whole \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words, \{ whole: wordsWhole \}\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail, \{ whole: detailWhole \}\)\}<\/div>/.test(row) && /a\.textContent = g\.s;/.test(row) && !/\.innerHTML = g\./.test(row);
   ok(wordsEscaped(ROW), 'NO innerHTML OF RAW TEXT: the tray\'s words and detail go through linkedHtml (escaped); the window\'s links are nodes with textContent');
   ok(/function wordsInto\(el, src\) \{\s*el\.innerHTML = wordsHtml\(src\);\s*\}/.test(IW) && /wordsInto\(c\.title, v\.title\);/.test(IW) && /else wordsInto\(c\.detail, v\.detail\);/.test(IW) && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW) && /c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW) && !/\bmdInto\(|from 'marked'/.test(IW),
     'the For-you window: its words drawn by THE tray\'s renderer (wordsHtml — one renderer over both doors, never markdown: lane foryou-honest), a command\'s verbatim <pre> linked as text nodes, its chips as nodes');
-  ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr) })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
-  const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g) } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g) } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
+  ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), whole })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
+  const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), whole = false } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g), whole = false } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
   ok(/<img/.test(rawHtml), 'CONTROL: a linkedHtml without its escape lets <img onerror> through — the §1 XSS leg is RED on it');
   // the one artifact door: a chip opens through openArtifactRow (artifacts-window.js) — never its own opener
   const ACT = read('src/lib/user-todos-actions.js');
@@ -269,6 +269,47 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   ok(/export function openArtifactRow\(app, sessionId, b\)/.test(read('src/lib/artifacts-window.js')) && /model\.openArtifact\(it, Number\(fy\.dataset\.ai\)\)/.test(read('src/lib/user-todos-panel.js')) && /model\.openArtifact\(it, Number\(fy\.dataset\.ai\)\)/.test(IW), 'the tray AND the window press a chip into model.openArtifact');
   ok(!oneDoor(ACT.replace("openArtifactRow(app, (s && s.webuiId) || '', row);", 'app.openFile(row.path, row.name, { host: row.host });')), 'CONTROL: a chip that opens its file by itself ⇒ the one-door census is RED');
   ok(/'\{name\} is gone — nothing at \{path\} any more'/.test(body(ACT)) && /'\{name\} is no longer published'/.test(body(ACT)), 'the open-time re-check speaks: a gone file / an unpublished page is a toast that says so, never silent');
+}
+
+// B-3f50 (the artifacts-by-intent lane's «Known in 2.369.400» pick): (a) A «…» THE WRITER PUT AT A LINE'S END IS ITS OWN WORDS — the
+// store cuts a field at its END only (clip), so the tray reads a field-end mark as a cut, never a line-end one inside the field, and
+// where it draws a WHOLE stored field (wordsHtml) only at the store's caps (cutRuns { lineEnds: false, caps: FIELD_CAPS }).
+// (b) the .400 follow-up's MASKED clause gets a leg of its own: cutMade shadows it on the tree (a fuzz over every cut position of
+// masked / vault / URL texts: 0 of 1 173 differ with the clause removed), so its leg runs over a copy without cutMade.
+console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a field\'s end mark is the store\'s only at its caps; the masked clause\'s own leg');
+{
+  const RT = require(path.join(REPO, 'src/inbox-reply-text.js'));
+  const UT = require(path.join(REPO, 'src/user-todos.js'));
+  ok(J(RT.FIELD_CAPS) === J([UT.TEXT_MAX, UT.DETAIL_MAX]), 'B-3f50: FIELD_CAPS spells the store\'s two caps (src/user-todos.js TEXT_MAX / DETAIL_MAX)', { caps: RT.FIELD_CAPS, store: [UT.TEXT_MAX, UT.DETAIL_MAX] });
+  const own = 'the guide: https://docs.example.com/wiki/Setup…\nand then run it';
+  const ownEnd = 'see https://docs.example.com/wiki/Setup…';
+  const cutQ = RT.clip('q'.repeat(470) + ' https://docs.example.com/wiki/Setup-and-more-pages', 500);
+  const lk = (x, o) => F.segmentText(x, o).filter((g) => g.t === 'link').map((g) => g.s);
+  ok(J(lk(own, { whole: true })) === J(['https://docs.example.com/wiki/Setup']) && lk(own).length === 0,
+    'B-3f50 (a): on the agent\'s own WHOLE stored field a link it ends with «…» at a LINE\'s end stays a link (the store never cuts inside a field); any other text keeps the conservative reading (a producer may cut a line — the memory note\'s command at 120)', { whole: lk(own, { whole: true }), other: lk(own) });
+  ok(J(lk(ownEnd, { whole: true })) === J(['https://docs.example.com/wiki/Setup']) && lk(ownEnd).length === 0,
+    'B-3f50 (a): the same «…» at the END of a short whole field (41 chars, no cap) stays a link; a text node that is not a whole field keeps the conservative reading (words)', { whole: lk(ownEnd, { whole: true }), node: lk(ownEnd) });
+  ok(cutQ.length === 500 && lk(cutQ, { whole: true }).length === 0 && lk(cutQ).length === 0 && /href|data-fy/.test(F.linkedHtml(own, { whole: true })) && !/data-fy/.test(F.linkedHtml(cutQ, { whole: true })),
+    'B-3f50 (a): a field the store cut at its cap (500) through the URL: no link on either road — the cut token is its words', { len: cutQ.length });
+  ok(J(RT.cutRuns(own)) !== J([]) && RT.uncut(own) !== own, 'B-3f50 (a): a COMPOSED text\'s reader (presentAsk\'s words, a reply\'s quote — cutRuns\' defaults) still reads every line-end mark as a cut (conservative there)');
+  let base = ''; try { base = (await import('node:child_process')).execFileSync('git', ['show', 'b06f36e90:src/lib/foryou-links.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
+  if (base) {
+    const B = await import('data:text/javascript,' + encodeURIComponent(fileImports(base)));
+    ok(B.segmentText(own).filter((g) => g.t === 'link').length === 0 && lk(own, { whole: true }).length === 1, 'B-3f50 RED control: the release b06f36e90\'s tray drew the writer\'s own line-end «…» link as words (the row\'s complaint) — the whole-field road now keeps it');
+  } else console.log('  · SKIP: the release b06f36e90 is not in this clone');
+  const ROWB = read('src/lib/user-todos-row.js');
+  ok(/const wordsWhole = !card && !run && !\(i\.i18n && i\.i18n\.text\) && words === i\.text;/.test(ROWB) && /const detailWhole = !\(i\.i18n && Array\.isArray\(i\.i18n\.detail\) && i\.i18n\.detail\.length\) && detail === i\.detail;/.test(ROWB),
+    'B-3f50 (a): the row reads a field WHOLE only when it draws the agent\'s own stored text / detail — never a template the page filled (a takeover request\'s «{words}» cut at 300), a card, a run headline or a line list');
+  const FY = read('src/lib/foryou-links.js');
+  const CM = "const cutMade = (a, z) => !still.has(a) && ends.some((e) => e >= z && !/\\s/.test(src.slice(z, e)));";
+  const MASKED = "if (g.t !== 'link' && g.t !== 'masked') continue;";
+  ok(FY.includes(CM) && FY.includes(MASKED), 'B-3f50 (b) needles exist (cutMade, the masked clause)');
+  const noCM = FY.replace(CM, 'const cutMade = () => false;');
+  const A = await import('data:text/javascript,' + encodeURIComponent(fileImports(noCM)));
+  const M = await import('data:text/javascript,' + encodeURIComponent(fileImports(noCM.replace(MASKED, MASKED + " if (g.t === 'masked') continue;"))));
+  const vcut = 'open https://h.example/x?k=[vault:…';
+  ok(A.segmentText(vcut).filter((g) => g.t === 'link').length === 0, 'B-3f50 (b): the MASKED clause on its own (a copy without cutMade): a cut inside a [vault: mark — the probe\'s closed mark is a MASKED segment over the cut ⇒ the URL before it is drawn as words', A.segmentText(vcut));
+  ok(J(M.segmentText(vcut).filter((g) => g.t === 'link').map((g) => g.s)) === J(['https://h.example/x?k=[vault']), 'B-3f50 (b) RED control: the same copy with the masked clause skipped (the verifier\'s M3d) links «https://h.example/x?k=[vault» — the leg above can go red', M.segmentText(vcut));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -422,7 +422,7 @@ export const optionWords = (label, t) => t('Reply: {label}', { label: String(lab
 /** THE WORDS OF AN ITEM, ONE RENDERER (lane foryou-honest, the stress evaluation's P1-2): plain text + the For-you links
  *  (foryou-links linkedHtml — every segment escaped, a link a span around its own words), never markdown — the tray's rows
  *  and the For-you window's pane both draw this (the pane's markdown turned `__tests__/` into a bold «tests/»). */
-export const wordsHtml = (text) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr) });   // lane mask-value-shape: a masked link = words + THE note
+export const wordsHtml = (text, { whole = false } = {}) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), whole });   // B-3f50: `whole` = the text IS the agent's own stored field — its end «…» is the store's cut only at a cap   // lane mask-value-shape: a masked link = words + THE note
 /** The labels a row's chips stand for (lane foryou-honest): ctx.optionsOf (the model's — explicit, else parsed), else the item's own. */
 export const rowOptions = (i, ctx) => (ctx && typeof ctx.optionsOf === 'function' ? ctx.optionsOf(i) : i && Array.isArray(i.options) ? i.options : []) || [];
 
@@ -472,13 +472,16 @@ function partsOf(entry, ctx) {
   const run = card ? null : runCardOf(i, { t }); // r7: the run card's facts — its headline is the row's question
   const words = card ? cardWords(card, t, lang).title : run ? run.headline : ctx.wordsOf(i);
   const detail = ctx.detailOf(i);
+  // B-3f50: a field drawn WHOLE and as the agent stored it (never a template the page filled, never a line list) — the cut rule's caps judge it
+  const wordsWhole = !card && !run && !(i.i18n && i.i18n.text) && words === i.text;
+  const detailWhole = !(i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length) && detail === i.detail;
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
   const dot = resolved
     ? '<span class="ut-dot" data-urgency=""></span>'
     : `<span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>`;
   // Detail rides behind a collapsed expander (up to 2000 chars of agent context).
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
-  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${wordsHtml(detail)}</div></details>` : '';
+  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${wordsHtml(detail, { whole: detailWhole })}</div></details>` : '';
   const detailOrFacts = run ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${runFactsHtml(i, t, { buttons: false })}</div></details>` : detailHtml; // r7: a record with facts never shows the prose (old clients' words)
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
   const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type) || isSecretAsk(i)) && !resolved ? '' : detailOrFacts; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too; lane vault-paste-request: a paste request's words above its box)
@@ -520,7 +523,7 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)

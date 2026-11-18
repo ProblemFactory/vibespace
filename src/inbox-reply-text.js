@@ -13,6 +13,9 @@ const lf = (s) => String(s).replace(/\r\n?/g, '\n');
  *  it; every reader of a cut text (presentAsk's words — src/artifacts.js askOps —, the reply's quote — artifacts-of)
  *  drops the token the cut went through (`uncut`), never a rule of its own per cap. */
 const CUT_MARK = '…';
+/** B-3f50: the caps the store keeps an item's words to (src/user-todos.js TEXT_MAX, DETAIL_MAX — test-foryou-links holds the two
+ *  spellings equal): a reader of a WHOLE stored field asks cutRuns about them */
+const FIELD_CAPS = Object.freeze([500, 8000]);
 // r7: never half a surrogate pair — the last kept unit a lone high surrogate steps back one (src/user-todos.js's facts cut
 // was a second rule with this guard; it is this one now)
 const clip = (s, cap) => { if (s.length <= cap) return s; let n = cap - 1; if (/[\ud800-\udbff]/.test(s[n - 1])) n--; return s.slice(0, n) + CUT_MARK; };
@@ -33,10 +36,17 @@ const WORD_CH = /[A-Za-z0-9_-]/; // a page id runs on through these (src/artifac
  *  side). Linear: one backward scan per cut, never past the one before (r5: a /…+$/ regex re-scans a long run from every
  *  start). The ONE place a cut is found: the tray's links read the same ends and let THEIR grammar name the token (r8 —
  *  src/lib/foryou-links.js: a URL or a path runs on across '.', '/', '?', '=', ':', where a page id stops). */
-function cutRuns(s, cutAt = -1) {
+function cutRuns(s, cutAt = -1, { lineEnds = true, caps = null } = {}) {
   const src = typeof s === 'string' ? s : '';
   const ends = [];
-  for (let i = src.indexOf(CUT_MARK); i >= 0; i = src.indexOf(CUT_MARK, i + 1)) if (i + 1 === src.length || src[i + 1] === '\n') ends.push(i);
+  // B-3f50: a reader of ONE stored field (the tray: an item's text, its detail) says `lineEnds: false` — the store cuts a field at
+  // its END only (`clip`), so a «…» ending a line inside it is the writer's own — and, when it draws the WHOLE field, the caps it
+  // was kept to: the end mark is the store's only at a cap (cap, or cap − 1 when clip stepped back off a surrogate — sameWords'
+  // own rule). A composed text (presentAsk's words: the text, a newline, the detail; a reply's quote) keeps both defaults.
+  const atCap = (len) => !caps || caps.some((c) => len === c || len === c - 1);
+  for (let i = src.indexOf(CUT_MARK); i >= 0; i = src.indexOf(CUT_MARK, i + 1)) {
+    if (i + 1 === src.length ? atCap(src.length) : lineEnds && src[i + 1] === '\n') ends.push(i);
+  }
   if (cutAt >= 0 && cutAt <= src.length) ends.push(cutAt);
   ends.sort((a, b) => a - b);
   const runs = [];
@@ -45,10 +55,10 @@ function cutRuns(s, cutAt = -1) {
   return runs;
 }
 /** A cut text, read: `s` without the runs cutRuns names (presentAsk's words, the reply's quote). */
-function uncut(s, cutAt = -1) {
+function uncut(s, cutAt = -1, opts = {}) {   // opts = cutRuns' (B-3f50: a reader of one whole stored field)
   const src = typeof s === 'string' ? s : '';
   let out = '', from = 0;
-  for (const [b, e] of cutRuns(src, cutAt)) { out += src.slice(from, b); from = e; }
+  for (const [b, e] of cutRuns(src, cutAt, opts)) { out += src.slice(from, b); from = e; }
   return out + src.slice(from);
 }
 
@@ -80,4 +90,4 @@ function parseReply(text) {
   return { id: m[1], quote: q.join('\n'), reply: rest.slice(i).join('\n'), cutAt: cm && cm[1] === m[1] ? q.slice(0, k).join('\n').length : -1 };
 }
 
-module.exports = { REPLY_MARKER_RE, lf, parseReply, cutLine, CUT_LINE_RE, CUT_MARK, clip, sameWords, cutRuns, uncut };
+module.exports = { REPLY_MARKER_RE, lf, parseReply, cutLine, CUT_LINE_RE, CUT_MARK, FIELD_CAPS, clip, sameWords, cutRuns, uncut };

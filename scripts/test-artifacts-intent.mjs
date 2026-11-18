@@ -540,5 +540,15 @@ if (AFD) {
   const r10Where = M.whereOf(r10W[':/w/proj/../other/y.md'] || {}, { cwd: '/w/proj' });
   ok(Object.keys(r10W).length === 2 && r10Where.away === false && r10Where.folder === '../other', 'CONTROL r10\'s absPath (the joined path not normalized) ⇒ TWO rows for one file, the climbing one read as inside («../other») — RED', { keys: Object.keys(r10W), r10Where });
 }
+// B-3f50 (b): A READ IS NO DELIVERABLE — the verifier's M1 (OPS gains 'read' in src/artifacts.js) survived every fast suite because no
+// leg fed the reducer a read op: a file the agent only READ is never a row, on apply() and on fold(); the planted M1 copy is the red control
+{
+  const readOp = { cwd: CWD, op: 'read', path: 'notes/plan.md', at: T0, by: 'agent' };
+  const a = AF.apply({}, readOp), f = AF.fold({}, readOp);
+  ok(!a.row && a.skipped === 'bad-op' && !Object.keys(a.rows).length && !Object.keys(f).length, 'B-3f50 (b): a READ op makes no row — apply() skips it by name (bad-op), fold() keeps nothing', { a: { row: a.row, skipped: a.skipped }, f });
+  const M1 = cjsCopy('src/artifacts.js', "const OPS = Object.freeze(['write', 'edit']);", "const OPS = Object.freeze(['write', 'edit', 'read']);", 'af-m1-read');
+  const m1 = M1 && M1.apply({}, readOp);
+  ok(M1 && m1.row && Object.keys(m1.rows).length === 1, 'B-3f50 (b) RED control: the verifier\'s M1 (OPS gains read) makes a row of a file the agent only read — the leg above can go red');
+}
 
 done();

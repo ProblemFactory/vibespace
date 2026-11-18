@@ -13,7 +13,7 @@
 import { pathRe, cleanPath, looksRelPath, relCandidates } from '../path-linkify.js';
 import { CJK_PUNCT, SEG, isTrailing } from '../path-linkify.js'; // lane mask-value-shape r4: THE token grammar's classes (one definition — the path rule's own)
 import { maskedLink } from '../secret-shapes.js'; // PURE: THE belt's marks — «redacted» / [vault:<entry>], raw or in an href
-import { cutRuns } from '../inbox-reply-text.js'; // PURE: the tokens a cut went through (lane artifacts-by-intent r7)
+import { cutRuns, FIELD_CAPS } from '../inbox-reply-text.js'; // PURE: the tokens a cut went through (lane artifacts-by-intent r7)
 
 export const ASK_ARTIFACT_KINDS = Object.freeze(['file', 'design', 'page']);
 // r5 (M1): THE full-width pairs a URL token may hold BALANCED (a CJK page title: `…/wiki/東京（都）`, `…/「東京」`) — as cleanPath's ASCII
@@ -167,9 +167,9 @@ function proseSegments(s, segs) {
 /** THE SEGMENTER: text → [{t:'text', s} | {t:'link', s, kind: url|mail|page|path|rel, ref} | {t:'masked', s, mask}]; the `s`
  *  of every segment joined IS the text (nothing added, nothing dropped). A `code span` holds a relative path or a bare
  *  filename. A `masked` segment is a URL a belt masked inside (mask = secret-shapes maskedLink's {shape, vault}). */
-export function segmentText(text) {
+export function segmentText(text, { whole = false } = {}) {   // B-3f50: `whole` = the text IS a whole stored field (its caps judge the end mark)
   const src = typeof text === 'string' ? text : '';
-  return uncutLinks(src, segmentWords(src));
+  return uncutLinks(src, segmentWords(src), whole ? FIELD_CAPS : null);
 }
 function segmentWords(src) {
   const segs = [];
@@ -220,8 +220,11 @@ function continuation(src, e) {
   }
   return '0' + open.reverse().join('');
 }
-function uncutLinks(src, segs) {
-  const ends = cutRuns(src).map(([, e]) => e).filter((e) => e < src.length);
+function uncutLinks(src, segs, caps = null) {
+  // B-3f50: on a WHOLE stored field of the agent's own (caps given) a cut is the store's — at the field's END, only at its caps: a «…»
+  // the writer put at a line's end is its own words. Every other text (a template a producer filled, a line list, a text node)
+  // keeps cutRuns' conservative defaults (a producer may cut a line with the same mark)
+  const ends = cutRuns(src, -1, caps ? { lineEnds: false, caps } : {}).map(([, e]) => e).filter((e) => e < src.length);
   if (!ends.length) return segs;
   const through = [], still = new Set();
   // the continued words, and where each of their offsets sits in `src` (an inserted closer sits at its cut's mark)
@@ -242,8 +245,8 @@ function uncutLinks(src, segs) {
 }
 /** The words as HTML: every segment ESCAPED; a link = a span around its own words carrying its kind + ref (escaped); a
  *  masked link = its words + the note (`note(g)` — the caller's translated words, maskedLinkNote) — no ref, no role. */
-export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g) } = {}) {
-  return segmentText(text).map((g) => (g.t === 'link'
+export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), whole = false } = {}) {
+  return segmentText(text, { whole }).map((g) => (g.t === 'link'
     ? `<span class="fy-link" role="link" tabindex="0" data-fy="${escape(g.kind)}" data-ref="${escape(g.ref)}">${escape(g.s)}</span>`
     : g.t === 'masked' ? `<span class="fy-masked">${escape(g.s)}</span> <span class="masked-link-note">${escape(note(g))}</span>`
       : escape(g.s))).join('');

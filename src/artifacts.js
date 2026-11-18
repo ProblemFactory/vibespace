@@ -51,7 +51,7 @@
 // the For-you store keeps: `askOps` is THE ONE READER OF AN ASK — live (presentAsk) and at the rebuild — so a row an ask
 // put in front of the person reads «for you» whatever op came after, the tree before this field included.
 const { FILE_TYPES } = require('./file-type-table.js');
-const { uncut } = require('./inbox-reply-text.js'); // PURE: the cut mark's reader (r6) — a token a cap cut through is no link
+const { uncut, FIELD_CAPS } = require('./inbox-reply-text.js'); // PURE: the cut mark's reader (r6) — a token a cap cut through is no link
 
 const KINDS = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'code', 'other']);
 const VIEW_ORDER = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'other']); // lane artifacts-services: what a conversation RUNS reads first after its docs
@@ -412,7 +412,8 @@ function askOp(a, { at = Date.now(), id = '' } = {}) {
 function askOps({ artifacts = null, id = '', at = 0, said = [] } = {}) {
   const tag = (k) => (id ? `ask:${id}:${k}` : '');
   const ops = (Array.isArray(artifacts) ? artifacts : []).map((a, k) => askOp(a, { at, id: tag(k) }));
-  for (const l of pageLinksIn((Array.isArray(said) ? said : []).filter((x) => typeof x === 'string').map((x) => uncut(x)).join('\n'))) { const o = presentOp(l); if (o) ops.push({ ...o, at, ...(id ? { id: tag('p:' + l.id) } : {}) }); }
+  // B-3f50: each stored field (`said`) read as the tray reads the agent's own whole field — a cut at its end, at a cap
+  for (const l of pageLinksIn((Array.isArray(said) ? said : []).filter((x) => typeof x === 'string').map((x) => uncut(x, -1, { lineEnds: false, caps: FIELD_CAPS })).join('\n'))) { const o = presentOp(l); if (o) ops.push({ ...o, at, ...(id ? { id: tag('p:' + l.id) } : {}) }); }
   return ops.filter(Boolean).map((o) => ({ ...o, by: 'agent' }));
 }
 /** THE READ (the registry's list, every time): each presented row against the pages store. `pageOf(id)` → {page} (live) |

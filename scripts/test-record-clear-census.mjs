@@ -1147,6 +1147,7 @@ const BELT = [
   ['src/lib/task-log.js', '.filter((p) => (!state.session || p.session === state.session) && (matches(p.note) || matches(p.detail)));', 'the Copy-as-markdown FILTER (the Find text); the line it writes words a cleared entry (isCleared on the next line)'],
   ['src/lib/task-log.js', "&& (matches(it.text) || matches(it.detail)))", 'a BACKLOG item (not a cleared kind)'],
   ['src/lib/task-log.js', ".map((it) => `- [${it.status === 'done'", 'a BACKLOG item (not a cleared kind)'],
+  ['src/lib/user-todos-row.js', 'const wordsWhole = !card && !run && !(i.i18n && i.i18n.text) && words === i.text;', 'B-3f50: a COMPARISON, never drawn — is the row\'s text the stored field verbatim (then the cut rule reads it whole)? The row draws `words` (the model\'s cleared-aware wordsOf)'],
   ['src/lib/inbox-window-layout.js', 'const defaultText = (i) => [i.text, i.detail,', 'the PURE layout\'s fallback when no `text` is handed in; the window hands in the model\'s wordsOf'],
   ['src/lib/inbox-window-layout.js', "const title = String(ctx.words != null ? ctx.words : (i.text || ''));", 'itemView — the window passes ctx.words = the model\'s wordsOf (the fallback is for the PURE tests)'],
   ['src/lib/session-props.js', "const histMenu = (h, x, y) => showContextMenu(x, y, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'status', sessionKey: histKey, id: String(h.at), at: h.at, words: h.reason || h.branch || '' }]); } }]);", 'the menu of an entry NOT cleared (`clearable(h)` guards both doors); the dialog is spent at the answer'],
