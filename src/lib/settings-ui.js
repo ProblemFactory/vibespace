@@ -1,7 +1,7 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
 import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords } from './settings-view.js';
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
-import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
+import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
@@ -446,6 +446,9 @@ class SettingsUI {
     const control = this._createControl(path, schema, row);
     controlWrap.appendChild(control);
     if (schema.type === 'number' && !schema.slider && !schema.store) controlWrap.appendChild(this._saveMark(path));   // lane owner-press-attended
+    // lane think-tools-phone: a text box's save says its outcome too — «Saving…» → «Saved», or «Not saved — the server did not answer…»
+    // (a failed save keeps the words holding a stale page's reload; the person must be told they are not on the server)
+    if ((schema.type === 'json' || (schema.type === 'text' && schema.multiline)) && !schema.store) controlWrap.appendChild(this._saveMark(path));
     // lane settings-multiline-row (owner 2026-10-14): a multi-line box STACKS — the words above it across the row, the box
     // under them across the row (style.css "settings rows never squeeze their words"); read off the control, so every textarea row does
     if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');
@@ -1025,11 +1028,12 @@ class SettingsUI {
       textarea.className = 'settings-json';
       textarea.rows = 4;
       textarea.value = JSON.stringify(value, null, 2);
+      carryUnsaved(this.settings, path, textarea);   // redrawn from words not yet on the server: they still hold a stale page's reload
       textarea.onchange = () => {
         try {
           const parsed = JSON.parse(textarea.value);
           textarea.classList.remove('invalid');
-          this.settings.set(path, parsed);
+          this.settings.set(path, parsed); markLandedOnSave(this.settings, path, textarea, parsed);   // released only when the store's POST for this path LANDED (invalid JSON never reaches here)
           row.classList.toggle('modified', this.settings.isModified(path));
         } catch {
           textarea.classList.add('invalid');
@@ -1049,14 +1053,16 @@ class SettingsUI {
       ta.rows = 5;
       if (schema.maxLength) ta.maxLength = schema.maxLength;
       ta.value = String(value || '');
+      carryUnsaved(this.settings, path, ta);   // redrawn from words not yet on the server: they still hold a stale page's reload
       // THE ROW'S WRITE DOOR (lane rule-learning-fix F3): a value over maxLength is REFUSED by name, never sliced — a typed
       // value is bounded by the box's own maxLength already; a programmatic one (the drafter's card) is told {ok: false, why}
       const save = (v = ta.value) => {
         const text = String(v);
         if (schema.maxLength && text.length > schema.maxLength) return { ok: false, why: 'too-long', chars: text.length, max: schema.maxLength };
         ta.value = text;
-        this.settings.set(path, text); row.classList.toggle('modified', this.settings.isModified(path)); saveBtn.hidden = true;
-        return { ok: true };
+        markTyped(ta);   // the door runs only on the person's press (a typed change, Save, the learn card's Save): the words hold until they land
+        this.settings.set(path, text); const landed = markLandedOnSave(this.settings, path, ta, text); row.classList.toggle('modified', this.settings.isModified(path)); saveBtn.hidden = true;
+        return { ok: true, landed };   // the learn card's toast speaks from the answer: 'landed' / 'failed' / 'other' (null: a store with no save states)
       };
       const saveTyped = () => { const w = save(); if (!w.ok) showToast(t('Not saved — {n} characters, at most {max}', { n: w.chars, max: w.max }), { type: 'error' }); };
       ta.onchange = saveTyped;
@@ -1079,6 +1085,7 @@ class SettingsUI {
             return;
           }
           ta.value = [ta.value.trim(), r.text].filter(Boolean).join('\n').slice(0, schema.maxLength || undefined);
+          markTyped(ta);   // the person's own press put these words here (a billed judgment): they hold a stale page's reload until a Save lands
           saveBtn.hidden = false;
           ta.focus();
           showToast(t('Read {n} of your decisions — {m} lines proposed; edit them, then Save', { n: r.read, m: (r.lines || []).length }));

@@ -760,7 +760,7 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
     b.onResolve({ filter: /\/utils\.js$/ }, () => ({ path: 'utils-stub', namespace: 'stub' }));
     b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const fetchJson = (...a) => globalThis.__fetchJson(...a); export const showToast = (...a) => globalThis.__toasts.push(a);', loader: 'js' }));
   } };
-  await esbuild.build({ stdin: { contents: `export * from ${JSON.stringify(path.join(repo, 'src/lib/learn-card.js'))};`, resolveDir: repo, loader: 'js' }, bundle: true, format: 'cjs', platform: 'neutral', outfile: out, plugins: [stub], logLevel: 'error', mainFields: ['module', 'main'] });
+  await esbuild.build({ stdin: { contents: `export * from ${JSON.stringify(path.join(repo, 'src/lib/learn-card.js'))}; export { wasTyped } from ${JSON.stringify(path.join(repo, 'src/lib/stale-watch.js'))};`, resolveDir: repo, loader: 'js' }, bundle: true, format: 'cjs', platform: 'neutral', outfile: out, plugins: [stub], logLevel: 'error', mainFields: ['module', 'main'] });
   const LC = require(out);
   const bundleCard = async (src, tag) => { const o = path.join(WIRE_ROOT, `learn-card.${tag}.cjs`); await esbuild.build({ stdin: { contents: src, resolveDir: path.join(repo, 'src/lib'), sourcefile: 'learn-card.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'neutral', outfile: o, plugins: [stub], logLevel: 'error', mainFields: ['module', 'main'] }); return require(o); };
   const EXN = [{ n: 1, verdict: 'needs', inferred: false, snippet: 'Invoice 7 — approve today?' }, { n: 2, verdict: 'not', inferred: false, snippet: 'Forum digest' }];
@@ -771,6 +771,16 @@ console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL lea
   const c1 = LC.renderLearnCard(answerOf(LONG, { lines: [{ text: M.cleanPart(LONG, 120, 'line'), kind: 'keep', line: 1, from: [], evidence: '' }], removed: [], note: '' }), { onSave: (x) => { got.push(x); return true; } });
   const row1 = c1.querySelector('.learn-text');
   ok(c1.querySelector('.learn-chip').textContent === '原样保留' && c1.querySelector('.learn-tick').checked && row1.value === LONG && row1.maxLength >= LONG.length && look(c1).fit.hidden && look(c1).save.textContent === '保存', `§G-F2 the ${LONG.length}-char line the model kept (its copy cut with an elision): 原样保留, ticked, the box holds the WHOLE line, no notice, 「保存」`, { chip: c1.querySelector('.learn-chip').textContent, len: row1.value.length });
+  // lane think-tools-phone (主开发 04:19Z — the stale page's law): the card's press (a billed judgment) put these lines here, so each box is
+  // marked TYPED — a stale page holds its reload while the card shows; RED: the same card without its mark (a mutant copy, its own bundle)
+  {
+    const CARD_NOW = fs.readFileSync(path.join(repo, 'src/lib/learn-card.js'), 'utf8'), MARK = '    if (box.value) markTyped(box);';
+    if (!CARD_NOW.includes(MARK)) ok(false, '§stale the anchor of the red control «the card without its mark» is not in learn-card.js — the control builds nothing', MARK);   // never silent (主开发 04:54Z)
+    const LCm = CARD_NOW.includes(MARK) ? await bundleCard(CARD_NOW.replace(MARK, '') + "\nexport { wasTyped } from './stale-watch.js';", 'nomark') : null;
+    const cm = LCm ? LCm.renderLearnCard(answerOf(LONG, { lines: [{ text: M.cleanPart(LONG, 120, 'line'), kind: 'keep', line: 1, from: [], evidence: '' }], removed: [], note: '' }), { onSave: () => true }) : null;
+    ok(LC.wasTyped(row1) === true && !!cm && LCm.wasTyped(cm.querySelector('.learn-text')) === false,
+      '§stale the card\'s proposed line is marked TYPED by its press (the stale page holds while the card shows) — RED: a copy without the mark leaves it unmarked');
+  }
   look(c1).save.onclick();
   ok(got[0] === LONG, '§G-F2 …保存 writes the block whole (the verifier\'s probe saved "")', got);
   // F3: the 11 kept + 12 new ⇒ the notice, 保存 waits; unticking new lines until it fits releases it — nothing was cut

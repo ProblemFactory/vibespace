@@ -804,6 +804,9 @@ function _placeToastStackNow() {
   stack.style.bottom = spot.bottom + 'px';
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('resize', () => { if (document.getElementById('global-toasts')) _queueToastPlace(); });
+// WORDS A PERSON TYPED (lane think-tools-phone — the stale page's law): the mark lives in PURE src/lib/stale-watch.js, re-exported here
+// for every box's owner (markTyped / carryUnsaved at a carry, markLanded / markLandedOnSave only where a save PROVED a success)
+export { markTyped, markLanded, markLandedOnSave, carryUnsaved, wasTyped } from './stale-watch.js';
 // `action: { label, run }` (split UX R5, 2026-09-23) = ONE button inside the
 // toast (Undo / Show side by side): a click runs it and dismisses the toast; an
 // action toast lives 5 s unless the user's toast-seconds setting says otherwise.
@@ -812,7 +815,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 let unsavedSaySink = null;
 // `icon` (lane phone-refusal-wrap) = an SVG string of OURS (a module constant — never words) drawn before the words: a
 // toast that names a control shows the control's own icon (UI convention: SVG, no emoji)
-export function showToast(message, { type = 'info', duration, action, actions, history = null, icon = '' } = {}) {
+export function showToast(message, { type = 'info', duration, action, actions, history = null, icon = '', pinned = false } = {}) {
   if (unsavedSaySink && type === 'error') unsavedSaySink.push(String(message));
   let stack = document.getElementById('global-toasts');
   if (!stack) {
@@ -824,7 +827,7 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   // move it to any bar; mobile hides it → fall back to the centered strip).
   _anchorToastStack(stack);
   const el = document.createElement('div');
-  el.className = `global-toast global-toast-${type}`;
+  el.className = `global-toast global-toast-${type}` + (pinned ? ' global-toast-pinned' : '');   // pinned: until its ✕ or its owner takes it away (no timer; the cap never drops it)
   const body = document.createElement('div');
   body.className = 'global-toast-body';
   body.textContent = message;
@@ -848,11 +851,11 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   stack.appendChild(el);
   _recordToast(history && typeof history.m === 'string' ? history.m : message, type, history && history.ref);   // a record's toast keeps its head + a ref, never its words (above)
   // Cap the stack so a burst of errors doesn't fill the screen
-  while (stack.children.length > 4) stack.firstChild.remove();
+  for (let k = stack.children.length; k > 4; k--) { const drop = [...stack.children].find((c) => !c.classList.contains('global-toast-pinned')); if (!drop) break; drop.remove(); }   // a PINNED notice (the stale page's) is never the one dropped
   _placeToastStack(); _queueToastPlace();   // P2-1: off the phone composer / an open modal's rows — now, and once the act that showed it is done
   const secs = Number(_toastCfg.getSeconds?.());
   const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : (acts.length ? 5000 : 3000)));
-  setTimeout(() => {
+  if (!pinned) setTimeout(() => {
     el.classList.add('global-toast-out');
     setTimeout(() => { el.remove(); if (!stack.children.length) stack.remove(); }, 250);
   }, ttl);

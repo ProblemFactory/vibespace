@@ -24,6 +24,7 @@
 // moves it again (R3-F6); the stored-block notice follows the count — never «over» beside an enabled 保存 (R3-F5).
 import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
+import { markTyped } from './stale-watch.js';   // the stale page's mark, from its PURE home (utils.js re-exports it; a suite stubs utils.js)
 import { blockFrom, blockFit } from '../rule-learning.js';
 import { moneyText } from '../decision-model.js';
 
@@ -96,6 +97,7 @@ export function renderLearnCard(r, { onSave = () => { }, onDiscard = () => { } }
     const tick = el('input', 'learn-tick'); tick.type = 'checkbox'; tick.checked = !!x.tick;
     tick.setAttribute('aria-label', t('use this line'));
     const box = el('input', 'learn-text'); box.type = 'text'; box.value = x.text; box.maxLength = Math.max(LINE_BOX_MAX, String(x.text || '').length);
+    if (box.value) markTyped(box);   // the person's own press (a billed judgment) put these words here: they hold a stale page's reload while the card shows
     const main = el('div', 'learn-row-main');
     main.append(tick, box, el('span', 'learn-chip', opWord(x.op)));
     if (x.long) { row.dataset.long = '1'; main.appendChild(el('span', 'learn-none learn-long', t('too long — shortened'))); }
@@ -226,8 +228,11 @@ export function mountLearnDraft(wrap, { catalogue, ta, apply } = {}) {
         onSave: (text) => {
           const w = apply ? apply(text) : null;
           if (w && w.ok === false) { showToast(t('Not saved — {n} characters, at most {max}', { n: w.chars, max: w.max }), { type: 'error' }); return false; }
-          if (ta && ta.value !== text) ta.value = text;
-          showToast(t('Saved — the judge reads the new block from the next message'));
+          if (ta && ta.value !== text) { ta.value = text; markTyped(ta); }   // words the press put in the box are the person's
+          // «Saved» only when the server has these words (the stale page's law): the row's write door hands back its POST's answer
+          // ('other': the box changed or another door's words landed — no «Saved», no false «the server did not answer»: the box holds)
+          const said = (a) => { if (a === 'landed') showToast(t('Saved — the judge reads the new block from the next message')); else if (a === 'failed') showToast(t('Not saved — the server did not answer; change it again to retry'), { type: 'error' }); };
+          if (w && w.landed && typeof w.landed.then === 'function') w.landed.then(said); else said('landed');   // no answer only for a store with no save states or a card with no row door — neither in production: the old word stands
           return true;
         },
       });

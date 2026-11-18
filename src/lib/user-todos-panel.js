@@ -33,7 +33,7 @@ import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, 
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT } from './utils.js';
+import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT, markTyped } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
@@ -623,6 +623,7 @@ export function installUserTodos(app) {
       body.append(box);
       const ta = box.querySelector('textarea');
       ta.value = drafts.get(i.id) || '';
+      if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what a reply box held), carried into the rebuilt box: they still hold a stale page's reload
       applyLive(row, i, rowCtx);
       growBox(ta);
     }

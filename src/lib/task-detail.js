@@ -1,4 +1,4 @@
-import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu } from './utils.js';
+import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu, markLanded } from './utils.js';
 import { t, tc } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { mountTaskLog } from './task-log.js'; // the Backlog / 活动记录 tabs ARE the log viewer
@@ -448,7 +448,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     obj.className = 'task-detail-objective';
     obj.placeholder = t('What this group is for, and the rules every conversation in it follows…');
     obj.value = task.objective || '';
-    obj.onchange = () => patch({ objective: obj.value, ...(task.kind !== 'task' ? { kind: 'task' } : {}) });
+    // a save that LANDED releases the person's words (the stale page's hold): only when the patch answered with the group, the group
+    // stores exactly what was sent (the server cuts an objective at its cap) and the box still holds it — a failed save (the door
+    // resolves with nothing) never releases them
+    obj.onchange = () => { const v = obj.value; Promise.resolve(patch({ objective: v, ...(task.kind !== 'task' ? { kind: 'task' } : {}) })).then((d) => { if (d && d.task && d.task.objective === v && obj.value === v) markLanded(obj); }, () => { }); };
     objSec.appendChild(obj);
 
     // the CONTEXT TABLE

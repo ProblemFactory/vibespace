@@ -12,7 +12,7 @@
 // only icons are the library's SVG. The pane is ONE per window (another thread REPLACES its content, keyed by
 // thread; each thread keeps its scroll and its draft), never persisted in the layout (a replayed window opens on
 // its list — a persisted pane would replay a vendor walk at boot).
-import { fetchJson, showToast } from './utils.js';
+import { fetchJson, showToast, markTyped } from './utils.js';
 import { t, tc } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
 import { autosizeEditor } from './channel-editor-size.js';   // lane channel-edit-autosize: every message editor opens at its text's size
@@ -277,6 +277,7 @@ export function createThreadPane(host, ctx) {
     ta.placeholder = t('Reply in thread…');
     ta.rows = 2;
     ta.value = drafts.get(cur.key) || '';
+    if (ta.value) markTyped(ta);   // the person's own words, carried into the rebuilt box: they still hold a stale page's reload
     autosizeEditor(ta, { minRows: 2 });
     ta.addEventListener('input', () => drafts.set(cur.key, ta.value));
     const row = el('div', 'chanwin-composer-row');

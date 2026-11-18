@@ -23,7 +23,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
-import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
+import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
@@ -3012,6 +3012,7 @@ export function installManageAgents(App, ctx = {}) {
           ta.maxLength = cap;
           ta.placeholder = ph;
           ta.value = this.settings.get(key) || '';
+          carryUnsaved(this.settings, key, ta);   // redrawn from words not yet on the server: they still hold a stale page's reload
           tas.push([key, ta]);
           field.append(lab, ta);
           body2.appendChild(field);
@@ -3057,7 +3058,12 @@ export function installManageAgents(App, ctx = {}) {
         const save = document.createElement('button');
         save.className = 'agent-btn'; save.textContent = t('Save');
         save.onclick = () => {
-          for (const [key, ta] of tas) this.settings.set(key, ta.value.trim());
+          // «Saved» only when the server has THIS press's words (the stale page's law): each key's answer is read from the store
+          // (markLandedOnSave: true when its own words landed) — one «Not saved» when any did not; ONE answer per press: a later press
+          // within the debounce speaks instead (one POST, one toast)
+          const press = adv.press = (adv.press || 0) + 1;
+          const answers = [];
+          for (const [key, ta] of tas) { const v = ta.value.trim(); this.settings.set(key, v); answers.push(markLandedOnSave(this.settings, key, ta, v)); }   // released only when the store's POST for the key LANDED with these words
           for (const [key, inp, schema] of numInputs) {
             // Explicit 0 is a VALID value (every-stop mode) — only an empty or
             // non-numeric input falls back to the default. Never `|| dflt`.
@@ -3065,11 +3071,18 @@ export function installManageAgents(App, ctx = {}) {
             const n = Number(raw);
             const v = raw === '' || !Number.isFinite(n) ? schema.default : Math.min(schema.max, Math.max(schema.min, n));
             inp.value = v;
-            this.settings.set(key, v);
+            this.settings.set(key, v); answers.push(markLandedOnSave(this.settings, key, inp, v));
           }
-          showToast(t('Saved — new/updated sessions receive it on their next turn'));
+          if (typeof this.settings.onSaveState !== 'function') { showToast(t('Saved — new/updated sessions receive it on their next turn')); return; }
+          Promise.all(answers).then((got) => {
+            if (adv.press !== press) return;
+            if (got.every((a) => a === 'landed')) showToast(t('Saved — new/updated sessions receive it on their next turn'));
+            else if (got.includes('failed')) showToast(t('Not saved — the server did not answer; press Save again'), { type: 'error' });
+            // else 'other' — a box changed before the answer, or another door's words landed: no «Saved»; the box holds and closing asks
+          });
         };
         adv.dirty = () => tas.some(([key, ta]) => ta.isConnected && ta.value.trim() !== String(this.settings.get(key) || '').trim())
+          || tas.some(([key, ta]) => ta.isConnected && typeof this.settings.saveStateOf === 'function' && this.settings.saveStateOf(key) === 'failed')
           || numInputs.some(([key, inp, schema]) => inp.isConnected && String(inp.value).trim() !== String(this.settings.get(key) ?? schema.default));
         adv.save = () => { save.onclick(); return true; };
         btnRow.appendChild(save);

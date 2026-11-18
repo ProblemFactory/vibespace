@@ -36,6 +36,8 @@
 //   H  the stale-tab reload: a server whose version the bundle never matches — ONE reload, ONE notice, then quiet across
 //      two reconnects (the diary's stale rows say reload, notice); two reconnects 300 ms apart — ONE reload, the notice
 //      only from the reloaded page (round 2)
+//      + (lane think-tools-phone) a prefilled box nobody typed in never holds it (H1); words TYPED into it (CDP Input.insertText) hold
+//      it with ONE pinned «unsaved» notice, and the box emptied lets the next look reload (H3, H3b)
 //   CI .358 (ci358-reds — the mirror's WATCHDOG at 720 s on «· red: the renderer-kill road», both tries; the runner's Chrome is
 //   156): on Chrome 156 Page.crash kills the renderer ~6 s LATE (measured 6.2 / 6.3 s; 154: within the 1.5 s the road used to
 //   sleep), so the road's reload started a load the crash then killed — never answered, the tab left dead, and the next
@@ -604,6 +606,10 @@ try {
     const pj = path.join(wt, 'package.json'), pjSrc = fs.readFileSync(pj, 'utf8');
     fs.writeFileSync(pj, JSON.stringify({ ...JSON.parse(pjSrc), version: '9.9.9' }, null, 2)); // the server's /api/version the bundle never matches
     const tH = Date.now() - 1000; // the tab's diary holds the whole suite's boots: H judges its own rows
+    // + lane think-tools-phone (the stale page's verdict, 2026-11-18): every document of H carries a box that only SHOWS a saved value
+    //   (a Task Group's objective, prefilled, nobody typing in it) — a box nobody typed in never holds the reload: H1's «reload,notice»
+    //   proves it on a real page
+    const { identifier: savedBox } = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "document.addEventListener('DOMContentLoaded', () => { const b = document.createElement('textarea'); b.className = 'task-detail-objective'; b.value = 'every conversation follows these rules'; b.style.cssText = 'position:fixed;left:-9999px'; document.body.appendChild(b); });" });
     await restartWith([]);
     await phone(...DIMS);
     await cdp('Page.navigate', { url: PREV }); await sleep(300);
@@ -614,7 +620,7 @@ try {
     const stale = rows.filter((r) => r.k === 'stale').map((r) => r.d2).join();
     const bootTypes = rows.filter((r) => r.k === 'boot').map((r) => r.type).join();
     const notes = (await evalJs(`JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]').map((x) => x.m)`)).filter((m) => /still runs VibeSpace/.test(m));
-    check('H1 a bundle that never matches the server: ONE reload, ONE notice («still runs VibeSpace …»), then quiet across two reconnects — the diary\'s stale rows say reload, notice', stale === 'reload,notice' && bootTypes.split(',').filter((x) => x === 'reload').length === 1 && notes.length === 1, { stale, bootTypes, notes });
+    check('H1 a bundle that never matches the server: ONE reload, ONE notice («still runs VibeSpace …»), then quiet across two reconnects — the diary\'s stale rows say reload, notice (a prefilled box nobody typed in never holds it)', await evalJs(`!!document.querySelector('textarea.task-detail-objective')`) && stale === 'reload,notice' && bootTypes.split(',').filter((x) => x === 'reload').length === 1 && notes.length === 1, { stale, bootTypes, notes });
     // round 2: two reconnects 300 ms apart — both inside the reload's 800 ms — on a tab with no stamps yet
     await evalJs(`Object.keys(sessionStorage).filter((k) => /^vibespace\\.(reloaded-for|stale-said)\\./.test(k)).forEach((k) => sessionStorage.removeItem(k)); true`);
     const t2 = Date.now();
@@ -623,6 +629,27 @@ try {
     const rows2 = (await diary()).filter((r) => r.t >= t2 && (r.k === 'stale' || r.k === 'boot'));
     const st2 = rows2.filter((r) => r.k === 'stale'), reloads2 = rows2.filter((r) => r.k === 'boot' && r.type === 'reload').length;
     check('H2 two reconnects 300 ms apart: ONE reload; the notice only from the RELOADED page (its bundle still stale) — never said before the reload', st2.map((r) => r.d2).join() === 'reload,notice' && st2[0].d !== st2[1].d && reloads2 === 1, { st2, reloads2 });
+    // H3 the law's other half on a real page (lane think-tools-phone, the cure's adversarial read): words the person TYPED hold the
+    //   reload — CDP Input.insertText is the person's own (trusted) input into the prefilled box; the box is then left (the typing
+    //   rule's focus gone), so only the TYPED mark can hold: the look holds for «unsaved» with its ONE pinned notice and no reload;
+    //   H3b the box emptied ⇒ the next look reloads (the hold was the words, never the box)
+    await evalJs(`Object.keys(sessionStorage).filter((k) => /^vibespace\\.(reloaded-for|stale-said|stale-hidden)\\./.test(k)).forEach((k) => sessionStorage.removeItem(k)); true`);
+    await evalJs(`(() => { const b = document.querySelector('textarea.task-detail-objective'); b.focus(); b.setSelectionRange(b.value.length, b.value.length); return true; })()`);
+    await cdp('Input.insertText', { text: ', and one rule more' });
+    await evalJs(`(() => { document.activeElement?.blur?.(); return true; })()`);
+    const t3 = Date.now();
+    await evalJs('app._checkBundleFreshness(); true');
+    await sleep(9000); await settle();
+    const rows3 = (await diary()).filter((r) => r.t >= t3 && (r.k === 'stale' || r.k === 'boot'));
+    const held3 = await evalJs(`(() => { const n = document.querySelector('.global-toast-pinned'); return { why: (n && n.dataset.why) || null, pinned: document.querySelectorAll('.global-toast-pinned').length, text: (document.querySelector('textarea.task-detail-objective') || {}).value || '' }; })()`);
+    check('H3 words the person TYPED (CDP Input.insertText into the prefilled box, the box then left) HOLD the reload: the diary says hold (unsaved), ONE pinned notice, no reload',
+      rows3.filter((r) => r.k === 'stale').map((r) => `${r.d2}:${r.why || ''}`).join() === 'hold:unsaved' && !rows3.some((r) => r.k === 'boot') && held3.pinned === 1 && held3.why === 'unsaved' && /one rule more$/.test(held3.text), { rows3, held3 });
+    const t4 = Date.now();
+    await evalJs(`(() => { document.querySelector('textarea.task-detail-objective').value = ''; app._checkBundleFreshness(); return true; })()`);
+    await sleep(9000); await settle();
+    const rows4 = (await diary()).filter((r) => r.t >= t4 && (r.k === 'stale' || r.k === 'boot'));
+    check('H3b the typed box EMPTIED: the next look reloads (the hold was the words, never the box)', rows4.some((r) => r.k === 'stale' && r.d2 === 'reload') && rows4.some((r) => r.k === 'boot' && r.type === 'reload'), { rows4 });
+    await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: savedBox });
     fs.writeFileSync(pj, pjSrc);
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));

@@ -86,12 +86,16 @@ function bindAvailability() {
 // a box with a microphone of its own (attachDictation 'chat' / 'field') — marked ON THE ELEMENT through the global symbol
 // registry, so the lazy doc bundle's copy of this module (public/doc-editor.js) marks the box the main bundle's follower reads
 const OWN = Symbol.for('vibespace.voice.own');
+// the person's dictated words on their input event (the global registry again: app.js's capture listener reads it — lane think-tools-phone)
+const SPOKEN = Symbol.for('vibespace.voice.spoken');
 
 /** the box the words go into: a textarea / a text input (its value and caret; type=email has no caret API — its end) or
  *  a [contenteditable] (a Range). mark() = the cursor now, end() = the box's end; around(m) = before / after / selected;
  *  put(text, m) inserts (a FOCUSED box: insertText, its own undo; else a range edit + input/change); back(u) undoes. */
 function boxOf(el) {
-  const fire = (change) => { el.dispatchEvent(new Event('input', { bubbles: true })); if (change) el.dispatchEvent(new Event('change', { bubbles: true })); };
+  // the words' input event carries SPOKEN (a plain Event otherwise — every other listener sees what it always saw): the stale page's
+  // ONE capture listener (app.js) reads it as the person's own words — the mic never focuses the box, so no trusted event comes from it
+  const fire = (change, spoken = true) => { const ev = new Event('input', { bubbles: true }); if (spoken) ev[SPOKEN] = true; el.dispatchEvent(ev); if (change) el.dispatchEvent(new Event('change', { bubbles: true })); };
   if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
     let caret = true;
     try { caret = el.selectionStart !== null; } catch { caret = false; }
@@ -119,7 +123,7 @@ function boxOf(el) {
         if (el.value !== u.after) return; // typed on since — the person's text wins
         el.value = u.before;
         if (caret) el.setSelectionRange(u.s, u.e);
-        fire(false);
+        fire(false, false);
       },
       hint(v) { if (v === undefined) return el.placeholder; el.placeholder = v; return v; },
     };
@@ -144,7 +148,7 @@ function boxOf(el) {
       if (u.via === 'exec') { if (document.activeElement === el) document.execCommand('undo'); return; }
       if (!u.node.isConnected || el.textContent !== u.after) return; // typed on since — the person's text wins
       u.node.replaceWith(u.gone);
-      fire(false);
+      fire(false, false);
     },
     hint() { return undefined; },
   };

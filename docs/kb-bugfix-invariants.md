@@ -964,6 +964,7 @@
 - (2026-11-17) A LARK QUOTE-REPLY'S PICTURE WAS LISTED WITH A FETCH COMMAND THAT FAILED (B-fbac, 234003; cause unmeasured). 不变量 = a listed attachment is fetchable by its printed command or says why; a recalled one offers no fetch ⇒ kb-bugfix-invariants
 
 - (2026-11-17) «LOCATE IN SIDEBAR» SAID «NOT VISIBLE» ABOUT A ROW ON SCREEN, AND COLLAPSED THE LIST (think-tools-phone): a dead class, the rail's re-click, a look at 60 ms. 不变量 = Locate ends open with the row shown; «not visible» only when true, with its door ⇒ kb-bugfix-invariants
+- (2026-11-17) A STALE PAGE THAT GAVE UP NEVER CHECKED AGAIN — 2.369.404 against 2.369.406 for twelve hours (think-tools-phone): the ready wait gave up at a slow boot, the socket stayed up. 不变量 = a page that knows the hub runs another version reaches it by itself ⇒ kb-bugfix-invariants
 
 ## «LOCATE IN SIDEBAR» SAID «NOT VISIBLE» ABOUT A ROW ON SCREEN, AND COLLAPSED THE LIST; FORK WAS NOT ON THE WINDOW'S MENU (the owner, 2026-11-17; lane think-tools-phone)
 
@@ -1016,6 +1017,18 @@
 - **Invariant:** an attachment the read command lists is fetchable by the command it prints, or the refusal says why in words; a recalled message's attachment says recalled and offers no fetch.
 - **Pins:** scripts/test-channels-lark-shape.mjs «B-fbac» (RED CONTROL: the release's single ask); scripts/test-channels-images.mjs «B-fbac» (RED CONTROL: the release's engine records nothing).
 - **Open:** if the measured cause is none of the suspects, the words now name it for the next report — the record's raw item is what to read.
+
+## A STALE PAGE THAT GAVE UP NEVER CHECKED AGAIN — THE OWNER'S PAGE RAN 2.369.404 AGAINST A 2.369.406 HUB FOR TWELVE HOURS (2026-11-17; lane think-tools-phone)
+
+**Symptom.** The owner's page kept the 2.369.404 bundle against a 2.369.406 hub for twelve hours. Every fix shipped since reached the hub and not the page. The tab's nav log ended, at the hub's restart, «stale, 404 to 406, wait».
+
+**Cause.** The stale-tab check (app.js `_checkBundleFreshness`) ran only on a socket (re)connect. Its reload waits for the hub's ready (`waitServerReady`: 180 s of «booting», or four failed polls); that morning's boot was slower, the wait gave up, noted «wait» and returned — «the next reconnect checks again». The socket then stayed connected all day, so nothing ever checked again.
+
+**Fix.** src/lib/stale-watch.js `staleLook` (PURE, its effects injected; app.js wires them with ONE timer): a give-up looks again on a back-off (30 s → 1 min → 2 min → 5 min, then every 5 min) while the hub is still starting, and a hub that answers «ready» is reloaded onto; a reload HOLDS while a person types or a chat box holds unsent words; ONE pinned notice says why only while the page is behind and will not reload now, its ✕ hiding it for that version. The existing rules stand: one reload per version per tab, the once notice, the ready wait, the stamp written as the reload fires.
+
+**Invariant.** A page that knows the hub runs another version reaches that version by itself: a give-up is followed by another try, never a reload loop, never while a person types, and it never nags.
+
+**Gates.** scripts/test-stale-watch.mjs (fast): the owner's twelve hours over the real `waitServerReady` and a simulated hub, with the release's give-up as the RED control; never nags; holds; no reload loop; the page's own wiring with the release's line planted back as a RED control. scripts/test-boot-phase.mjs: the stale-tab pins re-read through staleLook, the replay over the real look.
 
 ## A CONVERSATION'S 437 BROWSER RECORDS RETIRED IN ONE LOOP TURN, A PROGRAM START EACH (2026-11-16, lane keeper-sweep-yields, 2.369.407)
 - **Seen:** on a fleet instance (2.369.387), one conversation held 437 ephemeral CHILD browser records (one per sub-agent that had used a browser). When it went away the keeper's reconcile retired them all in ONE loop turn, about a second per record on the main thread; the hub's witness said «pipe_read in read». The liveness probe killed the hub after six minutes, six times in a row; each boot removed some records and the count persisted, so the sixth finished the list. Every conversation running there died at the first restart.

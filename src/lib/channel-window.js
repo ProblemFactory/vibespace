@@ -56,7 +56,7 @@
 // standing line under the composer (a1 W1). An AGENT GROUP (the same window
 // type, `adapterId` = the group namespace) is drawn by `openGroupWindow`
 // below: its composer sends as You, @name wakes.
-import { fetchJson, showToast, showContextMenu, showImageOverlay, showInputDialog, copyText } from './utils.js';
+import { fetchJson, showToast, showContextMenu, showImageOverlay, showInputDialog, copyText, markTyped } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
@@ -930,6 +930,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (foot.dataset.footKey === footKey && foot.firstChild) { drawQuote(); return c; }   // lane webhook-l2-ui: the caller line follows the path's callers
     // a draft being typed is HELD across every rebuild — including the flip to the
     // read-only line (a disconnect mid-sentence) — and restored when the composer returns
+    // (in this tab's memory: while no box shows it, a stale page's reload does not wait for it — the law's «gone»)
     const typed = (foot.querySelector('textarea') || {}).value || heldDraft;
     heldDraft = typed;
     foot.dataset.footKey = footKey;
@@ -946,6 +947,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       ta.placeholder = direct ? t('Write a message — it is sent at once, as you') : t('Write a reply…');
       ta.rows = 2;
       ta.value = typed;
+      if (typed) markTyped(ta);   // the person's own words, carried into the rebuilt box: they still hold a stale page's reload
       autosizeEditor(ta, { minRows: 2 });   // a held draft opens at its size (the empty box keeps its two rows)
       const row = el('div', 'chanwin-composer-row');
       // lane owner-composer-attach: the owner's own send carries files where the adapter declares them — lane

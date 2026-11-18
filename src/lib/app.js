@@ -1,5 +1,6 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
-import { waitServerReady, reasonOf, staleTabStep } from './boot-ladder.js';
+import { waitServerReady, reasonOf } from './boot-ladder.js';
+import { staleLook, staleNotice, heldWords, TYPING_QUIET_MS } from './stale-watch.js'; // lane think-tools-phone: a stale page that gave up checks again
 import { awaitBootReady, bootDeps, startingLine, retryLine } from './boot-splash.js';
 import { installPluginClient } from './plugin-client.js';
 import { installKeybindings, registerKeybinding, runCommand } from './contributions.js';
@@ -19,7 +20,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
+import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
@@ -2336,42 +2337,78 @@ class App {
    *  guard keeps dev instances that rebuild without a version bump from
    *  reload-looping). */
   async _checkBundleFreshness() {
+    // ONE look at a time (the adversarial read: a timer's look still in its 180-s wait and a reconnect's look polled twice and
+    // skipped back-off rungs): a call during a look asks for ONE more look when it ends
+    if (this._staleBusy) { this._staleAgain = true; return; }
+    this._staleBusy = true;
     try {
       if (!BUILD_VERSION) return;
-      const r = await fetchJson('/api/version');
-      const srv = r?.version;
-      if (!srv || srv === BUILD_VERSION) return;
-      const key = 'vibespace.reloaded-for.' + srv;
-      // lane phone-back-reload: ONE reload per server version per tab (staleTabStep, PURE in boot-ladder.js); a tab that
-      // reloaded once and STILL runs the old bundle says so once and never reloads again (measured before: silent)
-      const noticeKey = 'vibespace.stale-said.' + srv;
-      const step = staleTabStep({ bundle: BUILD_VERSION, server: srv, reloaded: !!sessionStorage.getItem(key), noticed: !!sessionStorage.getItem(noticeKey), pending: !!this._staleReloadAt });
-      if (step === 'notice') {
-        sessionStorage.setItem(noticeKey, String(Date.now()));
-        navNote({ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'notice' });
-        showToast(t('This tab still runs VibeSpace {old} after its one reload for {new} — reload it yourself to update', { old: BUILD_VERSION, new: srv }), { type: 'warn', duration: 12000 });
-        return;
-      }
-      if (step !== 'reload') return;
-      // PER-TAB, not per-origin (2.240.3, userN's "updated but still broken"
-      // marathon): localStorage is shared across every tab of the origin, so
-      // the FIRST tab to reload burned the once-per-version key and every
-      // OTHER stale tab never auto-reloaded — it kept its old bundle and
-      // silently misbehaved against the new server, looking exactly like
-      // "the fix didn't work". sessionStorage is per-tab and survives the
-      // reload within it, preserving the anti-loop property where it matters.
-      // B-0ece: reload onto a server READY for a page, not one still booting (else the tab sits on the splash)
-      if (!(await waitServerReady({ ...bootDeps() })).ok) { navNote({ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'wait' }); return; } // gave up — the next reconnect checks again
-      if (this._staleReloadAt || sessionStorage.getItem(key)) return; // another reconnect's check won the wait
-      // the reload is PENDING, and the once-per-version stamp waits for the moment it fires (acceptance round 2: stamped
-      // 800 ms early, a reconnect inside that window read «already reloaded» and burned the one notice — no reload yet)
-      this._staleReloadAt = Date.now();
-      navNote({ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'reload' });
-      try { track('event', 'stale-bundle-reload', BUILD_VERSION + ' -> ' + srv); } catch { }
-      showToast(t('VibeSpace was updated — reloading this tab…'));
-      setTimeout(() => { sessionStorage.setItem(key, String(Date.now())); location.reload(); }, 800);
-    } catch { }
+      // A STALE PAGE THAT GAVE UP CHECKS AGAIN (lane think-tools-phone, 主开发 2026-11-17 — the owner's page ran 2.369.404 against a
+      // 2.369.406 hub for twelve hours: the ready wait gave up at a slow boot, «wait», and the socket then stayed up all day). The
+      // look is src/lib/stale-watch.js staleLook (PURE, its effects injected here): a give-up looks again on the back-off, a reload
+      // HOLDS while a person types or a box holds unsent words, and ONE pinned notice says why the page is behind only while it
+      // will not reload now. The existing rules stand: one reload per server version PER TAB (2.240.3 — sessionStorage), the once
+      // notice of a reload that did not take, the wait for the hub's ready, the stamp written as the reload fires.
+      clearTimeout(this._staleTimer); this._staleTimer = null;
+      // the ONE capture listener: the person's own input stamps the typing rule's clock and marks the box TYPED (observed, never declared) —
+      // a trusted input, or the microphone's words (voice-input.js marks their event with the global symbol vibespace.voice.spoken: the
+      // mic never focuses the box, so its event is script-made)
+      if (!this._staleTyping) { const T = this._staleTyping = { at: 0 }; document.addEventListener('input', (e) => { if (!e.isTrusted && !e[Symbol.for('vibespace.voice.spoken')]) return; T.at = Date.now(); if (e.target?.tagName === 'TEXTAREA') markTyped(e.target); }, true); }
+      const memo = this._staleMemo || (this._staleMemo = { n: 0, srv: null });
+      const keyOf = (v) => 'vibespace.reloaded-for.' + v, noticeKeyOf = (v) => 'vibespace.stale-said.' + v;
+      await staleLook({
+        bundle: BUILD_VERSION,
+        fetchVersion: async () => (await fetchJson('/api/version'))?.version || null,
+        store: { reloaded: (v) => !!sessionStorage.getItem(keyOf(v)), noticed: (v) => !!sessionStorage.getItem(noticeKeyOf(v)), markNoticed: (v) => { const noticeKey = noticeKeyOf(v); sessionStorage.setItem(noticeKey, String(Date.now())); } },
+        pending: () => !!this._staleReloadAt,
+        typing: () => { const a = document.activeElement; return !!a && (a.isContentEditable || /^(INPUT|TEXTAREA)$/.test(a.tagName)) && Date.now() - this._staleTyping.at < TYPING_QUIET_MS; },
+        // work a reload would LOSE: an editor window's unsaved file (_editorDirty — the code and doc editors), or words the person TYPED
+        // in a box during this page's life and no landed save or send has released (heldWords — a box nobody typed in never holds, whatever
+        // it shows). The listener marks a multi-line box (a TEXTAREA) only — a single-line field, a search box, never holds by typing;
+        // a box of any kind holds when a person's PRESS filled it and marked it (a drafter's billed proposal: learn-card.js, settings-ui.js).
+        // NOT the chat box: its draft is saved 300 ms after a keystroke and comes back at load; key proxies (the live view's,
+        // xpra's, xterm's) hold nothing — their keys are already sent
+        unsaved: () => [...this.wm.windows.values()].some((w) => typeof w._editorDirty === 'function' && w._editorDirty())
+          || heldWords([...document.querySelectorAll('textarea, input')].filter((x) => !x.matches('.chat-input, .browser-live-kbd, .xpra-ime, .xterm-helper-textarea')).map((x) => ({ typed: wasTyped(x), text: x.value, enabled: !x.disabled && !x.readOnly, connected: x.isConnected }))),
+        // B-0ece: reload onto a server READY for a page, not one still booting (else the tab sits on the splash)
+        waitReady: () => waitServerReady({ ...bootDeps() }),
+        gaveUp: memo,
+        schedule: (ms) => { clearTimeout(this._staleTimer); this._staleTimer = setTimeout(() => this._checkBundleFreshness(), ms); },
+        say: (v, why) => this._staleSay(v, why),
+        notice: (v) => showToast(t('This tab still runs VibeSpace {old} after its one reload for {new} — reload it yourself to update', { old: BUILD_VERSION, new: v }), { type: 'warn', duration: 12000 }),
+        note: (d2, extra = {}) => navNote({ k: 'stale', b: BUILD_VERSION, s: memo.srv, d2, ...extra }),
+        // the reload is PENDING, and the once-per-version stamp waits for the moment it fires (acceptance round 2: stamped
+        // 800 ms early, a reconnect inside that window read «already reloaded» and burned the one notice — no reload yet)
+        reload: (v) => {
+          this._staleReloadAt = Date.now();
+          try { track('event', 'stale-bundle-reload', BUILD_VERSION + ' -> ' + v); } catch { }
+          showToast(t('VibeSpace was updated — reloading this tab…'));
+          const key = keyOf(v);
+          setTimeout(() => { sessionStorage.setItem(key, String(Date.now())); location.reload(); }, 800);
+        },
+      });
+    } catch { } finally {
+      this._staleBusy = false;
+      if (this._staleAgain) { this._staleAgain = false; if (!this._staleReloadAt) { clearTimeout(this._staleTimer); this._staleTimer = setTimeout(() => this._checkBundleFreshness(), 0); } }
+    }
   }
+
+  /** THE ONE PINNED NOTICE of a page that is behind and will not reload now (stale-watch.js staleNotice): why, in words, with
+   *  Reload as one press. Patched in place when the reason changes; its ✕ hides it FOR THAT VERSION (per tab); `v` null takes it
+   *  away. The tries and the hold go on in silence whatever it shows. */
+  _staleSay(v, why) {
+    const hideKey = v ? 'vibespace.stale-hidden.' + v : '';
+    const n = staleNotice({ v, why, hidden: !!(hideKey && sessionStorage.getItem(hideKey)) });
+    const el = this._staleNoticeEl;
+    if (!n) { if (el) { el.remove(); this._staleNoticeEl = null; } return; }
+    if (el && el.isConnected && el.dataset.why === why) return;   // said already — never a second toast
+    if (el) el.remove();
+    const toast = showToast(t(n.words), { type: 'warn', pinned: true, action: { label: t(n.door), run: () => location.reload() } });
+    toast.dataset.why = why;   // pinned (showToast): no timer, and the stack's cap of 4 never drops it
+    toast.querySelector('.global-toast-x')?.addEventListener('click', () => { try { sessionStorage.setItem(hideKey, '1'); } catch { } });
+    this._staleNoticeEl = toast;
+  }
+
 
   _probeVncAvailability(attempt = 0) {
     fetchJson('/api/vnc/status').then((d) => {

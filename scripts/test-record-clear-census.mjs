@@ -791,6 +791,7 @@ const STORAGE = {
   'src/lib/app.js|localStorage|k': ['pref', 'CLIENT_PREF_KEYS — the per-device UI prefs (scale, font size)'],
   'src/lib/app.js|sessionStorage|key': ['marker', 'the once-per-version stale-bundle reload stamp (a time)'],
   'src/lib/app.js|sessionStorage|noticeKey': ['marker', 'lane phone-back-reload: the once-per-version "this tab still runs the old bundle" notice was said (a time)'],
+  'src/lib/app.js|sessionStorage|hideKey': ['marker', 'lane think-tools-phone: the person\'s ✕ on the stale page\'s pinned notice hid it for THAT version in this tab (the value \'1\')'],
   'src/lib/nav-log.js|sessionStorage|NAV_LOG_KEY': ['telemetry', 'lane phone-back-reload: the tab\'s navigation diary — entry shapes, back verdicts, navigation types, versions; never a URL, a title or words'],
   'src/lib/nav-log.js|sessionStorage|EXIT_INTENT_KEY': ['ids', 'lane phone-back-reload round 2: the exit\'s intent — a time, a hop count, 8 chars of the browser\'s random key for the entry it left; never a URL'],
   'src/lib/appearance-panel.js|localStorage|\'termFontSize\'': ['pref', 'terminal font size'],

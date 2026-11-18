@@ -24,7 +24,7 @@
 import { buttonsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { t, tc, resolveLang } from './i18n.js';
 import { cardWords } from './app-card-model.js'; // design 009: THE words of an app install's one card
-import { copyText, showContextMenu, showToast } from './utils.js';
+import { copyText, showContextMenu, showToast, markTyped } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts only once its pane has been shown ARM_MS
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -307,6 +307,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     ta.placeholder = t('Reply…');
     ta.setAttribute('aria-label', t('Reply'));
     ta.value = model.drafts.get(id) || '';
+    if (ta.value) markTyped(ta);   // the person's own words (a draft holds only what this box held), carried into the rebuilt box: they still hold a stale page's reload
     const why = mk('div', 'iw-reply-why'); // the box's one-line note ABOVE it: the verdict's fact (an ended conversation: the send reopens it)
     reply.append(why, voiceField(ta, attachDictation(ta)));
     const actions = mk('div', 'iw-actions');
