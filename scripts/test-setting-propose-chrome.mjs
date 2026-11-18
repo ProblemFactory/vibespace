@@ -149,7 +149,7 @@ try {
 
   console.log('② the agent proposes; the refusals file nothing');
   const r0 = await ask(['Raise the day ceiling so the release can finish?', '--propose', `${DAY}=1600`], TOKEN);
-  check('a RAISE with no --until is refused by name, with the row\'s link — nothing filed', r0.code !== 0 && /time-boxed/.test(r0.out) && r0.out.includes(`vibespace://settings/${DAY}`) && (await items()).length === 0, r0.out);
+  check('a RAISE with no --until is refused by name, with the row\'s link — nothing filed', r0.code !== 0 && /time-boxed/.test(r0.out) && r0.out.includes(`vibespace://settings/${DAY}`) && (await items()).length === 0, r0.out);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const r1 = await ask(['The judge\'s cap?', '--propose', 'plugin.llm.dailyBudgetUsd=9', '--until', '2h'], TOKEN);
   check('the judge\'s daily cap is not on the list — refused, nothing filed', r1.code !== 0 && (await items()).length === 0, r1.out);
   const a = await ask(['The lanes hit today\'s ceiling — raise it so the release can finish?', '--propose', `${DAY}=1600`, '--until', '6h'], TOKEN);
@@ -234,7 +234,7 @@ try {
   check('a hold stands: 1600, back to 1200', !!hB && hB.value === 1600 && hB.before === 1200 && stored()[DAY] === 1600, hB);
   const qc = await ask(['Settle the day ceiling at 1000?', '--propose', `${DAY}=1000`], TOKEN), qd = await ask(['Raise the day ceiling a little more for an hour?', '--propose', `${DAY}=2000`, '--until', '1h'], TOKEN);
   const q1400 = await ask(['Make it 1400 for good?', '--propose', `${DAY}=1400`], TOKEN);
-  check('LAW A at the ASK: on the held row a lasting 1400 (over the «before» 1200) is refused by name, with the row\'s link — nothing filed', q1400.code !== 0 && /raise-over-hold|goes back to 1200/.test(q1400.out) && q1400.out.includes(`vibespace://settings/${DAY}`), q1400.out);
+  check('LAW A at the ASK: on the held row a lasting 1400 (over the «before» 1200) is refused by name, with the row\'s link — nothing filed', q1400.code !== 0 && /raise-over-hold|goes back to 1200/.test(q1400.out) && q1400.out.includes(`vibespace://settings/${DAY}`), q1400.out);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const C = await idOf('Settle the day ceiling at 1000'), D = await idOf('Raise the day ceiling a little more');
   check('a lasting 1000 (under the «before») and a timed 2000 are filed on the held row', qc.code === 0 && qd.code === 0 && !!C && !!D, { qc: qc.out, qd: qd.out });
   await openTray();

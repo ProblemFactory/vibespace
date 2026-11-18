@@ -34,7 +34,7 @@ console.log('① the closed list and the ask\'s verdict (src/ask-setting.js, PUR
   const raise = r({ propose: `${DAY}=1600`, until: '6h' });
   ok(raise.ok && raise.action.type === 'setting-change' && raise.action.key === DAY && raise.action.value === 1600 && raise.action.was === 800 && raise.action.untilRel === 6 * 3600e3 && raise.action.askedAt === NOW, 'a raise with --until 6h ⇒ the action: the row, the value, the value when asked, a stretch counted from the PRESS', raise);
   const noUntil = r({ propose: `${DAY}=1600` });
-  ok(!noUntil.ok && noUntil.code === 'raise-needs-until' && noUntil.error.includes(`vibespace://settings/${DAY}`), 'amendment 1: a RAISE with no «until» is refused by name, with the row\'s link (a lasting raise is the row\'s own)', noUntil);
+  ok(!noUntil.ok && noUntil.code === 'raise-needs-until' && noUntil.error.includes(`vibespace://settings/${DAY}`), 'amendment 1: a RAISE with no «until» is refused by name, with the row\'s link (a lasting raise is the row\'s own)', noUntil);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   ok(r({ propose: `${DAY}=400` }).ok && r({ propose: `${DAY}=400`, until: '2h' }).ok, 'a LOWER may last, or carry an «until»');
   ok(r({ propose: `${DAY}=800` }).code === 'propose-same', 'a value equal to the present one is refused (nothing to change)');
   const off = r({ propose: 'chat.uploadDir=1' }), judge = r({ propose: 'plugin.llm.dailyBudgetUsd=5', until: '1h' });
@@ -82,7 +82,7 @@ console.log('③ THE HOLD STORE — one act, the hold on disk FIRST; one hold pe
     const r2 = await k.H.take({ key: DAY, value: 2000, untilRel: 2 * 3600e3, shown: 1600 });
     ok(r2.ok && k.H.list()[0].value === 2000 && k.H.list()[0].before === 800 && k.timers.length === 1 && k.timers[0].ms === 2 * 3600e3, 'amendment 4: ONE hold per row — a second press replaces the value and the moment and KEEPS the first «before»', k.H.list());
     k.at(NOW + 2 * 3600e3); await k.H.returnHold(DAY, 'moment');
-    ok(k.st[DAY] === 800 && k.H.list().length === 0 && k.owner.length === 0 && k.told.some((m) => m.type === 'server-notice' && m.i18n && m.i18n.params.value === '800' && m.i18n.params.link === `vibespace://settings/${DAY}`) && k.logs.some((l) => /back to 800/.test(l)),
+    ok(k.st[DAY] === 800 && k.H.list().length === 0 && k.owner.length === 0 && k.told.some((m) => m.type === 'server-notice' && m.i18n && m.i18n.params.value === '800' && m.i18n.params.link === `vibespace://settings/${DAY}`) && k.logs.some((l) => /back to 800/.test(l)),   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
       'amendment 6: THE RETURN — back to the FIRST «before» at its moment, a toast on the open pages (its row\'s link) and a journal line, NO For-you item', { st: k.st[DAY], owner: k.owner });
   }
   {
@@ -143,7 +143,7 @@ console.log('③ THE HOLD STORE — one act, the hold on disk FIRST; one hold pe
       ok(!r1.ok && r1.retry === 1 && k.owner.length === 0 && tm.length === 1 && tm[0].ms === SH.RETRY_MS && SH.RETRY_MS === 60e3 && SH.RETRIES === 3, 'a return the settings file refuses is NOT left to the boot: tried again in a minute, nothing filed yet', { r1, owner: k.owner, tm: tm.map((x) => x.ms) });
       for (let i = 0; i < SH.RETRIES; i++) { const t = tm.shift(); if (!t) break; await t.fn(); await new Promise((r) => setTimeout(r, 5)); }
       ok(writes() === SH.RETRIES + 1 && k.owner.length === 1 && tm.length === 0 && H.list().length === 1 && k.st[DAY] === 1600, `…${SH.RETRIES + 1} tries a minute apart, then left to the next start: the hold stays on disk, ONE notice`, { writes: writes(), owner: k.owner.length, timers: tm.length });
-      ok(k.owner[0].detail.includes(`vibespace://settings/${DAY}`) && k.owner[0].text.includes(AS.PROPOSABLE[DAY].label) && k.owner[0].i18n && k.owner[0].i18n.text.params.label.key === AS.PROPOSABLE[DAY].label && /tried 4 times, a minute apart/.test(k.owner[0].detail) && /next start of VibeSpace tries again/.test(k.owner[0].detail) && k.owner[0].origin === 'spend' && k.owner[0].kind === 'notice' && k.owner[0].key === 'accounts', 'the ONE notice (the Spending family: origin spend) names the row with its link, the tries, and that the next start tries again', k.owner[0]);
+      ok(k.owner[0].detail.includes(`vibespace://settings/${DAY}`) && k.owner[0].text.includes(AS.PROPOSABLE[DAY].label) && k.owner[0].i18n && k.owner[0].i18n.text.params.label.key === AS.PROPOSABLE[DAY].label && /tried 4 times, a minute apart/.test(k.owner[0].detail) && /next start of VibeSpace tries again/.test(k.owner[0].detail) && k.owner[0].origin === 'spend' && k.owner[0].kind === 'notice' && k.owner[0].key === 'accounts', 'the ONE notice (the Spending family: origin spend) names the row with its link, the tries, and that the next start tries again', k.owner[0]);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
     }
     {
       const { k, H, tm, writes } = failing(2);
@@ -171,12 +171,12 @@ console.log('③ THE HOLD STORE — one act, the hold on disk FIRST; one hold pe
     let saved = null; const w0 = { dirty: (f, o) => { saved = JSON.parse(o.produce()); }, durable: async () => true };
     const H = SH.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: () => { }, userTodos: { add: (key, x) => { k.owner.push({ key, ...x }); return { id: 'n1' }; } }, now: () => NOW, writer: w0, setTimer: () => ({}), clearTimer: () => { } });
     await H.start();
-    ok(H.list().length === 0 && k.owner.length === 1 && k.owner[0].text.includes(AS.PROPOSABLE[HOUR].label) && k.owner[0].detail.includes(`vibespace://settings/${HOUR}`) && /its moment is not a number/.test(k.owner[0].detail) && /it held 60/.test(k.owner[0].detail) && saved && Object.keys(saved.holds).length === 0, 'a hold whose moment is not a number is dropped AND said (the row, the value it held, its link); the store is saved as kept, so the next start says nothing again', { owner: k.owner, saved });
+    ok(H.list().length === 0 && k.owner.length === 1 && k.owner[0].text.includes(AS.PROPOSABLE[HOUR].label) && k.owner[0].detail.includes(`vibespace://settings/${HOUR}`) && /its moment is not a number/.test(k.owner[0].detail) && /it held 60/.test(k.owner[0].detail) && saved && Object.keys(saved.holds).length === 0, 'a hold whose moment is not a number is dropped AND said (the row, the value it held, its link); the store is saved as kept, so the next start says nothing again', { owner: k.owner, saved });   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   }
   {
     const k = mk({ file: '{ not json' });
     await k.H.start();
-    ok(k.owner.length === 1 && /could not be read/.test(k.owner[0].text) && Object.keys(AS.PROPOSABLE).every((key) => k.owner[0].detail.includes(`vibespace://settings/${key}`)), 'holds that cannot be read at boot reach the owner (a raised ceiling may not return by itself) — each of the three ceilings with its link', k.owner);
+    ok(k.owner.length === 1 && /could not be read/.test(k.owner[0].text) && Object.keys(AS.PROPOSABLE).every((key) => k.owner[0].detail.includes(`vibespace://settings/${key}`)), 'holds that cannot be read at boot reach the owner (a raised ceiling may not return by itself) — each of the three ceilings with its link', k.owner);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   }
 }
 
@@ -214,7 +214,7 @@ console.log('⑤ the agent\'s ask — the route builds the action, or refuses by
   const base = `http://127.0.0.1:${srv.address().port}`;
   const ask = (add) => new Promise((resolve) => { const d = Buffer.from(JSON.stringify({ add: { text: 'The lanes hit today\'s ceiling — raise it?', ...add } })); const q = http.request(`${base}/api/agent/user-todo`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': d.length } }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => { let j = {}; try { j = JSON.parse(t); } catch { j = { raw: t.slice(0, 300) }; } resolve({ status: res.statusCode, json: j }); }); }); q.write(d); q.end(); });
   const a = await ask({ propose: `${DAY}=1600` });
-  ok(a.status === 400 && a.json.code === 'raise-needs-until' && a.json.error.includes(`vibespace://settings/${DAY}`) && filed.length === 0, 'a raise with no --until: 400 by name with the row\'s link, NOTHING filed (the present value is the hub\'s own reading)', a.json);
+  ok(a.status === 400 && a.json.code === 'raise-needs-until' && a.json.error.includes(`vibespace://settings/${DAY}`) && filed.length === 0, 'a raise with no --until: 400 by name with the row\'s link, NOTHING filed (the present value is the hub\'s own reading)', a.json);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const b = await ask({ propose: 'plugin.llm.dailyBudgetUsd=9', until: '2h' });
   ok(b.status === 400 && b.json.code === 'propose-not-allowed' && filed.length === 0, 'the judge\'s daily cap is not on the list (amendment 7) — refused, nothing filed', b.json);
   const c = await ask({ until: '6h' });
@@ -228,7 +228,7 @@ console.log('⑤ the agent\'s ask — the route builds the action, or refuses by
   app.locals.settingHolds = { holdOf: (k) => (k === DAY ? { key: DAY, value: 1600, before: 800, untilAt: NOW + 3600e3, lasting: 800 } : null) };
   settings[DAY] = 1600; const n0 = filed.length;
   const e = await ask({ propose: `${DAY}=1200` });
-  ok(e.status === 400 && e.json.code === 'raise-over-hold' && e.json.error.includes(`vibespace://settings/${DAY}`) && filed.length === n0, 'LAW A at the ask: on a held raise (1600, before 800) a lasting 1200 is refused raise-over-hold by name, with the row\'s link, nothing filed', e.json);
+  ok(e.status === 400 && e.json.code === 'raise-over-hold' && e.json.error.includes(`vibespace://settings/${DAY}`) && filed.length === n0, 'LAW A at the ask: on a held raise (1600, before 800) a lasting 1200 is refused raise-over-hold by name, with the row\'s link, nothing filed', e.json);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const f = await ask({ propose: `${DAY}=800` });
   ok(filed.length === n0 + 1 && filed[filed.length - 1].action.value === 800, '…while a lasting 800 (at the «before») is filed', { status: f.status });
   delete app.locals.settingHolds;
@@ -268,7 +268,7 @@ console.log('⑦ THE CHECK\'S LAWS (主开发 2026-11-15 20:29Z) — A: a live h
     const pv = AS.pressVerdict({ type: 'setting-change', key: DAY, value: 1200 }, { present: 1600, now: NOW, lasting: 800 });
     ok(!pv.press && pv.why === 'raise-over-hold' && pv.lasting === 800, '…the same verdict the card draws (pressVerdict with the lasting value)', pv);
     const a = AS.askVerdict({ propose: `${DAY}=1200` }, { present: 1600, now: NOW, lasting: 800 });
-    ok(!a.ok && a.code === 'raise-over-hold' && a.error.includes(`vibespace://settings/${DAY}`) && /goes back to 800/.test(a.error), '…and the ASK is refused by name with the row\'s link (nothing filed)', a);
+    ok(!a.ok && a.code === 'raise-over-hold' && a.error.includes(`vibespace://settings/${DAY}`) && /goes back to 800/.test(a.error), '…and the ASK is refused by name with the row\'s link (nothing filed)', a);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
     const r2 = await k.H.take({ key: DAY, value: 800, shown: 1600 });
     ok(r2.ok && !r2.held && r2.endedHold && k.st[DAY] === 800 && k.H.list().length === 0 && k.timers.length === 0, 'a lasting change AT the «before» (800) ends the hold and stays', r2);
   }
@@ -346,7 +346,7 @@ console.log('⑦ THE CHECK\'S LAWS (主开发 2026-11-15 20:29Z) — A: a live h
     ok(far.why === 'too-far' && near.why === 'too-near' && r.code === 'too-far' && r2.code === 'too-near' && k.st[DAY] === 800, 'AT THE PRESS too: 49 h is refused (too-far), a relative 4 min is refused (too-near) — the ask\'s bounds, nothing written', { far, near, r: r.code, r2: r2.code });
     const kd = mkH(); fs.mkdirSync(path.join(kd.dir, 'setting-holds.json'));
     await kd.H.start();
-    ok(kd.owner.length === 1 && /could not be read/.test(kd.owner[0].text) && Object.keys(AS.PROPOSABLE).every((key) => kd.owner[0].detail.includes(`vibespace://settings/${key}`)), 'a holds file that is unreadable for ANOTHER reason than missing (a folder: EISDIR) reaches the owner — ONE notice, the three ceilings with their links', kd.owner);
+    ok(kd.owner.length === 1 && /could not be read/.test(kd.owner[0].text) && Object.keys(AS.PROPOSABLE).every((key) => kd.owner[0].detail.includes(`vibespace://settings/${key}`)), 'a holds file that is unreadable for ANOTHER reason than missing (a folder: EISDIR) reaches the owner — ONE notice, the three ceilings with their links', kd.owner);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   }
   // ── words-9 / words-7: the notices and the toast name the row's LABEL in three languages; End now refused carries the value
   {

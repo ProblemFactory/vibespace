@@ -36,12 +36,12 @@ console.log('① THE GRAMMAR (src/internal-link.js, PURE): two new targets and t
     ['vibespace://desktop/-x', [], 'a desktop id that starts with a dash is no door'],
     [`${D}?name=x`, [`desktop|${DESK}|${D}`], 'NO VALUE PART — `?…` stays words outside the link'],
     ['vibespace://window/w1 vibespace://foo', [], 'no third target: a target word not in the table is no door'],
-    [`vibespace://settings/${SETK}.`, [`setting|${SETK}|vibespace://settings/${SETK}`], 'the settings row: a known key (the longest, cut back at a dot)'],
+    [`vibespace://settings/${SETK}.`, [`setting|${SETK}|vibespace://settings/${SETK}`], 'the settings row: a known key (the longest, cut back at a dot)'],   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
     ['vibespace://settings/spend.nope', [], 'the settings row: an unknown key is words'],
     ['conversation://0e0e0e0e-1111-4222-8333-444455556666', [], 'the vendor\'s own conversation:// is another scheme — untouched'],
   ];
   for (const [s, want, name] of ROWS) ok(JSON.stringify(hits(s)) === JSON.stringify(want), name, hits(s));
-  ok(L.linkOf('conversation', KEY) === C && L.linkOf('desktop', DESK) === D && L.linkOf('setting', SETK) === `vibespace://settings/${SETK}`, 'linkOf spells each target as the list prints it');
+  ok(L.linkOf('conversation', KEY) === C && L.linkOf('desktop', DESK) === D && L.linkOf('setting', SETK) === `vibespace://settings/${SETK}`, 'linkOf spells each target as the list prints it');   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   ok(['conversation', 'desktop'].every((k) => { const r = k === 'desktop' ? DESK : KEY; const h = L.linkHits(L.linkOf(k, r), has); return h.length === 1 && h[0].kind === k && h[0].ref === r; }), 'what linkOf writes the grammar reads back whole');
   ok(JSON.stringify(L.hrefTarget(C, has)) === JSON.stringify({ kind: 'conversation', ref: KEY }) && L.hrefTarget(C + '/', has) === null && L.hrefTarget('vibespace://settings/spend.nope', has) === null && L.hrefTarget('vibespace://window/w1', has) === null,
     'an href is a link only when it IS one, exactly (no trailing part, no unknown key, no third target)');

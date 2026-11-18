@@ -356,7 +356,7 @@ const FURL = [
   ['file://localhost/home/u/a.js:12', '/home/u/a.js:12', 'a host part (localhost) dropped, the :line kept'],
   ['file://box/home/u/a.js', '/home/u/a.js', 'any host name dropped'],
   ['file:/home/u/a.md', '/home/u/a.md', 'one slash'],
-  ['FILE:///x/y.md', '/x/y.md', 'the scheme in any case'],
+  ['FILE:///x/y.md', '/x/y.md', 'the scheme in any case'],   // stale-pins: kept — a leg's own name (its words moved into chat-renderers' comment) — not a pin
   ['file:///a/b.py#L12-L20', '/a/b.py:12-20', 'a #L12-L20 fragment ⇒ the :12-20 a bare path carries'],
   ['file:///a/b.py#L7', '/a/b.py:7', '#L7 ⇒ :7'],
   ['file:///a/b.md#intro', '/a/b.md', 'any other fragment dropped'],

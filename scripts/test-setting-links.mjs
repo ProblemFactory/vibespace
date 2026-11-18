@@ -21,12 +21,12 @@ const keysOf = (t) => SL.settingLinkHits(t, has).map((h) => h.key);
 
 console.log('① the grammar (src/internal-link.js\'s settings row, PURE)');
 {
-  ok(SL.SCHEME === 'vibespace://settings/' && SL.settingLink('spend.unattendedPerInstanceDay') === 'vibespace://settings/spend.unattendedPerInstanceDay', 'the spelling: vibespace://settings/<the schema\'s dotted key>');
+  ok(SL.SCHEME === 'vibespace://settings/' && SL.settingLink('spend.unattendedPerInstanceDay') === 'vibespace://settings/spend.unattendedPerInstanceDay', 'the spelling: vibespace://settings/<the schema\'s dotted key>');   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   ok(A.DOOR_LINK_WORDS && /\{link\}/.test(A.DOOR_LINK_WORDS.spending) && /const SL = Object\.freeze\(\{ settingLink: \(key\) => `vibespace:\/\/settings\/\$\{key\}` \}\);/.test(read('src/spend-authorizer.js')), 'the spend authorizer (PURE, imports nothing) spells the link with the SAME scheme');
   const T = [
     ['Raise it: vibespace://settings/spend.unattendedPerInstanceDay.', ['spend.unattendedPerInstanceDay'], 'a sentence\'s full stop is shed'],
     ['（vibespace://settings/spend.unattendedPerIdentityDay）。', ['spend.unattendedPerIdentityDay'], 'CJK punctuation around it is shed (the shared trailing set)'],
-    ['vibespace://settings/spend.nope', [], 'an unknown key stays plain text'],
+    ['vibespace://settings/spend.nope', [], 'an unknown key stays plain text'],   // stale-pins: kept — a leg's own name — not a pin
     ['vibespace://settings/chat.uploadDir?value=/tmp&x=1', ['chat.uploadDir'], 'NO VALUE PART: `?value=` ends the key and stays text'],
     ['vibespace://settings/chat.uploadDir=9', ['chat.uploadDir'], '`=` ends the key'],
     ['xvibespace://settings/chat.uploadDir and /vibespace://settings/chat.uploadDir', [], 'not inside a longer word or another path'],
@@ -96,7 +96,7 @@ console.log('③ THE CENSUS — every product sentence that names a place in Set
     t.forEach((l, i) => {
       const m = RE.exec(l); if (!m || isComment(l, m.index)) return;
       const spend = /Spending|花费|支出/.test(l);
-      const klass = /vibespace:\/\/settings\/|settingLink\(|DOOR_LINK_WORDS|spendRowOf\(|warnRowOf\(|\{link\}|\$\{door\}/.test(l) ? 'link'
+      const klass = /vibespace:\/\/settings\/|settingLink\(|DOOR_LINK_WORDS|spendRowOf\(|warnRowOf\(|\{link\}|\$\{door\}/.test(l) ? 'link'   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
         : /\.open\(\{|openSettingAt\(/.test(l) ? 'door'
         : /\btitle\b|\btip\b|data-tip/.test(l) ? 'tip'
         : /Plugins/.test(m[0] + l.slice(m.index, m.index + 24)) ? 'plugin-path' : 'section';
@@ -147,10 +147,10 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   const span = (key, label) => `<span class="chat-link chat-setting-link" data-setting="${key}" title="Open in Settings">${label}</span>`;
   const md = (s) => r.renderMarkdown(s, { vsLinks: true }).trim();   // the conversation's own words (the option on — ⑧ holds where)
   ok(md(`raise it here: vibespace://settings/${K}.`) === `<p>raise it here: ${span(K, `vibespace://settings/${K}`)}.</p>`, 'chat: a bare link in an agent\'s message is ONE setting link; the sentence\'s full stop stays outside', md(`raise it here: vibespace://settings/${K}.`));
-  ok(md(`[the ceiling](vibespace://settings/${K})`) === `<p>${span(K, 'the ceiling')}</p>` && md(`<vibespace://settings/${K}>`) === `<p>${span(K, `vibespace://settings/${K}`)}</p>`, 'chat: a markdown link and an autolink carry their label (the sanitizer never sees the scheme)');
+  ok(md(`[the ceiling](vibespace://settings/${K})`) === `<p>${span(K, 'the ceiling')}</p>` && md(`<vibespace://settings/${K}>`) === `<p>${span(K, `vibespace://settings/${K}`)}</p>`, 'chat: a markdown link and an autolink carry their label (the sanitizer never sees the scheme)');   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const mdUnk = md('[x](vibespace://settings/spend.nope) and [y](#vs-setting-spend.nope)');
   ok(!/chat-setting-link|data-setting/.test(mdUnk), 'l3: the markdown road asks the schema at BOTH ends — a link (or a hand-written #vs-setting- anchor) to an unknown key is never the door', mdUnk);
-  ok(md(`\`vibespace://settings/${K}\``) === `<p><code>${span(K, `vibespace://settings/${K}`)}</code></p>`, 'chat: written as code, it is still the door');
+  ok(md(`\`vibespace://settings/${K}\``) === `<p><code>${span(K, `vibespace://settings/${K}`)}</code></p>`, 'chat: written as code, it is still the door');   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   const unk = md('unknown: vibespace://settings/spend.nope');
   ok(!/chat-setting-link|chat-link-path|data-path/.test(unk) && /<span class="chat-link-words">vibespace:\/\/settings\/spend\.nope<\/span>/.test(unk), 'chat: an UNKNOWN key stays plain words — and the path pass no longer half-links «//settings/…»', unk);
   const val = md(`value: vibespace://settings/${K}?v=9999`);
@@ -163,7 +163,7 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   // pass never underlines its tail («//settings/<key>» answered «Not found» as a FILE)
   const L1 = { cjkColon: `上限在这里:vibespace://settings/${K}`, enColon: `Raise it here:vibespace://settings/${K}`, caps: `VIBESPACE://SETTINGS/${K}`, glued: `herevibespace://settings/${K}` };
   const l1 = Object.fromEntries(Object.entries(L1).map(([k, v]) => [k, md(v)]));
-  ok(l1.cjkColon.includes(span(K, `vibespace://settings/${K}`)) && l1.enColon.includes(span(K, `vibespace://settings/${K}`)) && l1.caps.includes(`data-setting="${K}"`), 'l1 chat: after a half-width colon (zh and en) and with the scheme in capitals it is the DOOR', l1);
+  ok(l1.cjkColon.includes(span(K, `vibespace://settings/${K}`)) && l1.enColon.includes(span(K, `vibespace://settings/${K}`)) && l1.caps.includes(`data-setting="${K}"`), 'l1 chat: after a half-width colon (zh and en) and with the scheme in capitals it is the DOOR', l1);   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   ok(Object.values(l1).every((h) => !/chat-link-path|data-path=/.test(h)) && /<span class="chat-link-words">vibespace:\/\/settings\/spend\.unattendedPerInstanceDay<\/span>/.test(l1.glued), 'l1 chat: glued to a word it is WORDS, and no run of the scheme is ever a file path', l1.glued);
   const tgt = { closest: (sel) => (sel === '.chat-setting-link[data-setting]' ? tgt : null), dataset: { setting: K }, classList: { contains: (c) => c === 'chat-setting-link' || c === 'chat-link' } };
   const ev = { target: tgt, preventDefault() { this.dp = 1; }, stopPropagation() { this.sp = 1; }, clientX: 1, clientY: 1 };
@@ -193,7 +193,7 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   U.registerSettingLinks({ has: fyHas, open: (k) => toOpen.push(k) });
   const b2 = mkEl(), n = U.toastWordsInto(b2, `limit reached — vibespace://settings/${K}.`);
   const btn = b2._kids.find((k) => k.className === 'global-toast-setting');
-  ok(n === 1 && btn && btn.dataset.setting === K && btn.textContent === `vibespace://settings/${K}` && b2.textContent === `limit reached — vibespace://settings/${K}.`, 'a toast (the server\'s notices ride it): the link is a button built from text nodes, the rest stays text', b2._kids.map((k) => k.className || k.textContent));
+  ok(n === 1 && btn && btn.dataset.setting === K && btn.textContent === `vibespace://settings/${K}` && b2.textContent === `limit reached — vibespace://settings/${K}.`, 'a toast (the server\'s notices ride it): the link is a button built from text nodes, the rest stays text', b2._kids.map((k) => k.className || k.textContent));   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   if (btn && typeof btn.onclick === 'function') btn.onclick({ preventDefault() { }, stopPropagation() { } });
   ok(JSON.stringify(toOpen) === JSON.stringify([K]), 'the toast\'s link opens the row through the registered door', toOpen);
   const b3 = mkEl(), n3 = U.toastWordsInto(b3, 'see vibespace://settings/spend.nope now');
@@ -210,7 +210,7 @@ console.log('⑤ the agents\' rule — one sentence in the manual and in vibespa
   // MEASURED (lane setting-doors pick 1): one 83 B line in the ask paragraph left test-stash-strip's manager twin (a manager with
   // groups, filled to the inline cap) 61 B OVER — the tightest shape had 22 B of room. «At most one short line»: none fits, so the
   // rule lives where an agent looks when it asks — the manual and vibespace-ask's own usage — and the injected rules stay as they were
-  ok(!/vibespace:\/\/settings\//.test(said) && R.CAPS.sessionStart === 3160, 'the injected rules carry no line for it (the tightest shape had 22 B of room; an 83 B line went 61 B over) — the cap stays 3160 B');
+  ok(!/vibespace:\/\/settings\//.test(said) && R.CAPS.sessionStart === 3160, 'the injected rules carry no line for it (the tightest shape had 22 B of room; an 83 B line went 61 B over) — the cap stays 3160 B');   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
   ok(/a setting to change: put its link in the question or --detail — vibespace:\/\/settings\/<key>/.test(read('data/bin/vibespace-ask')) && /never a path in words, and never write the setting yourself/.test(read('data/bin/vibespace-ask')), 'vibespace-ask\'s own usage (what an agent reads when it asks) carries the rule');
 }
 

@@ -71,7 +71,7 @@ console.log('① every write road × every caller (sign-in OFF: no auth layer be
       const before = H.bytes(), r = await go(), after = H.bytes();
       if (c.writes) ok(r.status === 200 && after !== before, `${who} — ${road} ⇒ written`, { status: r.status, body: r.body.slice(0, 200) });
       else ok(r.status === 403 && r.json && r.json.code === 'spend_row_owner_only' && r.json.why === c.why && after === before
-        && /change only by the owner's press on the owner's own page/.test(r.json.error) && new RegExp(`vibespace://settings/spend\\.`).test(r.json.error) && /^vibespace:\/\/settings\/spend\./.test(r.json.door) && Array.isArray(r.json.rows) && r.json.rows.every((k) => /^spend\./.test(k)),
+        && /change only by the owner's press on the owner's own page/.test(r.json.error) && new RegExp(`vibespace://settings/spend\\.`).test(r.json.error) && /^vibespace:\/\/settings\/spend\./.test(r.json.door) && Array.isArray(r.json.rows) && r.json.rows.every((k) => /^spend\./.test(k)),   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
         `${who} — ${road} ⇒ 403 spend_row_owner_only (${c.why}), the file's bytes unchanged, the rule + the row + its link named`, { status: r.status, json: r.json });
     }
   }
@@ -97,7 +97,7 @@ console.log('② what is NOT fenced: other rows, and spending rows carried verba
   const BUD = 'plugin.llm.dailyBudgetUsd';
   const b1 = await send(H, 'PATCH', '/api/settings', { [BUD]: 50 }, { Authorization: 'Bearer vsst_fixture_agent' }), b2 = await send(H, 'PATCH', '/api/settings', { [BUD]: 51 }, {});
   const b3 = await send(H, 'POST', '/api/config/import', importOf({ ...H.read(), [BUD]: 52 }), { Authorization: 'Bearer jbt_fixture_job' });
-  ok(b1.status === 403 && b1.json.door === `vibespace://settings/${BUD}` && b2.status === 403 && b2.json.why === 'no-browser' && b3.status === 403 && H.read()[BUD] === undefined,
+  ok(b1.status === 403 && b1.json.door === `vibespace://settings/${BUD}` && b2.status === 403 && b2.json.why === 'no-browser' && b3.status === 403 && H.read()[BUD] === undefined,   // stale-pins: kept — the scheme's link text as this suite's input — src/setting-links.js was created and folded into src/internal-link.js inside this range; not a pin
     'f4: the judge\'s daily dollar cap — a bearer, a request with no page mark, a bearer\'s import: each refused, its OWN door named, nothing written', { b1: b1.json, b2: b2.status, b3: b3.status });
   const b4 = await send(H, 'PATCH', '/api/settings', { [BUD]: 2.5 }, page);
   ok(b4.status === 200 && H.read()[BUD] === 2.5, 'f4: the owner\'s page changes it');
