@@ -491,6 +491,14 @@ console.log('— ⑫ the whole-profile law, fast: the marks, a recipe for every 
     const ssCut = "    if (ONE_STATE_KINDS.has(n.kind) && rec.pendingNotices.some((x) => x && x.kind === n.kind && String(x.text || '') === String(n.text || ''))) return rec.pendingNotices.length;\n";
     const SSm = SS.includes(ssCut) ? MUT45.load('src/session-status.js', SS.replace(ssCut, ''), 'tells-again') : null;
     ok(SSm && tell(SSm).repeats === 5, 'CONTROL (B-0645 (5)): the base re-writes and re-broadcasts each repeat (RED)');
+    // B-0645 cure (主开发 09:07Z): the executor's folder signal — a give-up says «lost» ONLY when the browser had not confirmed the
+    // ordered put-back (then the journal says the folder is back), and every confirmed put-back says «back». The executor runs in
+    // no fast suite (the heavy test-browser-mediation ⑥e drives it): its lines are pinned here; the keeper's road is test-browser-builds'
+    const cmF = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
+    ok(/if \(q && q\.lost\) \{ if \(w\.orderedOk === n\) log\.log\?\.\(`[^`]*the browser HAD confirmed the ordered put-back — the profile's download folder is back`\); else \{ log\.warn\?\.\(/.test(cmF)
+      && (cmF.match(/emitFolder\(\{ kind: 'lost'/g) || []).length === 1 && /const done = \(ok, via\) => \{ say\(ok\); if \(ok\) \{ if \(via === 'ordered'\) w\.orderedOk = n; emitFolder\(\{ kind: 'back'/.test(cmF)
+      && /onFolder: \(fn\) => \{ if \(typeof fn !== 'function'\) return \(\) => \{ \}; folderListeners\.add\(fn\);/.test(cmF),
+      'B-0645 cure (the executor, pinned): a give-up after the browser had confirmed the ordered put-back is said as «the folder is back» and tells nobody; otherwise it says «lost» (once); every confirmed put-back says «back»; the keeper listens through onFolder');
   }
 }
 function STATES_ACTS(T) { return `${T.STATES.length} states × ${T.ACTS.length} acts`; }

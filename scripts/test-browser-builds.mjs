@@ -2763,5 +2763,46 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   setMode(null);
 }
 
+// ═══ B-0645 cure (主开发 09:07Z, as if a must): A FOLDER THAT COULD NOT BE CONFIRMED PUT BACK IS TOLD TO THE PERSON — the REAL
+// keeper over a stand-in mediator's folder signal: ONE For-you item per browser (its door: Restart), resolved by a confirmed
+// put-back or by the browser's end; nothing for a browser that is not running
+{
+  const MED = require('../src/browser-mediation.js');
+  const folderRun = async (Kmod) => {
+    let cb = null; const items = [], statuses = [];
+    const med = { available: () => false, repoint() { }, revoke() { }, admitTarget() { }, adopt: async () => { }, onTold: () => () => { }, onFolder: (fn) => { cb = fn; return () => { }; } };   // mediation off; only the folder signal
+    const uT = { add: (k, it) => { items.push(it); return { id: 'f' + items.length }; }, setStatus: (id, st, by) => statuses.push({ id, st, by }), get: (id) => ({ id, status: statuses.some((x) => x.id === id) ? 'done' : 'open' }) };
+    fs.mkdirSync(path.join(ROOT, 'data-folder-' + (Kmod === K ? 'real' : 'mut')), { recursive: true });
+    const kf = Kmod.create({ dataDir: path.join(ROOT, 'data-folder-' + (Kmod === K ? 'real' : 'mut')), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
+      log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: uT, mediator: med });
+    const pf = kf.createProfile({ label: 'Folder lent' });
+    const lost = () => cb && cb({ kind: 'lost', profileId: pf.id, browserKey: KEY_A });
+    lost();   // not running: nothing
+    const before = items.length;
+    await kf.start(pf.id, { why: 'test' });
+    lost(); lost();
+    const once = items.length - before;
+    if (cb) cb({ kind: 'back', profileId: pf.id, browserKey: KEY_A });
+    const back = statuses.map((x) => x.by).join();
+    lost();   // lost again after a confirmed put-back: told again
+    await kf.stop(pf.id, { why: 'user' });
+    const out = { before, once, back, all: items.length, ended: statuses.map((x) => x.by).join(), item: items[0] || null };
+    lost();   // stopped: nothing
+    out.after = items.length;
+    return out;
+  };
+  const f1 = await folderRun(K);
+  ok(f1.before === 0 && f1.once === 1 && f1.back === 'put-back-confirmed' && f1.all === 2 && f1.ended === 'put-back-confirmed,browser-ended' && f1.after === 2
+    && f1.item && f1.item.kind === 'action' && f1.item.action && f1.item.action.type === 'browser-restart' && /^Agent browser "Folder lent" may still save your downloads to the folder a conversation was lent — Restart it$/.test(f1.item.text)
+    && f1.item.i18n && f1.item.i18n.text.key === MED.FOLDER_LOST_WORDS.text && /asked the browser 3 times/.test(f1.item.detail),
+    'B-0645 cure (the real keeper): a download folder the hub could not confirm put back on a RUNNING browser is ONE For-you item with its Restart door (twice said, once filed); a confirmed put-back resolves it; the browser\'s end resolves the next one; a browser that is not running files nothing', f1);
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const sub = "  if (mediator && typeof mediator.onFolder === 'function') mediator.onFolder((ev) => {";
+  if (!ksrc.includes(sub)) throw new Error('the anchor of the control «B-0645 cure: no folder subscription» is not in the source');
+  const MCf = mutantCopies('browser-builds-folder', REPO);
+  const f0 = await folderRun(MCf.load('src/server/browser-keeper.js', ksrc.replace(sub, "  if (false) mediator.onFolder((ev) => {"), 'no-folder-notice'));
+  ok(f0.once === 0 && f0.all === 0, 'CONTROL (B-0645 cure): a keeper that does not hear the folder signal tells the person nothing — the base\'s journal line only (RED for the leg above)', f0);
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

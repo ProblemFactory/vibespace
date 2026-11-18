@@ -231,6 +231,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   kept = null,
   // verify r1 (F8, lane browser-admin): the wall clock of ONE step of THE install slot (default 15 min; injectable for the gate)
   installTimeoutMs = null } = {}) {
+  const folderNotices = new Map();   // B-0645 cure: profileId → {id, rec} — the For-you notice of a download folder not confirmed put back (at the top: emitLease ends one at any time)
   if (!dataDir) throw new Error('browser-keeper: dataDir is required');
   const storeFile = path.join(dataDir, STORE_FILE);
   const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
@@ -484,7 +485,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function emitLease(ev) {
     // verify r3 #2 (site-reset): the persisted witness dies with the browser — a stop, or a FRESH start (an adoption keeps it:
     // the tabs are still there; a named browser that outlives a VibeSpace restart is adopted at load with no event at all)
-    if (ev && ev.profileId && (ev.kind === 'browser-stopped' || (ev.kind === 'browser-ready' && !ev.adopted))) dropLeaseTabs(ev.profileId);
+    if (ev && ev.profileId && (ev.kind === 'browser-stopped' || (ev.kind === 'browser-ready' && !ev.adopted))) { dropLeaseTabs(ev.profileId); endFolderNotice(ev.profileId, ev.kind === 'browser-stopped' ? 'browser-ended' : 'browser-restarted'); }   // B-0645 cure: the folder notice ends with its browser
     const out = [];
     for (const fn of leaseListeners) {
       try { const r = fn(ev); if (r && typeof r.then === 'function') out.push(Promise.resolve(r).catch((e) => log.warn?.(`[browser] lease listener failed: ${e && e.message}`))); }
@@ -1942,6 +1943,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  and the browser that daemon launched is ended (it would hold the profile's SingletonLock: the relaunch's exit 21). */
   function markDaemonGone(rec, seenBy) {
     const v = livenessOf(rec);
+    endFolderNotice(rec.profileId, 'browser-ended');   // B-0645 cure: a browser that died took the lent folder with it
     rec.state = 'stopped'; rec.endedAt = now();
     rec.lastError = v === 'recycled' ? `the browser daemon exited (pid ${rec.pid} is another process now)` : 'the browser daemon exited';
     if (rec.launch === 'attach') { rec.lastError = v === 'recycled' ? `the browser exited (pid ${rec.pid} is another process now)` : 'the browser exited (its window was closed, or it crashed)'; if (userStoppedRec(rec)) { rec.lastError = null; rec.stoppedBy = 'user'; rec.note = USER_STOPPED_NOTE; } endDisplay(rec, 'its browser exited'); tabsWentWithBrowser(rec, seenBy); } // lane one-browser-b1: Chrome IS the record's process — the user's own browsing went with it (the driver heal's rule)
@@ -4441,6 +4443,31 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // WHY (onTold), the keeper words it with the profile's label and hands it to its listeners (browser-handback.js: ONE free notice at
   // that conversation's next turn) — the one road for the bound, the ceiling, a takeover, its connection ending, a download with no
   // folder of its lent
+  // B-0645 cure (主开发 09:07Z, as if a must): A FOLDER THAT COULD NOT BE CONFIRMED PUT BACK IS TOLD TO THE PERSON — ONE For-you
+  // notice per browser (its door: Restart), filed when the mediator gives the hub's own put-back up on a browser still alive,
+  // resolved when a later put-back is confirmed or the browser ends (a stop, a fresh start: emitLease)
+  function endFolderNotice(profileId, by) {
+    const n = folderNotices.get(profileId);
+    if (!n) return;
+    folderNotices.delete(profileId);
+    if (n.id && userTodos && typeof userTodos.setStatus === 'function') { try { const it = typeof userTodos.get === 'function' ? userTodos.get(n.id) : null; if (!it || it.status === 'open') userTodos.setStatus(n.id, 'done', by); } catch { /* gone already */ } }
+  }
+  if (mediator && typeof mediator.onFolder === 'function') mediator.onFolder((ev) => {
+    if (!ev || !ev.profileId) return;
+    if (ev.kind === 'back') return endFolderNotice(ev.profileId, 'put-back-confirmed');
+    if (ev.kind !== 'lost') return;
+    const rec = reg.browsers[ev.profileId], p = profile(ev.profileId);
+    if (!rec || !B.isLiveBrowser(rec) || !p) return;   // a browser that ended took the folder with it
+    const was = folderNotices.get(ev.profileId);
+    if (was && was.rec === rec) return;   // ONE per browser
+    if (was) endFolderNotice(ev.profileId, 'browser-restarted');
+    const n = M.folderLostNotice({ label: B.cleanLabel(p.label) });
+    const e = { id: null, rec };
+    folderNotices.set(ev.profileId, e);
+    if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${ev.profileId} "${p.label}": its download folder may still be lent — no For-you store is wired, so only this journal says so`); return; }
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'action', urgency: 'high', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', i18n: n.i18n, action: { type: 'browser-restart', profileId: ev.profileId } }); e.id = (it && it.id) || null; }
+    catch (err) { log.warn?.(`[browser] ${ev.profileId} "${p.label}": the download-folder For-you item was not filed (${err && err.message})`); }
+  });
   const folderListeners = new Set();
   if (mediator && typeof mediator.onTold === 'function') mediator.onTold((t) => {
     if (!t || !t.browserKey) return;

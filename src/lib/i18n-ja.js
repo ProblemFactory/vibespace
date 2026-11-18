@@ -4493,6 +4493,8 @@ export default {
   "Headless": "ヘッドレス",
   "Browser profile": "ブラウザプロファイル",
   "Agent browser profile…": "エージェントブラウザのプロファイル…",
+  'Agent browser "{label}" may still save your downloads to the folder a conversation was lent — Restart it': "エージェントブラウザ「{label}」がダウンロードをまだ会話のフォルダに保存しているかもしれません — 再起動してください",
+  "A conversation was lent this browser's download folder. When the lending ended, VibeSpace asked the browser {tries} times to put your own folder back and it never answered. Until it does, a file you download in it may land in the lent folder. Restarting the browser puts your folder back.": "ある会話がこのブラウザのダウンロードフォルダを借りていました。貸し出しが終わったとき、VibeSpace はブラウザに自分のフォルダへ戻すよう {tries} 回頼みましたが、応答がありませんでした。応答するまで、ここでダウンロードしたファイルは貸し出したフォルダに入るかもしれません。ブラウザを再起動するとフォルダが戻ります。",
   "Profile label": "プロファイル名",
   "e.g. Work account": "例: 仕事用アカウント",
   "ephemeral (no profile)": "一時的(プロファイルなし)",

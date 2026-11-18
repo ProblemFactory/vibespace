@@ -117,6 +117,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A passkey registration whose new key could not be saved no longer uses up your Allow once: the page can try again without asking you.
 - In your own browsing window, a refused sign-in now says why: the request has closed, Chrome shows its own sheet, or the browser is not watched.
 - When the browser answers late while an agent's download folder is being put back, a next download no longer lands in your own folder untold.
+- If a browser never confirms that your download folder was put back after a conversation borrowed it, For you now says so, with a Restart button.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.

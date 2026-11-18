@@ -43,6 +43,8 @@ export const noticeKeyTables = () => {
     { name: 'src/browser-builds.js PROGRAM_NOTICE_WORDS / PROGRAM_WHY_WORDS', keys: [...Object.values(req('../src/browser-builds.js').PROGRAM_NOTICE_WORDS), ...Object.values(req('../src/browser-builds.js').PROGRAM_WHY_WORDS)] },
     // B-cf42: the one For-you notice of an engine whose running kernel answers otherwise than its probe
     { name: 'src/browser-builds.js LIVE_KERNEL_WORDS', keys: Object.values(req('../src/browser-builds.js').LIVE_KERNEL_WORDS) },
+    // B-0645 cure: the For-you notice of a download folder not confirmed put back (src/browser-mediation.js FOLDER_LOST_WORDS)
+    { name: 'src/browser-mediation.js FOLDER_LOST_WORDS', keys: Object.values(req('../src/browser-mediation.js').FOLDER_LOST_WORDS) },
     // lane engine-spi-egress L3: the one notice of the 2026-11-cloak-to-plugin migration (and a running record's words)
     { name: 'src/server/migrations.js CLOAK_PLUGIN_WORDS', keys: Object.values(req('../src/server/migrations.js').CLOAK_PLUGIN_WORDS) },
     // lane hub-loop-stalls round 3: why a profile stopped / why samples were not taken — ONE table the journal line and ⚙ Diagnostics both say

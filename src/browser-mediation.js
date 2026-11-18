@@ -1047,7 +1047,23 @@ function mediationSentence({ profileLabel = '', others = 0 } = {}) {
   return `"${profileLabel}" is shared instance-wide through a mediated CDP url: you see and drive only your own tabs${n ? ` (${n} other session${n === 1 ? '' : 's'} attached, each confined the same way)` : ''}; while the user drives, everything but reads is refused (browser_interrupted) and what you had running there when they took over is interrupted — wait for the handback, then run it again.`;
 }
 
+/** B-0645 cure (主开发 09:07Z, as if a must): A FOLDER THAT COULD NOT BE CONFIRMED PUT BACK IS TOLD TO THE PERSON. After the hub's
+ *  own put-back is given up (WINDOW_PUTBACK_TRIES) on a browser that is still alive, the person's own downloads may land in the
+ *  folder a conversation was lent: ONE For-you notice per browser (its door: Restart), resolved when a later put-back is
+ *  confirmed or the browser ends (the keeper). Stored English; the page translates by key. */
+const FOLDER_LOST_WORDS = Object.freeze({
+  text: 'Agent browser "{label}" may still save your downloads to the folder a conversation was lent — Restart it',   // (no apostrophe: a key holding " is matched single-quoted)
+  detail: 'A conversation was lent this browser\'s download folder. When the lending ended, VibeSpace asked the browser {tries} times to put your own folder back and it never answered. Until it does, a file you download in it may land in the lent folder. Restarting the browser puts your folder back.',
+});
+const fillWords = (key, params) => String(key).replace(/\{(\w+)\}/g, (m, k) => (params[k] === undefined ? m : String(params[k])));
+function folderLostNotice({ label = '', tries = WINDOW_PUTBACK_TRIES } = {}) {
+  const params = { label: String(label || '').replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 80), tries: String(tries) };
+  return { text: fillWords(FOLDER_LOST_WORDS.text, params), detail: fillWords(FOLDER_LOST_WORDS.detail, params),
+    i18n: { text: { key: FOLDER_LOST_WORDS.text, params }, detail: [{ key: FOLDER_LOST_WORDS.detail, params }] } };
+}
+
 module.exports = {
+  FOLDER_LOST_WORDS, folderLostNotice, // B-0645 cure: the folder not confirmed put back, told to the person
   WINDOW_PUTBACK_TRIES,
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX, withhold, replayOnAdmit, // B-70af: the out-of-band admission's replay

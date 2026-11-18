@@ -4494,6 +4494,8 @@ export default {
   "Headless": "无界面(headless)",
   "Browser profile": "浏览器配置",
   "Agent browser profile…": "Agent 浏览器配置…",
+  'Agent browser "{label}" may still save your downloads to the folder a conversation was lent — Restart it': "Agent 浏览器「{label}」可能仍把你的下载存到某个对话的文件夹里——重启它",
+  "A conversation was lent this browser's download folder. When the lending ended, VibeSpace asked the browser {tries} times to put your own folder back and it never answered. Until it does, a file you download in it may land in the lent folder. Restarting the browser puts your folder back.": "有个对话借用了这个浏览器的下载文件夹。借用结束时，VibeSpace 请浏览器把你自己的文件夹换回来，问了 {tries} 次都没有回应。在它回应之前，你在里面下载的文件可能会落到借出的文件夹里。重启浏览器会换回你的文件夹。",
   "Profile label": "配置名称",
   "e.g. Work account": "例如 工作账号",
   "ephemeral (no profile)": "一次性(无配置)",
