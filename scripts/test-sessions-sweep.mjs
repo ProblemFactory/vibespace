@@ -587,6 +587,25 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
   const RFRESH = fresh(routeSrc.replace(FRESH, 'if (false && r && !r.row && _warmSweep && '), 'cure-newer-red');
   const n4 = await newer(MAIN), n4r = await newer(RFRESH);
   ok(routeSrc.split(FRESH).length === 2 && n4 === true && n4r === false, `(b) a reopen of a conversation newer than the last sweep finds its row after ONE fresh sweep (${n4}); RED the last sweep alone (${n4r})`);
+  // (c) the -cure's read (S7): a hub whose sweeps keep failing with NO list yet — its worker answers a lookup «no sweep held», each
+  // sweep fails — a second For-you reopen inside the cache's spacing starts NO second sweep (spaced by the last ATTEMPT, good or
+  // failed); RED: the lookup's sweep unspaced (3e6ed72ed's askRows)
+  const NONEFAIL = stub('none-fails', "const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (!m || !m.op) return; if (m.op === 'sessionsLookup') parentPort.postMessage({ id: m.id, ok: true, result: { none: true } }); else parentPort.postMessage({ id: m.id, ok: false, error: { message: 'the sweep failed', code: 'SWEEP_FAILS' } }); });");
+  const SPACE = '      if (Date.now() - _sweepTriedAt < (_sweepTest.cacheTtlMs ?? 4500)) return null;';
+  const reopens = async (src, tag) => {
+    const Mod = M12.load('src/routes/sessions.js', src, tag);
+    Mod._sweepTestSeam({ workerFile: NONEFAIL, lookupMs: 5000, cacheTtlMs: 60000, timeoutMs: null }); Mod.setup(routeCtx());   // a lookup waits out the failing sweep (it ends in ms once posted) — never joined by the second reopen
+    const P = Mod.sweepPool(), call0 = P.call.bind(P); let sweeps = 0;
+    P.call = (op, ...x) => { if (op === 'sessionsSweep') sweeps++; return call0(op, ...x); };
+    const t0 = Date.now(); const a = await Mod.sessionRow(`claude:${uuid()}`); const first = Date.now() - t0;
+    const ended = await settle(() => sweeps === 1);   // the first attempt was posted (and failed: the lookup waited it out)
+    const b = await Mod.sessionRow(`claude:${uuid()}`);
+    try { Mod.closeSweepPool(); } catch { }
+    return { sweeps, a, b, first, ended };
+  };
+  const sp = await reopens(routeSrc, 'cure2-spaced'), spRed = await reopens(routeSrc.replace(SPACE, () => '      if (false) return null;'), 'cure2-unspaced');
+  ok(routeSrc.split(SPACE).length === 2 && sp.ended && spRed.ended && sp.sweeps === 1 && sp.a === null && sp.b === null && spRed.sweeps === 2,
+    `(c) sweeps that keep failing with no list yet: two reopens inside the spacing start ONE sweep (${sp.sweeps}; each answered by locate()); RED the lookup's sweep unspaced: ${spRed.sweeps}`, { sp, spRed });
   for (const Mod of [MAIN, RSAID, RFRESH]) { try { Mod.closeSweepPool(); } catch { } }
 }
 RF.closeSweepPool();

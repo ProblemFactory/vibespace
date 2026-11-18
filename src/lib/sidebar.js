@@ -1466,7 +1466,7 @@ class Sidebar {
       retry.onclick = () => this._retryRebuild();
       // a paused discovery (a storage mount not answering) holds every rebuild — the chip's title names it and no door is offered
       // that cannot act (the chain's -cure); the line stays
-      row.append(label, hostStateChip('error', { text: tr('as of {ago}', { ago: agoText(this._hubStale.at) }), title: String(this._hubStale.why || '') }));
+      row.append(label, hostStateChip(stillRunning ? 'pending' : 'error', { text: tr('as of {ago}', { ago: agoText(this._hubStale.at) }), title: String(this._hubStale.why || '') }));   // the -cure's read: a healthy long sweep is not drawn as an error
       if (!this._hubStale.paused && this._hubStale.running == null) row.append(' ', retry);   // no door that cannot act: a pause holds a rebuild, a running sweep would only be joined
       this.listEl.appendChild(row);
     }

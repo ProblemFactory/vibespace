@@ -557,7 +557,7 @@ function setup(ctx) {
   // the sweep's -cure (B): rebuilds that failed IN A ROW while a list is served — from SWEEP_STALE_SAY_AFTER on, every answer
   // says so (listStale) and the page draws one line with its door; the first good sweep clears it
   let _sweepFails = 0, _sweepFailWhy = '', _sessionsBuiltAt = 0, _sweepStartedAt = 0, _sweepFailDeadline = false;
-  _sweepFailsOf = () => ({ fails: _sweepFails, why: _sweepFailWhy, builtAt: _sessionsBuiltAt, triedAt: _sessionsCacheAt });   // triedAt: the last ATTEMPT (a failure moves it too)
+  _sweepFailsOf = () => ({ fails: _sweepFails, why: _sweepFailWhy, builtAt: _sessionsBuiltAt, triedAt: _sweepTriedAt });   // triedAt: the last ATTEMPT (a failure moves it too — with no list yet as well)
 
   // The sweep body — ASYNC since 2.242.0. It ran execFileSync end-to-end and a
   // live V8 profile on the busiest fleet pod (22 live sessions, heavy claude
@@ -579,7 +579,7 @@ function setup(ctx) {
       if (!_sessionsCache) throw e;
       _sweepFails++; _sweepFailWhy = String((e && (e.code || e.message)) || 'error').slice(0, 120); _sweepFailDeadline = !!(e && e.deadline);
       sweepRoadSaid('stale', _sessionsCache.count, e); _sessionsCacheAt = Date.now(); return _sessionsCache;
-    } finally { _sweepStartedAt = 0; }
+    } finally { _sweepStartedAt = 0; _sweepTriedAt = Date.now(); }
   };
   const _sweepOnce = async () => {
     // B-47e2 (R5's local leg, FLAG-GATED default OFF: agentd.localDiscovery):
@@ -656,7 +656,7 @@ function setup(ctx) {
       // the worker down (its respawn backing off), wedged past its deadline, throwing, or its pool closed: THE LAST ANSWER
       // STANDS (the outer catch counts it, said) — never a walk on the loop while there is one. With none yet (a first
       // sweep), the old road ONCE, on this thread, said — ONLY when no worker exists at all (主开发 12:08Z, (1)): SafeFs's wait
-      // ended with nothing that ran it (noWorker), or its inline door refused (sweep-pool-down). A sweep that RAN — past its
+      // ended with nothing that ran it (noWorker) — or its inline door refused (sweep-pool-down: a BELT for a non-serial copy only; this serial pool sends every call with no live worker to its wait, so that door is never reached here). A sweep that RAN — past its
       // deadline (the storage that held the worker), throwing, refused for its size — is said (a 500 with its words), and
       // that storage is never walked again on the loop
       if (_sessionsCache) throw e;
@@ -836,6 +836,7 @@ const SWEEP_ANSWER_MAX_BYTES = 64 * 1024 * 1024;   // the chain's -cure (a): the
 const SWEEP_ROWS_IN_MAX = 200000;    // …and the rows handed in (the other harnesses' + the kept metas), at most
 const _sweepTest = {};               // the suite's seam: a stand-in worker script (a wedged / throwing / slow one), the sweep's deadline, a lookup's clock, a poll's wait, the cache's 4.5 s
 let _sweepPool = null, _sweepRoad = 'worker', _sweepStats = null, _warmthTag = 0, _sweepFailsOf = null;
+let _sweepTriedAt = 0;   // the -cure's read (S7): the end of the LAST sweep ATTEMPT, good or failed, list or none — what a lookup's sweep is spaced by
 /** THE FALLBACK IS SAID (主开发 00:18Z): no worker and no list yet ⇒ the route runs the sweep ONCE on the main loop (sweepInThread) — the old road
  *  (about a second a poll at the owner's 12 543 transcripts). Said ONCE per outage where the owner looks (the journal,
  *  the telemetry event Diagnostics counts; a hold it makes is named by its own frames in the [loop-hold] line), and its
@@ -895,6 +896,7 @@ async function askRows(op, payload) {
     let r = await sweepPool().call(op, payload, { timeoutMs: lk, waitMs: lk });   // ends ITSELF: never the sweep's worker
     if (r && r.none) {   // a worker that holds no sweep yet (a respawn): ONE sweep, waited for at most LOOKUP_MS (r3, S5) — never while
       if (_pausedOf && _pausedOf()) return null;   // discovery is paused (a wedged mount is never walked for a lookup)
+      if (Date.now() - _sweepTriedAt < (_sweepTest.cacheTtlMs ?? 4500)) return null;   // the -cure's read (S7): spaced by the last ATTEMPT — a hub whose sweeps keep failing is not swept again at each reopen (locate() answers)
       let t = null;
       await Promise.race([Promise.resolve(_warmSweep()).catch(() => null), new Promise((done) => { t = setTimeout(done, lk); })]);
       if (t) clearTimeout(t);
