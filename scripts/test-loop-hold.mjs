@@ -867,6 +867,17 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
   const NO = 'with no frame of ours below it', CUT = 'the stack cut before any frame of ours';
   ok(ud.words === `node’s own code — undici, ${NO}` && ud.key === '(node’s own code — undici)' && ud.keyWords === ud.key && !ud.empty,
     `a channel's first MessageEvent (undici's lazy load, measured): «${ud.words}», keyed by the module — never a frame of undici's bundle`, ud);
+  { // the two answer forms judge «cut» at the SAME depth (the batch-78 readers' should): the call-site form's own frame is
+    // skipped inside the expression (i = 1), the string form's at sampleOf (raw.slice(1)) — 31 frames below it is a full
+    // answer in both, 30 is not
+    const SS = (n) => { const t = ['Error', '    at self (node:internal/self:1:1)', ...Array.from({ length: n }, (_, i) => `    at f${i} (node:internal/deps/undici/undici:${i + 1}:1)`)].join('\n'); return 'S' + t.length + ':' + t; };
+    const CC = (n) => enc(Array.from({ length: n }, (_, i) => [`f${i}`, 'node:internal/deps/undici/undici', i + 1]));
+    const f = (t) => { const sm = LH.sampleOf(t, ROOT); return [sm.form, sm.cut, sm.frames.length, LH.framesAnswer(sm.frames, sm.form, sm.cut).words.replace(/^.*undici, /, '')]; };
+    const r = { s31: f(SS(31)), s30: f(SS(30)), c31: f(CC(31)), c30: f(CC(30)) };
+    ok(r.s31[0] === 'string' && r.c31[0] === 'calls' && r.s31[1] === true && r.c31[1] === true && r.s30[1] === false && r.c30[1] === false
+      && r.s31[3] === CUT && r.c31[3] === CUT && r.s30[3] === NO && r.c30[3] === NO && r.s31[2] === 31 && r.c31[2] === 31,
+      'the string form and the call-site form judge a full answer at the same depth: 31 frames below the sample\'s own = «the stack cut…», 30 = «no frame of ours below it», in both', r);
+  }
   ok(UNDICI31.length === LH.SAMPLE_FRAMES && u31.words === `node’s own code — undici, ${CUT}` && u31.key === ud.key && w22.words === ud.words,
     'the same load in a FULL answer (31 frames, cut inside crypto / tls / http2 — Node 24) and inside webstreams (Node 22): still undici — the bundled dependency in the run names it, never the innermost module; the full one never claims «no frame of ours»', { u31, w22 });
   ok(zl.words === 'node’s own code — zlib, driven by zlibHog (src/hogs.js:9)' && zl.key === 'src/hogs.js:9' && zl.keyWords === 'zlibHog (src/hogs.js:9)',

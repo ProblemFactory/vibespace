@@ -686,6 +686,61 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
   // THE RED CONTROLS — each cut put back alone (scripts/mutant-copy.mjs, never src/): its own count is red
   const LSRC = fs.readFileSync(path.join(REPO, 'src/server/loop-blame.js'), 'utf8'), WSRC = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8');
   const cut = (src, from, to) => (src.split(from).length === 2 ? src.replace(from, to) : null);
+  // THE ONE-PATH FAST ROAD JUDGES AS THE LOOP DOES (the batch-78 readers' follow-up): every one-path call × every kind of
+  // path, its verdict on the fast road (inflight() read DURING the call) against the same path through the loop
+  // (renameSync(p, p) — the pathsOf road); a two-path call judged by the path that hits; the moved OWN-DATA-ON-A-MOUNT
+  // branch (a data dir on its own network mount ⇒ its paths are the 'home' hit, never refused)
+  const ONE = ['statSync', 'lstatSync', 'existsSync', 'readFileSync', 'readdirSync', 'accessSync', 'realpathSync', 'mkdirSync', 'openSync', 'writeFileSync', 'appendFileSync', 'rmSync', 'unlinkSync', 'chmodSync', 'utimesSync'];
+  const DATA2 = path.join(ROOT, 'data'), STORE2 = `${ROOT}-store/S`, NFS2 = '/srv/fscan-cost-nfs2';
+  const MI2 = `900 42 0:73 / ${NFS2} rw,relatime - nfs4 192.0.2.10:/v rw\n901 42 0:74 / ${DATA2} rw,relatime - nfs4 192.0.2.11:/d rw\n`;
+  const PATHS = { ownData: path.join(DATA2, 'x.json'), ownTree: IN, nfs: `${NFS2}/a/b`, storage: `${STORE2}/b.md`, climbs: `${ROOT}/../${path.basename(ROOT)}-store/S/c.md`,
+    relative: 'rel/x.json', buffer: Buffer.from(`${NFS2}/buf`), url: new URL(`file://${STORE2}/u.md`) };
+  const eqRun = (W) => {
+    const F2 = {}, seen = [];
+    const w2 = W.create({ rootDir: ROOT, dataDir: DATA2, fresh: true, armed: false, live: false, log: quiet, readMountinfo: () => MI2, registry: () => [{ mountpoint: STORE2, name: 'S', id: 'mnt-s' }] });
+    for (const fn of [...ONE, 'renameSync']) F2[fn] = function () { seen.push(w2.inflight()); };
+    LB.install({ fsMod: F2, root: ROOT }); w2.refresh(); LB.setHook(w2.hook);
+    const at = (fn, ...a) => { seen.length = 0; F2[fn](...a); return seen[0] || null; };
+    const bad = [];
+    for (const [kind, p] of Object.entries(PATHS)) {
+      const loop = at('renameSync', p, p);
+      for (const fn of ONE) { const fast = at(fn, p); if (!fast || !loop || fast.root !== loop.root || fast.path !== loop.path) bad.push(`${fn}(${kind}): fast ${fast && fast.root} / loop ${loop && loop.root}`); }
+    }
+    const r = { bad, rename: (at('renameSync', IN, `${STORE2}/x.md`) || {}).root, fromHome: (at('renameSync', PATHS.ownData, `${STORE2}/y.md`) || {}).root, fromNfs: (at('renameSync', `${NFS2}/a`, `${STORE2}/b.md`) || {}).root, data: (at('statSync', PATHS.ownData) || {}).root, store: (at('statSync', PATHS.storage) || {}).root, nfs: (at('statSync', PATHS.nfs) || {}).root };
+    w2.stop(); LB.setHook(null);
+    return r;
+  };
+  const EQ = eqRun(SW);
+  ok(!EQ.bad.length && EQ.store === STORE2 && EQ.nfs === NFS2, `the one-path fast road judges as the loop does: ${ONE.length} calls × ${Object.keys(PATHS).length} kinds of path (own data, own tree, a network mount, a storage row, a path that climbs into storage, relative, a Buffer, a URL) — same root, same shown path`, EQ.bad.slice(0, 6));
+  ok(EQ.rename === STORE2 && EQ.fromHome === STORE2 && EQ.fromNfs === STORE2, `a call of two paths INTO a storage row is judged by the path that hits — the loop's road, never the first path alone: from the own tree (no hit), from the own data on its mount (a 'home' hit) and from a network mount (a network hit), a later storage hit wins (${EQ.rename} · ${EQ.fromHome} · ${EQ.fromNfs})`, EQ);
+  ok(EQ.data === DATA2, `THE OWN DATA ON ITS OWN MOUNT (a data dir on an nfs4 mount): its paths are the 'home' hit — named by that mount (${EQ.data})`, EQ);
+  // …and NEVER REFUSED — on an ARMED witness (eqRun's is disarmed: it refuses nothing), beside a storage row that IS refused
+  // in the same rig (the cure readers' should: a hit of another kind there would refuse every write of an NFS data dir)
+  const armedRun = (W) => {
+    const F3 = {};
+    const w3 = W.create({ rootDir: ROOT, dataDir: DATA2, fresh: true, armed: true, live: false, log: quiet, readMountinfo: () => MI2, registry: () => [{ mountpoint: STORE2, name: 'S', id: 'mnt-s' }] });
+    for (const fn of ['statSync', 'writeFileSync', 'renameSync']) F3[fn] = function () { return true; };
+    LB.install({ fsMod: F3, root: ROOT }); w3.refresh(); LB.setHook(w3.hook);
+    const refused = (fn, ...a) => { try { F3[fn](...a); return false; } catch (e) { return e && e.code === 'EVSMOUNTSYNC' ? e.mount : `threw ${e && e.code}`; } };
+    const r = { data: refused('statSync', PATHS.ownData), write: refused('writeFileSync', PATHS.ownData, 'x'), store: refused('statSync', PATHS.storage), into: refused('renameSync', PATHS.ownData, `${STORE2}/z.md`) };
+    w3.stop(); LB.setHook(null);
+    return r;
+  };
+  const AR = armedRun(SW);
+  ok(AR.data === false && AR.write === false && AR.store === STORE2 && AR.into === STORE2, `ARMED: the own data on its own mount is never refused (a stat and a write run), while a storage row in the same rig is refused (${AR.store}) and so is a rename from the data dir INTO it (${AR.into})`, AR);
+  { // their RED CONTROLS: the fast road misjudging, a two-path call taken for a one-path one, the own-mount hit dropped
+    const eqMut = (from, to, tag) => { const ws = cut(WSRC, from, to); return ws ? eqRun(M.load('src/server/sync-fs-witness.js', ws, tag)) : null; };
+    const skipOwn = eqMut('{ p0 = args[0]; hit = verdictOf(p0); }', '{ p0 = args[0]; hit = MPC.rootOf(p0, CTX); }', 'fast-skips-own');
+    const twoAsOne = eqMut("FNS.filter((f) => !f.startsWith('Dir.') && !FD_FNS.has(f) && !TWO_PATH.has(f))", "FNS.filter((f) => !f.startsWith('Dir.') && !FD_FNS.has(f))", 'two-as-one');
+    const noHome = eqMut('(ownHit && p.startsWith(DATA_SLASH) ? ownHit : null)', 'null', 'no-home');
+    const firstWins = eqMut("if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }", 'if (r && !hit) { hit = r; hp = p; }', 'first-hit-wins');
+    const wsStorage = cut(WSRC, "Object.freeze({ kind: 'home',", "Object.freeze({ kind: 'storage',");
+    const asStorage = wsStorage ? armedRun(M.load('src/server/sync-fs-witness.js', wsStorage, 'home-as-storage')) : null;
+    ok(firstWins && firstWins.fromHome === DATA2 && firstWins.fromNfs === NFS2 && asStorage && asStorage.data === DATA2 && asStorage.write === DATA2,
+      `RED CONTROLS: the first hit kept (a later storage hit never wins) names the data dir and the network mount, never the storage row (${firstWins && firstWins.fromHome} · ${firstWins && firstWins.fromNfs}); the own-mount hit made a storage hit refuses the data dir's own stat and write (${asStorage && asStorage.data})`, { firstWins, asStorage });
+    ok(skipOwn && skipOwn.bad.length > 0 && twoAsOne && twoAsOne.rename !== STORE2 && noHome && noHome.data !== DATA2,
+      `RED CONTROLS: a fast road that skips the own-tree verdict disagrees with the loop (${skipOwn && skipOwn.bad.length} calls); renameSync taken as one path misses the storage row (${twoAsOne && twoAsOne.rename}); the own-mount hit dropped names nothing (${noHome && noHome.data})`, { skipOwn: skipOwn && skipOwn.bad.slice(0, 2), twoAsOne: twoAsOne && twoAsOne.rename, noHome: noHome && noHome.data });
+  }
   const noKept = cut(WSRC, "if (typeof p !== 'string' || p.length > ROOT_MEMO_PATH_MAX) return judged(p);", 'return judged(p);');
   const muts = {
     'every call dated': [cut(LSRC, 'const at = ms >= datedFrom ? Math.round(now() - ms) : NaN;', 'const at = now();'), null, 'date', OUT],
@@ -693,6 +748,8 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     'no kept verdicts (outside the tree)': [null, noKept, 'rootOf', OUT],
     'no kept verdicts (the own tree)': [null, noKept, 'own', IN],
     'the path encoded every call': [null, cut(WSRC, 'if (p !== encP) { encLen = enc.encodeInto(p, P).written; encP = p; }', '{ encLen = enc.encodeInto(p, P).written; encP = p; }'), 'encode', OUT],
+    // every call sent through the loop (the fast road cut): the own-tree test runs at every call again
+    'every call through the loop': [null, cut(WSRC, "if (ONE_PATH.has(fn) && typeof args[0] !== 'number') { p0 = args[0]; hit = verdictOf(p0); }", "if (false) { }"), 'own', IN],
     // an inner call (readFileSync's openSync + closeSync) taken through the outer road again: it reads the clock and the hook
     'inner calls read the clock': [cut(LSRC, '      if (depth !== 0) { depth++; try { return orig.apply(this, args); } finally { depth--; } }   // an inner call: no clock, no hook\n', ''), null, 'perf', OUT, 'readFileSync', 2 * K],
   };
@@ -704,17 +761,21 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     return [tag, n[key] >= K && n[key] > over ? n[key] : null];
   });
   { // RED CONTROL of the throwing refresh: the verdicts cleared only AFTER the roots are rebuilt (as at a70fdfef0)
-    const ws = cut(WSRC, '    rootMemo.clear(); memoCtx = null;\n', '');
+    const CTXL = '    CTX = { mountRoots: roots, rootDir, dataDir, home, cwd };\n';
+    const ws0 = cut(WSRC, '    rootMemo.clear(); memoCtx = null;\n', '');
+    const ws = ws0 && cut(ws0, CTXL, CTXL + '    rootMemo.clear(); memoCtx = CTX;\n');   // a70fdfef0's refresh: the clear after the rebuild (stale-pins: kept — the red control rebuilds it)
     const r = ws ? rig(M.load('src/server/sync-fs-witness.js', ws, 'clear-after-rebuild')) : null;
-    let stale = null;
+    let stale = null, clean = null, threw = false;
     if (r) {
       count(0.001, () => times(2, () => r.F.statSync(IN)));
+      r.w.refresh();   // no fault: this copy DOES clear at a refresh (the own-tree path is judged once more)
+      clean = count(0.001, () => times(2, () => r.F.statSync(IN))).own;
       const realRoots = MPC.rootsOf; MPC.rootsOf = () => { throw new Error('a planted roots fault'); };
-      try { r.w.refresh(); } catch { } finally { MPC.rootsOf = realRoots; }
+      try { r.w.refresh(); } catch { threw = true; } finally { MPC.rootsOf = realRoots; }
       stale = count(0.001, () => times(2, () => r.F.statSync(IN))).own;
       r.w.stop();
     }
-    ok(stale === 0, `RED CONTROL: with the clear after the rebuild, a throwing refresh leaves the old own-tree verdict standing (${stale} own-tree tests after it)`, stale);
+    ok(clean === 1 && threw && stale === 0, `RED CONTROL: with the clear after the rebuild (as at a70fdfef0) — which does clear at a refresh that runs (${clean}) — a refresh that throws leaves the old own-tree verdict standing (${stale} own-tree tests after it)`, { clean, threw, stale });
   }
   ok(reds.every(([, v]) => v !== null), `RED CONTROLS: each cut put back alone reads its count per call again — ${reds.map(([t, v]) => `${t}: ${v === null ? 'NOT RED' : v + ' over ' + K}`).join('; ')}`, reds);
   LB.setHook(null);

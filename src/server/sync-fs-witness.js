@@ -53,7 +53,7 @@ const LIVE_MS = 10000;
 const ROOTS_EVERY_MS = 30000;
 const FD_PATHS_MAX = 4096;
 const ROOT_MEMO_MAX = 4096;   // B-9169: the paths whose class is kept until the roots refresh (the oldest leaves first)
-const ROOT_MEMO_PATH_MAX = 4096;   // …and only a path this long or shorter (the count bounds the entries, this their bytes)
+const ROOT_MEMO_PATH_MAX = 4096;   // …and only a path this long or shorter (the count bounds the entries, this their key length: at most ROOT_MEMO_MAX × this many characters, all dropped at every roots refresh)
 const STACK_FRAMES = 6;
 const SETTING = 'mounts.mainThreadSyncGuard';
 const TWO_PATH = new Set(['renameSync', 'copyFileSync', 'cpSync', 'linkSync', 'symlinkSync']);
@@ -150,14 +150,17 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     let mounts = [], reg = [], mi = '';
     try { mi = readMountinfo(); mounts = MPC.parseMountinfo(mi); } catch { }
     try { ownMount = dataDir ? require('../local-index.js').netMountOf(path.resolve(dataDir), mi) : null; } catch { ownMount = null; }
-    ownHit = ownMount ? { kind: 'home', root: ownMount.target, fstype: ownMount.fstype } : null;   // the data dir's own mount, as a hit
+    // the data dir's own mount, as a hit — ONE object shared by every call until the next refresh (kept verdicts hold it):
+    // NEVER MUTATED (after() copies its fields into the ring's `mount`; guardError is never reached for kind 'home')
+    ownHit = ownMount ? Object.freeze({ kind: 'home', root: ownMount.target, fstype: ownMount.fstype }) : null;
     // the kept verdicts go with the facts they were judged by — BEFORE anything below may throw (a throw keeps the old
     // CTX, and a memo still matching it would keep the old own-mount verdict standing)
     rootMemo.clear(); memoCtx = null;
     try { reg = registry() || []; } catch { }
     roots = MPC.rootsOf({ mounts, registry: reg, rootDir, dataDir });
     CTX = { mountRoots: roots, rootDir, dataDir, home, cwd };
-    memoCtx = CTX;
+    // no memoCtx here: a verdict asked between the clear above and this CTX (a wrapped call inside registry()) was judged
+    // under the old CTX — verdictOf's own CTX check drops it at the next call
     SP.setRoots(roots, { rootDir, dataDir, home, cwd });   // every module's answer (src/storage-path.js)
     counts.rootsRead++;
     return roots;
