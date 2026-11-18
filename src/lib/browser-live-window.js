@@ -414,6 +414,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // else the session row's when it names this browser; another browser's wait is a note naming it (pkElsewhere), never a Cancel
   const shownPid = () => st.pkPid || (st.target && st.target.profileId) || null;
   const pkRowFact = () => { const s = st.fact && st.fact.stuck; return s && s.state === 'passkey' && s.passkey ? s : null; };
+  // B-37a1: the stuck fact this window draws — a session's row; in the person's browsing window (no session row) the relay's prompt record
+  const stuckNow = () => (st.fact && st.fact.stuck) || (H && st.prRelay) || null;
   const pkFactNow = () => {
     const r = st.pkRelay && st.pkRelay.state === 'passkey' && st.pkRelay.passkey ? st.pkRelay : null;
     const s0 = pkRowFact(), s = s0 && (!s0.profileId || !shownPid() || s0.profileId === shownPid()) ? s0 : null;
@@ -581,7 +583,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // the .367 seam (× passkey-browse-yourself): the door judges the fact the banner shows (deskDoorStuck: his window's passkey lives on
   // its relay record, never on a session row), and a door that appears or goes re-draws the banner — its Desktop clause goes while
   // the door is drawn (ONE door to Chrome's window); a microtask, so a door judged before renderDialog exists never calls it
-  const renderDeskDoor = () => { let ds = null; try { ds = deskDoorOf({ source: pictureNow(), xShown: xOn(), stuck: deskDoorStuck({ passkey: pkFactNow(), stuck: st.fact && st.fact.stuck }), human: !!H }); } catch { ds = null; } const was = deskDoor.dataset.ds || ''; deskDoor.style.display = ds ? '' : 'none'; deskDoor.dataset.ds = ds || ''; winInfo._deskDoor = ds; if ((ds || '') !== was) queueMicrotask(() => { if (!st.closed) renderDialog(); }); };
+  const renderDeskDoor = () => { let ds = null; try { ds = deskDoorOf({ source: pictureNow(), xShown: xOn(), stuck: deskDoorStuck({ passkey: pkFactNow(), stuck: stuckNow() }), human: !!H }); } catch { ds = null; } const was = deskDoor.dataset.ds || ''; deskDoor.style.display = ds ? '' : 'none'; deskDoor.dataset.ds = ds || ''; winInfo._deskDoor = ds; if ((ds || '') !== was) queueMicrotask(() => { if (!st.closed) renderDialog(); }); };
   // lane site-reset (2026-09-30): A NAVIGATION LOOP (the browser fact's `stuck.state === 'loop'`) — the cycle's addresses,
   // KEYED children patched in place (a banner rebuilt at every fact push would blink under the pointer)
   const loopBanner = createLoopBanner(document);
@@ -1151,7 +1153,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     // page waits for one, names the desktop it is on when the browser is headed, and its ONE button cancels the request
     // lane browser-ui-prompts: the browser's OWN prompt (a file chooser, an HTTP sign-in) — no pixel of it reaches the screencast;
     // the sign-in's two boxes go over this socket to the bridge and on to Chrome only (never to the agent, never logged)
-    const pr = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'prompt' ? st.fact.stuck.prompt : null;
+    const pr = !d && stuckNow() && stuckNow().state === 'prompt' ? stuckNow().prompt : null; // B-37a1: the person's window's relay record too
     const prw = pr ? promptWords(pr, t) : null;
     if (prw) {
       const key = String(pr.id || '');
@@ -2179,7 +2181,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         renderMode(); renderViewers(); renderTitle(); renderStrip(); renderBackend(); renderRec(); syncTrace(); renderOwner(); renderBind();
         renderAsk(); if (st.takeOnOpen && !H) { st.takeOnOpen = false; if (!(st.mode === 'takeover' && st.mine)) send({ type: 'takeover' }); } // lane browser-takeover-queue
         st.fitSent = null; reportFit(); renderFit(); // lane S4: this viewer's pane, at once (the bridge sizes the page to the ruling pane)
-        st.dialog = null; st.dialogAnswering = false; st.pkRelay = null; st.pkPid = null; st.passkeyCancelling = false; renderDialog(); // lane browser-stuck: a (re)connected view is told again by the bridge's replay — acceptance r1 of lane passkey-browse-yourself: the passkey fact too (the bridge sends the CURRENT one right after hello, null included)
+        st.dialog = null; st.dialogAnswering = false; st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.passkeyCancelling = false; renderDialog(); // lane browser-stuck: a (re)connected view is told again by the bridge's replay — acceptance r1 of lane passkey-browse-yourself: the passkey fact too (the bridge sends the CURRENT one right after hello, null included)
         // live-watch-polish G4: the bridge's watch died with the old socket — a view that was watching asks again (the bridge
         // re-judges; a refusal clears the line by name), a view that drives now drops it: the line and the picture tell ONE truth
         if (st.watch) { if (st.mode === 'takeover' && st.mine) st.watch = null; else { st.watch = { ...st.watch, pending: true }; send({ type: 'watch-tab', targetId: st.watch.targetId }); } renderTabRow(); renderWatchLine(); }
@@ -2225,6 +2227,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'confirmation-resolved': if (m.id && st.confirmations.delete(m.id)) renderConfirms(); break;
       case 'page-note': pageNote(m.permission || null); break; // lane browser-ui-prompts-r2: the bar's one line (a permission decided, a print closed)
       case 'dialog': onDialogRecord(m); break; // lane browser-stuck: a page dialog opened / closed on the tab this view shows
+      case 'prompt-fact': st.prRelay = m.fact && typeof m.fact === 'object' && m.fact.state === 'prompt' ? m.fact : null; renderDialog(); break; // B-37a1: the person's window's native-prompt fact (the banner + the Desktop door)
       case 'passkey': st.pkRelay = m.fact && typeof m.fact === 'object' ? m.fact : null; st.pkPid = typeof m.profileId === 'string' && m.profileId ? m.profileId : (st.pkRelay && st.pkRelay.profileId) || null; renderDialog(); break; // lane passkey-browse-yourself: the relay's passkey fact (acceptance r1: + the browser on show)
       case 'surface': onSurfaceRecord(m); break; // lane browser-surfaces: a kernel's NOTED prompt (it never holds the page)
       case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } else if (m.failed) { st.passkeyCancelling = false; renderDialog(); showToast(t('VibeSpace could not cancel the page\'s passkey request — the page did not take the cancel, so it is still waiting. Closing the tab ends it.'), { type: 'error' }); } else if (m.ended) { st.passkeyCancelling = false; st.pkRelay = null; renderDialog(); showToast(t('The passkey wait had already ended'), { duration: 3000 }); } break; // B-97ae round 3: a cancel the page did not take keeps the banner and says so // lane browser-passkey — acceptance r1 of lane passkey-browse-yourself: a Cancel whose wait is gone says so (the bridge sends the current fact after it)
@@ -2354,7 +2357,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.pkRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
+    st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds

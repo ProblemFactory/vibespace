@@ -247,6 +247,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     for (const r of relays.values()) {
       if (relayProfileId(r) !== ev.profileId) continue;
       if (ev.kind === 'passkey' || ev.kind === 'passkey-proposal' || ev.kind === 'watched') pushPasskey(r); else if (ev.kind === 'down') passkeyAfterDown(r); // lane passkey-browse-yourself
+      pushPrompt(r); // B-37a1: the person's window's native-prompt fact, re-read at EVERY watch event of its browser (a passkey wait or a dialog that ranked above the sheet ends — the sheet's fact is back); sent only when it moved
       if (ev.kind === 'open' && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'open', dialog: blockOfEv(ev.dialog) });
       // lane browser-surfaces: a kernel's NOTED surface (the bar shows it; it never holds the page) / a surface whose words moved
       else if (ev.kind === 'surface' && ev.surface && (ev.state === 'open' || ev.state === 'updated') && dialogShownOn(r, ev.targetId)) broadcast(r, ev.surface.cls === 'held' ? { type: 'dialog', state: 'open', dialog: blockOfEv(ev.surface) } : { type: 'surface', state: 'open', surface: blockOfEv(ev.surface) });
@@ -274,6 +275,27 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   }
   /** acceptance r1 (MAJOR 2): the record a viewer is told after its hello / its Cancel — the CURRENT fact, null included. */
   const passkeyNow = (relay) => relay.lastPasskey || { type: 'passkey', fact: null, profileId: relayProfileId(relay) };
+  /** B-37a1: THE BROWSER'S OWN PROMPT on the person's browsing window (a native sheet — Chrome's HTTP sign-in on an X-road browser, which no
+   *  screencast pixel shows): the person's window has no session row, so this record is its only prompt fact — the stuck fact the person's key's row
+   *  would carry (the watch's stuckForKey, the same shape), `prompt` state only, sent when a prompt MOVES and after every hello (null
+   *  included: a sheet that closed while nobody watched never survives a reconnect). The window's banner and its «Open in Desktop»
+   *  door read it as they read a session's `stuck`. */
+  function promptRecordOf(relay) {
+    if (!isHuman(relay) || !dialogs || typeof dialogs.stuckForKey !== 'function') return null;
+    let f = null; try { f = dialogs.stuckForKey(relay.browserKey); } catch { f = null; }
+    return { type: 'prompt-fact', fact: f && f.state === 'prompt' && f.prompt ? f : null, profileId: relayProfileId(relay) };
+  }
+  function pushPrompt(relay) {
+    if (relays.get(relay.key) !== relay) return false;
+    const rec = promptRecordOf(relay);
+    if (!rec) return false;
+    const digest = rec.fact ? JSON.stringify({ id: rec.fact.prompt.id, type: rec.fact.prompt.type, native: rec.fact.prompt.native }) : '';
+    if (digest === (relay.prDigest || '')) return false;
+    relay.prDigest = digest;
+    broadcast(relay, rec);
+    return true;
+  }
+  const promptNow = (relay) => promptRecordOf(relay);
   /** A watch that went down: read again once its re-arm had its chance (a stopped browser's upstream is gone by then — nothing said). */
   function passkeyAfterDown(relay) { const t = setTimeout(() => pushPasskey(relay), PASSKEY_RECHECK_MS); if (t.unref) t.unref(); }
   function armDialogs(relay) {
@@ -435,6 +457,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (relay.lastFit) send(ws, relay.lastFit);
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: his window's tab row
     if (relay.lastBg) send(ws, relay.lastBg); // lane browser-windows (U0b)
+    { const pr = promptNow(relay); if (pr) { relay.prDigest = pr.fact ? JSON.stringify({ id: pr.fact.prompt.id, type: pr.fact.prompt.type, native: pr.fact.prompt.native }) : ''; send(ws, pr); } } // B-37a1: the person's window's prompt fact, the CURRENT one after every hello (null included)
     if (!pushPasskey(relay)) send(ws, passkeyNow(relay)); // lane passkey-browse-yourself: his page waits for a passkey — acceptance r1: the CURRENT fact, null included
     if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
     broadcastViewers(relay);

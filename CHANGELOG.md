@@ -113,6 +113,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the API stops taking the effort per turn, the conversation says so: changing the effort then costs a fresh prompt-cache write.
 - Starting a conversation with your own --settings file no longer drops it silently: VibeSpace's own values step aside, and you are told which.
 - A chat row that opens search results no longer just says a draft is awaiting your approval; it says where the draft waits.
+- When you browse a profile a conversation also uses, a browser sign-in sheet shown only on its desktop now gets its banner and an Open in Desktop button.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.

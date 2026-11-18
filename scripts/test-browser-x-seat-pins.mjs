@@ -34,7 +34,7 @@ function doorFacts(root) {
       && !/xDoorBtn\.textContent = t\('Take over'\)/.test(dw),
     doorVerdict: /const a = deskDoorAct\(\{ profile: prof, human: browserHuman\(\) \}\);/.test(dw) && /xDoorBtn\.style\.display = doorAct \? '' : 'none';/.test(dw),
     inputMode: /const next = m === 'watch' \|\| m === 'blocked' \|\| m === 'input' \? \(m === 'input' \? 'watch' : m\) : 'active';/.test(view) && /const sends = \(\) => mode === 'active' \|\| \(mode === 'watch' && inputSeat\);/.test(view) && /client\.viewOnly = viewOnly \|\| !sends\(\);/.test(view),
-    liveDoorHuman: /deskDoorOf\(\{ source: pictureNow\(\), xShown: xOn\(\), stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: st\.fact && st\.fact\.stuck \}\), human: !!H \}\)/.test(live), // the .367 seam: the banner's passkey fact first
+    liveDoorHuman: /deskDoorOf\(\{ source: pictureNow\(\), xShown: xOn\(\), stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: stuckNow\(\) \}\), human: !!H \}\)/.test(live), // the .367 seam: the banner's passkey fact first; B-37a1: the window's stuckNow() (its row's fact, else the person's own native-prompt fact)
     liveDoorRejudged: /const renderMode = \(\) => \{\n    renderDeskDoor\(\);/.test(live) && /scheduleReport\(\); renderDeskDoor\(\);/.test(live) && /renderOwner\(\); renderDeskDoor\(\);/.test(live) && /const renderDialog = \(\) => \{\n    renderDeskDoor\(\);/.test(live),
     themeShadow: !!rule && !/rgba?\(/.test(rule) && rule.includes('box-shadow: var(--shadow-window)'),
     oneRank: /w\.el\.style\.zIndex = String\(Z_FLOOR \+ stackRank\(win\)\);/.test(view) && /import \{[^}]*\bstackRank\b[^}]*\} from '\.\/xpra-proto\.js';/.test(view) && !/Z_REACH|Z_BASE/.test(view)

@@ -732,7 +732,8 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
       'the seam: the door changes only the virtual-display sentence (a headless browser says nothing; a headed one without a display keeps its line)');
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     ok(/const door = !!deskDoor\.dataset\.ds;[^\n]*\n\s*const pkw = pk \? passkeyWords\(pk\.passkey, t, \{[^}]*deskDoor: door \}\)/.test(live) && /\(door \? ':door' : ''\)/.test(live)
-      && /stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: st\.fact && st\.fact\.stuck \}\)/.test(live)
+      && /stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: stuckNow\(\) \}\)/.test(live)
+      && /const stuckNow = \(\) => \(st\.fact && st\.fact\.stuck\) \|\| \(H && st\.prRelay\) \|\| null;/.test(live) && /const pr = !d && stuckNow\(\) && stuckNow\(\)\.state === 'prompt' \? stuckNow\(\)\.prompt : null;/.test(live) // B-37a1 (+ the review: the prompt banner reads it too): the person's window's prompt record when it has no row
       && /if \(\(ds \|\| ''\) !== was\) queueMicrotask\(\(\) => \{ if \(!st\.closed\) renderDialog\(\); \}\);/.test(live)
       && /const renderDialog = \(\) => \{\n\s*renderDeskDoor\(\);/.test(live),
       "the seam's wiring: renderDialog judges the door first and hands its state to the banner (keyed by it), the door reads the banner's passkey fact, and a door that appears or goes re-draws the banner");
@@ -1041,6 +1042,66 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       '⑨r2 MAJOR 2 (the bridge, loopback): a viewer that joins after the ceremony ended is told the CURRENT fact right after hello — null, so no phantom banner; a Cancel whose wait is gone is answered `ended` and followed by the fact that stands', { v1saw, v2, ack, afterAck });
     try { V2.ws.close(); } catch { /* */ }
     bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+  }
+  // B-37a1: the person's browsing window's native-prompt fact — the person's window has no session row, so the relay's `prompt-fact` record (the person's key's
+  // stuck fact, the shape a session row carries) is the only one: the CURRENT fact after hello (null included), moved by the watch;
+  // the window's own code (sliced) draws the «Open in Desktop» door from it on an X picture
+  {
+    const http = require('http'), WSm = require('ws');
+    const SB = require(path.join(REPO, 'src/server/browser-stream.js')), BHS = require(path.join(REPO, 'src/browser-stream.js')), PIC = require(path.join(REPO, 'src/browser-picture.js'));
+    const target = BHS.humanTarget({ key: HK, profileId: PID, label: 'Mine' });
+    const known = { humanTargetFor: () => target, humanAttach: () => ({ ok: true, take: true }), streamPortFor: async () => ({ ok: true, port: 9 }) };
+    const keeper = new Proxy(known, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
+    const SHEET = { state: 'prompt', prompt: { id: 'T1:auth:1', type: 'http-auth', native: true, origin: 'https://intranet.test', text: 'x' }, since: 1, profileId: PID };
+    let cur = SHEET; const asked = []; const dl = new Set();
+    const dialogs = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => null, stuckForKey: (bk) => { asked.push(bk); return cur; }, onChange: (fn) => { dl.add(fn); return () => dl.delete(fn); }, openOn: () => null, surfacesIn: () => [] };
+    class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
+    const run = async (SBm) => {
+      const bridge = SBm.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: Up, keepaliveMs: 60000 });
+      const srv = http.createServer(); srv.on('upgrade', (req, s0, h) => bridge.handleUpgrade(req, s0, h));
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      cur = SHEET;
+      const V = await new Promise((res) => { const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`); const got = []; ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } }); ws.on('open', () => res({ ws, got })); ws.on('error', () => res({ ws, got })); });
+      const pr = () => V.got.filter((m) => m.type === 'prompt-fact');
+      await until2(() => V.got.some((m) => m.type === 'status' && m.state === 'upstream-open')); await sleep2(60);
+      const atHello = pr().slice();
+      cur = null; for (const fn of [...dl]) fn({ kind: 'prompt', profileId: PID, targetId: 'T1', state: 'cleared', why: 'answered' });
+      await until2(() => pr().length > atHello.length, 300);
+      const afterClear = pr().slice(atHello.length);
+      try { V.ws.close(); } catch { /* */ }
+      bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+      return { atHello: atHello.map((m) => ({ fact: m.fact, profileId: m.profileId })), afterClear: afterClear.map((m) => m.fact) };
+    };
+    const good = await run(SB);
+    ok(good.atHello.length === 1 && good.atHello[0].fact && good.atHello[0].fact.prompt.native === true && good.atHello[0].profileId === PID && asked.includes(HK) && good.afterClear.length === 1 && good.afterClear[0] === null,
+      'B-37a1 (the bridge, loopback): the person\'s window is told its native prompt right after hello (the person\'s key\'s stuck fact — the shape a session row carries), and a sheet that clears is said (null)', { good, asked: asked.slice(0, 4) });
+    const bs = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+    const needle = "    return { type: 'prompt-fact', fact: f && f.state === 'prompt' && f.prompt ? f : null, profileId: relayProfileId(relay) };";
+    ok(bs.includes(needle), 'control setup (B-37a1): the record line is where the control cuts');
+    const MUT37 = mutantCopies('browser-passkey-37a1', REPO);
+    const bad = await run(MUT37.load('src/server/browser-stream.js', bs.replace(needle, '    return null;'), 'no-prompt-record'));
+    ok(bad.atHello.length === 0 && bad.afterClear.length === 0, 'CONTROL (B-37a1): a bridge without the record says nothing of the sheet to the person\'s window — the base\'s gap (RED for the leg above)', bad);
+    // the window's own code: its `prompt-fact` case and stuckNow (sliced), then the REAL deskDoorOf / deskDoorStuck the door renders by
+    const lw = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    const line = (from) => { const i = lw.indexOf(from); return i < 0 ? null : lw.slice(i, lw.indexOf('\n', i)); };
+    const sn = line('  const stuckNow = () =>'), pc = line("      case 'prompt-fact':"), dd = line('  const renderDeskDoor = () =>');
+    const doorStuck = dd && (dd.match(/stuck: (deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: [^}]*\}\))/) || [])[1];
+    // the sliced case line may end in a // comment: the switch closes on the line after it
+    const win = (H, stuckExpr = doorStuck) => new Function('H', 'deskDoorStuck', 'deskDoorOf', 'PICTURE_X', `const st = { fact: null, prRelay: null }; const renderDialog = () => {}; const pkFactNow = () => null; ${sn || ''}
+      const on = (m) => { switch (m.type) { ${pc || ''}
+ } };
+      const door = () => deskDoorOf({ source: { source: PICTURE_X, displaySession: 'ds-7' }, xShown: false, stuck: ${stuckExpr}, human: !!H });
+      return { st, on, door, stuckNow: typeof stuckNow === 'function' ? stuckNow : () => null };`)(H, PIC.deskDoorStuck, PIC.deskDoorOf, PIC.PICTURE_X);
+    const own = sn && pc && doorStuck ? win({ key: HK }) : null, conv = sn && pc && doorStuck ? win(null) : null;
+    if (own) own.on({ type: 'prompt-fact', fact: SHEET, profileId: PID });
+    if (conv) conv.on({ type: 'prompt-fact', fact: SHEET, profileId: PID });
+    const ownDoor = own ? own.door() : null, convDoor = conv ? conv.door() : null, convStuck = conv ? conv.stuckNow() : 'none';
+    if (own) own.on({ type: 'prompt-fact', fact: null, profileId: PID });
+    ok(ownDoor === 'ds-7' && convDoor === null && convStuck === null && own && own.door() === null && own.st.prRelay === null,
+      'B-37a1 (the window\'s own code): the person\'s browsing window draws «Open in Desktop» for the native sheet its relay names, a conversation\'s view never from that record (its row is its fact), the door goes when the sheet clears', { ownDoor, convDoor, sn: !!sn, pc: !!pc, doorStuck });
+    const baseDoor = sn && pc ? win({ key: HK }, 'deskDoorStuck({ passkey: pkFactNow(), stuck: st.fact && st.fact.stuck })') : null;   // stale-pins: kept — the base's line, written back by this RED control
+    if (baseDoor) baseDoor.on({ type: 'prompt-fact', fact: SHEET, profileId: PID });
+    ok(baseDoor && baseDoor.door() === null, 'CONTROL (B-37a1): the base\'s door (the row\'s stuck only) draws nothing in the person\'s window for the same sheet (RED for the leg above)');
   }
   // MAJOR 2 + MINOR: the window's own code (sliced from src/lib/browser-live-window.js, run over a stub scope)
   {
