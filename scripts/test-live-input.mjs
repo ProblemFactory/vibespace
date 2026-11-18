@@ -537,7 +537,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   const fitWorld = async (BSmod, { setImpl }) => {
     const U = await fakeUpstream(); const { k } = stubKeeper(U);
     const sets = []; const K = { driving: false, sets };
-    k.setViewportFor = async (_t, { width, height }) => { const at = Date.now(); sets.push({ w: width, h: height, at }); return setImpl ? setImpl({ width, height, K, U }) : { ok: true }; };
+    k.setViewportFor = async (_t, { width, height }) => { const at = Date.now(); sets.push({ w: width, h: height, at, mono: performance.now() }); return setImpl ? setImpl({ width, height, K, U }) : { ok: true }; };
     k.viewportFor = async () => ({ ok: true, clientWidth: 1280, clientHeight: 577 });
     const B = await bridgeOn(BSmod, k);
     const A = viewer(B.P), Wv = viewer(B.P); await A.ready(); await Wv.ready();
@@ -579,9 +579,10 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
     const w = await fitWorld(BSmod, {});
     w.report(w.A, 1400, 900); w.report(w.Wv, 700, 450);
     await w.setTo(1400, 900);
-    const tTake = Date.now(); await takeover(w.Wv); // the smaller view drives ⇒ its pane rules
+    const tTake = Date.now(), tTakeMono = performance.now(); await takeover(w.Wv); // the smaller view drives ⇒ its pane rules
     await w.setTo(700, 450);
     const takeMs = (w.sets.find((s) => s.w === 700) || { at: Infinity }).at - tTake;
+    const takeMono = (w.sets.find((s) => s.w === 700) || { mono: Infinity }).mono - tTakeMono; // the negative control's own clock (below)
     w.Wv.send({ type: 'input_mouse', eventType: 'mousePressed', x: 20, y: 200, button: 'left', clickCount: 1, modifiers: 0 });
     await until(() => w.U.got.some((m) => m.eventType === 'mousePressed'), 2000);
     w.report(w.Wv, 900, 560); // the driver's window changes size MID-DRAG
@@ -600,7 +601,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
     const heldAgain = !w.sets.some((s) => s.w === 800);
     w.Wv.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 30, y: 30, button: 'none', clickCount: 0, modifiers: 0 });
     const freed = await w.setTo(800, 500);
-    const out = { takeMs, duringDrag, stillHeld, upMs, heldAgain, freed };
+    const out = { takeMs, takeMono, duringDrag, stillHeld, upMs, heldAgain, freed };
     await w.close(); return out;
   };
   // the six worlds are independent (each its own fake stream server, bridge and ports) — run at once (the fast tier's budget)
@@ -629,7 +630,14 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   ok(!b.duringDrag && b.stillHeld, 'B: the driver\'s window changing size while a button is held does NOT resize the page mid-drag');
   ok(b.upMs < FIT.FIT_DEBOUNCE_MS, `B: …the held resize runs at the release (${b.upMs} ms after it — never the ${FIT.FIT_DEBOUNCE_MS} ms debounce; the mechanism's constant, not a literal: lane mirror-flake-hardening)`);
   ok(b.heldAgain && b.freed, 'B: a release that happened outside the picture (never forwarded) ends the hold at the next buttonless move');
-  ok(bpre.duringDrag && bpre.takeMs >= FIT.FIT_DEBOUNCE_MS, `NEGATIVE CONTROL: without the hold the page is resized MID-DRAG, and the takeover's fit waits ${bpre.takeMs} ms (the verifier's y=232 → y=361 jump)`);
+  // the train's close (b342f2628, UTC zone): this control read 249 ms against its own 250 ms debounce. ITS LAW: without the hold
+  // the fit WAITS FOR THE DEBOUNCE (it is not at once). The debounce is a Node timer, armed on libuv's loop clock — monotonic, in
+  // WHOLE milliseconds, read when the loop's turn began — so it can fire up to that clock's one-millisecond grain before a
+  // finer reading says 250 ms passed; and Date.now() differences add the wall clock's own truncation. So the wait is judged on
+  // the monotonic clock (performance.now) against the debounce less the timer clock's grain — never «at once» (the legs above
+  // measure that: a few ms)
+  const TIMER_GRAIN_MS = 1;
+  ok(bpre.duringDrag && bpre.takeMono >= FIT.FIT_DEBOUNCE_MS - TIMER_GRAIN_MS, `NEGATIVE CONTROL: without the hold the page is resized MID-DRAG, and the takeover's fit waits ${bpre.takeMono.toFixed(1)} ms (monotonic; ≥ the ${FIT.FIT_DEBOUNCE_MS} ms debounce less the timer clock's ${TIMER_GRAIN_MS} ms grain) (the verifier's y=232 → y=361 jump)`);
   // PURE: the button table
   const st = (recs) => recs.reduce((d, r) => FIT.buttonStep(d, r) || d, new Set());
   ok([...st([{ type: 'input_mouse', eventType: 'mousePressed', button: 'left' }])].join() === 'mouse:left'
