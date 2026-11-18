@@ -10,6 +10,7 @@
 const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
 const LOCKCTX = require('./lock-context.js'); // B-6c55: the context a lock keeps (PURE)
 const SFW = require('./settings-file-words.js'); // B-8dcf item two: a person's own settings file at a start (PURE; loaded with the create, never on a pass)
+const BILLPICK = require('./billing-pick.js'); // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE)
 const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
 const { capsOf, worktreeRefusal, worktreeSpawnArgs, toolAllowlistArgs } = require('./backend-caps');
@@ -116,6 +117,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
   } = ctx;
+  const helperSaidKeys = new Set();   // unit «billing pick alive»: the helper-set-aside keys this hub has said (a said key asks no machine again)
 
   // ── THE AGENT BROWSER'S SPAWN ENVIRONMENT (P0, docs/design-agent-browser-v2
   //    §3.2) — constructed HERE, not in server.js, for two reasons that are both
@@ -738,81 +740,6 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // SAID after the start registered (batch 21's cure: below, beside the settings-file notices) — a resume refused on the way
           // never «resumed with the standard context»
           data._contextRefused = cmdOf.refused ? String(data.model || '') : null;
-          const sessionSpec = adapter.buildSessionArgs({
-            cwd,
-            model: commandModel,
-            neutralizeKeyHelper: !!pvModel,   // a machine-wide apiKeyHelper outranks the provider's key — neutralized (claude: --settings apiKeyHelper:"")
-            permissionMode: data.permissionMode,
-            resumeId: data.resume && data.resumeId ? data.resumeId : null,
-            fork: data.fork || false,
-            // the message a fork is cut at (the chat's fork-from-here) — the
-            // adapter derives the fork flags from these two facts (B-8b7b)
-            forkAt: data.fork && data.forkAtUuid ? String(data.forkAtUuid) : null,
-            sessionName: data.sessionName,
-            effort: data.effort,
-            // client value wins; else the instance default (covers every create
-            // path uniformly — resume, layout restore, billing switch)
-            // RESPONSE STYLE (2.369.58): client value wins; else the
-            // instance default for THIS harness's settings family
-            // (`<prefix>.outputStyle` — never the hardcoded claude key, which
-            // would have handed a codex spawn "Concise"). A value outside the
-            // harness's own vocabulary is dropped here so it never reaches a
-            // spawn: the caps row is the ONE enum.
-            outputStyle: (data._effOutputStyle = (() => {
-              const rs = capsOf(backend).responseStyle || { closed: true, values: [] };
-              const want = data.outputStyle || (() => { try { return harnessDeclares(backend, 'outputStyle') ? String(harnessSetting(backend, 'outputStyle') || '') : ''; } catch { return ''; } })();
-              // A CLOSED vocabulary (codex Personality) is validated here so an
-              // out-of-enum value can never reach a spawn; an OPEN one (claude,
-              // whose ~/.claude/output-styles/*.md are real user-defined styles)
-              // passes through — `values` there is only what the picker offers,
-              // and filtering on it would silently eat the user's own style.
-              return (!rs.closed || rs.values.includes(want)) ? want : '';
-            })()),
-            extraArgs,
-            // PER-SESSION GIT WORKTREE (owner ruling 9): the client's tick,
-            // preflighted above. `fork` already rides this object; the PURE
-            // rule in backend-caps decides whether the flag is actually
-            // emitted (never on a plain resume — the CLI re-enters its own).
-            worktree: !!data.worktree,
-            // THE 「可用工具」 PICK (lane new-session-form): the harness's own tool switch — each adapter judges it with
-            // backend-caps toolAllowlistArgs (claude --allowedTools/--disallowedTools, codex sandbox + approval)
-            tools: data.tools && typeof data.tools === 'object' ? data.tools : undefined,
-            // EVERY declared spawn row of this harness, typed, in ONE bag
-            // (design-harness-settings §5): --brief, the prompt-cache trio,
-            // disableModelFallback, tuiRenderer, … — INSTANCE settings read
-            // server-side so every create path (new, resume, layout restore,
-            // billing switch) behaves the same, and the adapter consumes them
-            // as `opts.settings.<key>` (test-harness-contract drives each row).
-            settings: (() => { try { return harnessSpawnSettings(backend); } catch { return {}; } })(),
-            initialPrompt: data.initialPrompt || '',
-            mode: sessionMode,
-            // an explicit per-session pick only; the instance default rides `settings.tuiRenderer`
-            tuiRenderer: data.tuiRenderer || '',
-            // Shell helper terminals auto-type this — the adapter arms the
-            // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
-            // first typed char: "claude /login" → "laude"). 2.196.0: the field
-            // never reached the server before, so the guard was dead code and
-            // the mangling hit REMOTE shells (env rides the exec-env prefix).
-            initialCommand: data.initialCommand || undefined,
-            // Background-job owner notify (2.344.0): our sessions run bypass-
-            // permissions, whose inbound default HOLDS an unattested peer
-            // message — pre-accept via the CLI's documented --settings knob so
-            // job notifications actually deliver. Follows the same global
-            // toggle that gates sending; repo/managed settings can tighten.
-            // LOCAL spawns only (the remote field is data.hostId — a data.host
-            // guard was a dead check, caught by the 2.344.0 review): accept
-            // only where our peer-messaging can actually deliver.
-            acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
-          });
-          // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
-          // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
-          // used to sit HERE, as two `if (!sessionSpec.env.CODEX_WEBUI_*)`
-          // post-fills. They now run BEFORE the spawn spec, for every harness,
-          // through the resume-continuity ladder above — the post-fill could
-          // only ever fire when the client sent nothing, and the client sent
-          // the instance default on every resume (B-6b6d), so the fallback the
-          // env test was guarding was unreachable exactly when it was needed.
-          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, forkChainEnv(backend, data.resumeId));
           const codexThreadBaseline = typeof SP.threadBaseline === 'function' && !data.resumeId // spawn.threadBaseline: the id appears after the spawn
             ? SP.threadBaseline({ activeSessions })
             : null;
@@ -1009,6 +936,89 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }
             }
           }
+
+          // A SUBSCRIPTION PICK SETS THE MACHINE'S KEY HELPER ASIDE (unit «billing pick alive», 主开发 2026-11-18 01:45Z;
+          // src/billing-pick.js). A helper named in the machine's Claude settings outranks every OAuth login, and from 2.236.0 nothing
+          // passed the adapter its neutralizer — a picked subscription billed the helper's paid credential. So the ONE spawn spec is
+          // built HERE, after the account is resolved: the local dtach line, the daemon pipe and every remote builder run its args.
+          const keyHelperOff = BILLPICK.setsHelperAside({ creds: harness && harness.creds, account: spawnAccount, linked: linkedAccountId });
+          const sessionSpec = adapter.buildSessionArgs({
+            cwd,
+            model: commandModel,
+            permissionMode: data.permissionMode,
+            resumeId: data.resume && data.resumeId ? data.resumeId : null,
+            fork: data.fork || false,
+            // the message a fork is cut at (the chat's fork-from-here) — the
+            // adapter derives the fork flags from these two facts (B-8b7b)
+            forkAt: data.fork && data.forkAtUuid ? String(data.forkAtUuid) : null,
+            sessionName: data.sessionName,
+            effort: data.effort,
+            // client value wins; else the instance default (covers every create
+            // path uniformly — resume, layout restore, billing switch)
+            // RESPONSE STYLE (2.369.58): client value wins; else the
+            // instance default for THIS harness's settings family
+            // (`<prefix>.outputStyle` — never the hardcoded claude key, which
+            // would have handed a codex spawn "Concise"). A value outside the
+            // harness's own vocabulary is dropped here so it never reaches a
+            // spawn: the caps row is the ONE enum.
+            outputStyle: (data._effOutputStyle = (() => {
+              const rs = capsOf(backend).responseStyle || { closed: true, values: [] };
+              const want = data.outputStyle || (() => { try { return harnessDeclares(backend, 'outputStyle') ? String(harnessSetting(backend, 'outputStyle') || '') : ''; } catch { return ''; } })();
+              // A CLOSED vocabulary (codex Personality) is validated here so an
+              // out-of-enum value can never reach a spawn; an OPEN one (claude,
+              // whose ~/.claude/output-styles/<name>.md are real user-defined styles)
+              // passes through — `values` there is only what the picker offers,
+              // and filtering on it would silently eat the user's own style.
+              return (!rs.closed || rs.values.includes(want)) ? want : '';
+            })()),
+            extraArgs,
+            // PER-SESSION GIT WORKTREE (owner ruling 9): the client's tick,
+            // preflighted above. `fork` already rides this object; the PURE
+            // rule in backend-caps decides whether the flag is actually
+            // emitted (never on a plain resume — the CLI re-enters its own).
+            worktree: !!data.worktree,
+            // THE 「可用工具」 PICK (lane new-session-form): the harness's own tool switch — each adapter judges it with
+            // backend-caps toolAllowlistArgs (claude --allowedTools/--disallowedTools, codex sandbox + approval)
+            tools: data.tools && typeof data.tools === 'object' ? data.tools : undefined,
+            // EVERY declared spawn row of this harness, typed, in ONE bag
+            // (design-harness-settings §5): --brief, the prompt-cache trio,
+            // disableModelFallback, tuiRenderer, … — INSTANCE settings read
+            // server-side so every create path (new, resume, layout restore,
+            // billing switch) behaves the same, and the adapter consumes them
+            // as `opts.settings.<key>` (test-harness-contract drives each row).
+            settings: (() => { try { return harnessSpawnSettings(backend); } catch { return {}; } })(),
+            initialPrompt: data.initialPrompt || '',
+            mode: sessionMode,
+            // an explicit per-session pick only; the instance default rides `settings.tuiRenderer`
+            tuiRenderer: data.tuiRenderer || '',
+            // Shell helper terminals auto-type this — the adapter arms the
+            // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
+            // first typed char: "claude /login" → "laude"). 2.196.0: the field
+            // never reached the server before, so the guard was dead code and
+            // the mangling hit REMOTE shells (env rides the exec-env prefix).
+            initialCommand: data.initialCommand || undefined,
+            // Background-job owner notify (2.344.0): our sessions run bypass-
+            // permissions, whose inbound default HOLDS an unattested peer
+            // message — pre-accept via the CLI's documented --settings knob so
+            // job notifications actually deliver. Follows the same global
+            // toggle that gates sending; repo/managed settings can tighten.
+            // LOCAL spawns only (the remote field is data.hostId — a data.host
+            // guard was a dead check, caught by the 2.344.0 review): accept
+            // only where our peer-messaging can actually deliver.
+            acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
+            // unit «billing pick alive» (src/billing-pick.js): a subscription the person picked sets the machine's key helper aside —
+            // false for the bare «the CLI's own login» case, whose argv stays the release's byte for byte
+            neutralizeKeyHelper: keyHelperOff,
+          });
+          // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
+          // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)
+          // used to sit HERE, as two `if (!sessionSpec.env.CODEX_WEBUI_*)`
+          // post-fills. They now run BEFORE the spawn spec, for every harness,
+          // through the resume-continuity ladder above — the post-fill could
+          // only ever fire when the client sent nothing, and the client sent
+          // the instance default on every resume (B-6b6d), so the fallback the
+          // env test was guarding was unreachable exactly when it was needed.
+          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, forkChainEnv(backend, data.resumeId));
 
           // THE MEMBER THIS PROCESS WILL HOLD (design-reset-credits r2): a pool on
           // a backend that cannot hot-switch (caps row, never an id — codex's
@@ -1613,7 +1623,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // B-8dcf item two: what the person's own settings file met at this start (the adapter's `settingsNotes`, read off the argv the hub
           // builds — local and remote alike, nothing reads the file) — SAID by name, once per start, where the person looks, with its door;
           // only a start that got this far is told (a refused one says its refusal)
-          for (const k of (sessionSpec && sessionSpec.settingsNotes) || []) {
+          // (unit «billing pick alive»: an ADOPTED process — keeperSid — keeps the argv it started with; this start's notes are not its own)
+          for (const k of (!data.keeperSid && sessionSpec && sessionSpec.settingsNotes) || []) {
             const w = SFW.SETTINGS_FILE_WORDS[k], name = String(session.name || data.name || '').slice(0, 80) || 'This conversation';
             if (w) { try { serverNotice?.(`settings-file-${k}-${id}`, w.replace('{name}', () => name), { level: 1, i18n: { key: w, params: { name } } }); } catch { } }   // a function: a «$&» in a name is words
           }
@@ -1622,6 +1633,22 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (data._contextRefused && !data.keeperSid) {
             const said = LOCKCTX.NO_LONG_CONTEXT, model = data._contextRefused, name = String(data.name || data.sessionName || '').slice(0, 80) || 'This conversation';
             try { serverNotice?.(`lock-context-${id}`, said.replace(/\{(model|name)\}/g, (m, k) => (k === 'model' ? model : name)), { level: 2, i18n: { key: said, params: { model, name } } }); } catch { }
+          }
+          // unit «billing pick alive»: the rule SAID where the person looks — once per picked account and machine (src/billing-pick.js
+          // noticeKey), only at a start that spawned with it (an adopted process keeps the argv it started with) and only when the
+          // Claude settings of the machine the CLI runs on name a helper it set aside (read after the spawn: the start never waits on it)
+          if (keyHelperOff && !data.keeperSid && harness && harness.creds && harness.creds.keyHelper) {
+            const row = harness.creds.keyHelper, acctId = (spawnAccount && spawnAccount.id) || linkedAccountId;
+            const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: session.hostName || null, hostId: data.hostId || null,
+              account: (() => { try { return accounts?.get?.(acctId)?.name || acctId; } catch { return acctId; } })() });
+            // a key this hub already said asks the machine nothing more (a remote start would probe the host again) — the notice
+            // channel says a key once per hub run; the file is the CLI's own (its config dir: CLAUDE_CONFIG_DIR, else ~/.claude)
+            if (said && !helperSaidKeys.has(said.key)) (async () => {
+              const on = data.hostId
+                ? (await hosts.backendStatus(data.hostId))?.[backend]?.keyHelper === true
+                : BILLPICK.namesHelper(JSON.parse(await fs.promises.readFile(BILLPICK.settingsFileOf(row, { creds: harness.creds, env: process.env, home: os.homedir() }), 'utf8')), row);
+              if (on && serverNotice && serverNotice(said.key, said.text, { level: 1, i18n: { key: said.words, params: said.params } }) > 0) helperSaidKeys.add(said.key);
+            })().catch(() => { });
           }
           // 2.368.0: what this session was spawned with / prefers. undefined on
           // _autoResume means "follow the global default" — the tri-state is

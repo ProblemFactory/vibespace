@@ -2075,7 +2075,7 @@ const I_RECV = {
   'src/server/user-input.js|caps': ['harness', 'a wrapper capability\'s reason'], 'src/task-groups.js|shadow': ['mount', 'the storage shadowing a context folder'],
   'src/server/session-brain.js|b': ['harness', 'a fallback banner\'s model (from → to)'], 'src/server/stdout/claude-stream-json.js|b': ['harness', 'a fallback banner\'s model (from → to)'],
   'src/server/session-stdout.js|death': ['harness', 'a CLI death\'s reason code'], 'src/ws-create.js|refusal': ['harness', 'a worktree refusal\'s reason code'],
-  'src/ws-create.js|pin': ['browser profile', 'a pinned profile\'s label'], 'src/ws-create.js|session': ['session', 'a session\'s name'], 'src/ws-handler.js|session': ['session', 'a session\'s name'],
+  'src/ws-create.js|said': ['words', 'a PURE verdict\'s sentence (src/billing-pick.js helperNotice — unit «billing pick alive»: the conversation\'s name, the picked account\'s name, the machine — the helper-set-aside notice)'],   'src/ws-create.js|pin': ['browser profile', 'a pinned profile\'s label'], 'src/ws-create.js|session': ['session', 'a session\'s name'], 'src/ws-handler.js|session': ['session', 'a session\'s name'],
   // ── the .197 integration: the other lanes' receivers, each named by what it is ──
   'src/agentd/agentd.js|f': ['dial', 'the daemon\'s own dial attempt facts (a code + the network\'s detail) — lane-pairing, never a record'],
   'src/server/dial-pairing.js|facts': ['dial', 'where a dial came from (an address) — lane-pairing'],

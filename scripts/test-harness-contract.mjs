@@ -776,6 +776,7 @@ const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')
         activeSessions: new Map(), WS_OPEN: 1, adapterRegistry: { get: () => adapter },
         sessionCounterRef: { value: 0 }, hosts: null, accounts: null, os, fs, path,
         serverSetting: () => '', SOCKETS_DIR: scratch('wtprobe-sockets'), BUFFERS_DIR: scratch('wtprobe-buffers'),
+        ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),   // unit «billing pick alive»: the spec is built after the account block — the dirs are made before it
         broadcastActiveSessions() { }, broadcastToSession() { },
       },
       agentEnv: () => ({}), crashLoopRef: { map: new Map() }, noConvoRef: { map: new Map() },

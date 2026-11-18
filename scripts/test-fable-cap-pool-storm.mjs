@@ -4178,7 +4178,7 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
   }
   // the create's REAL block (its own text): a resume commands target + [1m]; a catalog with no 1M form for the model is SAID
   {
-    const blockOf = (src) => { const a = src.indexOf('          // the saved fact applies only to the model the lock holds'), b = src.indexOf('          const sessionSpec = adapter.buildSessionArgs({', a); return a > 0 && b > a ? src.slice(a, b) : ''; };
+    const blockOf = (src) => { const a = src.indexOf('          // the saved fact applies only to the model the lock holds'), b = src.indexOf('          const codexThreadBaseline =', a); return a > 0 && b > a ? src.slice(a, b) : ''; };   // (unit billing pick alive: the spec is built after the account now — the block ends where the create moves on)
     const wc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), BLOCK = blockOf(wc);
     // batch 21's cure: the block RECORDS the refusal (data._contextRefused); the create SAYS it after the start registered
     const noticeOf = (src) => { const a = src.indexOf("          // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form"), b = src.indexOf('          // 2.368.0: what this session was spawned with / prefers.', a); return a > 0 && b > a ? src.slice(a, b) : ''; };

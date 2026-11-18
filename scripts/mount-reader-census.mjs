@@ -239,7 +239,7 @@ export const ROWS = [
   ['src/window-stamp.js', 'own-tree', 1, null, DATA], // lane oat-identity-fix-r3: the `.window-` sidecar's ONE reader (data/usage-cache)
   ['src/window-targets.js', 'own-tree', 2, null, PROC],
   ['src/workflow-usage-tailer.js', 'own-tree', 4, null, CLI],
-  ['src/ws-create.js', 'own-tree', 4, null, CLI],
+  ['src/ws-create.js', 'own-tree', 5, null, CLI], // unit billing pick alive +1: the CLI's own settings file (its config dir) — does it name the key helper a pick set aside (read off the loop, after the spawn)
   ['src/ws-handler.js', 'own-tree', 9, null, `${CLI}; lane bl-jobs B-c134 cure +1: the device agent's own pid file (~/.vibespace/agentd/state/agentd.pid) — kept out of a stop's tree walk, read off the loop at most once a minute`],
 ];
 // SafeFs: the pool's door is asked before a worker is picked (a blocked path is never queued)

@@ -57,6 +57,8 @@ export const noticeKeyTables = () => {
     { name: 'src/image-attach-rule.js REFUSAL_WORDS', keys: Object.values(req('../src/image-attach-rule.js').REFUSAL_WORDS) },
     // batch 20 cure: the reopen road's frame the just-started conversation cannot take yet — the route hands the key, the page words it
     { name: 'src/image-attach-rule.js REPLY_WORDS', keys: Object.values(req('../src/image-attach-rule.js').REPLY_WORDS) },
+    // unit «billing pick alive»: a subscription pick set the machine's key helper aside — the hub's notice, worded by t() on the page
+    { name: 'src/billing-pick.js HELPER_SET_ASIDE', keys: Object.values(req('../src/billing-pick.js').HELPER_SET_ASIDE) },
     // lane browser-login r23 (M2): every For-you notice template in src/browser-login.js NOTICE
     { name: 'src/browser-login.js NOTICE', keys: Object.values(BL.NOTICE || {}).flatMap((v) => [v.text, v.detail]) },
   ];

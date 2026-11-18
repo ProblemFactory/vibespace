@@ -108,6 +108,7 @@ const OWNERS = Object.freeze([
       name('lock-context'),   // B-6c55: the context a lock keeps (PURE; ws-create, ws-handler, the pool's repin)
       name('model-core'),   // batch 21's cure: a Claude model id's core — the catalog's name rule the lock's verdict shares (PURE)
       name('settings-file-words'),   // B-8dcf part two: a person's own settings file at a claude start (PURE; the adapter, the create, jobs wiring)
+      name('billing-pick'),   // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE; the create)
       name('usage-walker|design-fs|window-live-wiring|exit-call|exit-facts|unexpected-exit|account-material|login-shell|login-state|conversation-ops|sessions|session-(?:brain|stdout|store|schema)|desktop-(?:access|backends|display|fit|pin|serve|stream|viewers|webrtc)')] },
 ].map((o) => Object.freeze({ ...o, rules: Object.freeze(o.rules) })));
 // THE SHARED HELPERS — ONE short list: modules that hold NO state and belong to nobody. The walk passes a helper's frame

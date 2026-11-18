@@ -6,9 +6,11 @@
  * The claude adapter keeps exactly ONE --settings flag. When the person's own extra args carry `--settings <a file>`:
  *   · THE THREE (the output style the person picked, the «Disable model fallback» setting, the Background Work notices'
  *     inbound accept) STAND DOWN — the file is the person's most specific word for that conversation;
- *   · THE BILLING ONE (an explicit subscription pick neutralizes a helper that supplies a paid credential) NEVER does — a
+ *   · THE BILLING ONE (a subscription pick neutralizes a helper that supplies a paid credential) NEVER does — a
  *     subscription pick is a money choice and a file does not override it: the product's inline settings win and the file is
- *     set aside for that start. With no explicit pick the file governs like the three.
+ *     set aside for that start. A start that resolves to NO subscription (the CLI's own login, an API key): the file governs
+ *     like the three. (Amended 2026-11-18 02:39Z, unit «billing pick alive»: the default a person starred in Manage agents is
+ *     their standing pick — one conversation never changes who it bills between its first start and a resume.)
  * Each is SAID by name once per conversation start, where the person looks, with its door (the create's notice).
  * SETTINGS_FILE_WORDS[kind] = the person's words (English t() keys, {name} = the conversation; the page words them).
  * The kinds the file GOVERNS ride the session as `_settingsFileGoverns` (meta settingsFileGoverns): the paths that push a value
@@ -20,7 +22,7 @@ const SETTINGS_FILE_WORDS = Object.freeze({
   outputStyle: '{name}: your settings file is used as it is — the output style you picked in VibeSpace is not applied; put it into the file, or drop the --settings flag',
   noFallback: '{name}: your settings file is used as it is — «Disable model fallback» from VibeSpace is not applied; put it into the file, or drop the --settings flag',
   jobNotices: '{name}: your settings file is used as it is — VibeSpace does not set crossSessionInbound, so Background Work notices reach it only if the file accepts them; or drop the --settings flag',
-  billing: '{name} is set to bill through the subscription, so your settings file was set aside for this start, all of it — clear the pick to use the file',
+  billing: '{name} bills the subscription chosen for it, so your settings file was set aside for this start, all of it — to use the file, set its billing to «CLI login»',
 });
 const SETTINGS_FILE_KINDS = Object.freeze(Object.keys(SETTINGS_FILE_WORDS));
 /** the kinds a governing file covers (the three; billing is a set-aside, never a governing) */

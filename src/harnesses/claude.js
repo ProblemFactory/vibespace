@@ -313,6 +313,10 @@ module.exports = {
     providerTest: { argv: (model) => ['-p', 'ok', '--max-turns', '1', '--settings', '{"apiKeyHelper":""}', '--disallowedTools', 'Bash,Read,Edit,Write,WebFetch,WebSearch,Glob,Grep,NotebookEdit,Task,Agent,TodoWrite,ExitPlanMode,Skill', ...(model ? ['--model', String(model)] : [])] },
     loginLabel: 'Claude',
     defaultIdField: 'defaultAccountId',
+    // THE KEY HELPER THAT OUTRANKS THE LOGIN (2.191.0; unit «billing pick alive», src/billing-pick.js): a helper this setting
+    // names in this file of the CLI's config dir (homeEnvVar, else ~/.claude, on the machine the CLI runs on) bills every turn,
+    // whatever login the CLI holds — a subscription pick sets it aside at spawn (buildSessionArgs neutralizeKeyHelper)
+    keyHelper: { setting: 'apiKeyHelper', file: 'settings.json' },
     spawnForm: 'securestorage',                // accounts.resolveForSpawn: subscription (pool link / oat) or API key; spawnEnvVar relocates the secret store
     legacyGlobalKey: '__global__',             // the pre-registry harness: its machine login's usage key; its records may omit `backend`
     keychainSensitive: true,                   // darwin keychain service name hashes the env string ⇒ pools need Linux

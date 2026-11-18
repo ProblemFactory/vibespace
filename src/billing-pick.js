@@ -1,0 +1,77 @@
+'use strict';
+/**
+ * A SUBSCRIPTION PICK SETS THE MACHINE'S KEY HELPER ASIDE — PURE, imports nothing; CJS so the create, the suites and the
+ * dictionary check share ONE spelling (unit «billing pick alive», ruled by 主开发 2026-11-18 01:45Z).
+ *
+ * A helper named in the Claude settings of the machine the CLI runs on (`apiKeyHelper` in ~/.claude/settings.json) OUTRANKS
+ * every OAuth login (2.191.0, read from the binary): the CLI bills the helper's paid credential whatever login it holds.
+ * 2.236.0 measured the cure — an inline `--settings {"apiKeyHelper":""}` (the CLI's flag settings) overrides the file's helper
+ * (apiKeySource apiKeyHelper → none) — and shipped the adapter's half (buildSessionArgs `neutralizeKeyHelper`), but the create
+ * never passed it: from 2.236.0 until this unit an explicit subscription pick on such a machine billed the helper, while the
+ * billing switcher and Manage agents said «picking a subscription bypasses the helper».
+ *
+ * THE LAWS (the ruling):
+ *   · ONLY A PICK: the conversation's RESOLVED account is a subscription the person picked (their pick for it, or the default
+ *     they starred in Manage agents — their standing pick, ruled 02:39Z: one conversation never changes who it bills between
+ *     its first start and a resume) — a named subscription account or a
+ *     pool of them (resolveForSpawn kind 'subscription'), or a picked subscription that runs on the machine's own login because
+ *     it IS that login (`linked`). Never the bare «whatever the CLI is signed into» case (no account resolved: the CLI-login
+ *     entry, no pick and no default, a remote default that cannot reach the host and falls back to the host's own login) —
+ *     that spawn passes false, so its argv is the release's byte for byte; never an API-key account (no subscription to bill).
+ *   · ONE RULE FOR EVERY ROAD: the create asks this once, after the account is resolved, and hands the answer to the ONE
+ *     buildSessionArgs call — the local dtach line, the daemon pipe and every remote builder run those args.
+ *   · ONLY A HARNESS WHOSE LOGIN A HELPER OUTRANKS: its descriptor's `creds.keyHelper` row names the setting and the file
+ *     (claude). Any other harness: nothing to set aside, nothing said.
+ *   · SAID ONCE, where the person looks, when the rule actually set a helper aside (the machine's settings name one), with its
+ *     door: the billing switcher's CLI-login entry bills through the helper again (at the next start).
+ *   · A RUNNING conversation is never touched: the answer rides a spawn only.
+ */
+
+/** does this spawn set the machine's key helper aside? `creds` = the harness's creds row, `account` = what
+ *  accounts.resolveForSpawn answered (null = the CLI's own login), `linked` = the picked account id that resolved to the
+ *  machine's own login (ws-create's linkedAccountId) */
+function setsHelperAside({ creds = null, account = null, linked = null } = {}) {
+  if (!creds || !creds.keyHelper || typeof creds.keyHelper !== 'object') return false;
+  if (typeof linked === 'string' && linked) return true;
+  return !!account && typeof account === 'object' && account.kind === 'subscription';
+}
+
+/** the settings FILE whose helper the rule sets aside on THIS machine: the CLI's config dir (its descriptor's `homeEnvVar` in the
+ *  spawn's env — CLAUDE_CONFIG_DIR — else ~/.claude) + the row's file. Not read: a project's own .claude/settings files (a
+ *  helper there is set aside too, but not said) and the machine's managed settings (they outrank the inline flag: a helper there
+ *  is NOT set aside, and the notice may then be wrong — both named in the unit's line). */
+function settingsFileOf(row, { creds = null, env = {}, home = '' } = {}) {
+  if (!row || typeof row.file !== 'string' || !row.file) return null;
+  const v = creds && typeof creds.homeEnvVar === 'string' && env ? env[creds.homeEnvVar] : '';
+  const dir = typeof v === 'string' && v.trim() ? v.trim() : (home ? `${String(home).replace(/\/+$/, '')}/.claude` : '');
+  return dir ? `${dir.replace(/\/+$/, '')}/${row.file}` : null;
+}
+
+/** does a settings object name a helper the CLI would use? (the file's JSON, parsed; anything else = no) */
+function namesHelper(settings, row) {
+  const key = row && typeof row.setting === 'string' ? row.setting : '';
+  if (!key || !settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
+  const v = settings[key];
+  return typeof v === 'string' ? v.trim() !== '' : !!v;
+}
+
+/** the person's words (English t() keys; {name} = the conversation, {account} = the picked subscription, {host} = the machine) */
+const HELPER_SET_ASIDE = Object.freeze({
+  local: '{name} bills {account}, the subscription you picked — the apiKeyHelper in this machine’s Claude settings is not used for it. To bill through the helper, set its billing to «CLI login» (from its next start)',
+  remote: '{name} bills {account}, the subscription you picked — the apiKeyHelper in the Claude settings on {host} is not used for it. To bill through the helper, set its billing to «CLI login @ {host}» (from its next start)',
+});
+
+/** the notice's key: ONE per picked account and machine — the person hears it the first time the rule acts there, not at
+ *  every start (the hub's notice channel says a key once while it runs) */
+const noticeKey = (accountId, hostId) => `billing-pick-helper-${String(accountId || 'none').slice(0, 60)}-${hostId ? String(hostId).slice(0, 60) : 'local'}`;
+
+/** → { key, words, params, text } for the notice, or null without an account */
+function helperNotice({ name, account, accountId, host = null, hostId = null } = {}) {
+  if (!accountId) return null;
+  const words = hostId ? HELPER_SET_ASIDE.remote : HELPER_SET_ASIDE.local;
+  const params = { name: String(name || '').slice(0, 80) || 'This conversation', account: String(account || accountId).slice(0, 80), ...(hostId ? { host: String(host || hostId).slice(0, 80) } : {}) };
+  const text = words.replace(/\{(name|account|host)\}/g, (m, k) => (params[k] != null ? params[k] : m));
+  return { key: noticeKey(accountId, hostId), words, params, text };
+}
+
+module.exports = { setsHelperAside, settingsFileOf, namesHelper, HELPER_SET_ASIDE, noticeKey, helperNotice };
