@@ -370,6 +370,7 @@ class App {
         if (own && msg.rid && msg.rid === own.rid) { own.landed(); return; }
         if (own) { showToast(t('Layout restored on another device')); return; }
         showToast(t('Layout restored on another device — reloading…'));
+        if (this.layoutManager) this.layoutManager._restoreReload = true; // the restore armed the reload: nothing of this page's leaves (layout.js _restoreArmed)
         setTimeout(() => location.reload(), 900);
         return;
       }

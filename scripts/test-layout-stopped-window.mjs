@@ -1094,6 +1094,67 @@ await section('§9 B-46fc A PAGE THAT LEAVES TAKES ITS LAST CHANGE — the REAL 
     W.lm._pointerDown = true; const drag = W.lm._flushOnLeave('pagehide'); W.lm._pointerDown = false; clearTimeout(W.lm._autoSaveTimer);
     ok(drag === false && W.syncs('desk-w').length === 1, '§9 …a pointer still DOWN (an unfinished drag) sends no snapshot of it, and the flush says it sent nothing', drag);
   }
+  // THE TRAIN'S HOSTED RED (2.369.410, test-layout-placeholder-ui ④ — 主开发 13:32Z): a restore's own page — its ordinary save
+  // REFUSED as stale (the restore stamped the record after this page's base), the kept record ADOPTED with this page's captures
+  // and a save RE-ARMED under the NEW base (desktop-manager onSyncRefused → rearmSave), then the reload the restore armed. The
+  // release's reload killed that re-send; B-46fc's flush sent it and the hub took it (the page's captures over the restored
+  // record — whether that is what reds ④ is NOT proven: the merge keeps the point's ids; ④ prints its facts). THE LAW (主开发
+  // 13:32Z): a page whose reload a restore armed sends NOTHING at its leave — the restored point is the truth.
+  const restoreLeave = async (Lm, { armed = true } = {}) => {
+    const W = world({ records: { 'desk-w': [files('w-0', 0), files('w-1', 1)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w', Lm });
+    W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now(); // the restore's press: a person's act
+    const kept = { windows: [files('w-0', 0), files('w-1', 1), files('w-2', 2)], grid: null, updatedAt: Date.now() + 5000 }; // the point's THREE, stamped after this page's base
+    W.dm.onSyncRefused({ type: 'layout-sync-refused', desktopId: 'desk-w', reason: 'stale', state: kept });
+    const due = { rearmed: !!W.lm._autoSaveTimer && W.lm._saveAskedAt > (W.lm._savedAt || 0), gate: !!(W.lm._restoring || W.dm._restoring), base: W.dm.stampOf('desk-w') === kept.updatedAt };
+    if (armed) W.lm._restoreReload = true; // the restore landed: its reload armed (setup-flows' end / app.js's broadcast — pinned below)
+    const n0 = W.syncs('desk-w').length;
+    const sent = W.lm._flushOnLeave('pagehide');
+    const frames = W.syncs('desk-w').slice(n0);
+    clearTimeout(W.lm._autoSaveTimer); clearTimeout(W.lm._deferT);
+    return { due, sent, frames: frames.length, ids: frames.length ? frames[0].state.windows.map((w) => w.winId) : null };
+  };
+  const rl = await restoreLeave(LM);
+  ok(rl.due.rearmed && !rl.due.gate && rl.due.base && rl.sent === false && rl.frames === 0, '§9 A RESTORE-ARMED RELOAD SENDS NOTHING AT ITS LEAVE (found reading the 2.369.410 hosted red): the stale save refused, the kept record adopted, a save re-armed under the NEW base (due, no gate up) — the restore landed, the page leaves: no frame', rl);
+  const { LayoutManager: LMrr } = await mutantEsm('src/lib/layout.js', '    if (this._restoreArmed()) return false; // a restore armed this page\'s reload: nothing leaves at its leave (_restoreArmed)\n', '');
+  const rl0 = await restoreLeave(LMrr);
+  ok(rl0.sent === true && rl0.frames === 1, '§9 CONTROL: the train\'s tip as it was (the flag not read) sends the adopted merge at the leave — under the new base the hub takes it (the leg above goes RED)', rl0);
+  // …THE SECOND ROAD (主开发 13:50Z): the old document lives on until the reload commits — a refused save RE-ARMED after the
+  // restore landed could still leave through the debounce. The same predicate, asked by the re-arm: it arms nothing.
+  const rearmScene = async (Lm) => {
+    const W = world({ records: { 'desk-w': [files('w-0', 0), files('w-1', 1)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w', Lm });
+    W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now(); W.lm._restoreReload = true; // the restore landed first
+    const kept = { windows: [files('w-0', 0), files('w-1', 1), files('w-2', 2)], grid: null, updatedAt: Date.now() + 5000 };
+    W.dm.onSyncRefused({ type: 'layout-sync-refused', desktopId: 'desk-w', reason: 'stale', state: kept }); // the page's ordinary save, refused
+    const out = { armed: !!W.lm._autoSaveTimer && W.lm._saveAskedAt > (W.lm._savedAt || 0), adopted: W.wins.has('w-2') };
+    clearTimeout(W.lm._autoSaveTimer); clearTimeout(W.lm._deferT); return out;
+  };
+  const ra = await rearmScene(LM);
+  ok(ra.armed === false && ra.adopted, '§9 …and a refused save is NOT re-armed once a restore armed the reload (the adopt still shows the kept record) — nothing could leave by the debounce while the old document lives on', ra);
+  const { LayoutManager: LMra } = await mutantEsm('src/lib/layout.js', "    if (this._restoreArmed()) return; // a restore armed this page's reload: a refused save is not re-armed (_restoreArmed)\n", '');
+  const ra0 = await rearmScene(LMra);
+  ok(ra0.armed === true, '§9 CONTROL: the re-arm that does not ask the predicate arms the save (the leg above goes RED)', ra0);
+  // THE NEIGHBOUR (主开发's condition 3): a person's REAL change made after the restore landed and before its reload (a window
+  // closed in those 800 ms) does not leave at the leave either. NO NEW LOSS: at the release a close in the reload's last 500 ms
+  // never reached its debounce, and one before it went by its debounce under the page's OLD base — the hub refused it as stale
+  // (the restore stamped the record) and the reload killed its re-send. The person sees the reloaded page show the restored
+  // point, that window back. The flag holds only its two roads (the leave, the re-arm): a save the page's own debounce sends
+  // still leaves — the hub refuses it as stale, as at the release, and its re-arm then arms nothing.
+  {
+    const W = world({ records: { 'desk-w': [files('w-0', 0), files('w-1', 1)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w' });
+    W.mkWin('w-1', 'desk-w', { type: 'viewer' });
+    W.lm._restoreReload = true; // the restore landed, its reload armed
+    W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now(); W.app.wm.closeWindow('w-1'); W.lm.scheduleAutoSave(); // the person's close inside the 800 ms
+    const due = !!W.lm._autoSaveTimer && W.lm._saveAskedAt > (W.lm._savedAt || 0);
+    const n0 = W.syncs('desk-w').length, atLeave = W.lm._flushOnLeave('pagehide'), n1 = W.syncs('desk-w').length;
+    W.lm._doAutoSave(); const n2 = W.syncs('desk-w').length; clearTimeout(W.lm._autoSaveTimer);
+    ok(due && atLeave === false && n1 === n0 && n2 === n1 + 1, '§9 …a person\'s close made after the restore landed is not sent at the leave (the release lost it too: refused as stale, its re-send killed by the reload — no new loss; the reloaded page shows the restored point) — and the flag holds only its two roads: the debounce\'s own save still leaves', { due, atLeave, n0, n1, n2 });
+  }
+  // …the flag is SET on exactly two roads, READ by ONE predicate asked at its two roads (the leave, the re-arm), never stored
+  {
+    const SF = read('src/lib/setup-flows.js'), AP = read('src/lib/app.js'), LJ = read('src/lib/layout.js');
+    const writes = [SF, AP].map((x) => (x.match(/this\.layoutManager\._restoreReload = true;/g) || []).length), reads = (LJ.match(/_restoreReload/g) || []).length, asks = (LJ.match(/this\._restoreArmed\(\)/g) || []).length;
+    ok(J(writes) === J([1, 1]) && reads === 1 && asks === 2 && /_restoreArmed\(\) \{ return this\._restoreReload === true; \}/.test(LJ) && /rearmSave\(\) \{\n\s*if \(this\._restoreArmed\(\)\) return;/.test(LJ) && /if \(res\?\.success\) \{ own\.over = true; if \(this\.layoutManager\) this\.layoutManager\._restoreReload = true;/.test(SF) && /this\.layoutManager\._restoreReload = true;[^\n]*\n\s*setTimeout\(\(\) => location\.reload\(\), 900\);/.test(AP) && /_flushOnLeave\(why\) \{\n\s*if \(this\._restoreArmed\(\)\) return false;/.test(LJ) && !/localStorage[^\n]*_restoreReload|_restoreReload[^\n]*localStorage/.test(SF + AP + LJ), '§9 …the flag is SET on exactly two roads (setup-flows: its own restore landed · app.js: another device\'s broadcast — each just before its reload) and READ by ONE predicate (_restoreArmed) asked at its two roads — _flushOnLeave\'s and rearmSave\'s first lines; never stored', { writes, reads, asks });
+  }
   // RED CONTROLS: the pagehide listener taken out ⇒ the save waits for its timer; the gates lowered (the first cut) ⇒ a save mid-restore
   const { LayoutManager: LM0 } = await mutantEsm('src/lib/layout.js', "    if (typeof window !== 'undefined') window.addEventListener?.('pagehide', () => this._flushOnLeave('pagehide'));\n", '');
   const red = await scene(LM0, 'pagehide', { timer: true });

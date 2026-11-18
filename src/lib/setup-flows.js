@@ -533,7 +533,7 @@ export function installSetupFlows(App) {
       b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;
       const end = (res) => {
         if (own.over) return true;
-        if (res?.success) { own.over = true; close(); showToast(done); setTimeout(() => location.reload(), 800); return true; }
+        if (res?.success) { own.over = true; if (this.layoutManager) this.layoutManager._restoreReload = true; close(); showToast(done); setTimeout(() => location.reload(), 800); return true; } // the restore armed the reload: nothing of this page's leaves (layout.js _restoreArmed)
         b.textContent = was; b.removeAttribute('aria-busy'); if (list) list.inert = false; this._layoutRestoring = null;
         showToast(res?.error || t('Restore failed'), { type: 'error' });
         return false;

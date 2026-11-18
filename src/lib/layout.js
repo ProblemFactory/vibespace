@@ -1741,6 +1741,7 @@ class LayoutManager {
    *  (`_deferUserAt`, the 1.1 s kind) — an owed-recipe deferral sends only its recipes (_doAutoSave's own road). A socket that is not
    *  open queues the frame (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
   _flushOnLeave(why) {
+    if (this._restoreArmed()) return false; // a restore armed this page's reload: nothing leaves at its leave (_restoreArmed)
     const timerDue = !!this._autoSaveTimer && this._saveAskedAt > (this._savedAt || 0), deferred = !!this._deferT; // asked AFTER the last save left (one asked in that same ms counts as left — a save sets _savedAt right after its own ask's debounce)
     if ((!timerDue && !deferred) || this.app.stage?.isActive) return false; // nothing due: the last asked save has left
     const dm = this.app.desktopManager;
@@ -1888,7 +1889,16 @@ class LayoutManager {
   /** A record the server REFUSED was reconciled (desktop-manager onSyncRefused): send the corrected one through the
    *  ordinary autosave — the dirty bit re-armed, never the input time (§6b guard 2's 60 s expiry keeps its meaning:
    *  an idle page sends nothing). */
+  /** A RESTORE ARMED THIS PAGE'S RELOAD (found reading the 2.369.410 train's hosted red of test-layout-placeholder-ui ④ — 主开发's
+   *  law): the restored point is the truth; this page's captures of the moment before it (a stale save's refusal, the adopted
+   *  record + this page's captures) are no change a person made after it, and NOTHING of them leaves. ONE predicate, asked at the
+   *  TWO roads such a save could leave by: the leave's flush, and the re-arm of a refused save — the old document lives on until
+   *  the reload commits, so a re-armed save could still leave through the debounce after the reload was asked. The flag is set on
+   *  exactly two roads (setup-flows: its own restore landed · app.js: another device's broadcast, each just before its reload);
+   *  an instance field, it dies with the page. */
+  _restoreArmed() { return this._restoreReload === true; }
   rearmSave() {
+    if (this._restoreArmed()) return; // a restore armed this page's reload: a refused save is not re-armed (_restoreArmed)
     if (!this._lastUserInputAt || Date.now() - this._lastUserInputAt > 60000) return;
     this._userDirty = true;
     this._lastSentJson = null;

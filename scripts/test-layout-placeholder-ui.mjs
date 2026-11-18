@@ -247,6 +247,7 @@ else await (async () => {
     await P1.shot('confirm-zh');
     const reloads = (X) => X.ev('window.__lswMark = 1; true');
     await reloads(P1); await reloads(P2);
+    const jAt = journal.length; // the hub's own lines from the press on (④'s facts below)
     ok(await P1.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '只恢复「个人」')`), '④ the confirm is pressed');
     ok(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 12, 8000), '④ the server\'s 个人 is the point\'s TWELVE', (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.map((w) => w.winId));
     const after = await api('/api/layouts');
@@ -254,7 +255,14 @@ else await (async () => {
     const reloaded = (X) => until(async () => { try { return (await X.ev('window.__lswMark === undefined && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId)')); } catch { return false; } }, 20000, 250);
     ok(await reloaded(P1) && await reloaded(P2), '④ both pages reloaded (layout-restored is broadcast to every client)');
     const built = (X) => until(async () => (await X.ev(`${J(point.desktops['desk-p'].autoSave.windows.map((w) => w.winId))}.filter((id) => app.wm.windows.has(id)).length`)) === 12 && (await X.tiles()).length === 11, 20000, 250);
-    ok(await built(P1) && await built(P2), '④ on a hub whose sessions are stopped the restored 个人 shows TWELVE windows on both pages — eleven placeholders + the file window, not 0');
+    // the facts that name the half (lane bl-windows, the 2.369.410 hosted red — this leg said nothing): each page's point ids it
+    // lacks and its window and tile counts; the server's 个人 after the reload against the point (what it lacks, what it adds);
+    // the hub's last layout lines since the press (a refusal, a write) — compact: ok() keeps 900 characters
+    const PIDS = point.desktops['desk-p'].autoSave.windows.map((w) => w.winId);
+    const facts = async (X) => { try { const r = await X.ev(`(() => { const ids = ${J(PIDS)}; return { lacks: ids.filter((id) => !app.wm.windows.has(id)), windows: app.wm.windows.size }; })()`); return { ...r, tiles: (await X.tiles()).length }; } catch (e) { return String(e && e.message || e).slice(0, 60); } };
+    const b1 = await built(P1), b2 = await built(P2);
+    const srvFacts = async () => { try { const ids = (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.map((w) => w.winId); return { n: ids.length, lacks: PIDS.filter((x) => !ids.includes(x)), adds: ids.filter((x) => !PIDS.includes(x)) }; } catch { return null; } };
+    ok(b1 && b2, '④ on a hub whose sessions are stopped the restored 个人 shows TWELVE windows on both pages — eleven placeholders + the file window, not 0', b1 && b2 ? undefined : { P1: await facts(P1), P2: await facts(P2), server: await srvFacts(), hub: journal.slice(jAt).split('\n').filter((l) => /\[layout/.test(l)).slice(-3).map((l) => l.slice(0, 100)) });
     await P1.shot('restored-zh-1440');
 
     // ⑥ lane phone-dock-restore (the owner 2026-11-02 on the iPhone: «恢复之前布局的那个按钮加载速度有点慢，然后也没有任何提示让人那边

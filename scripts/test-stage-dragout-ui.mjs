@@ -164,8 +164,19 @@ else await (async () => {
     const opened = await ev(`return app.onBrowserDigestChanged({ leases: [] }, { leases: [{ profileId: 'p-work', sessionId: ${S(sidM)} }] });`);
     const liveId = 'win-blive-' + sidM;
     await sleep(700);
+    // THE LAW SINCE 2.369.410 (B-2dbe — the Stage's leave hands the focus to what is on show, a parked hero is never the active
+    // window; lane agent-window-no-pop — the agent's start opens a view beside a chat only where the person looks at it): the
+    // agent's browser that starts while the Stage is off screen opens NOTHING in the parked hero's group — a card (the hero's
+    // badge). At the release the parked hero stayed the active window (B-2dbe's bug) and the auto-bind took it for «looking».
+    const law = await ev(`return { none: !wm.windows.get(${S(liveId)}), active: wm.activeWindowId || null, card: !!wm.windows.get(${S(heroId)})?.element?.classList?.contains('window-arrived') };`);
+    ok(Array.isArray(opened) && opened.length === 0 && law.none && law.active !== heroId && law.card, 'the agent\'s browser starts while the Stage is off screen: NOTHING opens in the parked hero\'s group — the hero is no longer the active window (B-2dbe), a chat the person is not looking at gets a card (agent-window-no-pop)', S({ opened, law }));
+    // THE INCIDENT'S SHAPE (the release's auto-bind wrote it — records from before the law still hold it): built the way that
+    // auto-bind built it, with its own call — openBrowserLive into the hero's group as livePlacement places it for a hero in no
+    // group (a SPLIT, the browser on the right), quiet, the Stage off screen
+    await ev(`app.openBrowserLive({ sessionId: ${S(sidM)}, profileId: 'p-work', syncId: ${S(liveId)}, intoChain: { hostId: ${S(heroId)}, split: true, side: 'right' }, quiet: true }); return true;`);
+    await sleep(700);
     const born = await ev(`const h = wm.windows.get(${S(heroId)}), l = wm.windows.get(${S(liveId)}); if (!l) return { none: true }; const ch = h._tabChain; return { chain: !!ch, same: !!(ch && l._tabChain === ch), layout: ch && ch.layout, tabs: ch && ch.tabs, bound: st._boundAux.get(${S(liveId)}) || null, desk: l._desktopId, staged: st.isActive };`);
-    if (!ok(Array.isArray(opened) && opened.includes(liveId) && born.chain && born.same && born.tabs.length === 2 && born.desk === '__stage__' && !born.staged, 'the agent\'s browser starts while the Stage is off screen: the auto-bind opens the live view INTO the chat\'s (Stage-hidden) group, tagged to the Stage, unbound', S({ opened, born }))) return;
+    if (!ok(born.chain && born.same && born.tabs.length === 2 && born.desk === '__stage__' && !born.staged, 'the incident\'s shape, built as the release\'s auto-bind built it: the live view INTO the chat\'s (Stage-hidden) group, tagged to the Stage, unbound', S({ opened, born }))) return;
     // …and the ring's round trips: enter, leave, enter
     await ev('await st.enter(); return true;'); await sleep(1400);
     await ev('await st.leave(); return true;'); await sleep(900);
