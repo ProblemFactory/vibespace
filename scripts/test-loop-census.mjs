@@ -88,6 +88,20 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
   const smallsWrong = SMALLS.map(([p, id]) => [p, id, ownerOf(p)]).filter(([, id, got]) => got !== id);
   ok(!smallsWrong.length && !HELPERS.some((h) => h.path === 'src/peer-text.js') && SMALLS.every(([p]) => fs.existsSync(path.join(REPO, p))),
     'the census smalls: peer-text is channels\' (off the helpers\' list), msg-acl and the worker dispatch pair workspace\'s, the job-log sweep and the harness capability table the conversation\'s (the machine side), migrations a split file of its own; telemetry and the migration runner stay the interface\'s', smallsWrong);
+  // B-403e FOLLOW-UP (5): THE RULE FOR THE READS HELPER, its reason held (src/loop-census.js 'money'): with a caller after it the
+  // helper's frames are passed (the hold is the caller's); a stack that is the helper's ALONE keeps them, and the rule books it to
+  // money. CONTROL: the same helper frame above a channel store's caller is booked to channels, never money
+  {
+    const RT = '/repo', fr = (f) => ({ fn: 'f', file: 'file://' + RT + '/' + f, line: 3, col: 1 });
+    const trim = typeof LH.instrumentTrim === 'function' ? LH.instrumentTrim : (x) => x;
+    const fileOf = (x) => String(x.file).replace('file://' + RT + '/', '');
+    const alone = trim([fr('src/run-reads.js'), { fn: 'readFileSync', file: 'node:fs', line: 1, col: 1 }], RT);
+    const withCaller = trim([fr('src/run-reads.js'), fr('src/run-reads.js'), fr('src/channel-store.js')], RT);
+    ok(ownerOf('src/run-reads.js') === 'money' && fileOf(alone[0]) === 'src/run-reads.js' && ownerOf(fileOf(alone[0])) === 'money',
+      'the reads helper\'s rule is KEPT for its one case: a stack that is the helper\'s ALONE keeps its frame and is booked to money (its own memo work)', alone.map(fileOf));
+    ok(withCaller.length === 1 && fileOf(withCaller[0]) === 'src/channel-store.js' && ownerOf(fileOf(withCaller[0])) === 'channels',
+      'CONTROL: the helper\'s frames above a caller are passed — the hold is the caller\'s (a channel store\'s write ⇒ channels), never money\'s', withCaller.map(fileOf));
+  }
   // the sample's own encoding (src/loop-hold.js SAMPLE_EXPR): 'C' + <n>:<name><n>:<file><line>,<own line><e|n> each
   const C = (frames) => 'C' + frames.map(({ fn = 'f', file, ev = false }) => `${fn.length}:${fn}${file.length}:${file}3,1${ev ? 'e' : 'n'}`).join('');
   const R = '/srv/hub';
@@ -133,6 +147,10 @@ console.log('① PURE — the owners, one answer booked, the rate, one take fold
     [S(['    at f0 (/srv/hub/src/x.js:1:1)', '    at f (/srv/hub/src/browser-profiles.js:3:4)', '    at g (/srv/hub/src/ws-handler.js:5:6)']), B('machines'), 'the string form (locations only) books the same way'],
     [S(['    at f0 (/srv/hub/src/x.js:1:1)', '    at f (/srv/hub/src/server/browser-keeper.js:3:4)', '    at g (/srv/hub/src/browser-profiles.js:5:6)']), B('split:browser-keeper'), 'the string form books a split file\'s own bucket the same way'],
     [S(['    at f0 (/srv/hub/src/x.js:1:1)', ...Array.from({ length: LC.FRAME_LIMIT + 4 }, (_, i) => `    at g${i} (/srv/hub/node_modules/l/i.js:${i + 1}:1)`)]), B('outside', false, true), 'the string form cut at its limit with no owned frame: outside, deep'],
+    // B-403e follow-up (5), END TO END through bookOf (its trim, then the owners): the reads helper ALONE books money; its frames
+    // above a channel store's write are passed — the hold is the caller's
+    [C([at('src/run-reads.js'), { file: 'node:fs' }]), B('money'), 'the reads helper ALONE (no caller of ours: its memo-drop microtask) books money — the rule kept for that one case'],
+    [C([at('src/run-reads.js'), at('src/run-reads.js'), at('src/channel-store.js')]), B('channels'), 'the reads helper\'s frames above a channel store\'s write are passed: the hold is the caller\'s (channels), never money'],
     ['D', null, 'a debugger\'s stand-down: not sampled'], ['A', null, 'an accessor\'s stand-down: not sampled'], [S(['garbage']), null, 'frames unreadable: not sampled'], [null, null, 'no text: not sampled'],
   ];
   const bad = cases.map(([t, want, why]) => [why, want, LC.bookOf(t, R)]).filter(([, want, got]) => JSON.stringify(got) !== JSON.stringify(want));
