@@ -356,6 +356,9 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
    *  silence or a Never (the Deny holds until the owner allows that subject).
    *  At boot (reconcile), every STANDING_SWEEP_MS (wire), and by a suite. → how many it closed. */
   function reevaluate() {
+    // the B-f276 remainder (its read r3, Y1): a HELD hosts.json knows no machine — never «its machine is gone» (a Deny would be
+    // rewritten to ask-over on disk and lost): nothing is judged until the machines read
+    if (hosts && typeof hosts.unreadWords === 'function' && hosts.unreadWords()) return 0;
     let n = 0;
     for (const st of [...standing.values()]) {
       if (st.state === 'once' || byKey.has(st.dk)) continue; // an Allow once waits for its subject's next act; a hold in flight settles first

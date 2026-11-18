@@ -103,6 +103,12 @@ function noteDialEvent(deviceId, event, facts = {}) {
   if (r.changed || now - (_dialBcastAt.get(deviceId) || 0) >= 60000) { _dialBcastAt.set(deviceId, now); try { bcastAll({ type: 'hosts-updated' }); } catch { } }
   return r;
 }
+/** the B-f276 remainder: a dial met while hosts.json is held — 503 + Retry-After, the device still paired, nothing recorded */
+function holdDial(socket, deviceId) {
+  const body = JSON.stringify({ code: 'hosts-unread', error: 'this VibeSpace cannot read its paired machines right now and reads them again within minutes — nothing about this device was changed; it dials again by itself', deviceId: String(deviceId || '').slice(0, 64), serverVersion: SERVER_VERSION });
+  try { socket.end(`HTTP/1.1 503 Service Unavailable\r\nRetry-After: 60\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`); } catch { }
+  setTimeout(() => { try { socket.destroy(); } catch { } }, 2000).unref?.();
+}
 /** The refusal FRAME: 401 + `X-VibeSpace-Dial-Refusal: <code>` + a JSON body with the sentence (§4.4). `end()`,
  *  never a bare destroy — the bytes must reach the device before the socket closes. */
 function refuseDial(socket, code, deviceId, proof = '') {   // proof: B-4d71's retire proof (hex), only on a `retired` answer
@@ -153,6 +159,9 @@ function gateDialUpgrade(req, socket) {
   const q = new URL(req.url, 'http://x').searchParams;
   const deviceId = String(q.get('device') || '').slice(0, 64);
   const tok = String(req.headers['x-vibespace-dial-token'] || '');
+  // the B-f276 remainder (its read r1, S4): while hosts.json is HELD no pairing can be checked — a TRANSIENT answer the device retries
+  // (its classifier: http-503, the hub's own words), never the 401 that tells the person to pair again
+  if (hosts.unreadWords && hosts.unreadWords()) { holdDial(socket, deviceId); return null; }
   const want = hosts.dialTokenHash(deviceId); // pairing credential lives on the host record (B-f3e8)
   const hints = DF.parseDialHeaders(req.headers); // UNTRUSTED: closed codes, ≤ 80 bytes
   // `host` = the Host header AS IT REACHED THIS SERVER (the last proxy's fact — a relay rewrites it; kept for the journal

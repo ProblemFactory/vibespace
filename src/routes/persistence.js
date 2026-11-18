@@ -1260,6 +1260,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     { const held = Array.isArray(sections) && sections.includes('tasks') ? getTasks?.()?.unreadRefusal?.('a backup of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD (lane bl-windows): never a backup that silently holds no groups
     const secondPassword = req.body ? req.body.secondPassword : undefined;   // lane vault-contents-window r2: taken off the request at once
     if (req.body) delete req.body.secondPassword;
+    // the B-f276 remainder (its read r1, N3): a backup asked to carry the machines while hosts.json is HELD would leave them out in silence
+    const hostsHeld = includeSensitive.includes('hosts') && getHosts?.()?.unreadWords?.();
+    if (hostsHeld) return res.status(503).json({ error: `the export asks for the machines: ${hostsHeld}`, code: 'hosts-unread' });
     const file = {
       app: 'vibespace-config', version: 1,
       exportedAt: new Date().toISOString(),
@@ -1385,7 +1388,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         const r = getHosts?.()?.importBundle?.(sens.hosts);
         // lane grants-unify: the machines' exit lists → the ONE grants store (the bundle's rows, or an older bundle's
         // records mapped); a refused write is SAID (never a machine silently open to nobody / to more than it was)
-        const lists = getExitProxy?.()?.importLists?.(sens.hosts, { by: 'import' });
+        const lists = r && r.skipped ? null : getExitProxy?.()?.importLists?.(sens.hosts, { by: 'import' });   // the B-f276 remainder: no exit lists for machines not imported
         const warn = [...(r?.warnings || []), ...(lists && !lists.ok ? [`who can use the machines was not imported: ${lists.error || lists.code}`] : [])];
         applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');
       }

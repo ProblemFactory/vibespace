@@ -15,6 +15,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
 const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
@@ -334,14 +335,82 @@ class HostManager {
   invalidateDevice(id) { try { this._devices?.get(id)?.stop?.(); } catch { } this._devices?.delete(id); }
 
   _load() {
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); }
-    catch {
-      // hosts.json is the SOLE holder of every dialTokenHash since B-f3e8 —
-      // an unparseable file is backed up before we proceed empty, never
-      // silently overwritten by the next _save (review hardening)
-      try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { }
+    let read;
+    try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
+    this._loadAnswer(SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) }));
+  }
+  /** remainder of B-f276 (bl-jobs, the store-read law over hosts.json — the SOLE holder of every paired machine and every
+   *  dialTokenHash since B-f3e8): data → loaded · missing → empty · torn bytes → backed up (a copy), then empty, as before ·
+   *  a read that FAILED (EIO, EACCES, a timeout on network storage) → HELD: the machines are not shown, NOTHING is written over
+   *  the file (_save refuses), a person's change is refused by name, and the file is read again off the loop until it answers */
+  _loadAnswer(a) {
+    if (a.state === 'unreadable') return this._unreadHold(a);
+    if (a.state === 'corrupt') {
+      let aside = null;
+      try { aside = this._asideName(); fs.copyFileSync(this._file, aside, fs.constants.COPYFILE_EXCL); } catch { aside = null; }
+      const b = SR.afterSetAside(a, aside);
+      if (b.state !== 'missing') return this._unreadHold(b);   // its only copy: never written over
+      console.warn(`[hosts] hosts.json did not parse (${a.why}) — its bytes are kept in ${path.basename(aside)}; the machines list starts empty`);
     }
+    this._state = a.state === 'data' ? a.value : { hosts: [] };
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
+    if (a.state === 'data') this._reachChanged('hosts.json read');   // at boot nothing is wired yet (a no-op); a held store read again mid-life brings machines back — re-judged. Its read r3 (Y2): an EMPTY lift (torn bytes set aside, a gone file) re-judges nothing, as a boot does — a prune over the empty list cleared every machine's exit lists
+  }
+  _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
+  _unreadHold(a) {
+    this._unread = { code: a.code, why: a.why, at: (this._unread && this._unread.at) || Date.now() };
+    this._state = { hosts: [] };
+    if (!this._unreadSaid) { this._unreadSaid = true; console.warn(`[hosts] hosts.json could not be read (${a.code}: ${a.why}) — held: nothing is written over it, and it is read again off the main loop`); }
+    this._unreadRetrySoon();
+  }
+  /** the words a person reads while hosts.json is held (the machines list, a refused change) */
+  unreadWords() {
+    return this._unread ? `hosts.json in VibeSpace's data folder could not be read (${this._unread.code}); VibeSpace reads it again every few minutes. No machine is lost: nothing is written over it, and changes to machines wait until it reads.` : null;
+  }
+  _refuseIfUnread(what) {
+    if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'hosts-unread', status: 503 });
+  }
+  _unreadRetrySoon() {
+    if (this._unreadT || this._unreadStopped) return;
+    const n = this._unreadTries = (this._unreadTries || 0) + 1;
+    const t = this._unreadT = setTimeout(() => { this._unreadT = null; this._unreadRetry().catch((e) => { console.warn('[hosts] hosts.json read again failed:', e && e.message); this._unreadRetrySoon(); }); }, SR.retryDelay(n));
+    t.unref?.();
+  }
+  /** one read again, off this thread; ONE in flight; a «missing» answer right after an unreadable one is read once more (the
+   *  law of batch 2 cure 3: a storage that says «no such file» for a moment never has the file written over) */
+  async _unreadRetry() {
+    if (!this._unread) return;
+    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js's order) — a try that meets one in flight, or a read that fails, never ends the tries
+    if (this._unreadP) return;
+    const mine = this._unreadSeq = (this._unreadSeq || 0) + 1;   // its read r2 (X2): only the NEWEST try may lift the hold — r3 (Y3): counted once a try READS (a meeting makes no read stale)
+    const p = this._unreadP = fs.promises.readFile(this._file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+    const read = await p; this._unreadP = null;
+    if (!this._unread) return;
+    let a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
+    if (a.state === 'unreadable') { this._unread.code = a.code; this._unreadMissingAt = 0; return; }
+    if (a.state === 'missing' && !this._unreadMissingAt) { this._unreadMissingAt = Date.now(); return; }
+    if (a.state === 'corrupt') {   // its read r1 (N1): torn bytes now are copied aside OFF the loop first — no place for them, the hold stands
+      const aside = this._asideName();
+      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; } catch { }
+      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
+      a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
+      if (a.state === 'unreadable') { this._unread.code = a.code; return; }
+    }
+    const was = this._unread; this._unread = null; this._unreadMissingAt = 0; this._unreadTries = 0; this._unreadSaid = false; this._unreadSaveSaid = false;
+    if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
+    this._loadAnswer(a);
+    console.warn(`[hosts] hosts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.hosts.length} machine(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the machines list starts empty` : 'the file is GONE — the machines list starts empty'}`);
+    try { this.onDiscoveryDirty?.(null); } catch { }
+    try { this.onReadAgain?.(); } catch { }   // its read r1 (S1): every page's machines list is drawn again (exit-routes wires hosts-updated)
+    const waits = this._readWaits || []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
+    for (const fn of waits) { try { fn(); } catch (e) { console.warn('[hosts] a wait for the machines failed:', e && e.message); } }
+  }
+  /** run `fn` over the machines as soon as they are KNOWN — now, or once a held hosts.json reads (its read r1, S5: a sweep over
+   *  the held, empty list ran over nothing and never again) */
+  whenRead(fn, what = 'a sweep over the machines') {
+    if (!this._unread) return fn();
+    (this._readWaits = this._readWaits || []).push(fn);
+    console.warn(`[hosts] ${what} waits for hosts.json to read (${this._unread.code}) — it runs then; a restart before that forgets it`);   // its read r2 (X4): said
   }
 
   /** B-48a4 (the exit door's cost; the coordinator's word (e), 2026-11-18): EVERY write of hosts.json goes through THE STORE
@@ -351,6 +420,7 @@ class HostManager {
    *  throttled one once a minute per machine under exit commands. ONE writer of the file, so a later state always lands last.
    *  A failure is the writer's to say (and it retries); `persisted()` = the file holds the state saved so far (a reader of it). */
   _save() {
+    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; console.warn('[hosts] a hosts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return false; }
     const W = this._storeWriter || require('./store-writer.js').storeWriter();
     W.dirty(this._file, { name: 'hosts.write', produce: () => JSON.stringify(this._state, null, 2) });
     W.durable(this._file).catch(() => { });
@@ -399,6 +469,7 @@ class HostManager {
    *  path keeps working as the bootstrap + rescue channel; only the live
    *  routing (_deviceConnect) prefers the dialed-in stream. */
   graduateDial(id, { dialRoot } = {}) {
+    this._refuseIfUnread('moving a machine');   // remainder of B-f276: a held hosts.json takes no change
     const h = this.get(id);
     if (h.transport === 'dial') throw new Error('already a dial device');
     if (!h.deviceId) h.deviceId = ('grad-' + id).replace(/[^\w-]/g, '').slice(0, 32);
@@ -409,6 +480,7 @@ class HostManager {
   }
 
   ungraduateDial(id) {
+    this._refuseIfUnread('moving a machine back');   // remainder of B-f276: a held hosts.json takes no change
     const h = this.get(id);
     try { if (h.deviceId) require('./agentd/client.js').DeviceManager.dropHelloFolds('dev:' + h.deviceId); } catch {}   // B-0194: its device name's hello folds said and dropped
     delete h.deviceId; delete h.dialTokenHash; delete h.dialRoot;
@@ -436,6 +508,7 @@ class HostManager {
    *  folded in). setDialToken find-or-creates so re-pairing an existing name
    *  rotates the token in place. */
   setDialToken(deviceId, sha256Hash, { name } = {}) {
+    this._refuseIfUnread('pairing a device');   // remainder of B-f276: a held hosts.json takes no change
     let h = this.findByDeviceId(deviceId);
     if (!h) { this.add({ name: name || deviceId, transport: 'dial', deviceId }); h = this.findByDeviceId(deviceId); }
     // add() keys by the SANITIZED id — a different raw deviceId that sanitizes
@@ -470,6 +543,7 @@ class HostManager {
    *  `{hosts: […]}` and returns a report; ONE atomic save follows. The migration goes through the LIVE manager
    *  because it holds hosts.json in memory and saves it whole — a second writer beside it would be overwritten. */
   reshapeStore(fn) {
+    this._refuseIfUnread('reshaping the machines store');   // remainder of B-f276: a held hosts.json takes no change
     const rep = fn(this._state);
     this._save();
     this._reachChanged('reshape');
@@ -501,6 +575,7 @@ class HostManager {
    *  list, the stamp (PURE src/exit-reach.js `storedExit`) — MERGED into `exit`, so `lastRun` and the pre-unify
    *  `use` / `run` (on disk one more release, unread) stay as they are. */
   setExitAccess(id, exit) {
+    this._refuseIfUnread("changing a machine's exit access");   // remainder of B-f276: a held hosts.json takes no change
     const h = this.get(id);
     const was = h.exit && typeof h.exit === 'object' && !Array.isArray(h.exit) ? h.exit : {};
     const keep = {};
@@ -708,6 +783,7 @@ class HostManager {
   }
 
   add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null, viaConfig = false, sshConfig = null, jump = null }) {
+    this._refuseIfUnread('adding a machine');   // remainder of B-f276: a held hosts.json takes no change
     // DIAL host (graduation slice B): a paired dial-out device promoted to a
     // full machine — no ssh fields; every data path rides deviceForDial.
     if (transport === 'dial') {
@@ -779,6 +855,7 @@ class HostManager {
   }
 
   remove(id) {
+    this._refuseIfUnread('removing a machine');   // remainder of B-f276: a held hosts.json takes no change
     try { if (this._realCwds) this._realCwds.delete(id); } catch { }   // B-16d7: a removed machine's real folders go with it
     const h = this.get(id);
     // uploaded per-host key files are ours to clean up
@@ -803,6 +880,7 @@ class HostManager {
   // Boot sweep: remote-jsonl dirs whose host no longer exists (orphaned before
   // remove() learned to clean up) + cached transcripts unused for 30 days.
   sweepJsonlCache() {
+    if (this._unread) return;   // the B-f276 remainder, its read r1 (M1): a HELD list knows no machine — every machine's cache would read as an orphan
     const base = path.join(this.dataDir, 'remote-jsonl');
     let dirs = [];
     try { dirs = fs.readdirSync(base); } catch { return; }
@@ -839,6 +917,9 @@ class HostManager {
    *  writing it would produce a host that only fails at connect time); the
    *  caller surfaces the reason in the import result. */
   importBundle(bundle) {
+    // remainder of B-f276: a held hosts.json takes no change — its read r1 (S3): SAID in the import's own answer, never a throw
+    // inside the import route (Express answered its default 503 page, the rest of the import half-applied)
+    if (this._unread) return { warnings: [`the machines were not imported — ${this.unreadWords()}`], skipped: true };
     const warnings = [];
     if (!bundle || !Array.isArray(bundle.hosts)) return { warnings };
     fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });

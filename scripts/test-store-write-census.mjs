@@ -883,7 +883,7 @@ const STORE_READS = [
   { file: 'src/channel-store.js', store: 'channels/*.json (loadJsonFamily)', state: 'debt', why: 'sets the LIVE file aside on a failed read', mark: /return setAside\(`unreadable \(\$\{\(e && e\.code\) \|\| \(e && e\.message\)\}\)`\);/ },
   { file: 'src/user-todos.js', store: 'user-todos.json', state: 'debt', why: 'sets the live file aside on a failed read', mark: /if \(!\(e && e\.code === 'ENOENT'\)\) setAside = this\._setAside\(`unreadable/ },
   { file: 'src/server/browser-kept.js', store: 'browser-kept.json', state: 'debt', why: 'sets the live file aside on any failure but ENOENT', mark: /if \(e && e\.code !== 'ENOENT'\) \{[\s\S]{0,600}?fs\.renameSync\(file, aside\)/ },
-  { file: 'src/hosts.js', store: 'hosts.json', state: 'debt', why: 'a failed read starts EMPTY (the copy aside cannot read it either) — the next save writes over hosts.json', mark: /try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/ },
+  { file: 'src/hosts.js', store: 'hosts.json', state: 'answer', mark: /this\._loadAnswer\(SR\.storeAnswer\(read, \{ valid: \(v\) => !!v && typeof v === 'object' && !Array\.isArray\(v\) \}\)\)/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held, never written over
   { file: 'src/machine-mounts.js', store: 'machine-mounts.json', state: 'debt', why: 'a failed read starts EMPTY — the next save writes over machine-mounts.json', mark: /try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/ },
   { file: 'src/server/conversation-deliver.js', store: 'msg-retry.json', state: 'debt', why: 'a failed read is «no file»: the park starts empty and its next write overwrites', mark: /try \{ rawText = fs\.readFileSync\(retryFile, 'utf-8'\); \} catch \{ rawText = null; \}/ },
   { file: 'src/server/usage-pool-engine.js', store: 'reset-credit-tries.json', state: 'debt', why: 'a failed read is «no attempts»: the next write overwrites', mark: /try \{ raw = fs\.readFileSync\(RESET_CREDIT_TRIES_FILE, 'utf8'\); \} catch \{ return 0; \}/ },
@@ -896,7 +896,7 @@ const STORE_READS = [
   { file: 'src/desktop-serve.js', store: 'desktop-apps.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: STORE_VALID \}\);\n    if \(a\.state === 'data'\) \{ store = \{ apps: a\.value\.apps \}; return; \}/ },
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
 ];
-const READ_DEBT_CAP = 8;     // lower it as each debt row flips to `answer` — never raise it
+const READ_DEBT_CAP = 7;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, bl-jobs B-f276's remainder)
 const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
 const STATES = new Set(['answer', 'right', 'names', 'debt']);
 const USES_HELPER = /require\(['"](?:\.{1,2}\/)+(?:[\w-]+\/)*store-read(?:\.js)?['"]\)/;
@@ -964,15 +964,20 @@ const c0 = census(second);
 ok(c0.length === 1 && /^src\/jobs\.js: 4 set-aside name\(s\) in its code, 3 counted/.test(c0[0]), 'CONTROL: a SECOND store with the old shape in a file that already has rows is red by its count', c0);
 const commented = new Map(T); commented.set('src/server/notes.js', "// a store's bytes go to <name>.corrupt-<ts>\n/* '.corrupt-' */\nmodule.exports = {};\n");
 ok(census(commented).length === 0, 'CONTROL: a set-aside name in a COMMENT is no store');
-const converted = new Map(T); converted.set('src/hosts.js', T.get('src/hosts.js').replace(/try \{ this\._state = JSON\.parse\(fs\.readFileSync\(this\._file, 'utf-8'\)\); \}\s*catch \{/, "const a = SR.storeAnswer(read);\n    if (a.state === 'unreadable') {"));
-const c2 = census(converted);
-ok(c2.length === 1 && /^src\/hosts\.js hosts\.json: its marked read line is not there — if the line was only REWORDED, re-pin the row's mark to the new text \(nothing else\); only if the store reads through storeAnswer now, flip the row to 'answer'.*lower READ_DEBT_CAP/.test(c2[0]), 'CONTROL: a debt row whose marked line changed is red — its words say RE-PIN first (a reword), flip + lower the cap only for a converted store', c2);
+// the control's store is DERIVED (the last debt row): each conversion of the remainder moves it on by itself (a hard-coded store
+// went stale with the first one); its anchor missing fails by name
+const LAST_DEBT = STORE_READS.filter((r) => r.state === 'debt').pop(), lastText = LAST_DEBT && T.get(LAST_DEBT.file), lastHit = lastText && lastText.match(LAST_DEBT.mark);
+ok(!!lastHit, `control setup: the anchor of the control «converted» (the marked read line of the last debt row${LAST_DEBT ? ', ' + LAST_DEBT.file + ' ' + LAST_DEBT.store : ' — there is none'}) is in the source`);
+const converted = new Map(T); if (lastHit) converted.set(LAST_DEBT.file, lastText.replace(lastHit[0], 'const a = SR.storeAnswer(read);'));
+const c2 = census(converted), reEsc = (x) => String(x).replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+ok(c2.length === 1 && !!LAST_DEBT && new RegExp(`^${reEsc(LAST_DEBT.file + ' ' + LAST_DEBT.store)}: its marked read line is not there — if the line was only REWORDED, re-pin the row's mark to the new text \\(nothing else\\); only if the store reads through storeAnswer now, flip the row to 'answer'.*lower READ_DEBT_CAP`).test(c2[0]), 'CONTROL: a debt row whose marked line changed is red — its words say RE-PIN first (a reword), flip + lower the cap only for a converted store', c2);
 const lost = new Map(T); lost.set('src/jobs.js', T.get('src/jobs.js').replace('this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));', 'this._loadAnswer(JSON.parse(read.text));'));
 const c3 = census(lost);
 ok(c3.length === 1 && /^src\/jobs\.js jobs\.json: its storeAnswer call is no longer there/.test(c3[0]), 'CONTROL: a converted store that stops reading through storeAnswer is red', c3);
 const more = [...STORE_READS, { file: 'src/hosts.js', store: 'hosts-extra.json', state: 'debt', why: 'x', mark: /./ }];
 const c4 = census(T, more);
-ok(c4.length === 1 && /^DEBT: 9 debt rows against READ_DEBT_CAP 8/.test(c4[0]) && census(T, more, 9).some((p) => /above the census's first count 8/.test(p)), 'CONTROL: a NEW debt row is refused, and so is raising the cap past its first count', c4);
+const DEBT_NOW = STORE_READS.filter((r) => r.state === 'debt').length;   // derived: the remainder lowers the cap row by row
+ok(c4.length === 1 && c4[0].startsWith(`DEBT: ${DEBT_NOW + 1} debt rows against READ_DEBT_CAP ${READ_DEBT_CAP}`) && census(T, more, READ_DEBT_AT_BIRTH + 1).some((p) => p.includes(`above the census's first count ${READ_DEBT_AT_BIRTH}`)), 'CONTROL: a NEW debt row is refused, and so is raising the cap past its first count', c4);
 const noReq = new Map(T); noReq.set('src/jobs.js', T.get('src/jobs.js').replace(/require\('\.\/store-read\.js'\)/, "require('./store-reader.js')"));
 ok(census(noReq).some((p) => /^src\/jobs\.js jobs\.json: an 'answer' row whose file does not require src\/store-read\.js/.test(p)), 'CONTROL: an answer row\'s file must require the helper');
 

@@ -115,6 +115,9 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   }
   // B-69a7: this machine's desktop apps (every part's pid, the keeper's own records) are the hub's — never a conversation's leftover
   try { require('../proc-identity.js').keepOut('desktop-apps', () => { const ds = typeof local === 'function' ? local() : local; return ds && typeof ds.liveRecords === 'function' ? ds.liveRecords().flatMap((r) => Object.values(r.pids || {}).filter((p) => Number.isInteger(p) && p > 1).map((p) => [p, 0])) : []; }); } catch { }
+  /** the B-f276 remainder (its read r2, X1): a HELD hosts.json knows no machine — a transient «unavailable», never «not a paired
+   *  machine» (the desktop-app keeper drops a removed machine's records on that code: every paired machine's apps were deleted) */
+  function notHeld() { if (hosts && typeof hosts.unreadWords === 'function' && hosts.unreadWords()) throw named('host_unavailable', `the paired machines cannot be read right now — ${hosts.unreadWords()}`); }
   function localOf() {
     const ds = typeof local === 'function' ? local() : local;
     if (!ds) throw named('host_unavailable', 'this machine\'s desktop keeper is not wired on this instance');
@@ -122,6 +125,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   }
   async function deviceOf(hostId) {
     if (!hosts || typeof hosts.deviceBounded !== 'function') throw named('host_unavailable', 'remote machines are not configured on this instance');
+    notHeld();
     if (!hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     let dm;
     try { dm = await hosts.deviceBounded(hostId, connectMs); }
@@ -904,6 +908,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   function remoteappSetupView(hostId) {
     const st = credentialsOf();
     if (!st || typeof st.machineView !== 'function') throw named('host_unavailable', 'the integration store is not wired on this instance');
+    if (!isLocal(hostId)) notHeld();
     if (isLocal(hostId) || !hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     const view = st.machineView(RA.CREDENTIAL_ROW, hostId);
     let last = null;
@@ -991,7 +996,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { audit({ hostId, machine: hostName(hostId), sessionId: null, sessionKey: null, name: 'you — desktop sign-in', by: 'user', verb, via: 'desktop', ...extra }); } catch (e) { log.warn?.(`[desktop] the ${verb} on ${hostId} was not audited: ${e && e.message}`); }
   };
   const signinStore = () => { const st = credentialsOf(); if (!st || typeof st.setMachineValues !== 'function') throw named('host_unavailable', 'the integration store is not wired on this instance'); return st; };
-  const pairedOnly = (hostId) => { if (isLocal(hostId) || !hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`); };
+  const pairedOnly = (hostId) => { if (!isLocal(hostId)) notHeld(); if (isLocal(hostId) || !hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`); };
   /** GET …/signins[?host=] — ONE machine's state, or every machine that has a row kept ({ signins: {hostId: state}, locked }). */
   function signinsView(hostId = null) {
     if (hostId) { pairedOnly(hostId); return { signin: signinState(hostId) }; }

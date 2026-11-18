@@ -128,6 +128,7 @@ app.get('/api/hosts/:id/exit-access', (req, res) => {
 });
 app.patch('/api/hosts/:id/exit-access', async (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'the user decides who can use a machine — an agent token may not read or change it', code: 'human_only' });
+  if (hosts.unreadWords && hosts.unreadWords()) return res.status(503).json({ error: `changing a machine's exit access: ${hosts.unreadWords()}`, code: 'hosts-unread' });   // remainder of B-f276: refused BEFORE the grants store is written
   const b = req.body && typeof req.body === 'object' ? { ...req.body } : req.body;
   // a row picked LIVE names the session by its webui id ({kind:'session', session:'<id>'}): resolved HERE to its
   // conversation key — the grant model's ONE spelling (lane grants-unify): its own conversation id through addressableId,
@@ -245,6 +246,7 @@ app.post('/api/hub-acts/asks/:askId', async (req, res) => {
   catch (e) { cookieFail(res, e); }
 });
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
+hosts.onReadAgain = () => bcastAll({ type: 'hosts-updated' });   // the B-f276 remainder (its read r1, S1): a held hosts.json read again — every page draws its machines again
 const sshKey = require('../ssh-key'); // passphrase-protected private-key import
 const { RemoteFs } = require('../remote-fs');
 const remoteFs = new RemoteFs(hosts);
@@ -253,7 +255,7 @@ app.get('/api/hosts', (req, res) => {
   // lane grants-unify: a machine's `exit` as the page reads it — its two lists from the ONE grants store (the record's
   // own `exit` keeps only ask / hub / lastRun; its pre-unify lists are never served)
   const list = hosts.list().map((h) => { if (!h || typeof h !== 'object') return h; let exit; try { exit = exitProxy.publicExit(h); } catch { exit = { mode: 'unknown' }; } return { ...h, exit }; });
-  res.json({ hosts: list, key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });
+  res.json({ hosts: list, key: { exists: k.exists, path: k.path, publicKey: k.publicKey }, ...(hosts.unreadWords && hosts.unreadWords() ? { unread: hosts.unreadWords() } : {}) });   // remainder of B-f276: why the list is empty while hosts.json is held
 });
 app.post('/api/hosts', async (req, res) => {
   // A pasted key may be passphrase-protected: unlock it HERE (ssh-keygen -p,
@@ -339,6 +341,7 @@ async function removeHost(h) {
   hosts.remove(h.id);
 }
 app.delete('/api/hosts/:id', async (req, res) => {
+  if (hosts.unreadWords && hosts.unreadWords()) return res.status(503).json({ error: `removing a machine: ${hosts.unreadWords()}`, code: 'hosts-unread' });   // remainder of B-f276: refused BEFORE its teardown
   try {
     await removeHost(hosts.get(req.params.id));
     bcastAll({ type: 'hosts-updated' });

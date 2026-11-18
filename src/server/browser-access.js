@@ -70,6 +70,7 @@ function create({ hosts = null, env = () => ({}), homeDir = undefined, local = n
   }
   async function deviceOf(hostId) {
     if (!hosts || typeof hosts.deviceBounded !== 'function') throw named('host_unavailable', 'remote machines are not configured on this instance');
+    if (typeof hosts.unreadWords === 'function' && hosts.unreadWords()) throw named('host_unavailable', `the paired machines cannot be read right now — ${hosts.unreadWords()}`);   // also (the B-f276 remainder's read r3, Y6): never «not paired any more» for a held list
     if (!hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     let dm;
     try { dm = await hosts.deviceBounded(hostId, connectMs); }

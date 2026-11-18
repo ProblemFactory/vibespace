@@ -115,7 +115,7 @@ console.log('① the census');
   ok(v.length === 0, `every writer that can withdraw reach names THE ONE re-judge (${Object.keys(T.sessionFiles).length} files scanned)`, v);
   // the census is not vacuous: it FOUND the writers it judges
   const hostW = methodsOf(T.hosts).filter((m) => /this\._reachChanged\(/.test(m.body)).map((m) => m.name).sort();
-  ok(JSON.stringify(hostW) === JSON.stringify(['importBundle', 'remove', 'reshapeStore', 'setExitAccess']), 'hosts.js: the four record writers found (importBundle, remove, reshapeStore, setExitAccess)', hostW);
+  ok(JSON.stringify(hostW) === JSON.stringify(['_loadAnswer', 'importBundle', 'remove', 'reshapeStore', 'setExitAccess']), 'hosts.js: the five record writers found (_loadAnswer — a held hosts.json read again mid-life, the B-f276 remainder — importBundle, remove, reshapeStore, setExitAccess)', hostW);
   const taskW = methodsOf(T.tasks).filter((m) => /this\._notify\([^)]*\)/.test(m.body)).length;
   ok(taskW >= 6, `task-groups.js: ${taskW} membership writers found, each notifying`);
   const dels = Object.entries(T.sessionFiles).flatMap(([f, s]) => s.split('\n').map((l, i) => (/\bactiveSessions\.delete\(/.test(l) && !/^\s*\/\//.test(l) ? `${f}:${i + 1}` : null)).filter(Boolean));
