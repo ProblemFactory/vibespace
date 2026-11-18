@@ -35,7 +35,7 @@ const wt = path.join(root, 't'), fakeHome = path.join(root, 'home'), stubDir = p
 const SHOTS = process.env.MU_SHOTS ? path.resolve(process.env.MU_SHOTS) : '';
 for (const d of [fakeHome, stubDir, CWD, chromeDir, ...(SHOTS ? [SHOTS] : [])]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError(`check(name, cond): the name is a ${typeof n} — the arguments are swapped`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LIVE_SID = crypto.randomUUID();
 
