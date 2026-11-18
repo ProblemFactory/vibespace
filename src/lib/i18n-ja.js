@@ -11323,7 +11323,6 @@ export default {
   "left out of Everyone — any account on this site": "「すべて」から除外——このサイトの任意のアカウント", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — this account": "「すべて」から除外——このアカウント", // the owner 2026-11-17: who may have a web login filled
   "Any site…": "任意のサイト…", // the owner 2026-11-17: who may have a web login filled
-  "Any account on this site…": "このサイトの任意のアカウント…", // the owner 2026-11-17: who may have a web login filled
   "VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace はパスワードを渡さず、一致するサイトのパスワード欄またはコード欄にだけ入力します。誤った読み取りや違うサイトは防ぎますが、自分が操作するページを意図的に調べるエージェントまで防ぐとは約束しません。", // the owner 2026-11-17: who may have a web login filled
   "The vault is locked — press Unlock…, then save again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度保存してください。", // the owner 2026-11-17: who may have a web login filled
   "An exception is a running conversation, under a Task Group or Everyone.": "除外できるのは実行中の会話だけで、タスクグループか「全員」の下に置きます。", // the owner 2026-11-17: who may have a web login filled
@@ -11369,7 +11368,6 @@ export default {
   "User name: {name}": "ユーザー名：{name}", // the owner 2026-11-17: who may have a web login filled
   "Site: {site}": "サイト：{site}", // the owner 2026-11-17: who may have a web login filled
   "Any site": "すべてのサイト",
-  "Any account on this site": "このサイトのすべてのアカウント",
   "This account": "このアカウント",
   "Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names": "パスワードを表示します — 2 つ目のパスワードの後で。VibeSpace はエージェントにパスワードを渡しません：一致するサイトでのみ、エージェントが指定した欄に Hub が入力します",
   "Filled for:": "入力を許可：",

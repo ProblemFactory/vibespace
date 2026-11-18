@@ -11324,7 +11324,6 @@ export default {
   "left out of Everyone — any account on this site": "不在「全部」里——这个网站的任何账号", // the owner 2026-11-17: who may have a web login filled
   "left out of Everyone — this account": "不在「全部」里——这个账号", // the owner 2026-11-17: who may have a web login filled
   "Any site…": "任何网站…", // the owner 2026-11-17: who may have a web login filled
-  "Any account on this site…": "这个网站的任何账号…", // the owner 2026-11-17: who may have a web login filled
   "VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls.": "VibeSpace 绝不把密码交给它们，只在匹配的网站上把密码填进密码或验证码输入框；我们的防护能挡住误读和错误的网站，但不保证能挡住故意钻研它自己控制的页面的智能体。", // the owner 2026-11-17: who may have a web login filled
   "The vault is locked — press Unlock…, then save again.": "保险库已锁定——请按「解锁…」，然后再保存。", // the owner 2026-11-17: who may have a web login filled
   "An exception is a running conversation, under a Task Group or Everyone.": "「除了」里只能放正在运行的对话，并且要放在任务组或「全部」下面。", // the owner 2026-11-17: who may have a web login filled
@@ -11370,7 +11369,6 @@ export default {
   "User name: {name}": "用户名：{name}", // the owner 2026-11-17: who may have a web login filled
   "Site: {site}": "网站：{site}", // the owner 2026-11-17: who may have a web login filled
   "Any site": "任何网站",
-  "Any account on this site": "这个网站的任何账号",
   "This account": "这个账号",
   "Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names": "显示密码 — 先输入第二道密码。VibeSpace 不会把密码交给 agent：只由 Hub 在匹配的网站上填进 agent 指定的字段",
   "Filled for:": "可为谁填入：",
