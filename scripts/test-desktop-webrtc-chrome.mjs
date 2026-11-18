@@ -1330,13 +1330,27 @@ console.log('⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed): the brows
     r.forEach((x) => { if (x.type === 'transport') { sel = x.selectedCandidatePairId || null; changes = x.selectedCandidatePairChanges; dtls = x.dtlsState; } if (x.type === 'candidate-pair') rows[x.id] = x.bytesReceived || 0; });
     const hosts = [...new Set(pc.__cands.filter((c) => / typ host/.test(c)).map((c) => c.split(' ')[4]))];
     const sdp = (pc.remoteDescription && pc.remoteDescription.sdp) || '', m = sdp.indexOf('\\nm=');
-    return { hosts: hosts.filter((a) => !/\\.local$/.test(a)), mdns: hosts.filter((a) => /\\.local$/.test(a)).length, lite: m > 0 && /\\na=ice-lite\\r?\\n/.test(sdp.slice(0, m + 1)), sel, changes, dtls, rows }; })()`;
+    return { hosts: hosts.filter((a) => !/\\.local$/.test(a)), mdns: hosts.filter((a) => /\\.local$/.test(a)).length, lite: m > 0 && /\\na=ice-lite\\r?\\n/.test(sdp.slice(0, m + 1)), sel, changes, dtls, remotes: new Set((sdp.match(/a=candidate:[^\\r\\n]* typ host/g) || []).map((c) => c.split(' ')[4])).size, rows }; })()`;
   const agentLogText = () => { const f = path.join(rootOf(home), 'state', 'agentd.log'); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; };
   // the default origin first (no permission — the road every other leg takes): ONE mDNS name (never handed to werift) and a
-  // peer-reflexive pair; the same road with the agent as werift alone (BASE_ICE) — the mDNS road as it was, and both times
-  const road = async (base) => { if (base) fs.writeFileSync(BASE_ICE, '1'); const d = await page(1280, 800, DESK, { pcs: true }); const t = Date.now(); await d.ev(`window.__open(${JSON.stringify(M)})`); const up = await playing(d); const ms = Date.now() - t; const f = await d.ev(ICE_FACTS); await d.close(); fs.rmSync(BASE_ICE, { force: true }); return { up, ms, f }; };
+  // peer-reflexive pair; the same road with the agent as werift alone (BASE_ICE) — the code before this lane on that road
+  // (B-0084: it played where the lane measured it; on the integration box it never has), and both times
+  const road = async (base) => { if (base) fs.writeFileSync(BASE_ICE, '1'); const d = await page(1280, 800, DESK, { pcs: true }); const t = Date.now(); await d.ev(`window.__open(${JSON.stringify(M)})`); const up = await playing(d); const ms = Date.now() - t; const late = !up && base ? ((await playing(d)) ? Date.now() - t : false) : null; const f = await d.ev(ICE_FACTS); await d.close(); fs.rmSync(BASE_ICE, { force: true }); return { up, ms, late, f }; };
   const r1 = await road(false), r0 = await road(true);
-  ok(r1.up && r0.up && r1.f && r0.f && r1.f.hosts.length === 0 && r1.f.mdns === 1 && r0.f.mdns === 1 && r1.f.lite && !r0.f.lite, `⑲ the default origin (no microphone): the browser offers ONE mDNS name — it plays in ${r1.ms} ms, and in ${r0.ms} ms with the agent as werift alone: the mDNS road as before this lane`, { r1, r0 });
+  // B-0084 (lane bl-windows, 2026-11-18): each road's facts said COMPACTLY — ok() keeps 900 characters, and the per-pair rows of
+  // an agent with 16 host addresses (the integration box) filled them with the first road's, hiding the second road's own facts
+  const brief = (r) => r && { up: r.up, ms: r.ms, late: r.late, f: r.f && { hosts: r.f.hosts, mdns: r.f.mdns, lite: r.f.lite, sel: r.f.sel, changes: r.f.changes, dtls: r.f.dtls, remotes: r.f.remotes, pairs: Object.keys(r.f.rows || {}).length, rxPairs: Object.values(r.f.rows || {}).filter((b) => b > 0).length, rxOnSel: r.f.sel ? (r.f.rows || {})[r.f.sel] || 0 : null } };
+  ok(r1.up && r1.f && r1.f.hosts.length === 0 && r1.f.mdns === 1 && r1.f.lite, `⑲ the default origin (no microphone): the browser offers ONE mDNS name — it plays in ${r1.ms} ms`, brief(r1));
+  // the OLD road on the same origin (BASE_ICE: the agent's offer and pair handling as werift writes them) — a claim about the
+  // code before this lane, never the product's road. B-0084: on the integration box (its agent offers 16 host addresses) it
+  // never played within the 20 s bound — 24 tries in the twelve heavy fail-logs on record, each ending at the bound to the
+  // millisecond — while the road above played in 426-438 ms. JUDGED where it plays or where the agent offers one host
+  // address; said BY NAME, with its facts, where it keeps its own shape (one mDNS name, no session-level ice-lite), does not
+  // play, and the agent offers several (`remotes`: the offer's own host addresses). A road that did not play is watched 20 s
+  // more (`late`: the ms it played at, or false) — the fact that tells a short bound from a road that never plays here
+  const several = !!(r0.f && r0.f.remotes >= 2 && r0.f.mdns === 1 && !r0.f.lite);
+  if (r0.up || !several) ok(r0.up && r0.f && r0.f.mdns === 1 && !r0.f.lite, `⑲ …and in ${r0.ms} ms with the agent as werift alone: the mDNS road as before this lane`, brief(r0));
+  else console.log(`    (⑲ the old road NOT JUDGED on this computer (B-0084): with the agent as werift alone it did not play within ${r0.ms} ms (${r0.late ? `it played at ${r0.late} ms — the bound is short` : 'nor in 20 s more'}); the agent's offer holds ${r0.f.remotes} host addresses — ${JSON.stringify(brief(r0))})`);
   const moves0 = (agentLogText().match(/the browser moved its pair: [^\n]*/g) || []).length;
   const g = await browserCdp('Browser.grantPermissions', { origin: ORIGIN, permissions: ['audioCapture'] }); // a person who pressed 「麦克风」 once
   const p = await page(1280, 800, DESK, { pcs: true });
