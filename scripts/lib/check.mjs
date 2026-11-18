@@ -9,7 +9,7 @@
 //                          written !!x or x === y); the name a non-empty string. Anything else THROWS: a swap is a crash
 //                          with a stack, never a green leg. Prints «  ✓ name» / «  ✗ name — detail» (the lines the gate's
 //                          red-names-its-legs rule reads); report() prints «ALL PASS (n)» or «n FAILED (m passed)» and exits.
-//   helperDefs(src)      → every inline ok / check helper a file defines: its parameter order (which parameter the body
+//   helperDefs(src)      → every inline helper of HELPER_NAMES a file defines: its parameter order (which parameter the body
 //                          tests) and whether it guards the swap (typeof of its condition ≠ 'boolean' or of its name ≠
 //                          'string' throws).
 //   swappedCalls(src)    → every call of a file's own helper whose CONDITION slot is one whole string literal while its name
@@ -39,10 +39,17 @@ const safeJson = (v) => { try { return JSON.stringify(v); } catch { return Strin
 
 // ── the census (PURE over a file's text) ──────────────────────────────────────────────────────────────────────────────
 // A helper definition = a const / let / var binding of the name to an arrow function of two or more parameters, or a
-// function declaration of it. Only the names a suite uses for its pass/fail counter (ok, check) — a richer name (okCli,
-// okBase) is a wrapper with its own contract. (This comment spells no definition: the census reads comments too.)
-const FIND_RE = /\b(?:ok|check)\b/g, KW_BEFORE = /(?:^|[^\w$.])(const|let|var|function)\s+$/; // the cheap scan (a keyword-led alternation over 60 MB costs 3×); DEF_RE then reads each hit in place
-const DEF_RE = /(?:(?:const|let|var)\s+(ok|check)\s*=\s*(?:async\s*)?\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)[^)]*\)\s*=>|function\s+(ok|check)\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*))/y;
+// function declaration of it. Only the names a suite uses for its pass/fail counter — a richer name (okCli, okBase) is a
+// wrapper with its own contract. HELPER_NAMES: ok and check (2.369.408), and since B-1747's remainder (2.369.411) the names
+// a shape survey of every script found (a two-parameter helper that tests a parameter as its condition and counts a fail,
+// or hands it on): ck (13 helpers, 13 files), leg (65 in 17 files: wrappers handing (c, n) to ok, row-pushers — the 7
+// (name, fn) runners also spelled so test no parameter: order unknown, never judged), assert (2). LEFT, said: pin (1 —
+// too common a word for a name census), failPass (1); okc's two hand their pair on to ok, so their order cannot be
+// read. (This comment spells no definition: the census reads comments too.)
+export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert']);
+const NAMES_ALT = HELPER_NAMES.join('|');
+const FIND_RE = new RegExp(`\\b(?:${NAMES_ALT})\\b`, 'g'), KW_BEFORE = /(?:^|[^\w$.])(const|let|var|function)\s+$/; // the cheap scan (a keyword-led alternation over 60 MB costs 3×); DEF_RE then reads each hit in place
+const DEF_RE = new RegExp(`(?:(?:const|let|var)\\s+(${NAMES_ALT})\\s*=\\s*(?:async\\s*)?\\(\\s*([A-Za-z_$][\\w$]*)\\s*,\\s*([A-Za-z_$][\\w$]*)[^)]*\\)\\s*=>|function\\s+(${NAMES_ALT})\\s*\\(\\s*([A-Za-z_$][\\w$]*)\\s*,\\s*([A-Za-z_$][\\w$]*))`, 'y');
 const tests = (p, body) => new RegExp(`if\\s*\\(\\s*!?\\s*${p}\\s*[)&|]|\\(\\s*!?${p}\\s*\\?|=>\\s*\\{?\\s*!?${p}\\s*\\?|!${p}\\b|[(,=]\\s*${p}\\s*\\?\\s*['"\`(]|\\b${p}\\s*(?:===?|!==?)\\s*(?:true|false)\\b|if\\s*\\(\\s*!?\\s*${p}\\s*\\)`).test(body);
 const lineOf = (src, i) => src.slice(0, i).split('\n').length;
 // A definition's text: its own line, then every line indented deeper than it (a closing `}` / `)` at its own depth

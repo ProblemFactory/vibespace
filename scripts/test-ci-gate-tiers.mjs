@@ -308,8 +308,9 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 // ── §7b A LEG NEVER PASSES BY ITS NAME (B-1747, lane bl-tests-e, 2026-11-17) ──
 // Lane fable-52-cli-321 r5 (2026-11-10): thirteen new legs of test-status-bar-chips called ok(name, condition) against a
 // helper defined ok(condition, name) — a non-empty string is truthy, so the suite read ALL PASS (67) and four census plants
-// stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN ok /
-// check helper (its order = the parameter its body tests, scripts/lib/check.mjs helperDefs) and fails a call whose
+// stayed green. Both orders live in the tree, every suite with its own copy. This census reads every script's OWN
+// assertion helper — every name in scripts/lib/check.mjs HELPER_NAMES: ok, check, and since B-1747's remainder (2.369.411) the
+// ck / leg / assert a shape survey found — (its order = the parameter its body tests, helperDefs) and fails a call whose
 // CONDITION slot holds a string literal while its name slot does not: on 2.369.407 eight such legs, in test-record-shape,
 // test-queue-steer (the catch of ⑪'s browser leg: a THROWING leg passed), test-voice-follow-chrome and
 // test-path-field-chrome. The one helper (scripts/lib/check.mjs checker) THROWS on a non-boolean condition and a
@@ -318,8 +319,9 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
 console.log('\n§7b a leg never passes by its name: no swapped call anywhere, one guarded helper, the unguarded only fall');
 {
   const C = await import('./lib/check.mjs');
-  // The inline ok / check helpers without the swap guard, BY FILE (scripts/fixtures/unguarded-helpers.json — 1020 in 1016 files on
-  // 2.369.407). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
+  // The inline helpers without the swap guard, BY FILE (scripts/fixtures/unguarded-helpers.json — 1020 in 1016 files on
+  // 2.369.407; 1030 in 1026 at 2.369.410; + 80 in 32 files = 1110 in 1041 when the census learned ck / leg / assert at 2.369.411 —
+  // a first reading of helpers the tree already held, none new). ONE-WAY (主开发 2026-11-17, the batch-36 readers): a file that ADDS one is red by name — a new suite takes
   // `import { checker } from './lib/check.mjs'` — and the red prints the row that admits it on purpose; a file whose helper is
   // gone or guarded is NEVER red (forty-six lanes merge suites into one train), its stale row is only said.
   const LISTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'unguarded-helpers.json'), 'utf-8')).files || {};
@@ -333,10 +335,10 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
     for (const x of d) if (x.order !== 'unknown' && !x.guarded) { unguarded.push(`${f}:${x.line}`); (perFile[f] = perFile[f] || []).push(x.line); }
     for (const c of C.swappedCalls(src, d)) swapped.push(`${f}:${c.line} (a ${c.order} helper, :${c.defLine}) ${c.text.slice(0, 90)}`);
   }
-  ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ok / check helpers found (non-vacuous; this file exempts itself)`);
+  ok(files.length > 1000 && defs > 900, `${files.length} scripts read, ${defs} inline ${C.HELPER_NAMES.join(' / ')} helpers found (non-vacuous; this file exempts itself)`);
   ok(swapped.length === 0, `no call hands its own helper a string where the condition goes${swapped.length ? ' — ' + swapped.slice(0, 12).join(' · ') : ''}`);
   const added = Object.entries(perFile).filter(([f, ls]) => ls.length > (LISTED[f] || 0)), fell = Object.keys(LISTED).filter((f) => (perFile[f] || []).length < LISTED[f]);
-  ok(Object.keys(LISTED).length > 900 && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs'; on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
+  ok(Object.keys(LISTED).length > 900 && added.length === 0, `the inline helpers without the swap guard only fall (${unguarded.length} in ${Object.keys(perFile).length} files, the list ${Object.values(LISTED).reduce((a, b) => a + b, 0)})${added.length ? ' — ADDED by ' + added.map(([f, ls]) => `${f}:${ls.join(',')} (import { checker } from './lib/check.mjs', or give the helper a guard line — if (typeof c !== 'boolean') throw new TypeError(…); on purpose: "${f}": ${ls.length} in scripts/fixtures/unguarded-helpers.json)`).join(' · ') : ''}`);
   if (fell.length) console.log(`    (${fell.length} listed file(s) no longer carry an unguarded helper — not red; drop their rows when convenient: ${fell.slice(0, 8).join(', ')}${fell.length > 8 ? ', …' : ''})`);
   // the one-way rule over plants: an added helper is red by name, a removed one is not
   const judge = (per, listed) => ({ added: Object.entries(per).filter(([f, ls]) => ls.length > (listed[f] || 0)).map(([f]) => f), fell: Object.keys(listed).filter((f) => (per[f] || []).length < listed[f]) });
@@ -358,6 +360,19 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
   ok(sw(NF + "ok('the leg', x === 1);\n" + "ok(`leg ${n}`, y > 2, 'detail');\n") === '' && sw(CF + "ok(x === 1, 'the leg');\nok(/a'b\\(/.test(s), 'regex');\nok(s === \"it's\", `t ${f({ a: 1 })}`);\n") === '',
     'the right orders pass — a regex holding a quote and a paren, a template with an object in its ${…}, a string compared in the condition');
   ok(sw(CF + "ok(c, name);\nok(f('x'), 'leg');\n") === '', 'a variable or a call in the condition slot is not a swap (the runtime guard owns those)');
+  // B-1747's remainder (2.369.411): the names the shape survey found are read — a ck, leg or assert helper handed a swap is found
+  // as an ok one is. RED CONTROL: the library as it was (ok / check only), a copy built from its names line, misses all three —
+  // and still finds an ok swap (the copy is the old census, never a copy that reads nothing)
+  const CK = `${K} ck = (n, c) => { if (c) { pass++; } else { fail++; } };\n`, LG = 'function le' + 'g(c, n) { if (c) { pass++; } else { fail++; } }\n';
+  const AS = `${K} assert = (cond, name) => {\n  if (!cond) failed++;\n};\n`;
+  ok(C.HELPER_NAMES.join() === 'ok,check,ck,leg,assert' && sw(CK + "ck(x === 1, 'the leg');\n") === '2' && sw(LG + "leg('the leg', y);\n") === '2' && sw(AS + "assert('the leg', y);\n") === '4', 'NEG: a ck, leg or assert helper handed a swap is found (the names the shape survey found: ok, check, ck, leg, assert)');
+  const LIB = fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'check.mjs'), 'utf-8'), NAMES_LINE = "export const HELPER_NAMES = Object.freeze(['ok', 'check', 'ck', 'leg', 'assert']);";
+  ok(LIB.split(NAMES_LINE).length === 2, 'the anchor of the RED CONTROL (the names line) is in the source (scripts/lib/check.mjs)');
+  if (LIB.split(NAMES_LINE).length === 2) {
+    const OLD = await import(pathToFileURL(mutantCopies('cigate7b-lib', REPO).write('scripts/lib/check.mjs', LIB.replace(NAMES_LINE, "export const HELPER_NAMES = Object.freeze(['ok', 'check']);"), 'old-names')).href);
+    ok(OLD.swappedCalls(NF + "ok(x === 1, 'the leg');\n").length === 1, 'the RED CONTROL proves itself first: the old copy still finds an ok helper\'s swap (it is the census as it was, not a copy that reads nothing)');
+    ok(OLD.swappedCalls(CK + "ck(x === 1, 'the leg');\n").length === 0 && OLD.swappedCalls(LG + "leg('the leg', y);\n").length === 0 && OLD.swappedCalls(AS + "assert('the leg', y);\n").length === 0, 'RED CONTROL: the census as it was (ok / check only) reads no ck, leg or assert helper — their swaps pass unseen');
+  }
   ok(sw(NF + "ok('a' === x, 'the leg');\n") === '2' && sw(CF + "ok('the leg', 'a' === x);\n") === '2', 'NEG: a condition that OPENS with a quote is still found in the name\'s place — the slot is judged as one whole literal, not by its first character');
   ok(sw(CF + "ok('k' in o, label);\n// never write ok('the leg', cond)\n * ok('in a doc block', x)\n") === '' && sw(CF + "ok(f(() => { return /a'b(/.test(s); }), 'leg');\nok('swapped', y);\n") === '3',
     'a condition that only opens with a quote is no swap, a call quoted in a whole-line comment is skipped, and a regex after `return` holding a quote and a paren does not end the scan early');
