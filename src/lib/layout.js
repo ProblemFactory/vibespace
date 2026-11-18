@@ -2016,19 +2016,25 @@ class LayoutManager {
     b.onclick = () => this.reopenResumeOffer();
     bar.appendChild(b);
     (this._offerDoors || (this._offerDoors = new Set())).add(b);
-    this.paintOfferDoors();
+    this._paintDoor(b, this._offerLeft()); // ITS OWN paint only — its bar is inserted by chat-view right after; another bar's birth judges nobody
     return b;
+  }
+  /** One door: shown when two or more of the offer's conversations are left and its window's is one of them. */
+  _paintDoor(b, left) {
+    const n = left.length, show = n >= 2 && !!b._conv && left.some((d) => (d.opts?.backend || 'claude') + ':' + (d.opts?.backendSessionId || d.sessionId) === b._conv);
+    b.hidden = !show;
+    b.textContent = show ? t('Resume all {n}', { n }) : '';
   }
   paintOfferDoors() {
     if (!this._offerDoors || !this._offerDoors.size) return;
-    const left = this._offerLeft(), n = left.length;
-    const mine = new Set(left.map((d) => (d.opts?.backend || 'claude') + ':' + (d.opts?.backendSessionId || d.sessionId)));
+    const left = this._offerLeft();
     for (const b of this._offerDoors) {
       if (b.isConnected) b._shown = true;
-      else if (b._shown) { this._offerDoors.delete(b); continue; } // its bar left the page (the window closed or resumed)
-      const show = n >= 2 && !!b._conv && mine.has(b._conv);
-      b.hidden = !show;
-      b.textContent = show ? t('Resume all {n}', { n }) : '';
+      // its bar left the page (the window closed or resumed) — or never stood on it at two of THESE paints (the sidebar's merges, an
+      // offer kept; never offerDoor's own): dropped (B-6352 cure — a door whose window closed before any paint stayed for the page's life)
+      else if (b._shown || b._seenOff) { this._offerDoors.delete(b); continue; }
+      else b._seenOff = true;
+      this._paintDoor(b, left);
     }
   }
   /** The door's press: the same question over the offer's conversations still stopped (one question at a time). */

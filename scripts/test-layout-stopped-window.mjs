@@ -1097,6 +1097,11 @@ await section('§9 B-6352 A DISMISSED RESUME-ALL OFFER HAS A WAY BACK — the RE
   ok(open === 2 && t3.said(t3.doorA) === 'Resume all 3', '§9 …two presses while its question is open ask ONE question; dismissed again, the door stays', { open });
   t3.doorA.isConnected = false; t3.W.lm.paintOfferDoors();
   ok(!t3.W.lm._offerDoors.has(t3.doorA) && t3.W.lm._offerDoors.has(t3.doorB), '§9 …a door whose bar left the page is forgotten');
+  const never = async (Lm) => { const t = await scene(Lm); const b = mkEl('div'); const d = t.W.lm.offerDoor(b, { backend: 'claude', id: CID(2) }); d.isConnected = false; const one = t.W.lm._offerDoors.has(d); t.W.lm.paintOfferDoors(); const two = t.W.lm._offerDoors.has(d); t.W.lm.paintOfferDoors(); return { one, two, three: t.W.lm._offerDoors.has(d) }; }; // its bar never on the page (the window closed before the sidebar's merges)
+  const nv = await never(LM);
+  ok(nv.one && nv.two && !nv.three, '§9 …a door whose bar NEVER stood on the page is dropped at the second of the sidebar\'s repaints that find it off the page — never at its own birth, never by another door\'s (the cure of the batch-4 verdict: it stayed for the page\'s life)', nv);
+  const { LayoutManager: LMd } = await mutantEsm('src/lib/layout.js', 'else if (b._shown || b._seenOff) {', 'else if (b._shown) {'); // stale-pins: kept — the control writes the first cut's line back on purpose
+  ok((await never(LMd)).three === true, '§9 CONTROL: the first cut (only a door seen on the page is dropped) keeps it — the leg above goes RED');
   const t4 = await scene(LM); t4.setAnswer(true); t4.setBoom(true);
   let threw = false; try { await t4.doorA.onclick(); } catch { threw = true; }
   ok(threw && t4.said(t4.doorA) === 'Resume all 3', '§9 …a bulk resume that THROWS gives the door back (the list kept in a finally)', { threw, now: t4.said(t4.doorA) });
