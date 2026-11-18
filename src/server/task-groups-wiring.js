@@ -3,9 +3,12 @@
 // (主开发 2026-11-17 22:33Z: the next train carries every taken unit at once and server.js sat 14 lines under its line cap;
 // «the cap means code moves out»). NO BEHAVIOUR CHANGE: server.js calls these three at the block's three OLD places, so the
 // start-up effects keep their order (the sysinfo and incident wiring between them stays in server.js); the names other code
-// reads (tasks, taskFanout, scheduleCtxSync, remoteCtxBaseFor) stay server.js names, bound where they were bound; every
-// require runs where it ran (inside its call). A name server.js defines LATER is handed in as a getter, so a call made
-// before it exists throws where it threw — inside the same try.
+// reads (tasks, taskFanout, convOps, scheduleCtxSync, remoteCtxBaseFor) stay server.js names, bound where they were bound;
+// every require runs inside its call — and where it ran, but ONE: require('../ctx-sync') loads two requires later than it
+// did (server.js keeps src/machine-probes and src/rate-limit-capture.js at their place, just before the ctxSync call), and
+// that is inert: none of the three runs code at load beyond requires already loaded (fs, path, crypto, mount-door,
+// cli-caps). A name server.js defines LATER is handed in as a getter, so a call made before it exists throws where it
+// threw — inside the same try.
 //   createStore  — the store (src/task-groups.js TaskGroupManager; data/task-groups.json is AUTHORITATIVE) with its onChange
 //                  re-judges, and THE broadcast (src/server/task-fanout.js)            (server.js 2.369.407 lines 660–687)
 //   mountRoutes  — /api/tasks … (list · create · patch · delete · bind / unbind · progress · export / import) and the
