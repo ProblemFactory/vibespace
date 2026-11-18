@@ -636,12 +636,12 @@ export function installSidebarWorkbench(Sidebar) {
       let opened = false;
       const now = Date.now();
       if (now - (s.startedAt || 0) < RECENT_MS) {
-        if (this._wbRecentHost) { this._wbRecentHost = ''; opened = true; }   // Recent shows another machine: this machine's, for this page
+        if (this._wbRecentHost) { this._locateSaid('recent', this._wbRecentHost); this._wbRecentHost = ''; opened = true; }   // Recent shows another machine: this machine's, for this page — SAID by Locate, with the way back
         const cwd = s.cwd || '(unknown)';
         if (!this._wbProjExpanded?.has(cwd)) { (this._wbProjExpanded = this._wbProjExpanded || new Set()).add(cwd); opened = true; }   // past the five
       } else {
         if (!this._wbHistoryOpen) { this._wbHistoryOpen = true; opened = true; }
-        if (this._wbHistoryHost) { this._wbHistoryHost = ''; opened = true; }
+        if (this._wbHistoryHost) { this._locateSaid('history', this._wbHistoryHost); this._wbHistoryHost = ''; opened = true; }
         // its page: History lists its rows newest first; the row's place among EVERY older row is at least its place in the drawn
         // (filtered) list, so a cap past it draws it
         const older = (this._allSessions || []).filter((x) => !isLive(x) && now - (x.startedAt || 0) >= RECENT_MS).sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
@@ -650,6 +650,11 @@ export function installSidebarWorkbench(Sidebar) {
       }
       return opened ? 'render' : false;
     },
+
+    /** A switcher Locate moved off another machine, kept for Locate's word ({ zone, host, name }); its way back puts it back. */
+    // (recorded only while a Locate press records: `_locateSwitched` is that press's own array)
+    _locateSaid(zone, host) { if (this._locateSwitched) this._locateSwitched.push({ zone, host, name: this._hostsData?.hosts?.find((h) => h.id === host)?.name || host }); },
+    _locateSwitchBack(sw) { if (sw.zone === 'recent') this._wbRecentHost = sw.host; else this._wbHistoryHost = sw.host; this._render(); },
 
     _renderWorkbench(sessions) {
       if (this._columnListWanted?.()) { this._renderColumnList(sessions); return; } // the regular class: ONE stream of rows (src/lib/sidebar-column.js)

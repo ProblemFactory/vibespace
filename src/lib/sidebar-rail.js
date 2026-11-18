@@ -444,9 +444,12 @@ export function installSidebarRail(Sidebar) {
      *  re-click's collapse (that stays the rail item's own click, `_railGo`). Every program caller comes here; scripts/
      *  test-locate-verdict's census refuses a `_railGo(` anywhere but the rail's own items. */
     _railShow(id) {
-      if (id !== 'tasks') this._mobileDrilldown = null;   // a Task Group's drill-down is the Tasks tab's own (it outlived a switch to Sessions on the phone)
+      // a Task Group's drill-down is the Tasks tab's own (it outlived a switch to Sessions on the phone); cleared, the list is DRAWN
+      // again even when the tab is already the one asked for (主开发's verdict, the must: else the stale detail stayed and Locate timed out)
+      const hadDrill = id !== 'tasks' && !!this._mobileDrilldown;
+      if (id !== 'tasks') this._mobileDrilldown = null;
       if (!this.isOpen) this.toggle(true);
-      if (this._activeTab === id) { this._railSync?.(); return; }
+      if (this._activeTab === id) { this._railSync?.(); if (hadDrill) this._render?.(); return; }
       if (this._railEl) { this._railGo(id); return; }   // open now and on another tab ⇒ the switch (_railGo collapses only its own tab)
       this._activeTab = id; this._updateTabs?.(); this._render?.();   // the classic tab bar / the phone's drawer: the tab, drawn
     },

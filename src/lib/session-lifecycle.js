@@ -652,7 +652,9 @@ export function installSessionLifecycle(App, ctx = {}) {
    *  reason and its door (the PURE src/locate-verdict.js over the list's own filters). */
   async locateSessionInSidebar(backendSessionId) {
     const sb = this.sidebar;
-    if (!sb || !backendSessionId) return;
+    if (!sb) return;
+    // a press with no id to look for: SAID with the verdict's own words for a row the list does not hold, never a silent press
+    if (!backendSessionId) { showToast(t(LOCATE_WORDS.absent.words)); return; }
     try { sb._railShow?.('folders'); } catch { }
     const v = locateVerdict(sb._locateFacts?.(backendSessionId) || { present: false });
     if (!v.show) {
@@ -661,9 +663,20 @@ export function installSessionLifecycle(App, ctx = {}) {
       showToast(words, w.door ? { action: { label: t(w.door), run: () => { sb._locateDoor?.(v.why); this.locateSessionInSidebar(backendSessionId); } } } : {});
       return;
     }
+    // THE WAIT ENDS WHEN THE PERSON WALKS AWAY (主开发's verdict): the list closed, another tab chosen, or the person's own scroll /
+    // key in the list ends it SILENTLY — never a toast about a thing they left, never a scroll against their own
+    const switched = sb._locateSwitched = [];   // THIS press's record (a second press starts its own)
+    const shown = () => (sb._regularMode ? !sb._listHidden : !!sb.isOpen) && sb._activeTab === 'folders' && document.visibilityState !== 'hidden';
+    let walked = false;
+    const walk = () => { walked = true; };
+    const WALK = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+    const search = document.getElementById('session-filter');   // the person searching meanwhile walked away too
+    for (const e of WALK) sb.listEl?.addEventListener?.(e, walk, { passive: true });
+    search?.addEventListener?.('input', walk);
     const card = await new Promise((resolve) => {
       const t0 = Date.now();
       const look = () => {
+        if (walked || !shown()) return resolve('walked');
         try { if (sb._openZoneOf?.(backendSessionId) === 'render') sb._render?.(); sb._openFolderOf?.(backendSessionId); } catch { }   // the zone that holds it (the workbench's Recent / History / the column), then a grouped view's folder
         const c = [...(sb.listEl || document).querySelectorAll('.session-item-card')].find((x) => x._sessionId === backendSessionId);
         if (c || Date.now() - t0 > LOCATE_WAIT_MS) return resolve(c || null);
@@ -671,10 +684,22 @@ export function installSessionLifecycle(App, ctx = {}) {
       };
       look();
     });
+    for (const e of WALK) sb.listEl?.removeEventListener?.(e, walk);
+    search?.removeEventListener?.('input', walk);
+    if (sb._locateSwitched === switched) sb._locateSwitched = null;
+    // the row not shown (walked away, or not drawn in time): what Locate switched is PUT BACK, silently
+    if (card === 'walked' || !card) for (const sw of switched) { try { sb._locateSwitchBack?.(sw); } catch { } }
+    if (card === 'walked') return;
     if (!card) { showToast(t('The session list did not draw this conversation in time — press Locate again')); return; }
     card.scrollIntoView({ block: 'center', behavior: 'smooth' });
     card.classList.add('locate-flash');
     setTimeout(() => card.classList.remove('locate-flash'), 2400);
+    // WHAT LOCATE OPENED IS SAID (主开发's verdict): a Recent / History switcher it moved off another machine names what it showed,
+    // with the way back
+    for (const sw of switched) {
+      showToast(t(sw.zone === 'recent' ? 'Recent now shows Local, to find this conversation (it showed {host})' : 'History now shows Local, to find this conversation (it showed {host})', { host: sw.name }),
+        { action: { label: t('Show {host} again', { host: sw.name }), run: () => sb._locateSwitchBack?.(sw) } });
+    }
   },
 
   async killPid(pid, host) {

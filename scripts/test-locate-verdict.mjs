@@ -184,29 +184,38 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   ok(/_railShow\(id\) \{/.test(railObj) && /_railGo\(id\) \{/.test(railObj), 'the real _railShow and _railGo are read off sidebar-rail.js');
   const store = { setItem() {}, getItem: () => null };
   const RAILM = new Function('localStorage', 'track', `return ({ ${railObj} });`)(store, () => {});
+  // TODAY'S DOOR (主开发's must, its red control): the show door that clears a drill-down but does not draw the list again
+  const DRILL_REDRAW = ' if (hadDrill) this._render?.();';
+  const WB0 = read('src/lib/sidebar-workbench.js');
+  const SWITCH_BACK = (() => { const a = WB0.indexOf('    _locateSwitchBack(sw) {'); return a < 0 ? null : new Function('return ({ ' + WB0.slice(a, WB0.indexOf('\n', a)) + ' })')()._locateSwitchBack; })();
+  const RAILM_NO_REDRAW = railObj.includes(DRILL_REDRAW) ? new Function('localStorage', 'track', `return ({ ${railObj.replace(DRILL_REDRAW, '')} });`)(store, () => {}) : null;
   const FRAME = 16;
   // THE MODEL OF THE SESSIONS TAB (the adversarial read: it is the WORKBENCH — zones, built at once by _render): a row is on a card
   // only while its ZONE is drawn (Recent within its project's five, History open, this machine's list); `zone: 'closed'` = a row
   // the list holds and no zone draws until _openZoneOf opens it
-  const world = ({ open, tab, zone = 'drawn', facts = SHOWN, never = false }) => {
+  const world = ({ open, tab, zone = 'drawn', facts = SHOWN, never = false, phone = false, drill = false, rail = RAILM, switched = null }) => {
     const W = { ms: 0, q: [], n: 0, toasts: [], actions: [], flashes: 0, frames: 0, facts: { ...facts } };
     W.later = (fn, d) => W.q.push({ due: W.ms + Math.max(0, d || 0), k: ++W.n, fn });
     const card = { _sessionId: 'c1', classList: { add: (c) => { if (c === 'locate-flash') W.flashes++; }, remove() {}, contains: () => false }, scrollIntoView() { W.scrolled = (W.scrolled || 0) + 1; }, closest: () => null };
-    const sb = Object.assign(Object.create(RAILM), {
-      isOpen: open, _activeTab: tab, _railEl: {}, _panelDispose: null, zoneOpen: zone === 'drawn', drawn: zone === 'drawn',
+    const sb = Object.assign(Object.create(rail), {
+      isOpen: open, _activeTab: tab, _railEl: phone ? null : {}, _panelDispose: null, zoneOpen: zone === 'drawn', drawn: zone === 'drawn',
+      _mobileDrilldown: drill ? { type: 'group', id: 'g1' } : null, drillShown: drill,   // the phone: a Task Group's detail drawn on the Sessions tab
       toggle(f) { this.isOpen = f !== undefined ? f : !this.isOpen; },
       _updateTabs() {}, _railSync() {}, _railApplyTitle() {},
-      _render() { this.drawn = this.zoneOpen; },   // the workbench builds every zone's cards at once
+      _render() { this.drawn = this.zoneOpen; this.drillShown = !!this._mobileDrilldown; },   // the workbench builds every zone's cards at once (a drill-down draws the group instead)
       render() { this._render(); },
-      _openZoneOf() { if (never || this.zoneOpen) return false; this.zoneOpen = true; return 'render'; },
+      _openZoneOf() { if (never || this.zoneOpen) return false; this.zoneOpen = true; if (switched) (this._locateSwitched = this._locateSwitched || []).push(switched); return 'render'; },
+      _wbRecentHost: '', _wbHistoryHost: '', _locateSwitchBack: SWITCH_BACK,   // the workbench's own switch-back
       _openFolderOf() { return false; },   // no grouped view on this tab
       _locateFacts: () => W.facts, _locateName: (why, name) => name,
       _locateDoor(why) { W.doors = [...(W.doors || []), why]; W.facts = { ...SHOWN }; },
     });
-    const cards = () => (sb.isOpen && sb._activeTab === 'folders' && sb.zoneOpen && sb.drawn && !never ? [card] : []);
-    sb.listEl = { querySelectorAll: (sel) => (sel === '.session-item-card' ? cards() : []) };
+    const cards = () => (sb.isOpen && sb._activeTab === 'folders' && sb.zoneOpen && sb.drawn && !sb.drillShown && !never ? [card] : []);
+    sb.listEl = { l: {}, querySelectorAll: (sel) => (sel === '.session-item-card' ? cards() : []), addEventListener(e, f) { (this.l[e] = this.l[e] || []).push(f); }, removeEventListener(e, f) { this.l[e] = (this.l[e] || []).filter((x) => x !== f); } };
+    W.person = (e) => (sb.listEl.l[e] || []).forEach((f) => f());   // the person's own input in the list
     W.sb = sb;
-    W.doc = { querySelectorAll: (sel) => (sel === '.session-item-card' ? cards() : []), getElementById: () => null };
+    W.search = { l: [], addEventListener(e, f) { if (e === 'input') this.l.push(f); }, removeEventListener(e, f) { this.l = this.l.filter((x) => x !== f); } };
+    W.doc = { visibilityState: 'visible', querySelectorAll: (sel) => (sel === '.session-item-card' ? cards() : []), getElementById: (id) => (id === 'session-filter' ? W.search : null) };
     W.showToast = (words, o = {}) => { W.toasts.push(words); if (o.action) W.actions.push(o.action); };
     W.raf = (fn) => { W.frames++; W.later(fn, FRAME); };
     W.drain = async () => { for (let i = 0; i < 100000; i++) { await new Promise((r) => setImmediate(r)); if (!W.q.length) return; W.q.sort((x, y) => x.due - y.due || x.k - y.k); const nx = W.q.shift(); W.ms = nx.due; nx.fn(); } };
@@ -256,6 +265,42 @@ const RELEASE_LOCATE = `locateSessionInSidebar(backendSessionId) {
   const framesAtBound = Math.round(WAIT / FRAME);
   ok(nv.toasts.length === 1 && /did not draw this conversation in time/.test(nv.toasts[0]) && Wn.q.length === 0 && Wn.frames >= framesAtBound && Wn.frames <= framesAtBound + 2,
     `a list that never draws the row: the wait ends at its bound (${Wn.frames} frames of ${FRAME} model ms ≈ LOCATE_WAIT_MS) with its own sentence, nothing left running`, J({ nv, frames: Wn.frames }));
+
+  // THE MUST (主开发's verdict): ON A PHONE, after a Task Group was opened, the Sessions tab still draws its detail; Locate on a LIVE row
+  // outside it — the show door clears the drill-down and DRAWS the list again (the tab already being Sessions)
+  const ph = await press(LOCATE, world({ open: true, tab: 'folders', phone: true, drill: true }));
+  ok(shown(ph), `THE MUST — a phone, a Task Group's detail left on the Sessions tab, Locate on a live row outside it: the list drawn again, the row flashed, no toast (${J(ph)})`, ph);
+  const phRed = RAILM_NO_REDRAW && await press(LOCATE, world({ open: true, tab: 'folders', phone: true, drill: true, rail: RAILM_NO_REDRAW }));
+  ok(!!phRed && phRed.flashes === 0 && phRed.toasts.length === 1 && /did not draw this conversation in time/.test(phRed.toasts[0]), `RED CONTROL — today's door (the drill-down cleared, nothing drawn): the stale detail stays and Locate times out (${J(phRed)})`, phRed);
+  // THE WAIT ENDS WHEN THE PERSON WALKS AWAY: closed, another tab, their own scroll — silently
+  const WALKS = [['closes the list', (w) => w.sb.toggle(false)], ['chooses another tab', (w) => { w.sb._activeTab = 'ports'; }],
+    ['scrolls the list (wheel)', (w) => w.person('wheel')], ['touches the list', (w) => w.person('touchstart')], ['presses a key in the list', (w) => w.person('keydown')],
+    ['presses in the list', (w) => w.person('pointerdown')], ['types a search', (w) => w.search.l.forEach((f) => f())], ['hides the browser tab', (w) => { w.doc.visibilityState = 'hidden'; }]];
+  for (const [name, act] of WALKS) {
+    const Wk = world({ open: true, tab: 'folders', never: true });
+    Wk.later(() => act(Wk), 200);
+    const r = await press(LOCATE, Wk);
+    const left = Object.values(Wk.sb.listEl.l).reduce((n, xs) => n + xs.length, 0) + Wk.search.l.length;
+    ok(r.toasts.length === 0 && Wk.frames < 30 && left === 0, `the person ${name} during the wait: Locate ends at once, SILENTLY, its listeners gone (${Wk.frames} frames, ${r.toasts.length} toasts, ${left} left)`, r);
+  }
+  // WHAT LOCATE OPENED IS SAID: a switcher it moved off another machine names what it showed, with the way back (the REAL switch-back)
+  const Ws = world({ open: true, tab: 'folders', zone: 'closed', switched: { zone: 'recent', host: 'h1', name: 'Box' } });
+  const sw = await press(LOCATE, Ws);
+  ok(sw.flashes === 1 && sw.toasts.length === 1 && /^Recent now shows Local, to find this conversation \(it showed Box\)$/.test(sw.toasts[0]) && Ws.actions[0]?.label === 'Show Box again',
+    `a Recent switcher moved off «Box» to find the row: said in the switcher's own word («Local»), with «Show Box again» (${J(sw.toasts)})`, sw);
+  Ws.actions[0].run();
+  ok(Ws.sb._wbRecentHost === 'h1' && Ws.sb._wbHistoryHost === '', '…and its door puts the RECENT switcher back (the workbench\'s own switch-back, drawn again)', { recent: Ws.sb._wbRecentHost, history: Ws.sb._wbHistoryHost });
+  const Wh2 = world({ open: true, tab: 'folders', zone: 'closed', switched: { zone: 'history', host: 'h2', name: 'Lab' } });
+  const sw2 = await press(LOCATE, Wh2);
+  ok(sw2.flashes === 1 && /^History now shows Local, to find this conversation \(it showed Lab\)$/.test(sw2.toasts[0] || ''), `a History switcher: its own sentence (${J(sw2.toasts)})`, sw2);
+  Wh2.actions[0].run();
+  ok(Wh2.sb._wbHistoryHost === 'h2' && Wh2.sb._wbRecentHost === '', '…and its door puts the HISTORY switcher back');
+  // the row NOT shown (not drawn in time): what Locate switched is PUT BACK, silently — no switch sentence
+  const Wn2 = world({ open: true, tab: 'folders', zone: 'closed', never: false, switched: { zone: 'recent', host: 'h1', name: 'Box' } });
+  Wn2.sb._openZoneOf = function () { (this._locateSwitched || []).push({ zone: 'recent', host: 'h1', name: 'Box' }); this._wbRecentHost = ''; return 'render'; };   // opens, yet the row never draws
+  Wn2.sb.zoneOpen = false;
+  const nv2 = await press(LOCATE, Wn2);
+  ok(nv2.toasts.length === 1 && /did not draw this conversation in time/.test(nv2.toasts[0]) && Wn2.sb._wbRecentHost === 'h1', `the row not drawn in time: only the timeout sentence, and the switcher is put back (${J(nv2.toasts)}, recent=${Wn2.sb._wbRecentHost})`, nv2);
 }
 
 console.log('④b THE ZONE THAT HOLDS THE ROW (sidebar-workbench.js _openZoneOf — the sessions tab is zones, not folders)');
@@ -264,15 +309,17 @@ console.log('④b THE ZONE THAT HOLDS THE ROW (sidebar-workbench.js _openZoneOf 
   const num = (name) => Function('return ' + (WB.match(new RegExp(`const ${name} = ([^;]+);`)) || [])[1])();
   const RMS = num('RECENT_MS'), PAGE = num('HISTORY_PAGE');
   const OPEN = new Function('RECENT_MS', 'HISTORY_PAGE', 'return ' + asFunction(methodText(WB, '    _openZoneOf(sessionId) {')))(RMS, PAGE);
+  const SAID = (() => { const a = WB.indexOf('    _locateSaid(zone, host) {'); return a < 0 ? null : new Function('return ({ ' + WB.slice(a, WB.indexOf('\n', a)) + ' })')()._locateSaid; })();
   const now = Date.now(), DAY = 86400e3;
-  const fake = (rows, st = {}) => Object.assign({ _allSessions: rows, _columnListWanted: () => false, listEl: null }, st);
+  const fake = (rows, st = {}) => Object.assign({ _allSessions: rows, _columnListWanted: () => false, listEl: null, _locateSaid: SAID, _locateSwitched: [], _hostsData: { hosts: [{ id: 'h1', name: 'Box' }] } }, st);
   const row = (id, ageDays, extra = {}) => ({ sessionId: id, status: 'stopped', cwd: '/p', startedAt: now - ageDays * DAY, ...extra });
   const R = [];
   let f = fake([row('a', 1)]); R.push(['a recent row past its project\'s five', OPEN.call(f, 'a') === 'render' && f._wbProjExpanded.has('/p')]);
   f = fake([row('a', 1)], { _wbProjExpanded: new Set(['/p']) }); R.push(['…already expanded: nothing to open', OPEN.call(f, 'a') === false]);
-  f = fake([row('a', 1)], { _wbRecentHost: 'h1', _wbProjExpanded: new Set(['/p']) }); R.push(['Recent showing another machine: this machine\'s, for this page', OPEN.call(f, 'a') === 'render' && f._wbRecentHost === '']);
+  f = fake([row('a', 1)], { _wbRecentHost: 'h1', _wbProjExpanded: new Set(['/p']) }); R.push(['Recent showing another machine: this machine\'s, for this page — and the switch KEPT for Locate to say', OPEN.call(f, 'a') === 'render' && f._wbRecentHost === '' && J(f._locateSwitched) === J([{ zone: 'recent', host: 'h1', name: 'Box' }])]);
   f = fake([row('o', 30)]); R.push(['History closed: opened', OPEN.call(f, 'o') === 'render' && f._wbHistoryOpen === true]);
-  f = fake([row('o', 30)], { _wbHistoryOpen: true, _wbHistoryHost: 'h1' }); R.push(['History showing another machine: this machine\'s', OPEN.call(f, 'o') === 'render' && f._wbHistoryHost === '']);
+  f = fake([row('o', 30)], { _wbHistoryOpen: true, _wbHistoryHost: 'h1' }); R.push(['History showing another machine: this machine\'s — and the switch kept for Locate to say', OPEN.call(f, 'o') === 'render' && f._wbHistoryHost === '' && J(f._locateSwitched) === J([{ zone: 'history', host: 'h1', name: 'Box' }])]);
+  f = fake([row('a', 1)], { _wbRecentHost: 'h1', _wbProjExpanded: new Set(['/p']), _locateSwitched: null }); R.push(['no press recording: a switch writes no record', OPEN.call(f, 'a') === 'render' && f._locateSwitched === null]);
   const many = Array.from({ length: 200 }, (_, i) => row('h' + i, 10 + i));
   f = fake(many, { _wbHistoryOpen: true }); R.push([`a History row at place 130: the page reaches it (cap ${PAGE} → ${Math.ceil(131 / PAGE) * PAGE})`, OPEN.call(f, 'h130') === 'render' && f._wbHistoryCap === Math.ceil(131 / PAGE) * PAGE]);
   f = fake([row('l', 30, { status: 'live' })]); R.push(['a live row: the Live zone draws it, nothing to open', OPEN.call(f, 'l') === false]);
@@ -347,9 +394,10 @@ console.log('⑥ THE WORDS: three languages, the vague sentence gone, no native 
 {
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
   const timeout = (LIFE.match(/t\('(The session list did not draw[^']+)'\)/) || [])[1];
-  const keys = [...Object.values(LOCATE_WORDS).flatMap((w) => [w.words, w.door]).filter(Boolean), timeout].filter(Boolean);
+  const said = [...methodText(LIFE, '  async locateSessionInSidebar(backendSessionId) {').matchAll(/t\('([^']+)'|'((?:Recent|History) now shows [^']+)'/g)].map((m) => m[1] || m[2]);   // every sentence Locate itself says (the switch's two ride a ternary)
+  const keys = [...new Set([...Object.values(LOCATE_WORDS).flatMap((w) => [w.words, w.door]).filter(Boolean), timeout, ...said].filter(Boolean))];
   const missing = keys.filter((k) => !ZH.includes(J(k) + ':') || !JA.includes(J(k) + ':'));
-  ok(timeout && keys.length >= 16 && !missing.length, `all ${keys.length} sentences and doors have a zh and a ja row`, missing.join(' | '));
+  ok(timeout && keys.length >= 19 && !missing.length, `all ${keys.length} sentences and doors (the verdict's and every one Locate says) have a zh and a ja row`, missing.join(' | '));
   const files = [];
   const walk = (dir) => { for (const e of fs.readdirSync(path.join(REPO, dir), { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (/\.(m?js|cjs|html)$/.test(e.name)) files.push(p); } };
   walk('src');
