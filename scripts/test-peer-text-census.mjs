@@ -1378,7 +1378,7 @@ const deliveryClause = (rows) => {
   return parts.length ? ' — ' + parts.join(' · ') : '';
 };
 const printMsgRead = (r) => [`group "${r.group.name}" (${r.group.id}) — ${r.records.length} record(s), oldest first:`, ...r.records.map((x) => `- [${x.at}] ${x.kind === 'message' ? x.from + ':' : '(' + x.kind + ')'} ${x.text}${x.kind === 'message' ? deliveryClause(x.delivery) : ''}`)].join('\n');
-const printMsgGroups = (gs) => gs.map((g) => `${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.archived ? ' [archived]' : ''} — ${g.unread} unread · your notify: ${g.notify}\n    members: ${g.members.map((m) => `${m.name}${m.live ? '' : ' (not live)'} [${m.notify}]`).join(', ')} + the user`).join('\n');
+const printMsgGroups = (gs) => gs.map((g) => `${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.archived ? ' [archived]' : ''} — ${g.unread == null ? 'unread not counted yet (the hub just started)' : g.unread + ' unread'} · your notify: ${g.notify}\n    members: ${g.members.map((m) => `${m.name}${m.live ? '' : ' (not live)'} [${m.notify}]`).join(', ')} + the user`).join('\n');
 const printMsgPeers = (ps) => ps.map((p) => `${p.level === 'messageable' ? '✉' : '·'} ${p.name || '(unnamed)'} — ${p.conversationId}\n    ${p.level}${p.machine ? ' · on ' + p.machine : ''}${p.state ? ' · ' + p.state + (p.stateReason ? ': ' + p.stateReason.slice(0, 60) : '') : ''}`).join('\n');
 // verify r2 F1: the send / group-op printers (data/bin/vibespace-msg), spelled as the CLI spells them — §5 pins the lines
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;

@@ -326,6 +326,12 @@ function create({
    *  be stale-free or absent: `list()`/`listFor()` read no log after the
    *  first count. The first count is warmed in the background after boot. */
   const unreadMemo = new Map();   // `${gid}|${who}` → {since, lastAt, n}
+  // B-b17f's remainder (2.369.411): until the boot warm-up has PASSED a group, a reader never reads that group's log on the
+  // loop — an owed count is null («not counted yet»). The release's readers counted every group the warm-up had not reached
+  // from its log, synchronously, all in ONE turn (a page asking at the hub's start: every cold group's log at once). The
+  // warm-up's end announces the list once when a reader was answered null. coldIds: the groups of the start, not yet passed
+  let coldIds = null;
+  const coldAsked = new Set();
   // B-a354: a `mention` member counts only what reaches it (B-a354's rule, read through reachFor) — its mode is part of the memo's facts
   const modeOf = (g, who) => { const m = who === G.OWNER ? null : G.memberOf(g, who); return m ? m.notify : null; };
   function unreadFor(g, who, since, log = null) {   // `log` (B-b17f, the boot warm-up): the group's records already read
@@ -333,6 +339,9 @@ function create({
     const lastAt = Number(g.lastAt) || 0;
     const mode = modeOf(g, who);
     const sig = mode === 'mention' ? reachSig(g, who) : '';
+    // B-b17f's remainder: a COLD group's reader memoises nothing (the warm-up's count is the first memo) — an owed count is
+    // null, «not counted yet»; nothing owed is 0 by the facts alone
+    if (!log && coldIds && coldIds.has(g.id)) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }
     if (!(lastAt > since)) { unreadMemo.set(key, { since, lastAt, mode, sig, n: 0 }); return 0; }
     const m = unreadMemo.get(key);
     if (m && m.since === since && m.lastAt === lastAt && m.mode === mode && m.sig === sig) return m.n;
@@ -1858,9 +1867,10 @@ function create({
     const turn = () => new Promise((r) => { const h = setImmediate(r); if (h && h.unref) h.unref(); });
     const whos = (g) => [[G.OWNER, ownerReadOf(g.id)], ...g.members.map((m) => [m.member, memberSince(m)])];
     const clearedN = (g) => (g.cleared && typeof g.cleared === 'object' ? Object.keys(g.cleared).length : 0);
+    try { coldIds = new Set(Object.keys(all())); } catch { coldIds = null; }   // the groups of the start (a later one is never cold)
     (async () => {
       await turn();
-      let ids; try { ids = Object.keys(all()); } catch { return; }
+      let ids; if (coldIds) ids = [...coldIds]; else { try { ids = Object.keys(all()); } catch { return; } }   // no start set (the store unread at create): as before
       for (const id of ids) {
         try {
           const g = getGroup(id);
@@ -1872,9 +1882,15 @@ function create({
           if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) continue;
           for (const [who, since] of whos(now2)) unreadFor(now2, who, since, records);
         } catch { /* an unreadable log: the next reader counts it */ }
+        finally { if (coldIds) coldIds.delete(id); }   // passed: counted, nothing owed, a record landed during the read or unreadable — the next reader counts it
         await turn();
       }
-    })().catch(() => { });
+    })().catch(() => { }).finally(() => {
+      coldIds = null;
+      if (!coldAsked.size) return;
+      const asked = [...coldAsked]; coldAsked.clear();
+      announce(asked, null, null, { pending: false });   // the counts a reader was answered null for, said once (no pending moved)
+    });
   })();
 
   return {

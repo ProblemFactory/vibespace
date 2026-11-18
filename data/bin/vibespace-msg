@@ -229,7 +229,7 @@ const deliveryClause = (rows) => {
     const r = await call('GET', '/api/agent/msg/groups');
     if (!r.groups || !r.groups.length) { console.log('you are in no group yet. vibespace-msg send <agent> "..." starts a direct one; vibespace-msg group create <name> <member…> a group.'); return; }
     for (const g of r.groups) {
-      console.log(`${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''} — ${g.unread} unread · your notify: ${g.notify}`);
+      console.log(`${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''} — ${g.unread == null ? 'unread not counted yet (the hub just started)' : g.unread + ' unread'} · your notify: ${g.notify}`);
       console.log(`    members: ${g.members.map((m) => `${m.name}${m.live ? '' : ' (not live)'} [${m.notify}]`).join(', ')} + the user`);
     }
     return;
