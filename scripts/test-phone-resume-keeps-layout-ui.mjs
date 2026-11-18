@@ -19,13 +19,18 @@
 //      session», the hub's answer is the no-transcript breaker (the one answer this suite injects: a claude that never answers cannot
 //      say it), the rescued window shows «Try resuming anyway» and the person presses it — the retry re-opens row c-1 (live, same id,
 //      its box); b-2's session is stopped and its sidebar card is pressed TWICE while the hub is slow — ONE create, ONE window (b-2)
+//   ⑤ (lane bl-windows — B-46fc's own gate, the 2.369.410 close's remainder: «a chrome leg that opens a window and reloads at
+//      500 ms ⇒ the same window is on show») on that desktop page: the person's press on the top bar's Files button opens a
+//      window and the page RELOADS with that save still due — the save HELD in the page before the press (a stall, never the
+//      clock), so the leave's flush is its only road ⇒ after the reload the window is on show again and the hub's record holds
+//      it; RED CONTROL first (the release: no flush at the leave) ⇒ gone after the reload, no row
 // Screenshots go to $PRK_SHOTS_DIR when set (the lane's report), else nowhere.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -264,6 +269,51 @@ else await (async () => {
     const said4 = (await P2.toasts()).filter((t) => /warn/.test(t[0])).map((t) => t[1]);
     ok(!said4.length && !/REFUSED/.test(journal.slice(j0)), '④ no refusal, no warn toast', { said4 });
     await P2.shot('desktop-after-retry-and-double-press');
+    // ⑤ B-46fc'S OWN GATE (lane bl-windows — the row: «a chrome leg that opens a window and reloads at 500 ms ⇒ the same window is
+    //    on show»; the 2.369.410 close's remainder). A race is proven by a STALL, never by the clock: before the press the page's
+    //    save is HELD (each ask recorded as due, its timer never fires), so the leave's flush (pagehide) is the open's ONLY road to
+    //    the hub. The fact a leave flushes is read from a run: int361's heavy run of test-browser-live-input on e8a5c8bcf (2026-11-18
+    //    11:24Z, 182/182) — a page ended with its save held carried its close through this flush. RED CONTROL FIRST, the release's
+    //    behaviour (no flush at the leave: `_flushOnLeave` answers false), proving its plant before its verdict.
+    const FILESWIN = `[...app.wm.windows.values()].filter((w) => w.type === 'files').map((w) => ({ id: w.id, desk: w._desktopId, path: w._explorerPath || null, shown: !w.isMinimized && !w._hiddenByDesktop }))`;
+    // the person's press goes through THE still door (scratch.mjs realClicker — test-still-press's ledger): it measures, waits
+    // still, checks at press time that the element under the pointer IS the button, and says where the press landed
+    const realClick = realClicker({ evalJs: (x) => P2.ev(x), cdp: (m, p) => P2.send(m, p) });
+    const pressFiles = async () => { const pressed = await realClick('#btn-file-explorer'); return { pressed, landed: realClick.landed || null, miss: realClick.lastMiss || null }; };
+    const LEAVE_LOG = 'vs.b46fc.leave'; // sessionStorage survives a same-tab reload: what the leave did, read by the NEW page
+    const reloadScene = async (flushOff) => {
+      // the stall, installed BEFORE the act: a pending save cleared, every ask held due (the timer never fires); the leave's
+      // flush wrapped to LOG what it answered (the control's answers false — the release, which had no flush)
+      await P2.ev(`(() => { const lm = app.layoutManager; clearTimeout(lm._autoSaveTimer); lm._autoSaveTimer = null; sessionStorage.removeItem(${J(LEAVE_LOG)});
+        const log = (why, sent) => { try { const l = JSON.parse(sessionStorage.getItem(${J(LEAVE_LOG)}) || '[]'); l.push({ why, sent }); sessionStorage.setItem(${J(LEAVE_LOG)}, JSON.stringify(l)); } catch { } };
+        const real = lm._flushOnLeave.bind(lm);
+        lm._flushOnLeave = ${flushOff ? 'function offAtLeave(why) { log(why, false); return false; }' : 'function loggedLeave(why) { const sent = real(why); log(why, sent); return sent; }'};
+        lm.scheduleAutoSave = function heldSave() { lm._saveAskedAt = Date.now(); if (!lm._autoSaveTimer) lm._autoSaveTimer = setTimeout(() => {}, 600000); }; return true; })()`);
+      const before = ((await P2.ev(FILESWIN)) || []).map((w) => w.id);
+      const press = await pressFiles();
+      const fresh = async () => ((await P2.ev(FILESWIN)) || []).find((w) => !before.includes(w.id) && w.path) || null;
+      const opened = (await until(async () => !!(await fresh()), 10000, 100)) ? await fresh() : null;
+      const due = await P2.ev(`(() => { const lm = app.layoutManager, dm = app.desktopManager; return { due: !!lm._autoSaveTimer && lm._saveAskedAt > (lm._savedAt || 0), dirty: !!lm._userDirty, gate: !!(lm._restoring || (dm && dm._restoring)), held: lm.scheduleAutoSave.name === 'heldSave', leave: lm._flushOnLeave.name }; })()`);
+      const desk = await P2.ev('app.desktopManager.activeDesktopId');
+      await P2.ev('(window.__b46fcOld = 1, true)'); // a mark only the OLD page holds — the boot wait below is the NEW page's
+      await P2.send('Page.reload', {});
+      const booted = await until(async () => { try { return await P2.ev('!window.__b46fcOld && !!(window.app && app.desktopManager && app.desktopManager.activeDesktopId && app.layoutManager && !app.layoutManager._restoring)'); } catch { return false; } }, 30000, 250);
+      if (booted && (await P2.ev('app.desktopManager.activeDesktopId')) !== desk) { await P2.ev(`(app.desktopManager.switchTo(${J(desk)}), true)`); await sleep(1500); }
+      await sleep(1500);
+      const after = (await P2.ev(FILESWIN).catch(() => null)) || [];
+      const leave = await P2.ev(`JSON.parse(sessionStorage.getItem(${J(LEAVE_LOG)}) || '[]')`).catch(() => null);
+      const hub = (((await api('/api/layouts')).desktops[desk] || {}).autoSave?.windows || []).filter((w) => w.type === 'files').map((w) => w.winId);
+      const mine = opened ? after.find((w) => w.id === opened.id) || null : null;
+      return { press, opened, due, desk, booted, leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
+    };
+    const red = await reloadScene(true);
+    ok(!!red.press && red.press.pressed, '⑤ (control) the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', red.press);
+    ok(!!red.opened && red.due.due && red.due.dirty && !red.due.gate && red.due.held && red.due.leave === 'offAtLeave', '⑤ RED CONTROL proves its plant first: the person\'s press opened a files window, a person\'s save DUE and HELD, no gate up — and the page\'s leave is the planted one (it answers false, as the release sent nothing)', red.due);
+    ok(red.booted && !!red.opened && !red.mine && !red.inHub && Array.isArray(red.leave) && red.leave.length >= 1 && red.leave.every((l) => l.sent === false), '⑤ RED CONTROL — the release\'s behaviour (no flush at the leave): the leave RAN (logged) and sent nothing ⇒ after the reload that window is GONE and the hub\'s record holds no row of it (the leg below goes red without B-46fc)', { leave: red.leave, mine: red.mine, inHub: red.inHub, booted: red.booted });
+    const fact = await reloadScene(false);
+    ok(!!fact.press && fact.press.pressed, '⑤ the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', fact.press);
+    ok(!!fact.opened && fact.due.due && fact.due.dirty && !fact.due.gate && fact.due.held && fact.due.leave === 'loggedLeave', '⑤ the person\'s press opened a files window; its save DUE and HELD in the page (no gate up) — the leave\'s flush its only road', fact.due);
+    ok(fact.booted && !!fact.mine && fact.mine.desk === fact.desk && fact.mine.shown && fact.inHub && Array.isArray(fact.leave) && fact.leave.some((l) => l.sent === true), '⑤ B-46fc\'S OWN GATE: the page reloaded with the open\'s save still due ⇒ the leave\'s flush SENT it (logged), the hub\'s record holds that window\'s row, and after the reload the SAME window (its id) is on show on its desktop', { opened: fact.opened, mine: fact.mine, inHub: fact.inHub, leave: fact.leave, booted: fact.booted });
   } catch (e) {
     ok(false, 'the suite threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e));
   } finally {
