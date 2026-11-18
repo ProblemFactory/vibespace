@@ -1344,21 +1344,31 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  looks: a disagreement is a MARK on the profile (`kernelLive` — its Agent browser panel row, its engine's card) and ONE For-you
    *  item per engine version (a profile on the same engine and version already filed ⇒ none); an agreeing answer clears the mark.
    *  The live answer rules — the watch already follows it; this only says it. */
+  /** B-cf42 cure (主开发 09:07Z): an engine version's For-you notice is resolved when the LAST mark of that engine and version
+   *  clears — an agreeing answer, a profile that left the engine, a mark of another version, a profile removed. `m` = the mark
+   *  that went, `p` = its profile (still listed, or already gone). */
+  function markCleared(m, p) {
+    if (!m || !m.noticeId) return;
+    if (reg.profiles.some((x) => x && x !== p && x.kernelLive && x.kernelLive.engine === m.engine && x.kernelLive.version === m.version)) return;
+    if (userTodos && typeof userTodos.setStatus === 'function') { try { const it = typeof userTodos.get === 'function' ? userTodos.get(m.noticeId) : null; if (!it || it.status === 'open') userTodos.setStatus(m.noticeId, 'done', 'kernel-answers-again'); } catch { /* gone already */ } }
+  }
   function noteEngineLive(profileId, f = {}) {
     const p = reg.profiles.find((x) => x && x.id === String(profileId || '')); // a conversation's own browser on the default engine too
     const engine = String((f && f.engine) || '');
     if (!p) return null;
-    if (!p.browser || p.browser.kind !== 'plugin' || p.browser.id !== engine) { if (p.kernelLive) { delete p.kernelLive; commit(); } return null; } // it left that engine: its mark goes
+    if (!p.browser || p.browser.kind !== 'plugin' || p.browser.id !== engine) { if (p.kernelLive) { const m = p.kernelLive; delete p.kernelLive; markCleared(m, p); commit(); } return null; } // it left that engine: its mark goes
     const v = ENG.kernelLiveVerdict(f);
-    if (!v) { if (p.kernelLive) { delete p.kernelLive; commit(); log.log?.(`[browser] ${p.id} "${p.label}": its running kernel answers as its engine's probe says again`); } return null; }
+    if (!v) { if (p.kernelLive) { const m = p.kernelLive; delete p.kernelLive; markCleared(m, p); commit(); log.log?.(`[browser] ${p.id} "${p.label}": its running kernel answers as its engine's probe says again`); } return null; }
     const version = f.version ? String(f.version).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, 120) : null;
-    const was = p.kernelLive && p.kernelLive.engine === engine && p.kernelLive.version === version ? p.kernelLive : null;
-    if (!was || was.why !== v.why || JSON.stringify(was.live) !== JSON.stringify(v.live) || JSON.stringify(was.probe) !== JSON.stringify(v.probe)) { p.kernelLive = { engine, version, why: v.why, probe: v.probe, live: v.live, at: now(), filed: !!(was && was.filed) }; commit(); }
+    const prev = p.kernelLive || null;
+    const was = prev && prev.engine === engine && prev.version === version ? prev : null;
+    if (!was || was.why !== v.why || JSON.stringify(was.live) !== JSON.stringify(v.live) || JSON.stringify(was.probe) !== JSON.stringify(v.probe)) { p.kernelLive = { engine, version, why: v.why, probe: v.probe, live: v.live, at: now(), filed: !!(was && was.filed), ...(was && was.noticeId ? { noticeId: was.noticeId } : {}) }; if (prev && prev !== was) markCleared(prev, p); commit(); }
     if (p.kernelLive.filed) return p.kernelLive;
-    if (reg.profiles.some((x) => x && x !== p && x.kernelLive && x.kernelLive.filed && x.kernelLive.engine === engine && x.kernelLive.version === version)) { p.kernelLive.filed = true; commit(); return p.kernelLive; }
+    const sib = reg.profiles.find((x) => x && x !== p && x.kernelLive && x.kernelLive.filed && x.kernelLive.engine === engine && x.kernelLive.version === version);
+    if (sib) { p.kernelLive.filed = true; if (sib.kernelLive.noticeId) p.kernelLive.noticeId = sib.kernelLive.noticeId; commit(); return p.kernelLive; }
     if (!userTodos || typeof userTodos.add !== 'function') return p.kernelLive;
     const n = BB.liveKernelNotice({ engineLabel: f.label || '', id: engine, version, verdict: v });
-    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', i18n: n.i18n }); p.kernelLive.filed = true; commit(); }
+    try { const it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser', i18n: n.i18n }); p.kernelLive.filed = true; if (it && it.id) p.kernelLive.noticeId = String(it.id); commit(); }
     catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the running-kernel notice was not filed (${e && e.message}) — tried again at its next answer`); }
     return p.kernelLive;
   }
@@ -1459,7 +1469,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // verify r8 (T2 ③): a record whose start was REFUSED (`failed` at the door: an adopted backup judged a copy, a stranger's directory)
     // has nothing to remember — its retire never mints into the directory (the launched record's retire remembers as r4 built it)
     if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }
+    const goneRec = reg.profiles.find((x) => x.id === id) || null;
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
+    if (goneRec && goneRec.kernelLive) markCleared(goneRec.kernelLive, goneRec);   // B-cf42 cure: a removed profile's mark goes with it
     if (!isEph(p)) { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch (e) { log.warn?.(`[browser] the grant row of ${id} was not removed — ${e && e.message}`); } }   // lane grants-unify: its list goes with it (a record re-made under its id starts at its own default)
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)

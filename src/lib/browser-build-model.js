@@ -234,7 +234,7 @@ export function cardBuildLine({ buildChoice = true, choice = null, running = nul
   const r = typeof running === 'string' && running ? running : null;
   const text0 = live && r ? t(i18nKey('{choice} · running Chrome {version}'), { choice: base, version: r }) : base;
   // B-cf42: an engine profile whose RUNNING kernel answers otherwise than its plugin's probe — the live answer, on its row
-  const lw = c.kind === 'plugin' && kernelLive && typeof kernelLive === 'object' && kernelLive.engine === c.id ? liveKernelWords(kernelLive, t) : '';
+  const lw = c.kind === 'plugin' && live && kernelLive && typeof kernelLive === 'object' && kernelLive.engine === c.id ? liveKernelWords(kernelLive, t) : '';   // B-cf42 cure: only while its browser runs (the card counts running browsers too)
   const text = lw ? text0 + ' · ' + lw : text0;
   // ui-words: the first letter of a sentence t() already worded (it may start with a build's name)
   return { text: text.charAt(0).toUpperCase() + text.slice(1), warn: !!lw };

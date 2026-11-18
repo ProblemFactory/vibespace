@@ -129,11 +129,12 @@ const CDP_PORT = await new Promise((r) => cdpSrv.listen(0, '127.0.0.1', () => r(
 const PATH_ENV = `${path.join(ROOT, 'bin')}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
 const KEY_A = 'bk-0000a0a1';
 const todos = [];
+const todoDone = [];   // B-cf42 cure: the stand-in store's resolutions {id, st, by}
 const relaunches = [];
-function mkKeeper(dataDir, extra = {}) {
+function mkKeeper(dataDir, extra = {}, Kmod = K) {
   fs.mkdirSync(dataDir, { recursive: true });
-  return K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
-    log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: (k, item) => { todos.push(item); return { id: 'u' + todos.length }; } }, ...extra });
+  return Kmod.create({ dataDir, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
+    log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: (k, item) => { todos.push(item); return { id: 'u' + todos.length }; }, get: (id) => ({ id, status: todoDone.some((x) => x.id === id) ? 'done' : 'open' }), setStatus: (id, st, by) => { todoDone.push({ id, st, by }); } }, ...extra });
 }
 const B151 = path.join(BROWSERS, 'chrome-151.0.7922.34', 'chrome'), B146 = path.join(BROWSERS, 'chrome-146.0.7680.153', 'chrome');
 // every call of the browser's own session that CAN launch — `session info` is launch-free (measured on the real binary,
@@ -749,10 +750,19 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
     const zhK = (await import('../src/lib/i18n-zh.js')).default, jaK = (await import('../src/lib/i18n-ja.js')).default;
     const tK = (d) => (s, p) => String((d && d[s]) || s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
     const KL = { engine: EID, version: '150', ...KV(rowsK[1][0]) }, KF = { engine: EID, version: '150', ...KV(rowsK[2][0]) };
-    const cl = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, kernelLive: KL }, tK(null)), clZ = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, kernelLive: KF }, tK(zhK));
-    const clOther = BMk.cardBuildLine({ choice: { kind: 'plugin', id: 'other.engine' }, kernelLive: KL }, tK(null)), clNone = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID } }, tK(null));
+    const cl = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, live: true, kernelLive: KL }, tK(null)), clZ = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, live: true, kernelLive: KF }, tK(zhK));
+    const clOther = BMk.cardBuildLine({ choice: { kind: 'plugin', id: 'other.engine' }, live: true, kernelLive: KL }, tK(null)), clNone = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, live: true }, tK(null));
     ok(cl.warn === true && cl.text === `The custom kernel (${EID}) (pinned) · its running browser answers as standard Chrome, not as this kernel` && clZ.warn && clZ.text.includes('登录记录, 网页提示, 通行密钥') && clZ.text.includes('它的插件声称提供 网页提示')
       && !clOther.warn && !/standard Chrome/.test(clOther.text) && !clNone.warn, 'B-cf42 THE PANEL ROW: the profile\'s build line says its running kernel\'s answer (en; zh in its words) and warns; a mark for another engine / no mark says nothing', { cl, clZ: clZ.text });
+    // B-cf42 cure (主开发 09:07Z): the row says the mark only while its browser RUNS (the engine card counts running browsers too)
+    const clStopped = BMk.cardBuildLine({ choice: { kind: 'plugin', id: EID }, live: false, kernelLive: KL }, tK(null));
+    ok(!clStopped.warn && clStopped.text === `The custom kernel (${EID}) (pinned)`, 'B-cf42 cure: a STOPPED engine profile\'s build line says no running-kernel answer (its card counts it as not running too)', clStopped);
+    const bmSrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-build-model.js'), 'utf8');
+    const bmCut = "  const lw = c.kind === 'plugin' && live && kernelLive && ";
+    if (!bmSrc.includes(bmCut)) throw new Error('the anchor of the control «B-cf42 cure: the mark on a stopped row» is not in the source');
+    const MCb = mutantCopies('browser-builds-cf42-cure', REPO);
+    const BMs = await import(MCb.write('src/lib/browser-build-model.js', bmSrc.replace(bmCut, "  const lw = c.kind === 'plugin' && kernelLive && "), 'mark-while-stopped', { esm: true }));   // stale-pins: kept — the base's line, written back by this RED control
+    ok(BMs.cardBuildLine({ choice: { kind: 'plugin', id: EID }, live: false, kernelLive: KL }, tK(null)).warn === true, 'CONTROL (B-cf42 cure): the base\'s line warns on a stopped row (RED for the leg above)');
     const eRow = { id: EID, label: 'Kernel', installed: true, executable: true, version: '150', features: ALL3, live: { n: 13, ...KV(rowsK[1][0]) } };
     const en = BMk.engineNote(eRow, tK(null)), ej = BMk.engineNote(eRow, tK(jaK)), e0 = BMk.engineNote({ ...eRow, live: null }, tK(null));
     ok(en === `${e0} · 13 browser(s) on it: its running browser answers as standard Chrome, not as this kernel` && ej.includes('これを使うブラウザ 13 個') && ej.includes('標準の Chrome') && !/standard Chrome/.test(e0) && BMk.engineNote({ ...eRow, code: 'browser_engine_missing' }, tK(null)).indexOf('browser(s) on it') < 0,
@@ -1069,6 +1079,47 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     ke.noteEngineLive(pe.id, { ...STD, why: null, live: ALL3 });
     await ke.stop(pe.id, { why: 'user' }).catch(() => { }); await ke.stop(pe2.id, { why: 'user' }).catch(() => { });
     await ke.removeProfile(pe2.id);
+    // B-cf42 cure (主开发 09:07Z): an engine version's notice is RESOLVED when the LAST mark of that engine and version clears —
+    // one profile agreeing while another still answers otherwise leaves it open; the last one leaving (removed) resolves it;
+    // a lone mark cleared by agreement resolves its own
+    const cureRun = async (kx) => {
+      const SX = { ...STD, version: KVER + '.9' }, SY = { ...STD, version: KVER + '.8' };
+      const fact = await kx.engineFactOf(EID);
+      const pa = kx.createProfile({ label: 'Kernel A', browser: { kind: 'plugin', id: EID } }, { engine: fact }), pb = kx.createProfile({ label: 'Kernel B', browser: { kind: 'plugin', id: EID } }, { engine: fact });
+      const t0 = todos.length, d0 = todoDone.length;
+      kx.noteEngineLive(pa.id, SX); kx.noteEngineLive(pb.id, SX);
+      const idX = todos.length === t0 + 1 ? 'u' + todos.length : null;
+      kx.noteEngineLive(pa.id, { ...SX, why: null, live: ALL3 });
+      const openWhileB = todoDone.length === d0;
+      await kx.removeProfile(pb.id);
+      const doneX = todoDone.slice(d0);
+      kx.noteEngineLive(pa.id, SY); const idY = 'u' + todos.length; const d1 = todoDone.length;
+      kx.noteEngineLive(pa.id, { ...SY, why: null, live: ALL3 });
+      const doneY = todoDone.slice(d1);
+      await kx.removeProfile(pa.id);
+      return { idX, openWhileB, doneX, idY, doneY };
+    };
+    const cr = await cureRun(ke);
+    ok(cr.idX && cr.openWhileB && cr.doneX.length === 1 && cr.doneX[0].id === cr.idX && cr.doneX[0].st === 'done' && cr.doneX[0].by === 'kernel-answers-again' && cr.doneY.length === 1 && cr.doneY[0].id === cr.idY,
+      'B-cf42 cure: the version\'s ONE notice stays open while any profile still answers otherwise and is resolved when the last mark clears (its profile removed; a lone mark cleared by agreement)', cr);
+    const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const kCut = "  function markCleared(m, p) {\n    if (!m || !m.noticeId) return;\n";
+    if (!kSrc.includes(kCut)) throw new Error('the anchor of the control «B-cf42 cure: the notice left open» is not in the source');
+    const MCk = mutantCopies('browser-builds-cf42-notice', REPO);
+    const Kn = MCk.load('src/server/browser-keeper.js', kSrc.replace(kCut, "  function markCleared(m, p) {\n    return;\n"), 'notice-left-open');
+    const kn = mkKeeper(path.join(ROOT, 'data-eng-notice'), { engines: ENGR, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kn);
+    const crm = await cureRun(kn);
+    ok(crm.idX && crm.doneX.length === 0 && crm.doneY.length === 0, 'CONTROL (B-cf42 cure): a keeper that never resolves leaves «runs as standard Chrome» open after the kernel answers again (RED for the leg above)', crm);
+    // the agent's profile view drops the keeper's bookkeeping of the mark (filed, at, the notice id)
+    const PBv = require('../src/browser-profiles.js');
+    const markRow = { id: 'bp-0000cf42', label: 'K', provider: 'chromium', owner: { kind: 'instance', id: null }, browser: { kind: 'plugin', id: EID }, kernelLive: { engine: EID, version: '150', why: 'standard', probe: ALL3, live: [], at: 123, filed: true, noticeId: 'u9' } };
+    const av = PBv.agentProfileView(markRow, {}, {});
+    ok(av.kernelLive && Object.keys(av.kernelLive).sort().join() === 'engine,live,probe,version,why', 'B-cf42 cure: the agent\'s view of a marked profile carries the answer only — never the keeper\'s bookkeeping (filed, at, the notice id)', av.kernelLive);
+    const pSrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+    const pCut = (pSrc.match(/\n  if \(rest\.kernelLive\) rest\.kernelLive = \{[^\n]*/) || [''])[0];
+    if (!pCut) throw new Error('the anchor of the control «B-cf42 cure: the agent view\'s bookkeeping» is not in the source');
+    const PBm = MCk.load('src/browser-profiles.js', pSrc.replace(pCut, ''), 'agent-view-keeps-bookkeeping');
+    ok('filed' in (PBm.agentProfileView(markRow, {}, {}).kernelLive || {}), 'CONTROL (B-cf42 cure): a view without its projection hands the agent the keeper\'s bookkeeping (RED for the leg above)');
   }
   // the PLUGIN turned off ⇒ the table loses it at once ⇒ refused browser_engine_missing (marked, ONE item)
   LDR.setEnabled(EID, false);
