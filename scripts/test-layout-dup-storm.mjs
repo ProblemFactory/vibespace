@@ -29,6 +29,9 @@
 //      resume of a row on another desktop goes there, (b) the survivor of a dedup / a replaced row keeps the position, (c) a phone's
 //      capture writes the rows it was given, (d) the hub refuses positions dropped without a move (`unplaced`) and the page says it
 //      once, LAW 2: a row with no position is drawn (placeholders + the count); §6 PR: four mutants, each RED
+//   §D285 (lane bl-windows, the backlog push 2026-11-17): the reveal door reads the one verdict — in the (g) and (b) shapes a person's
+//      open reveals V's row (it has no recipe), builds no second window, and the next autosave keeps the row; R9 (b)'s attaching
+//      window now comes by a restore's attach (the person's open is this section's); CONTROL: the release's recipe-first find
 import { REPO, LIB, read, J, tick, made, mkEl, toasts, toastText, S, T, CID, GB, chat, files, DESKS, TRIPLE, SINGLE, DOC, ids, sessionEntries, MODEL, loadHandler, hub, refusals, acks, RealDM, RealLM, world, switchTo, loadLifecycle, loadWs, pageOn, press } from './layout-dup-world.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { createRequire } from 'node:module';
@@ -484,7 +487,7 @@ async function r9Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false,
   const dune = { title: 'Dune log — /srv/u/dune', cwd: '/srv/u/dune' };
   const SHAPES = {
     a: { row: { backendSessionId: CID }, copy: true, says: 'V lists S by its conversation id ALONE (captureState\'s row while a resume\'s create is in flight — no serverSessionId, no recipe), S BUILT on X' },
-    b: { row: { backendSessionId: CID }, copy: true, attaching: true, says: '…the same while S\'s window is still ATTACHING on X (the person\'s open)' },
+    b: { row: { backendSessionId: CID }, copy: true, attaching: true, says: '…the same while S\'s window is still ATTACHING on X (a restore\'s attach in flight — a PERSON\'s open now reveals V\'s row: B-d285, §D285)' },
     c: { row: { backendSessionId: CID, serverSessionId: STALE9 }, copy: true, says: 'V\'s row names S\'s conversation beside a STALE server id' },
     d: { row: { backendSessionId: DID9, ...dune }, copy: false, says: 'CONTROL: V\'s row names D, live and shown on no desktop of this page — a real held window, restored and offered as before' },
     e: { row: { serverSessionId: S }, copy: true, says: 'CONTROL: V\'s row names S by its server id alone (r8\'s shape) — R2/R3 unchanged' },
@@ -498,7 +501,7 @@ async function r9Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false,
     const P = pageOn(hub(loadHandler(), DOC(recs)), install, 'desk-x', { DM, LM, attachMs: 60000 }), t0 = made.length;
     P.app.sidebar._webuiSessions = live();
     P.lm._bootJson = async (u) => (u === '/api/active' ? { sessions: live() } : { sessions: [] });
-    if (sh.attaching) { press('pointerdown'); P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); press('pointerup'); }
+    if (sh.attaching) P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID, syncId: 'win-x-s' }); // X's record's replay, its attach in flight (B-d285: the person's open is §D285's)
     const L = windowList(P) || { main: [], other: [] }, sRows = [...L.main, ...L.other].filter((r) => /Atlas notes/.test(r.textContent)).length;
     const offered = L.other.some((r) => r.dataset.desktopId === 'desk-v' && r.dataset.winId === 'win-v-s');
     const restores = [], rs = P.lm.restoreState.bind(P.lm); P.lm.restoreState = (st) => { restores.push(...ids(st && st.windows)); return rs(st); };
@@ -593,6 +596,51 @@ async function r10Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false
 const install10 = await loadLifecycle();
 await section('§R10 ROUND 10 — one verdict, everywhere a copy is decided (the autosave\'s dup proposal reads doorSessionOf); a preset reads the restore\'s ladder', async () => {
   await r10Legs({ install: install10 });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// B-d285 (lane bl-windows, the backlog push 2026-11-17; the r10 acceptance's refuted[0], pre-existing) — THE REVEAL DOOR READS THE ONE
+// VERDICT: revealHeldSession asked `w.openSpec` before doorSessionOf, so a held row with NO recipe was never its target. A person's
+// open of D in the (g) shape (V's row names D's conversation beside S's server id, no recipe; D's window built nowhere) built a
+// SECOND window of D on the desktop on show, and the next autosave dropped V's row as S's 'dup'.
+/** The (g) shape, S's window built on X, the person's open of D (the REAL attachSession), then a real autosave. → failed names. */
+async function d285Legs({ DM = RealDM, LM = RealLM, install = null, quiet = false, shape = 'g' } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  if (!install) return failed;
+  const live = () => [{ id: S, name: 'Atlas notes', cwd: '/srv/u/atlas', backend: 'claude', backendSessionId: CID, mode: 'chat' }, { id: D9, name: 'Dune log', cwd: '/srv/u/dune', backend: 'claude', backendSessionId: DID9, mode: 'chat' }];
+  // (g): V's row names D's conversation beside S's server id, S's window built on X — the person opens D. (b): V's row names S by its
+  // conversation id alone and S has no window on X — the person opens S (r9's (b) built S's window on X by that open; now it reveals V)
+  const g = shape === 'g' ? { winId: 'win-v-s', title: 'Dune log — /srv/u/dune', type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(1), zIndex: 101, backend: 'claude', cwd: '/srv/u/dune', backendSessionId: DID9, serverSessionId: S }
+    : { winId: 'win-v-s', title: 'Atlas notes — /srv/u/atlas', type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(1), zIndex: 101, backend: 'claude', cwd: '/srv/u/atlas', backendSessionId: CID }; // NO recipe
+  const recs = { 'desk-x': shape === 'g' ? [files('x-1', 0), chat('win-x-s', S, 1)] : [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0), g] };
+  const H = hub(loadHandler(), DOC(recs), { alive: [S, T, D9] }), P = pageOn(H, install, 'desk-x', { DM, LM, attachMs: 30 }), t0 = made.length;
+  P.app.sidebar._webuiSessions = live();
+  P.lm._bootJson = async (u) => (u === '/api/active' ? { sessions: live() } : { sessions: [] });
+  const departed = [], nd = P.dm._noteDeparted.bind(P.dm);
+  P.dm._noteDeparted = (id, why, by) => { departed.push([id, why, by]); return nd(id, why, by); };
+  const winsOf = (sid) => [...P.wins.values()].filter((w) => w._openSpec && w._openSpec.serverId === sid).map((w) => w.id + '@' + w._desktopId);
+  const [O, ON, OC, OB] = shape === 'g' ? [D9, 'Dune log', '/srv/u/dune', DID9] : [S, 'Atlas notes', '/srv/u/atlas', CID];
+  press('pointerdown'); P.app.attachSession(O, ON, OC, { mode: 'chat', backend: 'claude', backendSessionId: OB }); press('pointerup'); // the person's open (a sidebar card)
+  await tick(90); // the switch, the build of V's row, its attach (30 ms)
+  const at = P.dm.activeDesktopId, oW = winsOf(O), sW = winsOf(S);
+  const others = shape === 'g' ? J(sW) === J(['win-x-s@desk-x']) : true;
+  leg(at === 'desk-v' && J(oW) === J(['win-v-s@desk-v']) && others && toasts(t0).length === 0, `§D285 (${shape}) the person opens ${ON} — its only window is V's row, which has no recipe: the open REVEALS it (the switch to V; one window of it, that row) — b06f36e90: a second window built on X, the person kept there`, { at, oW, sW });
+  P.dm._restoring = false; P.lm._restoring = false; // the switch's 1 s gate, opened (its own timer would, a second later)
+  P.lm._userDirty = true; P.lm._lastUserInputAt = Date.now(); await P.lm._doAutoSave(); await tick(5);
+  const onHub = ids(H.layouts().desktops['desk-v'].autoSave.windows);
+  leg(!departed.some(([id, why]) => id === 'win-v-s' && why === 'dup') && J(onHub) === J(['v-1', 'win-v-s']), `§D285 (${shape}) …and the next autosave keeps V's row: no 'dup' drop, the hub still lists it`, { departed, onHub });
+  return failed;
+}
+await section('§D285 B-d285 (lane bl-windows) — the reveal door reads the one verdict: a held row with no recipe is revealed, never copied', async () => {
+  await d285Legs({ install: install10 });
+  await d285Legs({ install: install10, shape: 'b' });
+  const DSRC = read('src/lib/desktop-manager.js'), find = 'const e = (st?.windows || []).find((w) => w && doorSessionOf(w, live) === String(serverId)';
+  ok(DSRC.includes(find), '§D285 CONTROL setup: the reveal door\'s find exists in desktop-manager.js');
+  const M = mutantCopies('ldup-d285', REPO);
+  const DMx = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC.replace(find, 'const e = (st?.windows || []).find((w) => w && w.openSpec && doorSessionOf(w, live) === String(serverId)'), 'd285-recipe-only', { esm: true })).href)).DesktopManager;
+  const f = await d285Legs({ DM: DMx, install: install10, quiet: true }), fb = await d285Legs({ DM: DMx, install: install10, quiet: true, shape: 'b' });
+  ok(f.some((n) => n.startsWith('§D285 (g) the person opens')) && fb.some((n) => n.startsWith('§D285 (b) the person opens')), `§D285 CONTROL: the release's find (a recipe first) ⇒ each open builds a second window on X — the reveal legs go RED (g: ${f.length} red, b: ${fb.length} red; the autosave legs: ${[...f, ...fb].filter((n) => /autosave/.test(n)).length} red)`, { f, fb });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════

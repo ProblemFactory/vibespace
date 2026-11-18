@@ -937,7 +937,10 @@ export class DesktopManager {
     const live = this._shownCensus().live; // an entry names the session its own door attaches (r9 — doorSessionOf: a recipe's session)
     for (const [desk, st] of this._savedStates) {
       if (desk === '__stage__' || desk === this._activeId || !this._desktops.some((x) => x.id === desk)) continue;
-      const e = (st?.windows || []).find((w) => w && w.openSpec && doorSessionOf(w, live) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
+      // ONE VERDICT FOR THE REVEAL TOO (B-d285 — the r10 acceptance's refuted[0]): a row with NO recipe names the conversation its
+      // restore attaches (doorSessionOf → liveSessionOf); asking for a recipe first left such a row unrevealed, and the open built a
+      // second window of that conversation on the desktop on show — the next autosave then dropped the row as a copy
+      const e = (st?.windows || []).find((w) => w && doorSessionOf(w, live) === String(serverId) && !this.app.wm.windows.has(String(w.winId || w.id)));
       if (!e || this.copiesOf(desk).includes(String(e.winId || e.id))) continue;
       const id = String(e.winId || e.id);
       try { window.__vsOp?.('desktop-reveal-held', { desk, win: id }); } catch { }
@@ -947,7 +950,7 @@ export class DesktopManager {
       // A LATE REVEAL NEVER TAKES THE PERSON BACK (r3 H): the open is an act (a reveal still waiting from an earlier one retires);
       // this one belongs to the generation after its own switch
       // A REVEAL WAITS FOR THE SWITCH IT ASKED FOR (r4 L): the ask names its desktop — that switch, queued or not, keeps its generation
-      this.revealHeld(id, desk, e.openSpec.name || e.title || null); // the conversation's name, for a failure said (r6 R)
+      this.revealHeld(id, desk, e.openSpec?.name || [...namesOf(e)][0] || null); // the conversation's name, for a failure said (r6 R) — never the « — cwd» tail (B-d285)
       return true;
     }
     return false;
