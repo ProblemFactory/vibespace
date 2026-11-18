@@ -730,7 +730,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   fs.copyFileSync = function (f, ...a) { if (String(f) === CF) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return cp.call(this, f, ...a); };
   let C; try { C = engine({ JobManager }, dC, lC); } finally { fs.renameSync = rn; fs.copyFileSync = cp; }
   C._unreadStopped = true;   // the scene holds still (no read again while it is judged)
-  C._dirty = true; C._save();
+  C._dirty = true; C._save(); landedU4();   // lane lg-store-writes U4 (the move's meeting): the save is the store writer's — landed before the file is looked at, so «never writes over» is proved, not vacuous
   ok(C._unread.store && C._unread.store.code === 'not set aside' && fs.readFileSync(CF, 'utf-8') === torn && C.jobs.has('jb-f2760c01'), 'B-f276: torn bytes whose set-aside failed hold the store — a save never writes the skeletons over their only copy', C._unread.store);
   if (C._logsNoteP) await C._logsNoteP;
   C.shutdown();
@@ -974,7 +974,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     fs.rmdirSync(F);   // «no such file», for a moment
     await J._unreadRetry('store');
     const heldAfterOne = !!J._unread.store;
-    J._dirty = true; J._save();   // the next save meanwhile
+    J._dirty = true; J._save(); landedU4();   // the next save meanwhile — lane lg-store-writes U4 (the move's meeting): the save is the store writer's, landed before the path is looked at (else a write over it is invisible here: the control blind, the positive vacuous)
     const wroteOver = fs.existsSync(F);
     if (!wroteOver) fs.writeFileSync(F, b);   // the storage answers again: the file was there all along
     await J._unreadRetry('store');
