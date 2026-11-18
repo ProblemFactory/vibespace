@@ -7689,7 +7689,11 @@ await section(async () => {
   const strips107 = /--outfile=data\/bin\/vibespace-agentd\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/vibespace-agentd\.js && /.test(script107)
     && script107.indexOf('agentd-bundle-strip.mjs') < script107.indexOf('scripts/agentd-release.mjs');
   const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
-  const RELEASE_BUNDLE_BYTES = 4866886, DEVICE_BUNDLE_MARGIN = 0.02;   // the 2.369.407 sources' device bundle as build:agentd ships it (stripped), + 2 % for this tree's own code
+  // RESTATED at 2.369.411's second checkpoint (lane bl-loop-a, the restack-411 chain moved onto 8f96c01eb): the size this leg printed
+  // there (run a463f5ecb-20261118231403-both) — the checkpoint's 4944081 + this chain's DEVICE code: B-91aa's belt in desktop-display.js
+  // (a starter seam, the X env names), B-299b A2's warm road in session-store.js, the usage walker's yields, proc-identity's statOf.
+  // Was the 2.369.407 sources' 4866886 (as build:agentd ships it, stripped); + 2 % for this tree's own code
+  const RELEASE_BUNDLE_BYTES = 4965563, DEVICE_BUNDLE_MARGIN = 0.02;
   ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
@@ -7699,7 +7703,7 @@ await section(async () => {
   // the device agent's bundle (the descriptor reaches it only by a path the worker pool starts, never a require)
   const in107 = Object.keys(r107.metafile.inputs);
   ok(in107.some((k) => /src\/agy-backfill\.js$/.test(k)) && !in107.some((k) => /src\/agy-cards(?:-worker)?\.js$/.test(k)), `§107 the device bundle carries agy-backfill (the descriptor's reader) but NOT the hub's agy-cards worker nor its reads (${in107.filter((k) => /agy-/.test(k)).join(', ')})`);
-  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the 2.369.407 sources' ${RELEASE_BUNDLE_BYTES} bytes, as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code raises RELEASE_BUNDLE_BYTES here to the size this leg prints, in the same commit, with its reason' : ''}`, size107);
+  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the restated device bundle's ${RELEASE_BUNDLE_BYTES} bytes (2.369.411's second checkpoint + a lane's device code; was the 2.369.407 sources'), as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code raises RELEASE_BUNDLE_BYTES here to the size this leg prints, in the same commit, with its reason' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
   // libraries' legal notices stay, every line keeps its own spacing, a second pass changes nothing

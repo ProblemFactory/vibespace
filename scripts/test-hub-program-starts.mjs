@@ -69,7 +69,7 @@ try {
     await S0.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });   // the starter's own start (made once), outside the window
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/desktop-app-keeper.js'), 'utf8'), INJ = "displayFacts.useStarter(require('./child-starter').childStarter());";
     const KREQ = "const displayFacts = require('../desktop-display');", MK = mutantCopies('hub-program-starts-k', REPO), dsrc0 = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
-    const keeperOver = (tag, withInj) => { const dp = MK.write('src/desktop-display.js', dsrc0, 'dd-' + tag); MK.load('src/server/desktop-app-keeper.js', ksrc.replace(KREQ, () => `const displayFacts = require(${JSON.stringify(dp)});`).replace(INJ, () => (withInj ? INJ : '/* no injection */')), 'k-' + tag); return require(dp); };
+    const keeperOver = (tag, withInj) => { const dp = MK.write('src/desktop-display.js', dsrc0, 'dd-' + tag, { same: true })   /* a per-keeper copy, deliberate (B-0d3e's guard) */; MK.load('src/server/desktop-app-keeper.js', ksrc.replace(KREQ, () => `const displayFacts = require(${JSON.stringify(dp)});`).replace(INJ, () => (withInj ? INJ : '/* no injection */')), 'k-' + tag); return require(dp); };
     const DR = keeperOver('red', false), DG = keeperOver('green', true);   // each its OWN desktop-display instance, loaded by its keeper
     const red0 = await counting(() => beltSize(DR, { ...process.env }));
     const r0 = S0.stats().requests, now0 = await counting(() => beltSize(DG, { ...process.env }));
@@ -94,7 +94,7 @@ try {
   const now = await tick({ MountManager }, { PortForwardManager }, D);
   const MC = mutantCopies('hub-program-starts', REPO);
   const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8'), psrc = fs.readFileSync(path.join(REPO, 'src/port-forward.js'), 'utf8'), dsrc = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
-  const M_NEW = "    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((procStat(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";
+  const M_NEW = "    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((PI.statOf(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";   // met at 2.369.411's second checkpoint: the hub's PATH handed; the stat through proc-identity
   const M_OLD = "    return new Promise((resolve) => { const c = require('child_process').spawn('ls', verb === 'attr' ? ['-d', mp] : [mp], { stdio: 'ignore' }); c.on('exit', (code) => resolve({ code })); c.on('error', () => resolve({ code: 1 })); })";
   const P_NEW = "    const out = await require('./server/child-starter').childStarter().run('sh', ['-c', PORT_SCAN], { timeoutMs: 8000, maxBuffer: 4 * 1024 * 1024, capture: true })";
   const P_OLD = "    const out = await new Promise((resolve) => require('child_process').execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve({ stdout })))";
@@ -169,7 +169,7 @@ try {
   fs.writeFileSync(BURST, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write([{id:m.id,ev:'started',pid:1},{id:m.id,ev:'timeout'},{id:m.id,ev:'exit',code:null,signal:'SIGKILL',timedOut:true}].map((x)=>JSON.stringify(x)).join('\\n')+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
   const SB = CS.createChildStarter({ script: BURST }); CS.setChildStarter(SB);
   const burst = async (M) => { const mm = Object.create(M.MountManager.prototype); const r = await mm._probeMountpoint(T, 2000, 'attr'); await sleep(50); return { health: r.health, held: mm._heldProbes.size }; };
-  const ON_T = "{ timeoutMs, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((procStat(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";
+  const ON_T = "{ timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid, start: pid ? ((PI.statOf(pid) || [])[1] || null) : null }), onLateExit: () => heldMap.delete(key) })";
   const HUNG_NOW = "        if (r.timedOut) return { health: 'hung', ms: Date.now() - t0 };";
   const RB = MC.load('src/mounts.js', msrc.replace(ON_T, () => "{ timeoutMs, onLateExit: () => heldMap.delete(key) })").replace(HUNG_NOW, () => "        if (r.timedOut) { heldMap.set(key, { t0 }); return { health: 'hung', ms: Date.now() - t0 }; }"), 'red-late-mark');
   const b1 = await burst({ MountManager }), b1r = await burst(RB);
@@ -179,7 +179,7 @@ try {
   const TALIVE = path.join(T, 'talive-starter.js');   // a child that timed out and LIVES (its pid: the stand-in's own, alive)
   fs.writeFileSync(TALIVE, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write(JSON.stringify({id:m.id,ev:'started',pid:process.pid})+'\\n'+JSON.stringify({id:m.id,ev:'timeout'})+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
   const alive2 = async (M) => { const st = CS.createChildStarter({ script: TALIVE }); CS.setChildStarter(st); const mm = Object.create(M.MountManager.prototype); const r1 = await mm._probeMountpoint(T, 2000, 'attr'); const r2 = await mm._probeMountpoint(T, 2000, 'attr'); st.closePipe(); return `${r1.health}${r1.held ? '/held' : ''} → ${r2.health}${r2.held ? '/held' : ''}`; };
-  const REC = "start: pid ? ((procStat(pid) || [])[1] || null) : null";
+  const REC = "start: pid ? ((PI.statOf(pid) || [])[1] || null) : null";
   const t2 = await alive2({ MountManager }), t2r = await alive2(MC.load('src/mounts.js', msrc.replace(REC, () => "start: pid ? 'not-the-field' : null"), 'red-rec'));
   ok(msrc.split(REC).length === 2 && t2 === 'hung → hung/held' && t2r === 'hung → hung', `a child that timed out and lives: the next probe says held («${t2}») — its recorded start time is the live child's; RED (the wrong field recorded): «${t2r}» — a second probe stacked`);
   const gone = await new Promise((r) => { const c = CP.spawn('true', [], { stdio: 'ignore' }); c.on('exit', () => r(c.pid)); });

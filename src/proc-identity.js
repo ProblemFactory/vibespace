@@ -66,6 +66,14 @@ function starttimeOf(pid, opts) {
 }
 /** /proc/<pid>/stat field 3 ('R', 'S', 'Z' …) or null. */
 function stateOf(pid, opts) { const r = statRest(pid, opts); return r ? r[0] : null; }
+/** B-91aa (met at 2.369.411's second checkpoint: src/mounts.js keeps no /proc read of its own — B-e783's law): ONE process's
+ *  [state, starttime] from the same one read, SYNC (a libuv pool thread may be held by the very mount a probe watches) —
+ *  null when it is gone (ENOENT / ESRCH), undefined when /proc cannot be read (never «gone» on an unreadable /proc). */
+function statOf(pid, opts) {
+  if (!pidOk(pid)) return null;
+  try { const s = fs.readFileSync(`${rootOf(opts)}/${Number(pid)}/stat`, 'utf8'); const f = s.slice(s.lastIndexOf(')') + 2).split(' '); return [f[0], f[19]]; }
+  catch (e) { return e && (e.code === 'ENOENT' || e.code === 'ESRCH') ? null : undefined; }
+}
 /** The no-/proc rung: `ps -o stat= -o lstart= -p <pid>` → { ran, state, lstart } (lstart null = no such pid). */
 function psOf(pid, opts) {
   if (opts && typeof opts.ps === 'function') return opts.ps(Number(pid));
@@ -421,7 +429,7 @@ function legacyOnce(door, pid, say) {
 module.exports = {
   childTreeOf, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
-  hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
+  hasProc, bootIdOf, starttimeOf, stateOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

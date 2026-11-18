@@ -209,7 +209,7 @@ console.log('⑤b the resume seam over the sweep\'s rows (B-a5a4 follow-up, met)
     } finally { try { Mod.closeSweepPool(); } catch { } }
   };
   const M5 = mutantCopies('sessions-sweep-seam', REPO);
-  const now5 = await seamOf(M5.load('src/routes/sessions.js', SRC, 'seam'));
+  const now5 = await seamOf(M5.load('src/routes/sessions.js', SRC, 'seam', { same: true }));
   const was5 = await seamOf(M5.load('src/routes/sessions.js', SRC.replace(HAND, '_sweptStopped = out.held;'), 'seam-merged'));
   ok(SRC.split(HAND).length === 2 && now5.code === 200 && now5.r && now5.r.accountId === 'acc-now',
     `after the route's sweep (the worker's rows), a resume that states no account goes to the account the copy kept NOW names (${now5.r && now5.r.accountId}) — over the row as discovered, as the page's next merge does`, now5);
@@ -261,11 +261,11 @@ fs.writeFileSync(PANES, `${kT}||work:0.1\n`);
 const liveTable = new Map([['sess-live', { backend: 'claude', claudeSessionId: sidL, backendSessionId: sidL, _childPid: kL, cwd: LIVE_CWD, name: 'a live one' }]]);
 const keptMeta = [{ backend: 'claude', backendSessionId: sidK, sessionId: sidK, status: 'stopped', name: 'kept by its name', stopReason: 'hub-restart', stoppedAt: T8, kept: true }];
 const routeSrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
-const RL = mutantCopies('sessions-sweep-live', REPO).load('src/routes/sessions.js', routeSrc, 'live');   // a fresh route (its own pool, its own cache)
+const RL = mutantCopies('sessions-sweep-live', REPO).load('src/routes/sessions.js', routeSrc, 'live', { same: true });   // a fresh route (its own pool, its own cache)
 RL.setup({ ...routeCtx(), activeSessions: liveTable, webuiPids: new Set([kL]), stoppedSessions: async () => keptMeta });
 let sent = null; { const p8 = RL.sweepPool(), c8 = p8.call.bind(p8); p8.call = (op, x, o) => { if (op === 'sessionsSweep') sent = x; return c8(op, x, o); }; }
 const ans8 = await getOf(RL)();
-const SSf = mutantCopies('sessions-sweep-walk', REPO).load('src/session-store.js', fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), 'fresh');   // its own memos (the pane map's 4 s)
+const SSf = mutantCopies('sessions-sweep-walk', REPO).load('src/session-store.js', fs.readFileSync(path.join(REPO, 'src/session-store.js'), 'utf8'), 'fresh', { same: true });   // its own memos (the pane map's 4 s)
 const fullWalk = (table) => SSf.discoverClaudeSessions({ activeSessions: table, webuiPids: new Set([kL]) });
 const bytesOf = (entries, x = sent, Asm = A) => Asm.answerBytes(Asm.assembleSweep({ perHarness: x.order.map((id) => ({ id, entries: id === x.offLoop ? entries : (x.others[id] || []) })), signInPids: x.signInPids, kept: x.kept })).buf;
 const inline8 = sent ? bytesOf(await fullWalk(liveTable)) : Buffer.alloc(0);
@@ -293,7 +293,7 @@ const getQ = (mod) => (q = {}) => new Promise((resolve, reject) => {
   const res = { status: (c) => { code = c; return res; }, type: () => res, set: () => res, json: (b) => resolve({ code, bytes: Buffer.from(JSON.stringify(b)) }), send: (b) => resolve({ code, bytes: Buffer.isBuffer(b) ? b : Buffer.from(String(b)) }) };
   Promise.resolve(layer.route.stack[0].handle({ query: q }, res)).catch(reject);
 });
-const RF = mutantCopies('sessions-sweep-fail', REPO).load('src/routes/sessions.js', routeSrc, 'fail');
+const RF = mutantCopies('sessions-sweep-fail', REPO).load('src/routes/sessions.js', routeSrc, 'fail', { same: true });
 RF.setup(routeCtx());
 const gf = getQ(RF), parse = (a) => { try { return JSON.parse(a.bytes.toString()); } catch { return {}; } };
 const sameList = (a, b) => JSON.stringify(parse(a).sessions) === JSON.stringify(parse(b).sessions);
@@ -481,11 +481,14 @@ parentPort.on('message', (m) => { if (!m || !m.op || !ops[m.op]) return; Promise
 console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop after a worker RAN; a list that stopped refreshing said in seconds; the bounds; a newer conversation reopened; a pause named');
 {
   const M12 = mutantCopies('sessions-sweep-chain-cure', REPO);
-  const fresh = (src, tag, ctx = routeCtx()) => { const Mod = M12.load('src/routes/sessions.js', src, tag); Mod.setup(ctx); return Mod; };
+  // the checkpoint's B-0d3e loader guard (met at 2.369.411's second checkpoint): the TIP's own route loaded fresh is a deliberate
+  // unpatched copy (`same: true`) — only for the tip legs' tags, so a red control whose anchor went still fails by name
+  const TIP_TAGS = new Set(['first', 'second', 'no-worker', 'cure', 'cure2-spaced']);
+  const fresh = (src, tag, ctx = routeCtx()) => { const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) }); Mod.setup(ctx); return Mod; };
   // (1) a FIRST sweep (no list yet) whose worker RAN past its deadline: SAID (a 500), never walked again on this thread
   const GUARD = "      if (!(e && (e.noWorker || e.code === 'sweep-pool-down'))) throw e;\n";
   const first = async (src, tag) => {
-    const Mod = M12.load('src/routes/sessions.js', src, tag);
+    const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) });
     Mod._sweepTestSeam({ workerFile: HUNG, timeoutMs: 150 }); Mod.setup(routeCtx());
     calls.length = 0; const t0 = A.touched();
     for (const fn of SPY) fs[fn] = function (p, ...a) { if (typeof p === 'string' && (p.startsWith(PROJ) || p.startsWith(LINK))) calls.push(fn); return realFs[fn].call(this, p, ...a); };
@@ -505,7 +508,7 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
   const sfSrc = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8'), SFREQ = "const { SafeFs } = require('../safe-fs');";
   const sfAlive = M12.write('src/safe-fs.js', sfSrc.replace(NW, () => 'noWorker: !this._workers.some((r) => r.alive)'), 'noworker-alive');
   const second = async (src, tag) => {
-    const Mod = M12.load('src/routes/sessions.js', src, tag);
+    const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) });
     Mod._sweepTestSeam({ workerFile: HUNG, timeoutMs: 150, firstQueueMs: 60 }); Mod.setup(routeCtx());
     for (const r of Mod.sweepPool()._workers) r.backoff = 6;   // the respawn after a kill: 30 s away (the sixth deadline's wait, reached at once)
     const a = await getQ(Mod)();                                // the first sweep: the worker ran past its deadline, killed
@@ -523,7 +526,7 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
   // (1c) the delta read (S3): the ONE road left to «no worker» — a worker that cannot be created (`new Worker` throws at once: a
   // script name that is not a path) — the first sweep runs here, once, said; RED: a safe-fs copy whose wait never says noWorker
   const noWorkerRoad = async (src, tag) => {
-    const Mod = M12.load('src/routes/sessions.js', src, tag);
+    const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) });
     Mod._sweepTestSeam({ workerFile: 'not-a-worker-path.js', timeoutMs: 150, firstQueueMs: 60 }); Mod.setup(routeCtx());
     const t0 = A.touched(); let a = null; try { a = await getQ(Mod)(); } catch (e) { a = { code: 'threw' }; }
     const out = { code: a && a.code, rows: A.touched() - t0, ran: !!Mod.sweepPool()._ran };
@@ -599,7 +602,7 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
   const NONEFAIL = stub('none-fails', "const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (!m || !m.op) return; if (m.op === 'sessionsLookup') parentPort.postMessage({ id: m.id, ok: true, result: { none: true } }); else parentPort.postMessage({ id: m.id, ok: false, error: { message: 'the sweep failed', code: 'SWEEP_FAILS' } }); });");
   const SPACE = '      if (Date.now() - _sweepTriedAt < (_sweepTest.cacheTtlMs ?? 4500)) return null;';
   const reopens = async (src, tag) => {
-    const Mod = M12.load('src/routes/sessions.js', src, tag);
+    const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) });
     Mod._sweepTestSeam({ workerFile: NONEFAIL, lookupMs: 5000, cacheTtlMs: 60000, timeoutMs: null }); Mod.setup(routeCtx());   // a lookup waits out the failing sweep (it ends in ms once posted) — never joined by the second reopen
     const P = Mod.sweepPool(), call0 = P.call.bind(P); let sweeps = 0;
     P.call = (op, ...x) => { if (op === 'sessionsSweep') sweeps++; return call0(op, ...x); };
