@@ -307,10 +307,24 @@ console.log('⑦ THE WALK (主开发 00:28Z; 03:08Z): for EVERY case of the thre
   ok(r4.wrong > 0, 'RED CONTROL (03:08Z — a subject admitted HERE through a held Everyone or Task Group falls through to the wider rows): the walk names it', r4.first[0]);
   const F5 = await esMutant('src/lib/login-grant-model.js', "plan.locked.push({ key: k, through: w[0], still: outHere });", "plan.locked.push({ key: k, through: w[0], still: false });");
   const r5 = walk(F5, 3);
-  ok(r5.wrong > 0 && r5.first.some((f) => true), 'RED CONTROL (03:08Z — a locked line that says «经由» where THIS row leaves the subject out, «仍经由»): the walk names it', r5.first[0]);
+  ok(r5.wrong > 0 && r5.first.some((f) => f.page.admitted && f.verdict.length > 0), 'RED CONTROL (03:08Z — a locked line that says «经由» where THIS row leaves the subject out, «仍经由»): the walk names it — on an ADMITTED subject, the locked line\'s words', r5.first[0]);
   const F6 = await esMutant('src/lib/login-grant-model.js', "if (by) plan.leftOut[k] = by;", "plan.leftOut[k] = by || 'any-site';");
   const r6 = walk(F6, 3);
   ok(r6.wrong > 0, 'RED CONTROL (03:08Z — «不在「全部」里» drawn where no row holding Everyone leaves the subject out): the walk names it', r6.first[0]);
+  // THE SEVENTH CONTROL (07:17Z): a fault in byWhatOf ITSELF — the «除了» half of its probing dropped (a stopped conversation named
+  // only in a row's exceptions is never asked) — compiled into a copy of src/browser-login.js; the two oracles part
+  const BLm = (() => { const file = path.join(REPO, 'src/browser-login.js'); const src = fs.readFileSync(file, 'utf8'); const from = '[...(r && Array.isArray(r.to) ? r.to : []), ...(r && Array.isArray(r.except) ? r.except : [])]';
+    if (src.split(from).length !== 2) throw new Error('mutant: byWhatOf\'s probing line not found exactly once'); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.split(from).join('[...(r && Array.isArray(r.to) ? r.to : [])]'), file); return m.exports; })();
+  let parted = null;
+  for (const ta of OPTIONS) { for (const aa of OPTIONS) { for (const as of OPTIONS) {
+    const all = { 'this-account': ta, 'any-account': aa, 'any-site': as };
+    const raw = (sc) => (all[sc] ? [row(RES[sc], all[sc].to, all[sc].except)] : []);
+    if (!M.SCOPES.some((sc) => named(all[sc], X))) continue;
+    const bwm = BLm.byWhatOf({ rows: { thisAccount: raw('this-account'), anyAccount: raw('any-account'), anySite: raw('any-site') }, subjects: probes });
+    const viaBw = M.SCOPES.filter((sc) => (bwm[XS.key] || []).includes(sc)), oracle = M.SCOPES.filter((sc) => all[sc] && GM.admits(raw(sc), factsOf(XS)).ok);
+    if (JSON.stringify(viaBw) !== JSON.stringify(oracle)) { parted = { all, viaBw, oracle }; break; }
+  } if (parted) break; } if (parted) break; }
+  ok(!!parted && parted.oracle.length > 0 && parted.viaBw.length === 0, 'RED CONTROL (07:17Z — byWhatOf without its «除了» half): the two oracles part — a stopped conversation a row leaves out, admitted by another row, is never asked by «by what»; the grant model admits it', parted);
   const GS2 = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-grants.js'), 'utf8');
   ok(/\+ \(isStopped\(l\.key\) \? ` · \$\{words\.notRunning\}` : ''\)/.test(GS2), '(4) a stopped conversation drawn locked says «not running now» in the lock\'s own words (a locked row hides the row\'s own hint)');
   // the dialog draws from the plan and nothing else

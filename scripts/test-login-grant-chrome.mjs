@@ -21,6 +21,7 @@
 //      (never drawn like a covered one); a conversation that ALSO holds this login's own row stays ticked and removable, «也经由» beside it.
 //   ⑨ EVERYONE ON BOTH ROWS (主开发 00:28Z): the Everyone row's own text says «也经由：任何网站 · 除了 新对话», its chip keeps ✕, D (admitted
 //      by this row's Everyone) carries no mark.
+//   ⑩ A STOPPED CONVERSATION THE STAR ROW ADMITS (主开发 07:17Z): its locked chip and row say «当前未运行» in the lock's own words.
 // LGD_SHOTS_DIR=<dir> also writes the pictures (360 and 960) for the owner's look.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -67,11 +68,13 @@ const STAR_ALL = { resource: '*', scope: 'any-site', to: [{ kind: 'everyone' }],
 const DATA_ALL = { ...DATA, entries: [alice([OWN, STAR_ALL], { everyone: ['any-site'], 'group:g1': ['any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['any-site'] }), ...DATA.entries.slice(1)] };
 // EVERYONE ON BOTH ROWS (主开发 00:28Z): this login's own row holds Everyone, the star row holds Everyone except D — this row admits D
 const OWN_ALL = { resource: `${ORIGIN}#alice`, scope: 'this-account', to: [{ kind: 'everyone' }], except: [] };
+// A STOPPED CONVERSATION THE STAR ROW ADMITS (主开发 07:17Z): drawn locked, and its lock says «not running now» in its own words
+const DATA_GONE = { ...DATA, entries: [alice([OWN, SITE, { ...STAR, to: [conv('conv-b'), conv('conv-gone')] }], { 'conversation:conv-a': ['this-account'], 'conversation:conv-b': ['any-site'], 'conversation:conv-gone': ['any-site'], 'group:g1': ['any-account'] }), ...DATA.entries.slice(1)] };
 const DATA_BOTH = { ...DATA, entries: [alice([OWN_ALL, STAR_ALL], { everyone: ['this-account', 'any-site'], 'group:g1': ['this-account', 'any-site'], 'conversation:conv-a': ['this-account', 'any-site'], 'conversation:conv-b': ['this-account', 'any-site'], 'conversation:conv-d': ['this-account'] }), ...DATA.entries.slice(1)] };
 const entry = `import { showLoginGrantPicker, showAnySiteDialog, showAnyAccountDialog, wideHeaderDoors, loginHeld } from ${J('src/lib/vault-login-grants.js')};
 import { loginExtras } from ${J('src/lib/vault-login-row.js')};
 const q = new URLSearchParams(location.search), mode = q.get('mode') || 'login';
-const DATA = q.get('star') === 'everyone' ? ${JSON.stringify(DATA_ALL)} : q.get('star') === 'both' ? ${JSON.stringify(DATA_BOTH)} : ${JSON.stringify(DATA)};
+const DATA = q.get('star') === 'everyone' ? ${JSON.stringify(DATA_ALL)} : q.get('star') === 'both' ? ${JSON.stringify(DATA_BOTH)} : q.get('star') === 'gone' ? ${JSON.stringify(DATA_GONE)} : ${JSON.stringify(DATA)};
 const doors = { held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog };
 const rowOf = (e) => { const w = document.createElement('div'); w.className = 'vw-row'; w.style.margin = '12px'; w.dataset.login = e.name; const n = document.createElement('div'); n.className = 'vw-row-name'; n.textContent = e.user + ' · ' + e.origin.replace('https://', ''); const x = loginExtras({ entry: e.name }, DATA, { refresh: () => {}, doors }); w.append(n, x.box, ...x.doors); return w; };
 if (mode === 'login') showLoginGrantPicker(DATA.entries[0], DATA, { refresh: () => {} });
@@ -268,6 +271,15 @@ for (const [tag, o] of [['360', { vw: 360, vh: 780, mobile: true }], ['960', { v
   ok(r.chipX === 1 && r.chipLocked === false && /也经由：任何网站/.test(r.rowE) && /除了 新对话/.test(r.rowE) && r.locked === 0,
     `${tag}: Everyone held HERE and on the star row: its chip keeps its ✕, its own row says «也经由：任何网站 · 除了 新对话», and no conversation gets a locked chip`, r);
   ok(!/不在「全部」里/.test(r.rowD), `${tag}: D — left out by the star row but admitted by THIS row's Everyone — carries no «left out» mark`, r.rowD);
+  p.close();
+}
+console.log('⑩ a STOPPED conversation the star row admits — locked, and its lock says «当前未运行» in its own words');
+{
+  const p = await page({ vw: 960, vh: 900, query: 'mode=login&star=gone', sel: LOGIN + ' .pp-row[data-key="agent:conv-gone"]' });
+  const r = await p.ev(`(() => { const d = document.querySelector(${Q(LOGIN)}); const chip = [...d.querySelectorAll('.pp-chip-locked')].find((c) => c.dataset.key === 'agent:conv-gone'); const row = d.querySelector('.pp-row[data-key="agent:conv-gone"]');
+    return { chip: chip ? chip.textContent : '', rowLocked: row ? row.classList.contains('pp-locked') : null, rowWhy: row ? ((row.querySelector('.pp-lock-why') || {}).textContent || '') : '', rowHintShown: row ? [...row.querySelectorAll(':scope > .pp-hint:not(.pp-lock-why)')].filter((h) => getComputedStyle(h).display !== 'none').length : -1 }; })()`);
+  ok(/经由：任何网站/.test(r.chip) && /当前未运行/.test(r.chip) && r.rowLocked === true && /当前未运行/.test(r.rowWhy) && r.rowHintShown === 0,
+    'a stopped conversation the star row admits: its locked chip and its locked row say «经由：任何网站 · 当前未运行» — the lock carries the words its row\'s hidden hint used to', r);
   p.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
