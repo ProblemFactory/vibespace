@@ -847,7 +847,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const f = sock2(world);
     let clock = 1_000_000;
     const listeners = new Set(), items = [], events = [];
-    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async () => ep || (hostId ? { ok: false, code: 'remote', error: 'the browser runs on another machine' } : { ok: true, url }) /* the keeper's own answers (its hostId branch is ITS — the machine handle's) */, onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async (pid, o) => { (world.eps = world.eps || []).push(!!(o && o.fresh)); return ep || (hostId ? { ok: false, code: 'remote', error: 'the browser runs on another machine' } : { ok: true, url }); }, viewersFor: () => world.viewers || 0 /* B-346d: the live views watching it now */ /* the keeper's own answers (its hostId branch is ITS — the machine handle's) */, onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
       browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
@@ -918,6 +918,37 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     ok(again >= 1 && row && row.state === 'passkey_open' && view && view.passkey.state === 'passkey_open' && his && his.state === 'passkey' && X.items.length > items0,
       '⑨r2 rule 4: a ceremony the page was ALREADY waiting on when the watch came back (a socket that closed under him; a hub restart is the same road) is said — the hook\'s `pending` gives it with its age: passkey_open on his key, his window\'s fact, the For-you item — never silence', { again, row: row && row.state, view: view && view.passkey.state, his: his && his.state, items: X.items.length - items0 });
     X.D.shutdown();
+  }
+  // B-346d (the owner's live view said «not watching» of a running browser after its daemon restarted): an AGENT's browser whose
+  // live view is OPEN — its watch socket fails (the relaunched Chrome on a new port) ⇒ re-armed by itself, its endpoint asked FRESH
+  // (the live daemon's port, never a remembered one); the accepted rule stands: nobody browsing it, no live view ⇒ no re-arm
+  {
+    const seen = async (viewers) => {
+      const X = world2({ holders: 'agent', print: false, rearmMs: 1 });
+      await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open');
+      X.world.viewers = viewers; const s0 = X.world.sockets, e0 = (X.world.eps || []).length;
+      try { X.f.sock().h.close(); } catch { /* */ }
+      const back = !!(await until2(() => X.world.sockets > s0 && X.w() && X.w().state === 'open', viewers ? 1500 : 120));
+      const fresh = (X.world.eps || []).slice(e0);
+      const out = { back, fresh, sockets: X.world.sockets - s0 };
+      X.D.shutdown();
+      return out;
+    };
+    const looked = await seen(1), nobody = await seen(0);
+    ok(looked.back && looked.fresh.length >= 1, 'B-346d: an agent\'s browser whose live view is open — its watch socket failed ⇒ re-armed by itself, its endpoint asked of the keeper again (which keys the url by the browser\'s RUN — test-browser-keeper)', looked);
+    ok(!nobody.back && nobody.sockets === 0, 'B-346d CONTROL (the accepted rule): the same close with nobody browsing it and no live view open ⇒ no re-arm (its next verb arms it)', nobody);
+    // …and a browser STARTED AGAIN (its daemon relaunched by the next verb) under an open live view is watched again at once
+    const again = async (viewers) => {
+      const X = world2({ holders: 'agent', print: false, rearmMs: 1 });
+      await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open');
+      X.world.viewers = viewers; const s0 = X.world.sockets;
+      await X.lease({ kind: 'browser-ready', profileId: PID, why: 'start' });
+      const back = !!(await until2(() => X.world.sockets > s0 && X.w() && X.w().state === 'open', viewers ? 1500 : 120));
+      X.D.shutdown();
+      return back;
+    };
+    const readyViewed = await again(1), readyNobody = await again(0);
+    ok(readyViewed && !readyNobody, 'B-346d: a browser started again under an open live view is watched again at once (its url read for THAT run); with nobody browsing and no view, it waits for its next verb (as before)', { readyViewed, readyNobody });
   }
   // the re-arm is bounded (rearmMs 1: the five tries' backoff is 1+2+4+8+16 ms — r5: was 5 ms, the waits scaled with it)
   {

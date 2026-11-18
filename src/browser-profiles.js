@@ -1504,6 +1504,16 @@ function ephemeralPairsVerdict(pairs, browserKey) {
  * client of a managed ephemeral browser (the agent's verbs, a live view's
  * `stream status`) runs under the PAIRS, so the keeper's launch passes this.
  */
+/** B-346d (the owner's live view said «not watching», ECONNREFUSED on the OLD port after its daemon restarted): the cache key of a
+ *  conversation's own browser's CDP url is per RUN of that browser — its record's start (else its pid) — so a relaunched daemon (a
+ *  new Chrome on a new port) is never answered with the previous run's port. `ephs` = the ephemeral profiles, `browsers` = the
+ *  records by profile id. PURE. */
+function childUrlKey(handle, ephs = [], browsers = {}) {
+  const h = String(handle || '');
+  const p = (Array.isArray(ephs) ? ephs : []).find((x) => x && x.owner && String(x.owner.id) === h) || null;
+  const rec = p && browsers && typeof browsers === 'object' ? browsers[p.id] : null;
+  return 'child:' + h + '@' + (rec ? String(Number(rec.startedAt) || rec.pid || '') : '');
+}
 function pairsIdleMs(pairs) {
   for (const s of Array.isArray(pairs) ? pairs : []) {
     if (typeof s !== 'string' || !s.startsWith('AGENT_BROWSER_IDLE_TIMEOUT_MS=')) continue;
@@ -3473,7 +3483,7 @@ module.exports = {
   VARIANTS, REJECTED_VARIANTS, ISOLATED_VARIANTS, isolatedVariant, variantLadder, fencedRungReason, configNamesProfile,
   SOCKET_PATH_MAX, SOCKET_DIR_BASE, SUN_PATH_LIMIT, CHROME_SINGLETON_TAIL, BROWSER_TMP_SHORT_BASE, browserTmpDir, launchFatalOf, configRefusalOf, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
   USER_CONFIG_REL, PROJECT_CONFIG_NAME, layerProjectConfig,
-  DEFAULT_IDLE_TIMEOUT_MS, idleTimeoutMs,
+  DEFAULT_IDLE_TIMEOUT_MS, idleTimeoutMs, childUrlKey,
   browserEnvFor,
   REMOTE_SCRATCH_DIR_SH, REMOTE_SCRATCH_STALE_DAYS, TOP_LEVEL_PROFILE_AWK, remoteBrowserPrelude,
   PIN_APPLIES_FROM, pinResolution, generatedConfig, generatedConfigParts,

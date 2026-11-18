@@ -7582,12 +7582,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!rec || rec.state !== 'ready') return { ok: false, code: 'not-running', error: 'the browser is not running' };
     if (rec.hostId) return { ok: false, code: 'remote', error: 'the browser runs on another machine' }; // lane passkey-browse-yourself r3: the watch says THIS answer's cause (never its own hostId branch)
     if (!isEph(p)) return rec.cdpUrl ? { ok: true, url: rec.cdpUrl } : { ok: false, error: 'the browser answered no CDP url' }; // the record's own (a restart writes the new one)
-    if (fresh) vpUrls.delete('child:' + String(p.owner.id)); // a watch that went down re-asks the daemon (a relaunched Chrome has a new port)
+    if (fresh) vpUrls.delete(childUrlKey(p.owner.id)); // a watch that went down re-asks the daemon (a relaunched Chrome has a new port)
     return withCdpUrl({ kind: 'child', handle: p.owner.id }, async (url) => ({ ok: true, url }));
+  }
+  /** B-346d (the owner's live view: «not watching», ECONNREFUSED on the OLD port after its daemon restarted): a conversation's own
+   *  browser's url is cached per RUN of its browser — the record's start — so a relaunched daemon (a new Chrome on a new port) is
+   *  never answered with the previous run's port: its key misses and the url is asked of the live daemon. The cache had one key
+   *  per conversation, and cdpEndpointFor's answer never fails, so nothing evicted it across a restart. A run's older keys go. */
+  function childUrlKey(handle) {
+    const h = String(handle || '');
+    const key = B.childUrlKey(h, reg.profiles.filter(isEph), reg.browsers); // the profiles only — never ephemerals() (it stats every kept folder)
+    for (const k of [...vpUrls.keys()]) if (k !== key && k.startsWith('child:' + h + '@')) vpUrls.delete(k); // the previous runs' urls go
+    return key;
   }
   async function withCdpUrl(target, fn) {
     const S = require('../browser-stream.js');
-    const key = target.kind === 'ephemeral' ? 'eph:' + String(target.sessionName || '') : target.kind === 'child' ? 'child:' + String(target.handle || '') : 'p:' + String(target.profileId || '');
+    const key = target.kind === 'ephemeral' ? 'eph:' + String(target.sessionName || '') : target.kind === 'child' ? childUrlKey(target.handle) : 'p:' + String(target.profileId || '');
     const resolveUrl = async () => {
       if (target.kind === 'ephemeral' || target.kind === 'child') {
         const e = target.kind === 'child' ? ephemeralFor(String(target.handle || '')) : null;
@@ -7796,7 +7806,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
-    cdpEndpointFor, setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    cdpEndpointFor, viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports

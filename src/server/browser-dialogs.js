@@ -255,6 +255,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const humanHolds = (pid) => { if (typeof holdersOf !== 'function') return false; try { return (holdersOf(String(pid)) || []).some((h) => h && h.human); } catch { return false; } };
   // acceptance r1 (MAJOR 1): WHO holds it decides the watch's mode — a conversation ⇒ 'agent' (the agent browser's policies);
   // only the person ⇒ 'person' (observation only: his own Chrome asks him, as on a browser no agent touched)
+  // B-346d: a live view is watching this browser now (the keeper's viewer count) — its watch re-arms by itself after a socket that
+  // failed (a daemon restart, a relaunched Chrome on a new port): the view never says «not watching» of a browser that runs
+  const viewed = (pid) => { try { return !!(keeper && typeof keeper.viewersFor === 'function' && keeper.viewersFor(String(pid)) > 0); } catch { return false; } };
   const agentHolds = (pid) => { if (typeof holdersOf !== 'function') return false; try { return (holdersOf(String(pid)) || []).some((h) => h && !h.human); } catch { return false; } };
   const modeOf = (pid) => (humanHolds(pid) && !agentHolds(pid) ? 'person' : 'agent');
   const rearms = new Map(); // profileId → {t: the one pending re-arm, n: the tries so far} of a socket that closed under his browsing
@@ -271,7 +274,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (r.t) return;
     rearms.set(pid, r);
     if (r.n >= REARM_TRIES) { gaveUp.set(pid, now()); try { log.warn?.(`[browser-dialog] ${pid}: the watch's socket failed ${r.n} re-arms in a row — stopped trying (the next arm of this browser starts again)`); } catch { /* */ } emit({ kind: 'passkey', profileId: pid, state: 'unwatched', why: 'gave-up' }); return; }
-    const t = setTimeout(() => { r.t = null; if (humanHolds(pid)) arm(pid, { budgetMs: 0, rearm: true }).catch(() => { /* the watch says why in its own journal line */ }); }, rearmMs * 2 ** r.n);
+    const t = setTimeout(() => { r.t = null; if (humanHolds(pid) || viewed(pid)) arm(pid, { budgetMs: 0, rearm: true }).catch(() => { /* the watch says why in its own journal line */ }); }, rearmMs * 2 ** r.n);
     r.n++;
     if (t.unref) t.unref();
     r.t = t;
@@ -445,7 +448,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     emit({ kind: 'down', profileId: w.profileId, why, closed: open.map((d) => d.id) });
     if (!keepNotices) withdrawNotices(open.map((d) => d.id)); // a VibeSpace shutdown keeps them: the dialog is still open in Chrome
     if (why === SOCKET_CLOSED && w.openedAt && now() - w.openedAt >= REARM_HEALTHY * rearmMs) { const r = rearms.get(w.profileId); if (r && !r.t) rearms.delete(w.profileId); } // a healthy socket's close starts the backoff over
-    if (why === SOCKET_CLOSED && humanHolds(w.profileId)) rearmLater(w.profileId); // lane passkey-browse-yourself (rule 1): re-opened on reconnect — acceptance r1: with a backoff, REARM_TRIES at most
+    if (why === SOCKET_CLOSED && (humanHolds(w.profileId) || viewed(w.profileId))) rearmLater(w.profileId); // lane passkey-browse-yourself (rule 1): re-opened on reconnect — acceptance r1: with a backoff, REARM_TRIES at most; B-346d: while a live view watches too (each re-arm reads the endpoint FRESH from the live daemon — arm's down road)
   }
   /** One page tab: attach (flat session) + Page.enable — the enable bounded; a tab that never answers is HELD. */
   function track(w, info) {
@@ -941,6 +944,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     dropOutcomes(String(profileId || ''));
     openers.delete(String(profileId || ''));
     refusals.delete(String(profileId || '')); gaveUp.delete(String(profileId || '')); // acceptance r3: a refusal is the stopped browser's — never said of the next one (r5: nor the given-up socket's)
+    { const r = rearms.get(String(profileId || '')); if (r && r.t) clearTimeout(r.t); rearms.delete(String(profileId || '')); } // B-346d (its adversarial read): a stopped browser's pending re-arm and its tries are not the next browser's
     if (!w) return;
     try { w.ws && w.ws.close(1000); } catch { /* closing */ }
     down(w, why);
@@ -5179,7 +5183,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const pid = String(ev.profileId);
       if (ev.kind === 'browser-stopped' || ev.kind === 'browser-ready') kernelOf.delete(pid); // lane browser-surfaces: a browser started again may be another engine (Change build…) — asked again
       if (ev.kind === 'browser-stopped') { clearProfileLoginFencesOnStop(pid, watches.get(pid)); disarm(ev.profileId, 'the browser stopped'); }
-      else if (ev.kind === 'browser-ready') { if (!ev.adopted) { stashedSnapshotsByProfile.delete(pid); stashedTabFencesByProfile.delete(pid); try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ } } resetOutcomes(ev.profileId); openers.delete(pid); refusals.delete(pid); gaveUp.delete(pid); const w = watches.get(pid); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId, { by: 'person' }); } // lane passkey-browse-yourself: a heal under the person's own browsing is watched again (acceptance r2: a new browser — its opener is asked again)
+      else if (ev.kind === 'browser-ready') { if (!ev.adopted) { stashedSnapshotsByProfile.delete(pid); stashedTabFencesByProfile.delete(pid); try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ } } resetOutcomes(ev.profileId); openers.delete(pid); refusals.delete(pid); gaveUp.delete(pid); const w = watches.get(pid); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId, { by: 'person' }); if (viewed(ev.profileId)) return arm(ev.profileId, { by: 'viewer' }); } // B-346d: a browser started again under an open live view is watched again at once (its url read for THIS run) // lane passkey-browse-yourself: a heal under the person's own browsing is watched again (acceptance r2: a new browser — its opener is asked again)
       // lane passkey-browse-yourself (rule 1): the person's own browsing starts (his press launched or joined the browser) ⇒ the
       // watch opens now — before any agent verb, before his window connects (the keeper's settleArming bounds the wait)
       else if (ev.kind === 'human-start') return arm(ev.profileId, { by: 'person' }); // (arm re-reads WHO holds it: his alone ⇒ the person's watch)
