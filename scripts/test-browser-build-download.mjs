@@ -247,7 +247,12 @@ console.log('— ⑥ the slot: one at a time; unzip absent; the disk row');
   const mid = kk.chromeBuildFacts().install;
   ok(fs.existsSync(plan(v).part) && mid.step === 'fetch' && mid.bytes > 0 && mid.total === MODES.get(v).zip.length, 'mid-download: the bytes stream into chrome-<v>.part; the facts say N of M bytes (the progress line)', mid);
   ok((await done()).done === v, '…and it lands');
-  const kn = mkKeeper(path.join(ROOT, 'data-nozip'), { env: () => ({ PATH: path.dirname(process.execPath), HOME }) });
+  // B-8f20: absence is FAKED by a PATH dir holding only a link to node — never dirname(process.execPath), which on a box whose
+  // node lives in /usr/bin (a lane env without nvm) holds unzip too, and the leg could not fake it (red there, 527/528)
+  const noZipBin = path.join(ROOT, 'bin-nozip'); fs.mkdirSync(noZipBin, { recursive: true });
+  try { fs.symlinkSync(process.execPath, path.join(noZipBin, 'node')); } catch (err) { if (err.code !== 'EEXIST') throw err; }
+  ok(!fs.existsSync(path.join(noZipBin, 'unzip')) && fs.realpathSync(path.join(noZipBin, 'node')) === fs.realpathSync(process.execPath), 'PREMISE: the PATH the leg hands holds node (a link to this very node) and no unzip, wherever node lives');
+  const kn = mkKeeper(path.join(ROOT, 'data-nozip'), { env: () => ({ PATH: noZipBin, HOME }) });
   const n0 = hits.length;
   const e3 = await thr(() => kn.installChromeBuild({ version: '151.0.7872.0' }));
   ok(e3 && e3.code === 'unzip_unavailable' && hits.length === n0 && !kn.chromeBuildFacts().install.running, 'unzip absent: refused `unzip_unavailable` before ANY request (not even the list)', e3 && e3.message);
