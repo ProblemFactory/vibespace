@@ -203,7 +203,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     // the bearer itself never rides an answer — a vendor echo of the request is cut out of ANY body, binary too (verify r1 M5)
     const hdrs = F.responseHeaders(res.headers);
     for (const k of Object.keys(hdrs)) hdrs[k] = hdrs[k].split(token).join(REDACTED);
-    const scopeSays = res.status === 403 ? scopeRefusalOf(c, cur, res.headers.get('www-authenticate')) : null;   // B-4e97: a 403 for a missing scope said, never silent
+    // B-4e97: a 403 for a missing scope said, never silent; cure: the challenge line gets the SAME scrub as the answer's headers
+    // (the bearer never rides an answer — not even inside a vendor's echo of it in scope=)
+    const scopeSays = res.status === 403 ? scopeRefusalOf(c, cur, String(res.headers.get('www-authenticate') || '').split(token).join(REDACTED)) : null;
     return { ok: true, status: res.status, headers: beltValue(hdrs), ...beltBody(scrubToken(b.body, token), res.headers.get('content-type')), bytes: b.bytes, truncated: b.truncated, ms: now() - t0, ...(scopeSays ? { scopeSays } : {}) };
   }
   /** B-4e97: the ONE line a scope refusal adds — the vendor's own challenge names the scope, else the row's declaration for

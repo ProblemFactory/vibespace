@@ -165,6 +165,8 @@ const vendor = http.createServer((req, res) => {
     if (req.url === '/token') { tokenHits++; await new Promise((r) => setTimeout(r, 30)); res.writeHead(tokenFail ? 400 : 200, { 'content-type': 'application/json' }); return res.end(tokenFail ? '{"error":"invalid_grant"}' : '{"access_token":"ya29.NEW","expires_in":3600}'); }
     if (req.url.startsWith('/echo-bin')) { res.writeHead(200, { 'content-type': 'application/octet-stream' }); return res.end(`auth=${req.headers.authorization}`); }
     if (req.url.startsWith('/limited')) { res.writeHead(429, { 'retry-after': '7', 'content-type': 'application/json' }); return res.end('{"code":99991400}'); }
+    // B-4e97 cure: a challenge that ECHOES the request's own bearer inside scope= (the bearer never rides an answer)
+    if (req.url.startsWith('/scope403echo')) { const bearer = String(req.headers.authorization || '').replace(/^Bearer /, ''); res.writeHead(403, { 'content-type': 'application/json', 'www-authenticate': `Bearer error="insufficient_scope", scope="${bearer} https://scopes.example.test/drive"` }); return res.end('{"error":{"code":403}}'); }
     // B-4e97: a scope refusal with the STANDARD challenge (RFC 6750 §3), and a bare 403
     if (req.url.startsWith('/scope403')) { res.writeHead(403, { 'content-type': 'application/json', 'www-authenticate': 'Bearer realm="https://auth.example.test/", error="insufficient_scope", scope="https://scopes.example.test/drive.readonly https://scopes.example.test/drive"' }); return res.end('{"error":{"code":403,"status":"PERMISSION_DENIED"}}'); }
     if (req.url.startsWith('/plain403')) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end('{"error":{"code":403,"status":"PERMISSION_DENIED"}}'); }
@@ -293,6 +295,27 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
 }
 
 // ── ③ THE REAL ENGINE'S TIER ROWS ──
+console.log('③b B-4e97 cure: the engine\'s own scopes row — what the sign-in granted, an empty or a missing list = not known');
+{
+  const ESRC3 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const row3 = async (Mod, tag) => {
+    const dataDir = fs.mkdtempSync(path.join(tmpRoot, `sc-${tag}-`));
+    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+    const recs = [['s-held', ['https://scopes.example.test/a', 'https://scopes.example.test/b']], ['s-empty', []], ['s-none', null]].map(([id, sc]) => ({ id, kind: 'fake-poll', label: id, enabled: true, options: {}, state: {}, auth: sc === null ? { tokenEnc: null, expiresAt: null } : { tokenEnc: null, expiresAt: null, scopes: sc }, lastPass: null, consecutiveFailures: 0 }));
+    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: recs }));
+    const e = Mod.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, log: { log() {}, info() {}, warn() {}, error() {} }, fetch: async () => { throw new Error('no network'); } });
+    const sc = (id) => { const c = e.apiCredential(id); return c && typeof c.scopes === 'function' ? c.scopes() : 'no credential'; };
+    const out = { held: sc('s-held'), empty: sc('s-empty'), none: sc('s-none') };
+    try { e.stop(); } catch { }
+    return out;
+  };
+  const r3 = await row3(require(path.join(REPO, 'src/server/channels-engine.js')), 'real');
+  ok(JSON.stringify(r3.held) === JSON.stringify(['https://scopes.example.test/a', 'https://scopes.example.test/b']) && r3.empty === null && r3.none === null, 'the engine\'s credential row says the scopes the sign-in granted; an EMPTY list and a missing one are «not known» (null — every declared host kept), never «holds nothing»', JSON.stringify(r3));
+  const ROWS3 = 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) && rec.auth.scopes.length ? rec.auth.scopes.map(String) : null),';
+  ok(ESRC3.split(ROWS3).length === 2, 'control setup: the engine\'s scopes row is present once');
+  const r3c = await row3(MUT.load('src/server/channels-engine.js', ESRC3.replace(ROWS3, 'scopes: () => (rec.auth && Array.isArray(rec.auth.scopes) ? rec.auth.scopes.map(String) : null),'), 'scopes-empty'), 'ctl');
+  ok(Array.isArray(r3c.empty) && r3c.empty.length === 0, 'RED CONTROL: a row that hands an empty list on — «holds nothing», every Google host dropped (the leg above is red on it)', JSON.stringify(r3c));
+}
 console.log('③ the engine: the `apiGrants` table (widen-only, the owner\'s, persisted, no reach)');
 {
   const { create } = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -877,6 +900,9 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
     };
   };
   const X = await run4(ORCH);
+  const ECHO = async (Mod) => { const eng = gEng(), api = mkOrch(Mod, eng, fs.mkdtempSync(path.join(tmpRoot, 'gme-'))); await api.setTiers('gm-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]); return api.call(A, { cred: 'gm-1', method: 'GET', path: '/scope403echo', host: 'gmail.googleapis.com' }); };
+  const xe = await ECHO(ORCH);
+  ok(xe.status === 403 && /lacks the permission this API needs/.test(xe.scopeSays || '') && !JSON.stringify(xe).includes('ya29-TOKEN-SECRET'), 'B-4e97 cure: a challenge that echoes the request\'s own bearer in scope= is scrubbed like the headers — the scope line is said, the bearer is not', JSON.stringify(xe).slice(0, 400));
   ok(X.docs.ok && X.docs.hosts.join(',') === 'www.googleapis.com,gmail.googleapis.com' && X.docs.needsScope.length === 6 && /did not ask for/.test(X.docs.needsScopeSays), '`api docs` lists the hosts the held token reaches and names the six it cannot, with the scopes they need', JSON.stringify({ hosts: X.docs.hosts, needs: (X.docs.needsScope || []).map((n) => n.host) }));
   ok(X.sc.ok && X.sc.status === 403 && /lacks the permission this API needs \(https:\/\/scopes\.example\.test\/drive\.readonly or https:\/\/scopes\.example\.test\/drive\)/.test(X.sc.scopeSays || ''), 'a 403 carrying the standard insufficient_scope challenge gains ONE line naming the scopes the vendor named', X.sc.scopeSays);
   ok(X.unreach.status === 403 && /lacks the permission/.test(X.unreach.scopeSays || '') && X.unreach.scopeSays.includes(GS('drive.readonly')), 'a bare 403 from a host the held token cannot reach is said too, with the row\'s scopes', X.unreach.scopeSays);
@@ -902,6 +928,10 @@ console.log('\nB-4e97: the raw API says which hosts the token reaches, and a sco
   ok(c4.code === 0 && /"status": 403/.test(c4.out) && /"scopeSays": "the token lacks the permission this API needs/.test(c4.out), '`vibespace-channels api … GET` prints the scope line beside the 403', c4.err || c4.out.slice(0, 400));
   // CONTROLS: the release's docs (every declared host) and run (no line)
   const OSRC4 = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf-8');
+  const SCRUB = "scopeRefusalOf(c, cur, String(res.headers.get('www-authenticate') || '').split(token).join(REDACTED))";
+  ok(OSRC4.split(SCRUB).length === 2, 'control setup: the scrubbed challenge read is present once');
+  const xeOld = await ECHO(MUT.load('src/server/channel-api.js', OSRC4.replace(SCRUB, "scopeRefusalOf(c, cur, res.headers.get('www-authenticate'))"), 'b4e97-noscrub'));   // stale-pins: kept (the release's read, restored by the red control)
+  ok(JSON.stringify(xeOld).includes('ya29-TOKEN-SECRET'), 'RED CONTROL: the release\'s challenge read — the echoed bearer rides the scope line (the leg above is red on it)', JSON.stringify(xeOld).slice(0, 300));
   const DOCS_NEW = "hosts: r.reach, ...(r.needs.length ? { needsScope: r.needs,";
   const RUN_NEW = "ms: now() - t0, ...(scopeSays ? { scopeSays } : {}) };";
   ok(OSRC4.split(DOCS_NEW).length === 2 && OSRC4.split(RUN_NEW).length === 2, 'control setup: the docs line and the run line are present once each');
