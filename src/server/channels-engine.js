@@ -7272,20 +7272,27 @@ function create(deps = {}) {
    *  the old one — each keeps refreshing with its own minted client (B-166e) until the vendor deletes that client. Per preset
    *  (integration row + key): ONE For-you item naming the preset, «N account(s) still signed in with the old one», its door
    *  the Re-authorize of the next such account (by label), redrawn as N falls, resolved at zero. THE MEMO IS THE PRESET'S, on
-   *  the adapters store (`clientSwaps[row|key] = {to, itemId, closed}`), kept after the item resolves: the same swap is said
+   *  the adapters store (`clientSwaps[row|key] = {to, itemId, closed, sig}` — `to` the swap's client, at the close the client IN
+   *  FORCE when no sign-in is left on another; `sig` the words and the door last drawn), kept after the item resolves: the same swap is said
    *  ONCE — read again, after a restart, after a dismissal, after an account comes back (re-enabled) — and a swap back is a new
    *  one (another `to`). Counted: enabled accounts whose token names a client (one minted before the B-166e rule names none).
    *  NOTHING is judged while the vault is locked, and a preset whose accounts' tokens this check cannot read, or whose preset is
    *  withdrawn, is left as it stands. Run at a presets reload / the vault opening, at boot, and after an account's sign-in,
    *  removal or enable changes — ONE AFTER ANOTHER (a reload then the vault opening never file twice). */
-  let swapChain = Promise.resolve();
+  let swapChain = Promise.resolve(), swapQueued = null;
+  const blindSaid = new Set();   // presets whose unread sign-in was said in the journal (once, until it reads again)
   function clientSwapCheck() {
-    const run = swapChain.then(() => clientSwapCheckNow());
+    // a burst coalesces: one check running, at most ONE queued (it reads the state after the running one)
+    if (swapQueued) return swapQueued;
+    const run = swapChain.then(() => { swapQueued = null; return clientSwapCheckNow(); });
+    swapQueued = run;
     swapChain = run.catch(() => {});
     return run;
   }
+  const swapMemoOf = (x) => (x && typeof x === 'object' && typeof x.to === 'string' && x.to
+    ? { to: x.to, itemId: typeof x.itemId === 'string' && x.itemId ? x.itemId : null, closed: x.closed === true, sig: typeof x.sig === 'string' ? x.sig : '' } : null);   // a hand-edited / older memo read strictly
   async function clientSwapCheckNow() {
-    if (!integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;
+    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;
     const memos = (() => { const m = store.adapters.live().clientSwaps; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; })();
     const keys = new Map();   // `${row}|${key}` → { key, to, kind, preset, old: [rec], blind }
     for (const rec of adapterRecords().adapters) {
@@ -7296,48 +7303,74 @@ function create(deps = {}) {
       const mk = `${mod.integration}|${key}`;
       let k = keys.get(mk);
       if (!k) {
-        let v = null; try { const r = integrations.resolveIntegration(mod.integration, { credentialKey: key }); v = r && r.source === 'cluster' && r.values ? r.values : null; } catch { v = null; }
-        keys.set(mk, (k = { key, to: v && v.clientId ? String(v.clientId) : '', kind: mod.label || rec.kind, preset: key.slice(CLUSTER_PREFIX.length), old: [], blind: false }));
+        let r = null; try { r = integrations.resolveIntegration(mod.integration, { credentialKey: key }); } catch { r = null; }
+        const v = r && r.source === 'cluster' && r.values ? r.values : null;
+        keys.set(mk, (k = { key, to: v && v.clientId ? String(v.clientId) : '', kind: mod.label || rec.kind, label: (r && r.clusterLabel) || '', old: [], stray: 0, blind: false }));
       }
-      if (!k.to || rec.enabled === false) continue;
+      if (!k.to) continue;
       const rd = tokensFor(rec).read();
       if (!rd.token) { if (rd.why !== 'never-authenticated') k.blind = true; continue; }
       const minted = rd.token.client && typeof rd.token.client.id === 'string' ? rd.token.client.id : '';
-      if (minted && minted !== k.to) k.old.push(rec);
+      if (!minted || minted === k.to) continue;
+      k.stray++;   // on another client — counted or not (a disabled account / a dead sign-in is still THERE: the swap is not over)
+      // counted: an ENABLED account with a live sign-in (a dead one is said by its own item, a disabled one is not in use)
+      if (rec.enabled !== false && !rec.signinDead) k.old.push(rec);
     }
+    const byLabel = new Map();
+    for (const k of keys.values()) if (k.label) byLabel.set(k.label, (byLabel.get(k.label) || 0) + 1);
+    for (const k of keys.values()) { const bare = k.key.slice(CLUSTER_PREFIX.length); k.preset = k.label ? (byLabel.get(k.label) > 1 ? `${k.label} (${bare})` : k.label) : bare; }
     // a preset whose last account left it (removed, moved to another key): nothing is on its old client any more
-    for (const [mk, m] of Object.entries(memos)) if (!keys.has(mk) && m && m.to) keys.set(mk, { key: mk.slice(mk.indexOf('|') + 1), to: String(m.to), old: [], blind: false });
+    for (const [mk, raw] of Object.entries(memos)) { const m = swapMemoOf(raw); if (!keys.has(mk) && m) keys.set(mk, { key: mk.slice(mk.indexOf('|') + 1), to: m.to, old: [], stray: 0, blind: false }); }
     const close = (id) => { try { const it = userTodos && id ? userTodos.get(id) : null; if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(id, 'done', RESOLVED_BY); } catch { } };
     const next = { ...memos };
     let changed = false;
     for (const [mk, k] of keys) {
-      if (k.blind || !k.to) continue;   // a token not read / the preset withdrawn: as it stands
-      const m = memos[mk] && typeof memos[mk] === 'object' ? memos[mk] : null;
+      // A PRESET THIS CHECK CANNOT FULLY READ is left as it stands (a count down on a sign-in it cannot read would be a guess) —
+      // said ONCE in the journal while it lasts (the 22:50Z choice: say it, never count only the readable part)
+      if (k.blind) { if (!blindSaid.has(mk)) { blindSaid.add(mk); log.warn(`[channels] ${k.key}: a sign-in under this preset cannot be read — its client-swap notice waits until every one reads`); } continue; }
+      blindSaid.delete(mk);
+      if (!k.to) continue;   // the preset withdrawn: as it stands (the accounts' own refresh says it)
+      const m = swapMemoOf(memos[mk]);
       try {
-        if (!k.old.length) {   // none left on the old client: the item resolved — the memo stays (the same swap is never said again)
-          if (m && !m.closed) { close(m.itemId); next[mk] = { ...m, closed: true }; changed = true; }
+        if (!k.old.length) {
+          // none COUNTED on the old client: the item resolved. The memo keeps the client IN FORCE only when no sign-in under the
+          // preset names another client (a swap reverted: a later swap away from it is a new one); while a disabled account or a
+          // dead sign-in is still on the old client, the swap is not over — the memo keeps the swap's own client
+          const to = k.stray ? (m ? m.to : k.to) : k.to;
+          if (m && (!m.closed || m.to !== to)) { close(m.itemId); next[mk] = { ...m, to, closed: true }; changed = true; }
           continue;
         }
         if (m && m.to === k.to && m.closed) continue;   // resolved, then an account back on the old client (re-enabled): said once
         k.old.sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)) || (a.id < b.id ? -1 : 1));
-        const n = k.old.length;
+        const n = k.old.length, labels = k.old.map((r) => r.label || r.id).join(', ');
         const text = `${k.kind}: the company preset «${k.preset}» signs in with another client now — ${n} account(s) still signed in with the old one; re-authorize each`;
-        const i18n = { text: { key: i18nKey('{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each'), params: { kind: k.kind, preset: k.preset, n } }, source: INBOX_SOURCE };
-        const detail = `Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: ${k.old.map((r) => r.label || r.id).join(', ')}.\nRe-authorize opens the next one; this item resolves when none is left.`;
+        const L1 = 'Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: {labels}.';
+        const L2 = 'Re-authorize opens the next one; this item resolves when none is left.';
+        const detail = `${L1.replace('{labels}', labels)}\n${L2}`;
+        const i18n = { text: { key: i18nKey('{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each'), params: { kind: k.kind, preset: k.preset, n } }, detail: [{ key: i18nKey(L1), params: { labels } }, { key: i18nKey(L2), params: {} }], source: INBOX_SOURCE };
         const action = { type: 'channel-reauth', adapterId: k.old[0].id };
-        if (m && m.to === k.to) {   // the same swap: its item redrawn while open (a dismissal stands)
-          if (m.itemId && userTodos && typeof userTodos.redrawItem === 'function') userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n, action });
+        const sig = JSON.stringify([text, detail, action.adapterId]);
+        if (m && m.to === k.to) {   // the same swap: its item redrawn — only when its words or its door moved (a dismissal stands)
+          if (m.sig !== sig && m.itemId && userTodos && typeof userTodos.redrawItem === 'function') {
+            const r = userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n, action });
+            if (r && r.ok) { next[mk] = { ...m, sig }; changed = true; }
+          }
           continue;
         }
-        if (m && !m.closed) close(m.itemId);   // an older swap of this preset (another `to`): superseded
         if (!userTodos || typeof userTodos.add !== 'function') continue;
-        const item = userTodos.add(INBOX_KEY, { origin: 'channels', kind: 'action', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', action, i18n });
-        next[mk] = { to: k.to, itemId: item && item.id ? item.id : null };
+        // A NEW SWAP: filed FIRST (a full tray refuses it by name: the older item stays), then an older swap's item superseded
+        const item = userTodos.add(INBOX_KEY, { origin: 'channels', kind: 'action', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', action, i18n, openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)) });
+        const itemId = item && item.id ? item.id : null;
+        if (m && !m.closed && m.itemId && m.itemId !== itemId) close(m.itemId);
+        next[mk] = { to: k.to, itemId, closed: false, sig };
         changed = true;
         log.log(`[channels] ${k.key}: the preset's client changed — ${n} account(s) still signed in with the old one, said once`);
       } catch (e) { log.warn(`[channels] ${k.key}: the client-swap notice could not be kept: ${(e && e.message) || e}`); }
     }
-    if (changed) await store.adapters.update(() => { store.adapters.live().clientSwaps = next; });
+    if (changed && !stopped) {
+      try { await store.adapters.update(() => { store.adapters.live().clientSwaps = next; }); }
+      catch (e) { log.warn(`[channels] the client-swap memo was not written: ${(e && e.message) || e} — the next check reads the presets again`); }
+    }
   }
   async function retractNames(rec, why = 'a profile was read') {
     if (!rec.namesItem) return;
@@ -7431,6 +7464,7 @@ function create(deps = {}) {
       } catch (e) { log.warn(`[channels] ${rec.id}: could not file the dead sign-in in the inbox: ${(e && e.message) || e}`); }
     }
     await store.adapters.update(() => { rec.signinDead = { cause, since, item, at: now(), ...(stallMs ? { heldMs: stallMs } : {}), ...(stallWhy ? { heldWhy: stallWhy } : {}) }; delete rec.signinVerifying; });
+    clientSwapCheck().catch(() => {});   // B-166e part 2: a dead sign-in is said by its own item — no longer counted on its preset's old client
     notify([], { full: false });   // the account views (the rail badge, the red line) carry it at once
   }
   /** lane lark-refresh-stall r2 (acceptance r1's R5 attack: a landing whose new token the vendor REFUSED went green at +1 ms
@@ -7474,6 +7508,7 @@ function create(deps = {}) {
     const d = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
     if (!d) { if (rec.signinVerifying) { await store.adapters.update(() => { delete rec.signinVerifying; }); notify([], { full: false }); } return; }
     await store.adapters.update(() => { delete rec.signinDead; delete rec.signinVerifying; });
+    clientSwapCheck().catch(() => {});   // B-166e part 2: a live sign-in again — counted on its preset's old client
     log.log(`[channels] ${rec.id}: the sign-in works again (${why})`);
     resolveSigninItem(rec, d, why);
     notify([], { full: false });

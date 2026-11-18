@@ -976,7 +976,7 @@ function create(engineCtx) {
       const ev = credentialKeyEvidence(rec, mod);
       if (ev.key) await store.adapters.update(() => { rec.credentialKey = ev.key; });
     }
-    if (rec.enabled === false) await store.adapters.update(() => { rec.enabled = true; });
+    if (rec.enabled === false) { await store.adapters.update(() => { rec.enabled = true; }); clientSwapCheck().catch(() => {}); }   // B-166e part 2 (1): enabled again by the re-authorize door — counted at once
     cancelChainOf(rec.id);   // lane lark-consent-chain: a newer press is the sign-in (a Connect's later pages end)
     if (choice && !sameClient(rec, choice)) {
       const r = await beginPending(mod, choice, { target: rec, origin, road });
@@ -1131,6 +1131,7 @@ function create(engineCtx) {
     const e = adapterFor(rec);   // rebuilt at once (its buckets carried) so the card answers the adapter's own `unknown`
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; await refreshAuth(e);
     await rejudgeConvCaps(rec, 'disconnected');   // inc-muk9jj0j-rel3: no credential ⇒ nothing sends, said everywhere at once
+    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a disconnected account holds no sign-in on its preset's old client
     notify([]);
     return { ok: true };
   }
@@ -1297,6 +1298,7 @@ function create(engineCtx) {
     const v = cleanLabel(label);
     if (!v) throw httpErr(400, 'bad-request', 'a name is required');
     await store.adapters.update(() => { rec.label = v; });
+    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a renamed account is named so in its preset's client-swap item
     notify([]);
     return { ok: true, label: v };
   }

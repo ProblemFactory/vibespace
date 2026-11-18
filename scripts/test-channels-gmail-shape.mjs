@@ -2387,7 +2387,7 @@ console.log('\n㉗ B-166e part 2 (1): a company preset\'s client swapped under i
     const ACCTS = [['g-bravo', 'Bravo mail', OLDP.clientId], ['g-alpha', 'Alpha mail', OLDP.clientId], ['g-charlie', 'Charlie mail', OLDP.clientId], ['g-pre', 'Pre-rule mail', null]];
     fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ACCTS.map(([id, label, c]) => ({ id, kind: 'gmail', label, enabled: true, options: {}, state: {}, credentialKey: KEY, identity: { email: `${id}@example.test` }, auth: { tokenEnc: tok(c), expiresAt: clock + 3600e3, scopes: ['https://www.googleapis.com/auth/gmail.modify'], user: `${id}@example.test` }, lastPass: null, consecutiveFailures: 0 })) }));
     const todos = new UserTodoManager({ dataDir: path.join(dir, 'todos'), onChange: () => {}, expirySweepMs: 0 });
-    const all = () => todos.idsWhere((i) => i.origin === 'channels' && /company preset «channels»/.test(i.text)).map((id) => todos.get(id));
+    const all = () => todos.idsWhere((i) => i.origin === 'channels' && /company preset «/.test(i.text)).map((id) => todos.get(id));
     const open = () => all().filter((i) => i.status === 'open');
     const look = () => open().map((i) => ({ n: i.i18n && i.i18n.text && i.i18n.text.params ? i.i18n.text.params.n : null, door: i.action && i.action.adapterId, type: i.action && i.action.type }));
     const st = {};
@@ -2415,6 +2415,10 @@ console.log('\n㉗ B-166e part 2 (1): a company preset\'s client swapped under i
       presetsHolder.list = [OLDP]; integrations.presetsChanged('presets'); await settle(); st.swapBack = { open: look(), all: all().length };   // A SWAP BACK
       const b = open()[0]; if (b) todos.setStatus(b.id, 'done', 'user');   // a person dismisses it
       integrations.presetsChanged('presets'); await settle(); st.dismissed = { open: open().length, all: all().length };
+      try { E.stop(); } catch { } try { E.store.close(); } catch { }
+      E = mk();   // the memo's persistence: a restart, then the count changes (a second account on the other client)
+      await E.store.adapters.update(() => { rec('g-bravo').auth.tokenEnc = tok(NEWP.clientId); }); await E.clientSwapCheck();
+      st.persist = { open: open().length, all: all().length };
     } finally { try { E.stop(); } catch { } try { E.store.close(); } catch { } presetsHolder.list = saved; }
     return st;
   };
@@ -2431,12 +2435,13 @@ console.log('\n㉗ B-166e part 2 (1): a company preset\'s client swapped under i
   // re-opens that item (said again, as a new swap must be — never a second item with the same words)
   ok(J(got.swapBack.open) === J([{ n: 1, door: 'g-alpha', type: 'channel-reauth' }]), '㉗ (1) a swap BACK is a second swap: said again for the account now on the other client', got.swapBack);
   ok(got.dismissed.open === 0, '㉗ (1) a person\'s dismissal stands: the same presets read again file nothing', got.dismissed);
+  ok(got.persist.open === 0, '㉗ (1) the memo persists: after a restart and a change of the count (2 accounts now), the dismissed item is not re-opened', got.persist);
   // the RED CONTROLS — an engine copy with one line gone each (the families inlined); the verdict IS the copy's own step
   const ESRC = engineSource(REPO);
   const PLANTS = [
-    ['no-memo', "        if (m && m.to === k.to) {   // the same swap: its item redrawn while open (a dismissal stands)", "        if (false) {", (c) => c.dismissed.open === 1, 'without the same-swap branch the swap is filed again at the next reload — the item the person dismissed re-opens (the account back after a resolution is held twice over: the memo\'s `closed` and a closed item that no redraw reaches)'],
-    ['no-door', "userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n, action });", "userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n });", (c) => J(c.one) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the door\'s move the item says «2» and still opens the account already re-authorized'],
-    ['no-close', "          if (m && !m.closed) { close(m.itemId); next[mk] = { ...m, closed: true }; changed = true; }", "          if (m && !m.closed) { next[mk] = { ...m, closed: true }; changed = true; }", (c) => c.zero.open === 1, 'without the close the item stays open at zero'],
+    ['no-memo', "        if (m && m.to === k.to) {   // the same swap: its item redrawn — only when its words or its door moved (a dismissal stands)", "        if (false) {", (c) => c.dismissed.open === 1, 'without the same-swap branch the swap is filed again at the next reload — the item the person dismissed re-opens (the account back after a resolution is held twice over: the memo\'s `closed` and a closed item that no redraw reaches)'],
+    ['no-door', "const r = userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n, action });", "const r = userTodos.redrawItem((x) => x.id === m.itemId, { text, detail, i18n });", (c) => J(c.one) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the door\'s move the item says «2» and still opens the account already re-authorized'],
+    ['no-close', "          if (m && (!m.closed || m.to !== to)) { close(m.itemId); next[mk] = { ...m, to, closed: true }; changed = true; }", "          if (m && (!m.closed || m.to !== to)) { next[mk] = { ...m, to, closed: true }; changed = true; }", (c) => c.zero.open === 1, 'without the close the item stays open at zero'],
     ['no-blind', "      if (!rd.token) { if (rd.why !== 'never-authenticated') k.blind = true; continue; }", "      if (!rd.token) continue;", (c) => J(c.blind) === J([{ n: 2, door: 'g-alpha', type: 'channel-reauth' }]), 'without the blind rule an unread token counts the preset down (a locked or broken read would resolve it)'],
     ['no-listener', "      if (id === null && (why === 'presets' || why === 'vault') && !stopped) clientSwapCheck().catch((err) => log.warn(`[channels] client-swap check failed: ${(err && err.message) || err}`));", "", (c) => J(c.swap) === J([]), 'without the listener\'s call the reload says nothing'],
   ];
@@ -2447,6 +2452,138 @@ console.log('\n㉗ B-166e part 2 (1): a company preset\'s client swapped under i
     ok(red(c), `㉗ RED CONTROL (${tag}): ${words} — red`, c);
   }
   for (const x of copiesCensus(MW.files, MW.dir, REPO, { minCopies: PLANTS.length, label: '㉗ (1) ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── ㉗ (1b) THE CURE (主开发 22:50Z, NOT TAKEN: «a swap reverted before anyone re-authorizes is never said again»): the memo
+//    keeps the client IN FORCE at the close — a swap away from it is a new swap. With it (the 22:35Z rule: cured where found):
+//    a supersede (a new swap while the item is open), a revert with no re-authorize (resolved), the swap again (SAID); the
+//    vault locked (nothing filed or closed; the opening says it); a disconnect counts at once; nothing moved ⇒ no save and no
+//    broadcast; the sign-in landings pinned by a census of channels-auth's doors; redrawItem's two refusals. RED CONTROLS.
+console.log('\n㉗ (1b) B-166e part 2 cure: the client in force kept at the close; supersede / revert / swap again; the vault; a disconnect; no redraw for nothing; the landings; redrawItem\'s refusals');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const SB = require(path.join(REPO, 'src/secret-box.js'));
+  const crypto = require('node:crypto');
+  const KEY = 'cluster:channels';
+  const OLDP = PRESETS.find((p) => p.key === 'channels');
+  const mkp = (id, tag, label) => ({ key: 'channels', label, clientId: `${id}.apps.googleusercontent.com`, clientSecret: ['ch', tag, 'value', '00'].join('-') });   // built at run time
+  const BP = mkp('chb', 'b', 'Channels'), CP = mkp('chc', 'c', 'Channels C');   // the third client under another LABEL: its item's words differ
+  const saved = presetsHolder.list;
+  const J = JSON.stringify;
+  const driftWorld = async (M, tag) => {
+    const dir = path.join(ROOT, tag); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+    // the tokens are sealed FIRST under the store's own key file; then a vault is registered over the data dir that serves
+    // THAT key while open and refuses it while locked (peek says the lock: the engine's vaultLocked() reads it)
+    let LOCKED = false;
+    const box = SB.secretBox(path.join(dir, ENG.KEY_FILE));
+    let minted = 0;
+    const tok = (clientId) => box.enc(JSON.stringify({ access_token: `at-${++minted}`, expiresAt: clock + 3600e3, refresh_token: `1//drift-${tag}-${minted}`, scopes: ['https://www.googleapis.com/auth/gmail.modify'], client: { id: clientId, key: KEY } }));
+    const ACCTS = [['d-one', 'One mail'], ['d-two', 'Two mail'], ['d-three', 'Three mail']];
+    fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ACCTS.map(([id, label]) => ({ id, kind: 'gmail', label, enabled: true, options: {}, state: {}, credentialKey: KEY, identity: { email: `${id}@example.test` }, auth: { tokenEnc: tok(OLDP.clientId), expiresAt: clock + 3600e3, scopes: ['https://www.googleapis.com/auth/gmail.modify'], user: `${id}@example.test` }, lastPass: null, consecutiveFailures: 0 })) }));
+    const VKEY = Buffer.from(box.readKey());
+    const unreg = SB.registerVault(dir, { keyFor: () => (LOCKED ? { ok: false, code: 'key-unreadable:vault_locked' } : { ok: true, key: Buffer.from(VKEY) }), peek: () => (LOCKED ? 'key-unreadable:vault_locked' : null), hasEntry: () => true, state: () => (LOCKED ? 'locked' : 'unlocked'), epoch: () => 1 });
+    let saves = 0;
+    const todos = new UserTodoManager({ dataDir: path.join(dir, 'todos'), onChange: () => { saves++; }, expirySweepMs: 0 });
+    const items = () => todos.idsWhere((i) => i.origin === 'channels' && /company preset «/.test(i.text)).map((id) => todos.get(id));
+    const open = () => items().filter((i) => i.status === 'open');
+    const look = () => open().map((i) => ({ n: i.i18n && i.i18n.text && i.i18n.text.params ? i.i18n.text.params.n : null, door: i.action && i.action.adapterId }));
+    presetsHolder.list = [OLDP];
+    const warns = [];
+    const E = M.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: { log() {}, warn: (...x) => warns.push(x.join(' ').slice(0, 300)), error() {}, info() {} }, userTodos: todos, ...FAST_PACE });
+    const settle = () => E.clientSwapSettled();
+    const memoTo = () => { const m = E.store.adapters.live().clientSwaps || {}; const k = Object.keys(m)[0]; return k ? { to: m[k].to, closed: m[k].closed === true } : null; };
+    const st = {};
+    try {
+      await E.clientSwapCheck();
+      presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle(); st.swap = look(); st.swapText = (open()[0] || {}).text || '';
+      const firstId = (open()[0] || {}).id;
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.supersede = { open: look(), memo: memoTo(), text: (open()[0] || {}).text || '', first: (todos.get(firstId) || {}).status || null, items: items().length };
+      presetsHolder.list = [OLDP]; integrations.presetsChanged('presets'); await settle(); st.revert = { open: open().length, memo: memoTo() };
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.again = look();   // back to the client the memo held before the revert
+      const s0 = saves; integrations.presetsChanged('presets'); await settle(); st.idleSaves = saves - s0;   // nothing moved
+      const w0 = warns.length;
+      LOCKED = true; presetsHolder.list = [BP]; integrations.presetsChanged('presets'); await settle(); st.locked = { open: look(), memo: memoTo(), blindLines: warns.slice(w0).filter((w) => /cannot be read/.test(w)).length };
+      LOCKED = false; integrations.presetsChanged('vault'); await settle(); st.unlocked = { open: look(), memo: memoTo() };
+      await E.disconnect('d-one'); await settle(); st.disconnect = look();
+      const rec = (id) => E.adapterRecords().adapters.find((x) => x.id === id);
+      // a DEAD sign-in is said by its own item: not counted here (the store's flag, then the check its doors start)
+      await E.store.adapters.update(() => { rec('d-three').signinDead = { cause: 'test', since: clock, at: clock }; }); await E.clientSwapCheck(); st.dead = look();
+      await E.store.adapters.update(() => { delete rec('d-three').signinDead; }); await E.clientSwapCheck();
+      // a BLIND preset is said ONCE in the journal while it lasts
+      const keepTok = rec('d-two').auth.tokenEnc, b0 = warns.length;
+      await E.store.adapters.update(() => { rec('d-two').auth.tokenEnc = 'not-a-seal'; }); await E.clientSwapCheck(); await E.clientSwapCheck();
+      st.blindLines = warns.slice(b0).filter((w) => /cannot be read/.test(w)).length;
+      await E.store.adapters.update(() => { rec('d-two').auth.tokenEnc = keepTok; }); await E.clientSwapCheck();
+      // THE UNCOUNTED CLOSE (the cure's read): every account still on the old client DISABLED — the item resolves, but the swap
+      // is not over: the memo keeps the swap's client; the preset moves on; the accounts back — SAID
+      await E.setEnabled('d-two', false); await E.setEnabled('d-three', false); await settle(); st.uncountedClose = { open: open().length, memo: memoTo() };
+      presetsHolder.list = [CP]; integrations.presetsChanged('presets'); await settle(); st.uncountedMoved = { open: open().length, memo: memoTo() };
+      await E.setEnabled('d-two', true); await E.setEnabled('d-three', true); await settle(); st.reenabled = look();
+    } finally { try { E.stop(); } catch { } try { E.store.close(); } catch { } presetsHolder.list = saved; unreg(); }
+    st.warns = warns.filter((w) => /client-swap|cannot be read|vault/i.test(w)).slice(0, 6);
+    return st;
+  };
+  const one3 = [{ n: 3, door: 'd-one' }];
+  const got = await driftWorld(ENG, 'drift');
+  ok(J(got.swap) === J(one3) && /company preset «Channels» /.test(got.swapText), '㉗ (1b) the swap: one item «3» naming the preset by its LABEL («Channels», never its key), its door the first account by label', J({ swap: got.swap, text: got.swapText }));
+  ok(J(got.supersede.open) === J(one3) && got.supersede.memo && got.supersede.memo.to === CP.clientId && /«Channels C»/.test(got.supersede.text) && got.supersede.first === 'done' && got.supersede.items === 2, '㉗ (1b) a NEW swap while the item is open (a third client under another label): a NEW item for it, filed first, then the superseded one closed — one open, the memo on the new client', J(got.supersede));
+  ok(got.revert.open === 0 && got.revert.memo && got.revert.memo.to === OLDP.clientId && got.revert.memo.closed === true, '㉗ (1b) reverted before anyone re-authorized: resolved, and the memo keeps the client IN FORCE (closed on it)', J(got.revert));
+  ok(J(got.again) === J(one3), '㉗ (1b) THE MUST: the swap again — back to the client the memo held before the revert, away from the client in force — SAID (a new swap)', J(got.again));
+  ok(got.idleSaves === 0, `㉗ (1b) the same presets read again with nothing moved: no For-you save, no broadcast (${got.idleSaves})`, J(got.idleSaves));
+  ok(J(got.locked.open) === J(one3) && got.locked.memo && got.locked.memo.to === CP.clientId && got.locked.blindLines === 0, '㉗ (1b) the vault LOCKED: the check reads nothing (no sign-in said unreadable) — a swap neither filed nor closed, the item and the memo as they stood', J(got.locked));
+  ok(J(got.unlocked.open) === J(one3) && got.unlocked.memo && got.unlocked.memo.to === BP.clientId, '㉗ (1b) the vault opened (its event): the swap read then — the memo on the client in force', J(got.unlocked));
+  ok(J(got.disconnect) === J([{ n: 2, door: 'd-three' }]), '㉗ (1b) a disconnect (the disconnect door) counts at once: «2», the door moved off the disconnected account', J(got.disconnect));
+  ok(J(got.dead) === J([{ n: 1, door: 'd-two' }]), '㉗ (1b) a dead sign-in is not counted (its own item says it): «1»', J(got.dead));
+  ok(got.blindLines === 1, `㉗ (1b) a preset with a sign-in the check cannot read is said ONCE in the journal while it lasts (${got.blindLines} lines over two checks)`, J(got.blindLines));
+  ok(got.uncountedClose.open === 0 && got.uncountedClose.memo && got.uncountedClose.memo.to === BP.clientId && got.uncountedClose.memo.closed === true, '㉗ (1b) every account on the old client disabled: the item resolves, the memo keeps the swap\'s client (it is not over)', J(got.uncountedClose));
+  ok(J(got.reenabled) === J([{ n: 2, door: 'd-three' }]), '㉗ (1b) the preset moved on, then the accounts enabled again — still on the old client: SAID (the cure\'s read: the uncounted close never moves the memo to the client in force)', J({ moved: got.uncountedMoved, reenabled: got.reenabled }));
+  // RED CONTROLS — an engine copy (the families inlined) with one line gone; its own step is the red
+  const ESRC = engineSource(REPO);
+  const PL = [
+    ['no-in-force', "          const to = k.stray ? (m ? m.to : k.to) : k.to;", "          const to = m ? m.to : k.to;   // stale-pins: kept (the close that never takes the client in force, the control's copy)", (c) => J(c.again) === J([]), 'without the client in force at the close the swap again is NEVER said (the must)'],
+    ['no-sig', "          if (m.sig !== sig && m.itemId && userTodos && typeof userTodos.redrawItem === 'function') {", "          if (m.itemId && userTodos && typeof userTodos.redrawItem === 'function') {", (c) => c.idleSaves > 0, 'without the comparison every reload saves and broadcasts the same item'],
+    ['no-disconnect', "    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): a disconnected account holds no sign-in on its preset's old client", "", (c) => J(c.disconnect) === J(one3), 'without the disconnect trigger the item still counts the disconnected account and opens it'],
+    ['no-stray', "          const to = k.stray ? (m ? m.to : k.to) : k.to;", "          const to = k.to;", (c) => J(c.reenabled) === J([]), 'with the client in force taken at an UNCOUNTED close the accounts back on the old client are never said'],
+    ['no-label', "kind: mod.label || rec.kind, label: (r && r.clusterLabel) || '', old: [], stray: 0, blind: false }));", "kind: mod.label || rec.kind, label: '', old: [], stray: 0, blind: false }));", (c) => /company preset «channels» /.test(c.swapText), 'without the preset\'s label the item names its KEY («channels»), not what the client picker shows'],
+    ['no-vault-guard', "    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;", "    if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function') return;", (c) => c.locked.blindLines > 0, 'without the vault guard a locked vault is read sign-in by sign-in and said unreadable, where it should judge nothing'],
+  ];
+  const MD = mutantCopies('chan-gmail-drift', REPO);
+  for (const [t, line, repl, red, words] of PL) {
+    ok(ESRC.split(line).length === 2, `㉗ (1b) control setup (${t}): the line is present once`);
+    const c = await driftWorld(MD.load('src/server/channels-engine.js', ESRC.replace(line, repl), t), `drift-${t}`);
+    ok(red(c), `㉗ (1b) RED CONTROL (${t}): ${words} — red`, J(c));
+  }
+  for (const x of copiesCensus(MD.files, MD.dir, REPO, { minCopies: PL.length, label: '㉗ (1b) ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  // THE SIGN-IN LANDINGS AND THE DOORS (a census of channels-auth: a consent landing is heavy-suite ground): each door that
+  // changes who holds a sign-in under a preset starts the check
+  const AUTH = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+  const DOORS = ['applyRebind', 'onAuthDone', 'remove', 'setEnabled', 'disconnect', 'reauthorize', 'setLabel'];
+  const doorCensus = (src) => DOORS.filter((name) => { const i = src.indexOf(`  async function ${name}(`); if (i < 0) return true; const rest = src.slice(i + 10); const j = rest.search(/\n  (?:async )?function /); return !(j < 0 ? rest : rest.slice(0, j)).includes('clientSwapCheck('); });
+  ok(doorCensus(AUTH).length === 0, `㉗ (1b) the seven doors (${DOORS.join(', ')}) each start the check — the two sign-in landings, the re-enable and the rename among them`, J(doorCensus(AUTH)));
+  const LANDING = "    clientSwapCheck().catch(() => {});   // B-166e part 2 (1): one fewer on a preset's old client (never awaited: the landing does not wait on it)";
+  ok(AUTH.split(LANDING).length === 2, '㉗ (1b) control setup: the re-authorize landing\'s call is present once');
+  ok(J(doorCensus(AUTH.replace(LANDING, ''))) === J(['applyRebind']), '㉗ (1b) RED CONTROL: without the re-authorize landing\'s call the census names applyRebind — red', J(doorCensus(AUTH.replace(LANDING, ''))));
+  // redrawItem's TWO REFUSALS (src/user-todos.js): a door of ANOTHER kind (`action_kind`), a door outside add()'s bounds (`action_refused`)
+  const redraws = (UT, tag) => {
+    const T = new UT.UserTodoManager({ dataDir: path.join(ROOT, `redraw-${tag}`), onChange: () => {}, expirySweepMs: 0 });
+    const it = T.add('channels', { origin: 'channels', kind: 'action', text: `door test ${tag}`, action: { type: 'channel-reauth', adapterId: 'x-1' } });
+    const r1 = T.redrawItem((x) => x.id === it.id, { detail: 'd', action: { type: 'channel-connect', kind: 'gmail' } });
+    const a1 = J(T.get(it.id).action);
+    const r2 = T.redrawItem((x) => x.id === it.id, { detail: 'd', action: { type: 'Bad Type!' } });
+    const r3 = T.redrawItem((x) => x.id === it.id, { detail: 'd', action: { type: 'channel-reauth', adapterId: 'x-2' } });
+    try { T.stop(); } catch { }
+    return { r1: r1.code || 'ok', a1, r2: r2.code || 'ok', r3: !!r3.ok, a3: J(T.get(it.id).action) };
+  };
+  const UT = require(path.join(REPO, 'src/user-todos.js'));
+  const rd = redraws(UT, 'real');
+  ok(rd.r1 === 'action_kind' && rd.a1 === J({ type: 'channel-reauth', adapterId: 'x-1' }) && rd.r2 === 'action_refused' && rd.r3 && rd.a3 === J({ type: 'channel-reauth', adapterId: 'x-2' }), '㉗ (1b) redrawItem: a door of another kind refused (action_kind), one outside add()\'s bounds refused (action_refused), the item unchanged by both; the same kind moves', J(rd));
+  const UTS = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
+  const KIND = "    if (act !== undefined && !(act && it.action && act.type === it.action.type)) return { ok: false, code: 'action_kind' };";
+  ok(UTS.split(KIND).length === 2, '㉗ (1b) control setup: redrawItem\'s kind rule is present once');
+  const MU = mutantCopies('chan-gmail-redraw', REPO);
+  const rc = redraws(MU.load('src/user-todos.js', UTS.replace(KIND, ''), 'no-kind'), 'ctl');
+  ok(rc.r1 === 'ok' && rc.a1 === J({ type: 'channel-connect', kind: 'gmail' }), '㉗ (1b) RED CONTROL: without the kind rule the door changes KIND (a re-authorize item now connects) — red', J(rc));
+  for (const x of copiesCensus(MU.files, MU.dir, REPO, { minCopies: 1, label: '㉗ (1b) redraw ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── ㉗ B-166e part 2 (主开发 2026-11-18 20:07Z «A (BOTH)», confirmed 20:11Z) — (2) THE OWNER'S OWN CLIENT: per account since

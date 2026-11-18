@@ -8674,6 +8674,8 @@ export default {
   "Channel {label}: people's names and pictures cannot be read — re-authorize to add the contact permission": "チャンネル {label}: 人の名前と写真を読めません — 再認証して連絡先の権限を追加してください",
   // B-166e part 2: a company preset's client swapped — the accounts still on the old one
   "{kind}: the company preset «{preset}» signs in with another client now — {n} account(s) still signed in with the old one; re-authorize each": "{kind}: 会社のプリセット「{preset}」は別のクライアントでサインインするようになりました — {n} 件のアカウントがまだ古いクライアントのままです。1 件ずつ再認可してください",
+  "Its OAuth client is another one now. These accounts keep refreshing with the client they signed in with until the vendor deletes it: {labels}.": "OAuth クライアントは別のものになりました。ベンダーが古いクライアントを削除するまで、これらのアカウントはサインインしたときのクライアントで更新を続けます: {labels}。",
+  "Re-authorize opens the next one; this item resolves when none is left.": "「再認可」で次のアカウントを開きます。残りがなくなると、この項目は解決します。",
   "That account is gone": "そのアカウントはもうありません",
   "Memory is {pct}% full ({used} of {limit} GB) — the most is held by {who}": "メモリ使用率 {pct}%（{used} / {limit} GB）— 最も多く使っているのは{who}",
   "Memory is {pct}% full ({used} of {limit} GB)": "メモリ使用率 {pct}%（{used} / {limit} GB）",
