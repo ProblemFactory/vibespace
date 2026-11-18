@@ -686,24 +686,7 @@ console.log('— normalizer (AcpMessageManager) over the journal');
 
 console.log('— wiring pins');
 {
-  // S5: the acp-events consumer is its own module behind the stdout registry (src/server/stdout/acp-events.js)
-  const so = read('src/server/stdout/acp-events.js');
-  ok('stdout/acp-events.js is the acp-events consumer: id adoption from the session record, streaming from prompt_start/prompt_end, todos from plan, feedLive gate', /^const protocol = 'acp-events';$/m.test(so) && /msg\.kind === 'session'/.test(so) && /msg\.kind === 'prompt_end'\) \{\s*\n\s*session\._isStreaming = false/.test(so) && /u\.sessionUpdate === 'plan'/.test(so) && /noteHarnessModels\?\.\(session\.backend, msg\.models\)/.test(so));
-  ok('…registered under its protocol in the stdout registry, and every ACP record reaches the normalizer through feedLive (never processLive)', /'acp-events': require\('\.\/acp-events\.js'\)/.test(read('src/server/stdout/index.js')) && (so.match(/feedLive\(session, msg\)/g) || []).length === 2 && !/_normalizer\.processLive/.test(so));
-  const sv = read('server.js');
-  ok('server.js wires noteHarnessModels into the stdout engine and exposes harnessAvailability on app.locals', /noteHarnessModels: \(\.\.\.a\) => noteHarnessModels\(\.\.\.a\)/.test(sv) && /app\.locals\.harnessAvailability = harnessAvailability/.test(sv));
-  const ce = read('src/server/cli-env.js');
-  ok('cli-env resolves each ACP harness executable once (env <ID>_CMD override) and hands acpWrapper/acpCommands to the adapter registry', /ACP_COMMANDS\[h\.id\] = raw\.startsWith\('\/'\) \? raw : \(resolveCmd\(raw\) \|\| null\)/.test(ce) && /acpWrapper: path\.join\(rootDir, 'data', 'bin', 'acp-wrapper\.js'\)/.test(ce) && /acpCommands: ACP_COMMANDS/.test(ce) && /function harnessAvailability\(\)/.test(ce) && /function noteHarnessModels\(backend, models\)/.test(ce));
-  const wc = read('src/ws-create.js');
-  // lane cli-shell-truth: the boot-fact branch FOLDED into THE ONE verdict — cliCmds.forSpawn's cli-missing (the person's
-  // login shell asked, refused by name before the local ladder, dtach or a file), one road for every harness
-  ok('ws-create refuses an uninstalled ACP harness BEFORE any spawn — by THE ONE verdict (cli-missing, its facts named)', !/adapter\.installed === false/.test(wc) && /is refused by THE ONE verdict below/.test(wc) && /code: 'cli-missing', reqId: data\.reqId, backend, cli: e\.cli/.test(wc));
-  ok('files.js /api/home carries harness availability for the picker', /harnesses = typeof req\.app\.locals\.harnessAvailability === 'function'/.test(read('src/routes/files.js')));
-  const app = read('src/lib/app.js');
-  ok('app.js: the picker unhides an ACP backend only when installed; opencode session options row (build/plan, no effort ladder); effort row hidden by the declared ui.effortLevels (hasEffortMenu — lane effort-menu-per-harness: caps.effort is gone)', /opt\.hidden = !h\.installed/.test(app) && /opencode: \{\n    models: \[\{ id: '', label: t\('Default'\) \}\],/.test(app) && /\['row-effort', isShell \|\| !hasEffortMenu\(backend\)\]/.test(app) && /!BACKEND_SESSION_OPTIONS\[be\] \|\| !data\[be\]\?\.length\) continue;/.test(app));
-  ok('index.html lists the opencode option hidden by default', /<option value="opencode" hidden>OpenCode<\/option>/.test(read('public/index.html')));
-  const cr = read('src/lib/chat-renderers.js');
-  ok('chat-renderers renders ORDERED permission options (harness-neutral) and replies with the chosen optionId', /Array\.isArray\(msg\.permission\.options\) && msg\.permission\.options\.length/.test(cr) && /optionId: o\?\.optionId \|\| null/.test(cr) && /data-option-id="\$\{escHtml\(String\(o\.optionId\)\)\}"/.test(cr));
+  // (the wiring pins: consumer, server.js, cli-env, ws-create, files.js, app.js, index.html, renderer — MOVED to the fast scripts/test-acp-harness-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // int377 seam (nightly376): the opencode row is pinned on the ROW OBJECT — BACKEND_CAPS.opencode as backend-caps.js' own
   // text defines it, loaded as a fresh module (the file requires nothing; a fresh copy sees none of this run's registrations) —
   // never a char window over the text: a {0,200} window broke when cache-warmth-tiles r1a added promptCache to the row (red
@@ -714,15 +697,14 @@ console.log('— wiring pins');
   const ocRow = opencodeRowIn(capsText, 'backend-caps'), noRowText = capsText.replace(/\n  opencode: \{\n[\s\S]*?\n  \},\n/, '\n'), noRow = opencodeRowIn(noRowText, 'backend-caps-no-opencode');
   fs.rmSync(rowDir, { recursive: true, force: true });
   ok('backend-caps + harness registry: opencode row (streamProtocol acp-events, pool false, frameFile) registered as a built-in — pinned on the ROW OBJECT, and a copy of backend-caps.js with the row removed is RED', rowHolds(ocRow) && /require\('\.\/opencode'\)/.test(read('src/harnesses/index.js')) && noRowText !== capsText && !noRowText.includes('\n  opencode: {') && !rowHolds(noRow), { row: ocRow && { pool: ocRow.pool, streamProtocol: ocRow.streamProtocol, frameFile: ocRow.frameFile }, removed: noRowText !== capsText, noRow });
-  ok('mounts-plugins-wiring dispatches SessionMessages through the descriptor for non-claude/codex harnesses', /h\?\.store\?\.SessionMessages\) return new h\.store\.SessionMessages/.test(read('src/server/mounts-plugins-wiring.js')));
-  ok('wrapper-files recognises the ACP wrapper in the dtach master argv (collision resolver)', /\(chat\|acp\)-wrapper\\\.js/.test(read('src/server/wrapper-files.js')));
+  // (the descriptor dispatch + the collision resolver pins — MOVED to the fast scripts/test-acp-harness-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // 2.369.123: the OpenCode section is DERIVED from the harness's declared table (src/harness-settings.js) — the rows are
   // pinned on the table, no longer as literals in settings-schema.js (docs/design-harness-settings.zh.md §4)
   const ocTable = (await import(new URL('../src/harness-settings.js', import.meta.url))).default?.HARNESS_SETTINGS?.opencode || (await import(new URL('../src/harness-settings.js', import.meta.url))).HARNESS_SETTINGS?.opencode;
   const ocKeys = new Set(((ocTable && ocTable.rows) || []).map((r) => r.key));
   ok('settings schema: opencode.defaultModel/defaultPermissionMode/defaultExtraArgs are declared on the OpenCode harness table (category OpenCode; the schema derives them); zh+ja carry the new strings', !!ocTable && ocTable.prefix === 'opencode' && ocTable.category === 'OpenCode' && ['defaultModel', 'defaultPermissionMode', 'defaultExtraArgs'].every((k) => ocKeys.has(k)) && /import \{[^}]*HARNESS_SETTINGS[^}]*\} from '\.\.\/harness-settings\.js'/.test(read('src/lib/settings-schema.js')) && /"OpenCode":/.test(read('src/lib/i18n-zh.js')) && /"Build":/.test(read('src/lib/i18n-ja.js')), { prefix: ocTable && ocTable.prefix, category: ocTable && ocTable.category, keys: [...ocKeys] });
   ok('test-architecture places the ACP files in the SHARED tier; ci.mjs runs this suite', /'src\/harnesses\/acp\.js', 'src\/harnesses\/opencode\.js', 'src\/adapters\/acp\.js', 'src\/acp-message-manager\.js'/.test(read('scripts/test-architecture.mjs')) && /'test-acp-harness'/.test(read('scripts/ci.mjs')));
-  ok('the wrapper never touches a vendor API and never puts a secret in argv (program-use billing law)', !/api\.anthropic\.com|api\.openai\.com|Authorization: 'Bearer sk-/.test(read('data/bin/acp-wrapper.js')) && /clientCapabilities: \{ fs: \{ readTextFile: false, writeTextFile: false \}, terminal: false \}/.test(read('data/bin/acp-wrapper.js')));
+  // (the billing-law pin — MOVED to the fast scripts/test-acp-harness-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.log('— THE EXECUTABLE (lane antigravity-spawn-argv — the agy-wrapper contract, shared): argv[4] is ONE executable');

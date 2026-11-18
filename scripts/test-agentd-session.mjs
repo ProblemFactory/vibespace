@@ -279,15 +279,7 @@ if (!fs.existsSync('/proc/self/environ')) {
   check('③  PRE-FIX CONTROL: the raw `process.env` base hands the held secret to the child (≥ 1 secret line) — the shape the verifier measured on a real claude', c3.secret >= 1, JSON.stringify(c3));
   dm6.stop();
 
-  // wiring pins: the three daemon birth sites + the child base name the sanitizer, and no raw process.env env literal survives in the daemon tier
-  const clientSrc = fs.readFileSync(path.join(repo, 'src/agentd/client.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  const daemonSrc = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  // B-6be2 (lane jobenv-strip-census): the daemon birth also drops the harness credential names — `daemonEnv(process.env, { drop: … })`
-  check('WIRING: _spawnLocal spawns the daemon from daemonEnv(process.env[, { drop }])', /env:\s*\{\s*\.\.\.daemonEnv\(process\.env(?:\)|,\s*\{\s*drop:)/.test(clientSrc));
-  check('WIRING: spawnEnv() merges over daemonEnv(process.env), and the --stdio bridge + the upgrade re-exec are born from it too', daemonSrc.includes(ANCHOR) && (daemonSrc.match(/daemonEnv\(process\.env\)/g) || []).length >= 3);
-  const RAW = /env:\s*(?:process\.env\b|\{\s*\.\.\.process\.env\b)/;
-  check('WIRING: no `env: process.env` / `env: { ...process.env` literal survives in src/agentd/{client,agentd}.js', !RAW.test(clientSrc) && !RAW.test(daemonSrc));
-  check('CONTROL: the raw-literal rule matches the retired spellings', RAW.test('spawn(x, [], { env: { ...process.env, A: 1 } })') && RAW.test('{ detached: true, stdio: "ignore", env: process.env,') && !RAW.test('env: daemonEnv(process.env)') && !RAW.test('env: spawnEnv(msg.env)'));
+  // (the daemon tier's wiring pins — MOVED to the fast scripts/test-agentd-session-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   delete process.env.VIBESPACE_INTEGRATION_FAKE_APIKEY; delete process.env.VIBESPACE_INTEGRATIONS; delete process.env.VS_CANARY_KEEP;
 }
 

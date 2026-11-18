@@ -238,12 +238,7 @@ ok(/exit 0: 1 fs worker\(s\) blocked in the kernel would hold process\.exit fore
 const XC = exitRun('process', 2500);
 ok(XC.signal === 'SIGTERM' && XC.ms >= 2400 && XC.marker && XC.marker.stuck === 1, `CONTROL: plain process.exit(0) with the same wedged worker ran its handlers and then HUNG until the harness killed it at ${XC.ms} ms (the daemon's SIGTERM / re-exec path before this round)`, XC);
 
-console.log('— §4 the daemon runs THIS pool —');
-const agentd = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-ok(/require\('\.\/worker-pool\.js'\)\.createWorkerPool\(\{ file: __filename, workerData: \{ role: 'agentd-worker' \}/.test(agentd), "WIRING PIN: agentd.js builds its pool with createWorkerPool over its OWN bundle (__filename, role 'agentd-worker')");
-ok(!/new wt\.Worker\(/.test(agentd), 'WIRING PIN: agentd.js spawns no Worker of its own (one pool implementation, the bounded one)');
-ok(/handOver\(\{ server, log, exit: exitDaemon, spawnNext: /.test(agentd) && /try \{ spawnNext\(\); \} finally \{ exit\(0\); \}/.test(fs.readFileSync(path.join(REPO, 'src/agentd/reexec.js'), 'utf8')) && /SIGTERM — exiting \(sessions unaffected by design\)'\); exitDaemon\(0\);/.test(agentd) && /function exitDaemon\(code\) \{ if \(workerPool\) workerPool\.exit\(code\);/.test(agentd),
-  'WIRING PIN (verify r1): the self-upgrade\'s re-exec (reexec.js handOver: spawnNext, then exit = exitDaemon — int206) and SIGTERM exit through exitDaemon → pool.exit (a wedged worker cannot hold them)');
+// (§4 the daemon runs this pool — its wiring pins — MOVED to the fast scripts/test-agentd-worker-pool-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('\n§tree the patched copy never touches the tree');
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);

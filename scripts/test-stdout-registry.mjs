@@ -438,13 +438,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   ok('NEGATIVE CONTROL: no hint in either spelling ⇒ the generic sentence and hint:null (nothing is invented)', ccL() === 'Compacting the conversation\u2026' && ccB().slice(-1)[0]?.hint === null, JSON.stringify([ccL(), ccB().slice(-1)[0]?.hint]));
   p2.data(J({ type: 'compact_progress', event: { type: 'hooks_start' }, uuid: 'u-cc-5', session_id: 'sid-cc' }));
   ok('NEGATIVE CONTROL: a hooks_start with no hook name falls back to the generic word, it never guesses a phase', ccL() === 'Compacting: running hook hooks\u2026' && ccB().slice(-1)[0]?.hookType === null, ccL());
-  // DRIFT GUARD (the 2.331.0 lesson): the fix is ONE `??` pair at ONE read
-  // point — a later "clean-up to the documented schema" silently restores the
-  // production bug, and only the camelCase legs above would catch it.
-  const csj = read('src/server/stdout/claude-stream-json.js');
-  ok('the read point still accepts BOTH spellings (drift guard)', /ev\.hook_type \?\? ev\.hookType/.test(csj) && /ev\.hint_text \?\? ev\.hintText/.test(csj), 'claude-stream-json.js stopped reading both compact_progress spellings');
-  const strays = csj.replace(/ev\.hook_type \?\? ev\.hookType/g, '').replace(/ev\.hint_text \?\? ev\.hintText/g, '');
-  ok('…and nothing downstream re-reads the raw event (one read, one normalized broadcast)', !/ev\.hook_type|ev\.hint_text|ev\.hookType|ev\.hintText/.test(strays));
+  // (the DRIFT GUARD's source pins — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 {
   // ⓒ THE FIXTURE vs THE BINARY (facts law: dump, never remember). The legs
@@ -615,51 +609,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
         && calls.broadcasts.some((b) => b.id === 'w-b3-death2' && b.type === 'exited'),
         JSON.stringify(calls.broadcasts.filter((b) => b.id === 'w-b3-death2').map((b) => b.type)));
     }
-    // ── THE PIN HAS TO SEE A *SILENT* EXIT (round 7) ───────────────────────
-    //    Round 6 counted CALL SITES (`retires === 2`), which detects a deleted
-    //    call and is blind to the defect it was written for: a FOURTH exit that
-    //    clears the kind on its own. REPRODUCED on this suite — inserting
-    //      if (msg.type === 'system' && msg.subtype === 'vs_fake_silent_exit')
-    //        { session._streamingKind = null; }
-    //    into the consumer left ALL 168 asserts green, pin included. So the pin
-    //    is now on the ASSIGNMENTS: `endCompaction` is the ONE WRITER of the
-    //    cleared kind (it broadcasts, and `retireCompaction` is the guarded
-    //    wrapper both turn-lifecycle exits call), and a fifth exit is a NEW
-    //    write, which this census makes red by construction.
-    const csj2 = read('src/server/stdout/claude-stream-json.js');
-    // Comment lines are prose ABOUT the rule (this file's own essay quotes the
-    // assignment) — the census is about code.
-    const codeLines = (src) => src.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l));
-    const clearsIn = (src) => codeLines(src)
-      .map((l) => ({ l }))
-      .filter(({ l }) => /_streamingKind\s*(=[^=]|\]\s*=[^=])/.test(l) && /=\s*null/.test(l));
-    const clears = clearsIn(csj2);
-    ok(`CENSUS: exactly ONE line in the consumer clears _streamingKind, and it is inside endCompaction (${clears.length} found)`,
-      clears.length === 1 && /sess\._streamingKind = null;/.test(clears[0].l)   // `sess` is endCompaction's own parameter name
-      && /const endCompaction = \(sess, sid, \{ result = null, error = null, announce = true \}/.test(csj2)
-      && /const retireCompaction = \(sess, sid\) => \(sess\._streamingKind === 'compacting' \? endCompaction\(sess, sid\) : false\);/.test(csj2),
-      JSON.stringify(clears.map((c) => c.l.trim())));
-    ok('…and that one writer BROADCASTS the retirement (a clear that does not speak is the whole defect)',
-      /sess\._streamingKind = null;[^]{0,500}?if \(announce\) broadcastToSession\(sess, sid, \{ type: 'compact-progress'[^]{0,120}?event: 'compact_end'/.test(csj2),
-      'endCompaction no longer broadcasts compact_end next to the clear');
-    // The ONE announce-suppressed caller is the dormant compact_progress lane,
-    // which publishes its own frame for the same transition a few lines down.
-    const suppressed = [...csj2.matchAll(/announce: false/g)].length;
-    ok(`…and exactly ONE caller suppresses the announcement (${suppressed}) — the dormant compact_progress lane, which broadcasts its own frame for the same end`,
-      suppressed === 1 && /if \(ev\.type === 'compact_end'\) endCompaction\(session, id, \{ announce: false \}\);/.test(csj2));
-    // NEGATIVE CONTROL: the census must SEE the injected exit that fooled the
-    // round-6 pin. Run it over the same source with that line put back.
-    const injected = csj2.replace('const authoritative = session._turnStateSeen === true;',
-      "const authoritative = session._turnStateSeen === true;\n            if (msg.type === 'system' && msg.subtype === 'vs_fake_silent_exit') { session._streamingKind = null; }");
-    ok('NEGATIVE CONTROL: the census FLAGS the exact fourth silent exit that left round 6\'s call-site pin green',
-      clearsIn(injected).length === clears.length + 1, JSON.stringify(clearsIn(injected).map((c) => c.l.trim())));
-    // …and no OTHER module may clear it either (the teardown path retires
-    // through the consumer's own bound function — session-schema row).
-    const otherClearers = ['src/ws-handler.js', 'src/server/session-stdout.js', 'src/server/stdout/codex-events.js', 'src/server/stdout/acp-events.js']
-      .filter((f) => clearsIn(read(f)).length > 0);
-    ok('…and no other module clears the claim behind the consumer\'s back (the teardown exit calls session._retireCompaction)',
-      otherClearers.length === 0 && /session\._retireCompaction\?\.\(\)/.test(read('src/server/session-stdout.js'))
-      && /_retireCompaction:/.test(read('src/session-schema.js')), JSON.stringify(otherClearers));
+    // (the ONE-writer census of the cleared kind (its injected fourth exit is the control) — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   {
     // ── THE LAW, MEASURED: a clear that does not SPEAK is a defect ──────────
@@ -713,8 +663,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
         sess._streamingKind !== 'compacting' && !spoke);
     }
   }
-  ok("'status' is listed as HANDLED so the unknown-subtype breadcrumb stops firing for the record that marks every real compaction",
-    /'status',/.test(read('src/message-manager.js').slice(0, read('src/message-manager.js').indexOf('])'))));
+  // ('status' is HANDLED — its source pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 {
   // ⓔ ASK THE BINARY why leg ⓓ exists and leg ⓑ is dormant (facts law: dump,
@@ -1436,11 +1385,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     ok("NEGATIVE CONTROL: the pre-fix `srcKey: local:<abs>` + `makePublic:false` DOES take over the user's page and flip it private -- the asserts above measure the fix",
       negChan.page.id === negMine.page.id && negAfter.public === false && negAfter.conversationId === 'conv-N',
       JSON.stringify({ same: negChan.page.id === negMine.page.id, publicNow: negAfter.public }));
-    // ...and the shipped consumer must not spell that key any more
-    const csj = read('src/server/stdout/claude-stream-json.js');
-    ok('...and the shipped SendUserFile publish namespaces its key and passes NO visibility flag',
-      /srcKey: `userfile:\$\{session\.backendSessionId \|\| session\.claudeSessionId \|\| id\}:\$\{abs\}`/.test(csj)
-      && !/makePublic:\s*false/.test(csj) && !/srcKey: 'local:' \+ abs/.test(csj), 'claude-stream-json srcKey/makePublic');
+    // (the SendUserFile key pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
   // (h) THE CALL ITSELF FAILED (round-3 verifier, MEDIUM). A user-channel card
@@ -1484,11 +1429,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
       okRec.outcome === 'ok' && pendRec.outcome === 'pending'
       && !/chat-userchan-failed/.test(userFileCardHtml(okRec, { esc, t: tt }))
       && !/chat-userchan-failed/.test(userMessageCardHtml(pendRec, { esc, t: tt })));
-    // WIRING PIN: the pure rule is useless if the renderer never feeds it the
-    // outcome (the 2.355.0 unstaged-wiring class).
-    const cr = read('src/lib/chat-renderers.js');
-    ok('...and chat-renderers really HANDS the outcome to the record (a pure rule with no call site is a fix that never ships)',
-      /userChannelRecord\(\{\s*\n\s*toolName: block\.toolName, input: block\.input, output: block\.output,\s*\n\s*status: msg\.status \|\| block\.status, toolStatus: msg\.toolStatus,/.test(cr), 'chat-renderers _renderUserChannelMsg');
+    // (the renderer's hand-off wiring pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
   // (e) NEGATIVE CONTROL: an unrelated tool in the SAME shape publishes
@@ -1919,9 +1860,7 @@ console.log('— the put-back door at the feedLive gate (lane stop-refills-compo
     ok('claude: the wrapper\'s queue records pass the stream-json consumer to the normalizer — the strip\'s meta ops, the result, the chip queued → removed, no unknown-record card',
       JSON.stringify(metas.filter((m) => /^queue/.test(m))) === JSON.stringify(['queue', 'queue-result', 'queue']) && bubble?.webuiMsgId === 'm-held' && bubble?.queueState === 'removed'
       && s._ops.some((o) => o.op === 'edit' && o.fields?.queueState === 'queued') && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'), { metas, chip: bubble?.queueState });
-    const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-    const lit = /const CLAUDE_STREAM_TYPES = new Set\(\[([\s\S]*?)\]\);/.exec(srvSrc);
-    ok('server.js CLAUDE_STREAM_TYPES lists the wrapper\'s four queue records (the unknown-type breadcrumb stays quiet for a handled record)', !!lit && ['queued_input', 'queue_changed', 'queue_op_result', 'queue_dropped'].every((t) => lit[1].includes(`'${t}'`)));
+    // (CLAUDE_STREAM_TYPES' queue records pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   const s0 = mkSession('codex', 'w-pb-none'); const p0 = fakePty();
   so.setupSessionPty(s0, 'w-pb-none', p0);   // the suite's own engine: no getSyncStore (the null default every other create() caller relies on)
@@ -1964,22 +1903,7 @@ console.log('— builder');
 // ── 6. wiring pins ──
 console.log('— wiring pins');
 {
-  const ss = read('src/server/session-stdout.js');
-  // `permissionRulesRef` joined the deps on 2026-09-07 (owner ruling 10): the
-  // codex/acp consumers route a `permission_rules` answer back to the pending
-  // READ — a lazy ref like the others, never a new inline consumer.
-  ok('session-stdout requires the registry and builds it ONCE in create() with the orchestrator deps', /require\('\.\/stdout\/index\.js'\)/.test(ss) && (ss.match(/createStdoutRegistry\(/g) || []).length === 1 && /createStdoutRegistry\(\{ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,\s*\n\s*checkClaudeGoalStatus, noteModelSeen, noteHarnessModels, sbSeenFirst, hosts, usageHistory, deliverRef, pagesRef, permissionRulesRef, brainRef \}\)/.test(ss));
-  ok('…hands its own closures (feedLive, broadcasts, meta store, todo helpers) as ONE helpers object', /const stdoutHelpers = \{ feedLive: \(s, m\) => \{ feedLive\(s, m\); SEARCH\.noteLive\(s\); \}, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,\s*\n\s*updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos \};/.test(ss)); // lane global-search: feedLive also tells the search index
-  ok('…setupSessionPty resolves caps.streamProtocol → registry → attach (no protocol branch left in session-stdout)', /const consumer = streamProto \? stdoutConsumers\.get\(streamProto\) : null;/.test(ss) && /consumer\.attach\(session, id, ptyProcess, helpersFor\(id\)\);/.test(ss) && !/streamProto === '/.test(ss) && !/feedLive\(session, /.test(ss) && !/_stdin_ack/.test(ss));
-  ok('…the no-protocol text is unchanged and the no-consumer case is its own loud line + event', /has no streamProtocol in src\/backend-caps\.js — chat output passes through RAW \(register a pipeline\)/.test(ss) && /registers no consumer for it — chat output passes through RAW \(register one\)/.test(ss) && /'chat-protocol-no-consumer'/.test(ss));
-  ok('…still dispatches on capsOf(session.backend) (the `backend || claude` default + NO_CAPS fallback are unchanged)', /const streamProto = capsOf\(session\.backend\)\.streamProtocol;/.test(ss));
-  const idx = read('src/server/stdout/index.js');
-  ok('registry maps the three protocols to their modules', /'stream-json': require\('\.\/claude-stream-json\.js'\)/.test(idx) && /'codex-events': require\('\.\/codex-events\.js'\)/.test(idx) && /'acp-events': require\('\.\/acp-events\.js'\)/.test(idx));
-  for (const [m, proto] of [['claude-stream-json', 'stream-json'], ['codex-events', 'codex-events'], ['acp-events', 'acp-events']]) {
-    const src = read(`src/server/stdout/${m}.js`);
-    ok(`${m}.js: create(deps) → { protocol: '${proto}', attach(session, id, ptyProcess, helpers) }, feeds the normalizer only through feedLive`, new RegExp(`^const protocol = '${proto}';$`, 'm').test(src) && /function attach\(session, id, ptyProcess, \{ feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta/.test(src) && /return \{ protocol, attach \};/.test(src) && /feedLive\(session, msg\)/.test(src) && !/_normalizer\.processLive/.test(src));
-  }
-  ok('the claude consumer keeps the session-brain wiring EXACTLY (sbSeenFirst registration precedes the served-model latch; sbSeenFirst arrives via deps)', /sbSeenFirst\(session, msg\);\s*\n\s*if \(msg\.type === 'assistant' && !msg\.parent_tool_use_id && !msg\.isSidechain\s*\n\s*&& msg\.message\?\.model/.test(read('src/server/stdout/claude-stream-json.js')) && /checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef, brainRef = null \}\)/.test(read('src/server/stdout/claude-stream-json.js')));
+  // (the registry + consumers' wiring pins (the release-gate pin below stays: it names this heavy suite) — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok('test-harness-contract pins descriptor↔consumer coverage; ci.mjs runs this suite; test-session-schema + test-attach-rebuild scan src/server/stdout/', /hasConsumer\(h\.caps\.streamProtocol\)/.test(read('scripts/test-harness-contract.mjs')) && /'test-stdout-registry'/.test(read('scripts/ci.mjs')) && /src\/server\/stdout/.test(read('scripts/test-session-schema.mjs')) && /src\/server\/stdout/.test(read('scripts/test-attach-rebuild.mjs')));
   // B3 turn truth (§2.5/§2.10/§2.11) — the seams a green unit test cannot see
   {
@@ -2002,56 +1926,11 @@ console.log('— wiring pins');
       // r4 (lane claude-steer-inject): the prompt hook's phase — the one word before a turn's init that says one is starting
       ok('…and the PROMPT HOOK\'s phase too (CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: the wrapper\'s Stop window and owed turn wait through the hook) — chat only',
         chat.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === '1' && term.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === undefined, JSON.stringify({ chat: chat.env, term: term.env }));
-      ok('…it rides the spawn env, never an allowlist: agentEnv() is a DROP table, so ws-handler needs no entry for it',
-        /AGENT_ENV_DROP/.test(wsh) && !/CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS/.test(wsh) && /env\.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';/.test(ad));
+      // (the spawn env rides a DROP table — source pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     }
-    ok('session_state_changed is listed as HANDLED so the unknown-subtype breadcrumb stops lying about it',
-      /'session_state_changed',/.test(mm.slice(0, mm.indexOf('])'))));
-    ok('the three new top-level types are in server.js CLAUDE_STREAM_TYPES (the 2.289.0 mistake: the set lagging the handler)',
-      /'set_in_progress_tool_use_ids', 'compact_progress', 'tombstone'/.test(srv));
-    ok('the consumer reads the PURE turn-state module, and so does the ws attach path (ONE decision, no twin)',
-      /require\('\.\.\/\.\.\/turn-state\.js'\)/.test(cs) && /turnStateEffect\(st, \{ hasLabel: !!session\._streamingLabel \}\)/.test(cs)
-      && /reconcileAttachStreaming \} = require\('\.\/turn-state'\)/.test(wsh) && /const rec = reconcileAttachStreaming\(\{/.test(wsh));
-    ok('the derived writes are GATED on the authority latch, not deleted (an old CLI keeps every one of them)',
-      /const authoritative = session\._turnStateSeen === true;/.test(cs) && /if \(!authoritative\) session\._isStreaming = false;/.test(cs) && /if \(!authoritative\) session\._isStreaming = true;/.test(cs));
-    ok('the attach payload carries the tri-state turnState + the run set (null = never reported, NOT idle)',
-      /turnState: session\._turnStateSeen \? \(session\._turnState \|\| null\) : null,/.test(wsh) && /inProgressTools: session\._inProgressTools \? \[\.\.\.session\._inProgressTools\] : \[\],/.test(wsh));
-    const cv = read('src/lib/chat-view.js');
-    const sb = read('src/lib/chat-status-bar.js');
-    const cr = read('src/lib/chat-renderers.js');
-    ok('the client consumes all three pushes and both payload keys',
-      /msg\.type === 'turn-state'/.test(cv) && /msg\.type === 'tools-in-progress'/.test(cv) && /msg\.type === 'compact-progress'/.test(cv)
-      && /if \('turnState' in meta\)/.test(cv) && /if \('inProgressTools' in meta\)/.test(cv));
-    ok("the status bar draws the third state and NEVER asserts one it was not told (null ≠ idle)",
-      /this\._turnState === 'requires_action'/.test(sb) && /const next = \(v === 'idle' \|\| v === 'running' \|\| v === 'requires_action'\) \? v : null;/.test(sb));
-    ok('the hardcoded compaction apology is now the FALLBACK of one hint function (ONE copy of the sentence, in compactFallbackHint)',
-      /compactHintText\(\) \{/.test(cr) && /compactFallbackHint\(\) \{/.test(cr) && /if \(!s\) return this\.compactFallbackHint\(\);/.test(cr)
-      && (cr.match(/Compacting a large conversation takes 1/g) || []).length === 1);
-    // WIRING PIN (round 5): the fix lives at the CARD's build site — a held
-    // terminal stage must not become the view's permanent voice. A pure
-    // predicate whose call site is not staged is the 2.355.0 class.
-    ok('…and a NEW card gates that sentence on compactInFlight(), never on the held stage',
-      /compactInFlight\(\) \{/.test(cr) && /s\.event !== 'compact_end'/.test(cr)
-      && /chat-ctx-full-hint">\$\{escHtml\(this\.compactInFlight\(\) \? this\.compactHintText\(\) : this\.compactFallbackHint\(\)\)\}/.test(cr),
-      'appendContextFullCard renders the held stage into a card built after the compaction ended');
-    ok('…and only the CLI’s own "success" is reported as FINISHED (a hook-blocked compaction ends with no outcome and compacted nothing)',
-      /if \(s\.result === 'success'\) return t\('Compaction finished\.'\);/.test(cr) && /return t\('Compaction ended\.'\);/.test(cr),
-      'a compact_end with result:null still claims success');
-    const ro = read('src/rewind-ops.js');
-    ok("both harnesses emit the SAME 'rewound' op through the one PURE builder",
-      /rewoundOp\(\{ harness: 'claude'/.test(mm) && /rewoundOp\(\{ harness: 'codex'/.test(read('src/codex-message-manager.js'))
-      && /module\.exports = \{ rewoundByRecord, rewoundByTurns, applyRewound, rewoundOp, REWOUND_KINDS \};/.test(ro));
-    ok("codex's thread_rolled_back is OUT of SKIPPED_EVENT_TYPES and routed (it was invisible history)",
-      !/'thread_rolled_back'/.test(read('src/codex-message-manager.js').split('SKIPPED_EVENT_TYPES')[1].split('\n]')[0])
-      && /if \(type === 'thread_rolled_back'\) return this\._processRolledBack\(event, emit\);/.test(read('src/codex-message-manager.js')));
-    ok('both normalizers drop rewound messages from turnMap (the minimap must not point at ghosts) — the ONE turnMap, src/message-window.js (dc-twins M10), which both extend',
-      /if \(m\.rewound\) continue;/.test(read('src/message-window.js')) && ['src/message-manager.js', 'src/codex-message-manager.js'].every((f) => /extends MessageWindow/.test(read(f)) && !/^  turnMap\(\)/m.test(read(f))));
-    const css = read('public/chat.css');
-    ok('the two retraction kinds have their OWN display rules (no global .hidden in this project)',
-      /\.chat-msg-superseded \{ display: none; \}/.test(css) && /\.chat-msg-rewound \{/.test(css) && /\.chat-tool-inflight \.chat-tool-label::after/.test(css));
+    // (B3's seams — the source pins — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
-  const arch = read('scripts/test-architecture.mjs');
-  ok('test-architecture tiers src/server/stdout/ as ORCH by path (startsWith src/server/) — the consumers may use the engine; SHARED descriptors never reach up into them', /p\.startsWith\('src\/server\/'\)/.test(arch) && !/src\/server\/stdout/.test(read('src/harnesses/index.js').replace(/\/\/[^\n]*/g, '')) && !/require\(['"]\.\.\/server\//.test(read('src/harnesses/index.js')));
+  // (the architecture tier pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.error = origErr;
@@ -2116,8 +1995,7 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 403, message: 'forbidden' }, retry_in_ms: 0, retry_attempt: 1, max_retries: 10 });
   brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'HTTP 401' }, retryAttempt: 2 });
   ok('the REAL claude classifier over what the consumer forwards: 401 attempt 1 with an expiry message → true (the wording qualifies), a bare 401 attempt 1 → REFUSED (refresh race), 401 attempt 2 → true, 403 attempt 1 → true, the transcript-spelled retryAttempt rides through too', JSON.stringify(verdicts) === JSON.stringify([[401, 1, true], [401, 1, false], [401, 2, true], [403, 1, true], [401, 2, true]]), JSON.stringify(verdicts));
-  const fixtureRows = fs.readFileSync(path.join(REPO, 'scripts/fixtures/unknown-records/claude-transcript.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.type === 'system' && r.subtype === 'api_error');
-  ok('the fixture\'s own api_error rows exist and are TRANSCRIPT rows (never on stdout — the census of 35 live buffers saw zero); the consumer is forward-compat for the stream twin, the transcript path is NOT consumed (a days-old 401 must not evict today\'s member)', fixtureRows.length >= 1 && fixtureRows.every((r) => 'parentUuid' in r || 'retryAttempt' in r) && !/api_error/.test(fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8')) && !/noteApiErrorAuth/.test(fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')), fixtureRows.map((r) => [r.error?.status, r.retryAttempt]));
+  // (the fixture's api_error rows + the transcript path — source pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'fix/x', cwd: '/w/proj' });
   ok('vcs_state_changed → session._vcs {kind,branch,cwd,at}, persisted to session-meta (merged over the existing meta), a session-vcs push to EVERY client naming session + cwd, an active-sessions broadcast, a timeline event', d._vcs?.kind === 'push' && d._vcs.branch === 'fix/x' && d._vcs.cwd === '/w/proj' && Number.isFinite(d._vcs.at) && metaWrites.some(([sock, m]) => sock === 'cw-dev' && m.existing === 1 && m.vcs?.kind === 'push') && pushes.some((m) => m.type === 'session-vcs' && m.sessionId === 'w-dev' && m.kind === 'push' && m.cwd === '/w/proj' && m.branch === 'fix/x') && active >= 1 && events.some(([k, e]) => k === 'webui:w-dev' && e.event === 'vcs' && e.kind === 'push' && e.branch === 'fix/x'), JSON.stringify({ vcs: d._vcs, pushes, events }));
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'vcs_state_changed', kind: 'commit', cwd: '/w/proj' });
@@ -2126,7 +2004,7 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'merged' });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'javascript:alert(1)', repo: 'o/r', identifier: '8', action: 'pushed' });
   ok('code_change_published → session._prLinks keyed by url (the second record for the same url UPDATES action to merged; a non-http url is refused), persisted', d._prLinks?.length === 1 && d._prLinks[0].url === 'https://example.invalid/o/r/pull/7' && d._prLinks[0].action === 'merged' && d._prLinks[0].identifier === '7' && metaWrites.some(([, m]) => Array.isArray(m.prLinks) && m.prLinks[0].action === 'merged'), JSON.stringify(d._prLinks));
-  ok('the parse and the device feed call the SAME four named functions (source pin: claudeSideEffects names each; the parse calls each through brainRef)', ['noteHarnessNotification', 'noteApiErrorAuth', 'noteVcsState', 'notePublishedChange'].every((fn) => new RegExp("subtype === '[a-z_]+'\\) " + fn + "\\(session, sid, msg\\);").test(read('src/server/session-brain.js')) && new RegExp('brainRef\\?\\.' + fn + '\\?\\.\\(session, id, msg\\)').test(read('src/server/stdout/claude-stream-json.js'))));
+  // (the parse and the device feed call the same four functions — source pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   activeSessions.delete('w-ur-1');
 }
 

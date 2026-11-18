@@ -112,8 +112,7 @@ console.log('— ①b the /api/home "broken store" predicate (a deliberately-off
   ok('…and a RUNAWAY park speaks with the guard sentence', storeFailureReason(mk({ parked: true, parkedKind: 'runaway' }, 'stopped as a RUNAWAY — 190% CPU')) === 'stopped as a RUNAWAY — 190% CPU');
   ok('a park whose harness has no reason text falls back to lastError, never to an empty string', storeFailureReason({ store: { serveState: () => ({ parked: true, lastError: 'boom' }) } }) === 'boom');
   ok('a harness with no store (claude/codex/shell) is never flagged, and a THROWING store never breaks /api/home', storeFailureReason({ id: 'claude' }) === null && storeFailureReason({ store: { serveState: () => { throw new Error('x'); } } }) === null);
-  const ce = read('src/server/cli-env.js');
-  ok('ONE predicate: /api/home AND the live harness-store-updated push both call it (they were twins that disagreed — and the loud half was /api/home)', /const failed = storeFailureReason\(h\);/.test(ce) && /const reason = storeFailureReason\(harnessOf\('opencode'\), st\);/.test(ce) && !/autostart === false/.test(ce));
+  // (①b ONE predicate — its source pin — MOVED to the fast scripts/test-opencode-plugin-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 console.log('— ② decideAutostart: the ONE decision');
@@ -510,39 +509,7 @@ console.log('— ⑤ the first-use dialog in a real browser');
 
 console.log('— ⑥ wiring pins');
 {
-  const sl = read('src/lib/session-lifecycle.js');
-  ok('createSession (the ONE create/resume/fork funnel) offers the service without BLOCKING the spawn, and never as an unhandled rejection', /this\.maybeOfferHarnessService\?\.\(backend, \{ needsService: false \}\)/.test(sl) && /if \(!fork\) \{ try \{ Promise\.resolve\(this\.maybeOfferHarnessService/.test(sl) && (sl.match(/\)\.catch\(\(\) => \{\}\);/g) || []).length >= 2);
-  ok('a FORK awaits it — a fork is minted THROUGH the service, so it genuinely cannot proceed without it', /async _doForkSession\(/.test(sl) && /await this\.maybeOfferHarnessService\?\.\(backend, \{ needsService: true \}\)/.test(sl));
-  ok('viewSession (opening stopped history) offers it and RE-OPENS the window after an enable', /if \(offerService\) try \{[\s\S]{0,400}maybeOfferHarnessService\?\.\(backend, \{[\s\S]{0,200}retry: \(\) => \{/.test(sl) && /this\.viewSession\(sessionId, cwd, sessionName, \{ syncId, backend/.test(sl));
-  ok('a layout REPLAY (and the retry\'s own re-open) is not a user action — those call sites pass offerService:false, so the dialog never fires on boot or twice', (sl.match(/offerService: false/g) || []).length === 3 && /viewSession\(sessionId, cwd, sessionName, \{ syncId, backend = 'claude'[^)]*offerService = true/.test(sl));
-  ok('the re-opened history window keeps its geometry AND its home desktop (the 2.295.0 class: a rebuilt window must not land on whatever desktop is active)', /const dm = this\.desktopManager, home = bounds\?\.desktopId;/.test(sl) && /dm\.moveWindowToDesktop\(again\.id, home\)/.test(sl));
-  const pu = read('src/lib/plugins-ui.js');
-  ok('the dialog is createModalShell (never prompt/alert/confirm) with Enable & start / Not now', /_harnessServiceDialog\(meta, st\)/.test(pu) && /createModalShell\(\{[\s\S]{0,200}id: 'harness-service-dialog'/.test(pu) && /t\('Not now'\)/.test(pu) && /t\('Enable & start'\)/.test(pu) && !/\b(confirm|alert|prompt)\(/.test(pu));
-  ok('ONE offer at a time (a layout restore can open five history windows in a tick)', /this\._svcOffers \|\|= new Map\(\)/.test(pu) && /if \(inFlight\) return inFlight\.then/.test(pu));
-  ok('"Not now" POSTs the instance-wide flag; Enable POSTs enabled+start and then WAITS bounded for the serve', /\/prompted`, \{ method: 'POST'/.test(pu) && /post\('enabled', \{ enabled: true \}\)/.test(pu) && /post\('start'\)/.test(pu) && /SERVICE_START_WAIT_MS/.test(pu));
-  ok('every failure on that path reaches the user (no silent failure)', /showToast\(e\.message \|\| t\('Failed'\), \{ type: 'error' \}\); return false;/.test(pu) && /has not answered yet/.test(pu));
-  ok('the ⚙ → Plugins row renders the service (state chip, env-forced notice, ONE on-switch — lane plugin-settings-p0) without a config box', /const isServe = provides\(p, 'serve'\)/.test(pu) && /Forced OFF by the environment/.test(pu) && /t\('Enable & start'\)/.test(pu) && /onSwitch = \(on\) => act\(\(\) => api\('enabled', \{ body: JSON\.stringify\(\{ enabled: on \}\) \}\)\);/.test(pu));
-  const app = read('src/lib/app.js');
-  ok('app.js fills BACKEND_META.service from /api/home AND keeps it live from plugins-updated + harness-store-updated (multi-client law)', /BACKEND_META\[h\.id\]\.service = h\.service \|\| null;/.test(app) && /msg\.type !== 'plugins-updated' \|\| !msg\.services/.test(app) && /if \(msg\.service !== undefined\) BACKEND_META\[msg\.backend\]\.service = msg\.service \|\| null;/.test(app));
-  ok('agent-meta declares the control plugin for opencode (the client mirror of store.servicePlugin)', /servicePlugin: 'opencode-serve'/.test(read('src/lib/agent-meta.js')));
-  const sb = read('src/lib/sidebar.js');
-  ok('the sidebar hint row is generic over BACKEND_META.servicePlugin (never a backend id) and only shows once the user has met the harness', /_renderServiceHintRows\(sessions\) \{/.test(sb) && /const svc = meta\.servicePlugin \? meta\.service : null;/.test(sb) && /svc\.prompted \|\| \(sessions \|\| \[\]\)\.some/.test(sb));
-  ok('…and an OPS-forced-off service gets the same EXPLANATION with no Enable button (nothing the user clicks there could work) — it is the only in-product word left now that "off" is not an error toast', /if \(svc\.envForced !== false\) \{[\s\S]{0,400}sidebar-service-enable[\s\S]{0,300}row\.append\(enable\);/.test(sb) && !/svc\.envForced === false\) continue;/.test(sb));
-  ok('…and it is rendered by the WORKBENCH, the one builder that owns the sessions list on desktop AND mobile (it wipes listEl, so a row added in _renderInner would be silently thrown away — how this shipped broken once)', /this\._renderServiceHintRows\?\.\(sessions\);/.test(read('src/lib/sidebar-workbench.js')) && (sb.match(/_renderServiceHintRows\?\.\(/g) || []).length === 1 && /_renderServiceHintRows\?\.\(sessions\);\s*\n\s*return;/.test(sb));
-  // (the ONE call sidebar.js keeps is the empty-list branch's, and it must sit
-  // immediately before that branch's `return` — nothing wipes listEl after it)
-  const mw = read('src/server/mounts-plugins-wiring.js');
-  ok('POST /api/plugins/:id/prompted exists next to the other plugin routes', /app\.post\('\/api\/plugins\/:id\/prompted'/.test(mw));
-  const os_ = read('src/opencode-serve.js');
-  ok('the ops kill switch is checked INSIDE the adoption rung (before the reuse is taken), not only at the spawn gate below it', /serveEnvOverride\(\) === false\s*\n?\s*\? 'VIBESPACE_OPENCODE_SERVE=0 is set on this instance/.test(os_) && /const bad = serveEnvOverride\(\) === false/.test(os_));
-  ok('…and install() runs the ladder ONCE under the switch, so an instance nobody polls does not leave an inherited daemon indexing', /if \(serveEnvOverride\(\) === false && locator\?\.ensure\)/.test(os_) && /setImmediate\(\(\) => \{ Promise\.resolve\(locator\.ensure\(\)\)/.test(os_));
-  const pl = read('src/plugins/opencode-serve.js');
-  ok('the opencode-serve plugin (src/plugins/opencode-serve.js) is the CONTROL SURFACE only: it holds no keeper, no spawn of `opencode serve`, and reads every fact from the shared module', /const serve = h\.opts\.opencodeServe \|\| require\('\.\.\/opencode-serve'\)/.test(pl) && !/spawn\([^)]*serve/.test(pl) && /ocServeState\(\)/.test(pl) && /ocLocator\(\)\?\.stop\?\.\(\{ killRecorded: true \}\)/.test(pl));
-  ok('cli-env puts the control plugin\'s state on the harness row (declaration-driven, not an id list)', /if \(h\.store\?\.servicePlugin\) \{ try \{ row\.service = getPlugins\(\)\?\.serviceState\?\.\(h\.store\.servicePlugin\)/.test(read('src/server/cli-env.js')));
-  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  const keys = ['Not now', 'Enable & start', 'Turn {name} on or off'];
-  ok('the new user-visible strings carry zh + ja entries (i18n-check parity)', keys.every((k) => zh.includes(`"${k}"`) && ja.includes(`"${k}"`)), keys.filter((k) => !zh.includes(`"${k}"`) || !ja.includes(`"${k}"`)));
-  ok('docs updated: kb-file-structure (plugins.js + opencode-serve + plugins-ui), kb-features, the design S9 row, docs/settings.md', /opencode-serve.*PLUGIN|OpenCode background service/.test(read('docs/kb-file-structure.md')) && /OpenCode background service/.test(read('docs/kb-features.md')) && /OpenCode background service/.test(read('docs/design-harness-plugins.md')) && /Removed 2026-09-07/.test(read('docs/settings.md')) && /## Built-in plugins/.test(read('docs/plugins.md')) && /POST \/api\/plugins\/:id\/prompted/.test(read('docs/kb-api.md')));
+  // (⑥ the wiring pins (the release-gate row below stays: it names this heavy suite) — MOVED to the fast scripts/test-opencode-plugin-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok('ci.mjs runs this suite', /'test-opencode-plugin'/.test(read('scripts/ci.mjs')));
 }
 
