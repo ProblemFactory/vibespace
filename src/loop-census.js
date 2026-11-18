@@ -77,7 +77,8 @@ const OWNERS = Object.freeze([
     rules: [/^src\/agentd\/mux\.js$/,
       name('ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|day-one|phone-doors|changelog-style|instance-url'),
       name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migration-runner|ops-routes|exit-hook|exit-settle|child-starter|child-starter-proc|store-writer|store-writer-worker|store-read|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
-      lead('loop|incident')] },
+      lead('loop|incident'),
+      name('ui-needs')] },   // lane ui-needs-a-button: the need table of the page's sentences (PURE, no state; read by test-needs-doors)
   { id: 'vault', words: 'the vault: the key and every sealed entry, the mask and its belt, the integration credentials, web logins',
     rules: [lead('vault|secret|key-file|sealed-json|totp|integrations?|app-secrets|cluster-presets|preset-layers|ssh-key|credential-words|agent-output-belt|webauthn-sign|login-hold-words'),
       name(`browser-(?:${BROWSER_VAULT})`)] },
