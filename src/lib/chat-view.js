@@ -6791,13 +6791,14 @@ class ChatView {
     this._reattach(false);
   }
 
-  // Same-epoch reconnect: fetch just the messages we missed while offline
+  // Same-epoch reconnect: fetch just the messages we missed while offline — returns the catch-up's own promise (a failure
+  // becomes the history status below; it rejects only if that status itself throws), so a caller can await the work
   _reattachCatchUp() {
     const missedStart = this._windowEnd;
     const knownTotal = this._total; // B-4735: what lay past the window but under this was trimmed, never missed (the full extent has it)
     // same stagger rationale as the epoch reset above — N windows × 200
     // messages rendered in one tick is the non-restart reconnect freeze
-    this._fetchMessages(missedStart, 200).then(msgs => new Promise((res) => setTimeout(() => res(msgs), Math.random() * 400))).then(msgs => {
+    return this._fetchMessages(missedStart, 200).then(msgs => new Promise((res) => setTimeout(() => res(msgs), Math.random() * 400))).then(msgs => {
       if (!msgs.length) return;
       this._loadingHistory = true;
       for (const msg of msgs) this._onCreateMessage(msg);

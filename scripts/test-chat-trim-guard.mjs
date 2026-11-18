@@ -1372,20 +1372,20 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     { id: 'a1', role: 'assistant', ts: 5001, content: [{ type: 'text', text: 'the reply' }] },
     { id: 'u2', role: 'user', ts: 5002, turnIndex: 4, originKind: 'peer-message', peerVia: 'peer', content: [{ type: 'text', text: 'a peer\'s words' }] }];
   const catchUp = async (CV, gap, { windowEnd = 10, total = 10 } = {}) => {
-    const calls = { add: 0, full: [] };
+    const calls = { add: 0, full: [], status: 0 };
     const v = Object.assign(Object.create(CV.prototype), {
       _windowEnd: windowEnd, _windowStart: 0, _total: total, _disposed: false, _pinned: false, _search: null, _gapMinimapActive: gap,
-      _fetchMessages: async () => missed, _onCreateMessage() { }, _updatePosIndicator() { }, _showHistoryStatus() { }, _trace() { },
+      _fetchMessages: async () => missed, _onCreateMessage() { }, _updatePosIndicator() { }, _showHistoryStatus() { calls.status++; }, _trace() { },
       _chatMinimap: { addTurn() { calls.add++; }, appendFullTurn(t, o) { calls.full.push({ t, o }); }, setViewport() { } },
     });
     const rnd = Math.random; Math.random = () => 0;   // the catch-up's own stagger (Math.random() × 400 ms) at 0: the leg awaits the work, never a sleep
-    try { CV.prototype._reattachCatchUp.call(v); for (let i = 0; i < 20 && !calls.add && !calls.full.length; i++) await new Promise((r) => setTimeout(r, 5)); } // the turns are handed in ONE synchronous pass
+    try { await CV.prototype._reattachCatchUp.call(v); } // the catch-up's own promise: the leg awaits the work itself (no poll, no ceiling, no reliance on one synchronous pass)
     finally { Math.random = rnd; }
     return calls;
   };
   const on = await catchUp(ChatView, true), off = await catchUp(ChatView, false);
   ok(`B-4735: the catch-up hands the full-extent minimap each missed USER turn once, with the live append's facts (${on.full.length} turns)`,
-    on.full.length === 2 && on.full[0].t.ts === 5000 && on.full[0].t.preview === 'missed while offline' && !on.full[0].t.other && on.full[1].t.other === 'peer' && on.full.every((c) => c.o && c.o.once === true));
+    on.status === 0 && on.full.length === 2 && on.full[0].t.ts === 5000 && on.full[0].t.preview === 'missed while offline' && !on.full[0].t.other && on.full[1].t.other === 'peer' && on.full.every((c) => c.o && c.o.once === true));
   ok('…a view with no full-extent minimap takes the turns through addTurn only, as before', off.full.length === 0 && off.add === 2);
   // the reader's F1: a window TRIMMED at its bottom (paged up) re-fetches its own tail — those turns are on the map
   const trimmed = await catchUp(ChatView, true, { windowEnd: 8, total: 10 }); // fetched from 8: indices 8, 9 known, 10 new
