@@ -2,7 +2,7 @@ require('./src/server/runtime-boot.js').boot({ rootDir: __dirname }); // lane ru
 // libuv threadpool headroom (default 4): a few fs ops stuck on a dying fuse
 // mount used to starve EVERY async fs/dns op server-wide (real outage — see
 // mounts.js hung-mount defense). Must be set before the pool first spins up, i.e. before any require that performs async I/O.
-process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '32';
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '32'; require('./src/server/hub-port.js').claim(); // the B2b cure, law 2: the start word VIBESPACE_START_FD leaves the environment HERE, before the boot's first child (which dtach, the CLI probes) — test-hub-port ⑧ pins the order
 const bootTrace = require('./src/server/boot-trace.js').start({ dataDir: require('path').join(__dirname, 'data') }); // THE BOOT HOLDS (B-1319): the boot's own loop clock from here — GET /api/boot-trace, data/boot-trace.json
 const express = require('express');
 const http = require('http');
@@ -106,7 +106,7 @@ setInterval(refreshAvailableModels, 3600000); // refresh hourly
 const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
-const hubForm = require('./src/server/hub-port.js').decide(); let hubPort = null; // B2b: the start decides the hub's port (fd 3's start pipe ⇒ piped, else plain) — read before listen, off the loop
+const hubForm = require('./src/server/hub-port.js').decide(); hubForm.then((d) => require('./src/server/hub-port.js').endBadStart(d)); let hubPort = null; // B2b: the start decides the hub's port (the start word VIBESPACE_START_FD names a start pipe ⇒ piped; no word ⇒ plain, no descriptor looked at) — read before listen, off the loop
 const server = http.createServer(app); const hub = require('./src/server/tls.js').create({ app, httpServer: server, dataDir: path.join(__dirname, 'data'), port: PORT, onCertificate: (pem) => { if (hubPort) hubPort.pushCertificate(pem); }, serverSetting: (k) => serverSetting(k), getUserTodos: () => userTodos, log: console, tailscaleBin: throwawayRoot && !process.env.VIBESPACE_TAILSCALE_BIN ? null : undefined, step: (name, fn) => bootTrace.step(name, fn) }); // lane https-tailscale: ONE port, two servers — hub.front peeks each connection's first byte (TLS → https, else http), every listener reaches both through hub.attachToServers (test-architecture §89); a throwaway root never asks the real tailscale ⇒ src/server/tls.js
 
 // ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) +
@@ -1538,7 +1538,7 @@ if (METRICS_PORT > 0) {
   }).listen(METRICS_PORT, () => console.log(`  metrics exporter on :${METRICS_PORT}`));
 }
 
-probeSockets().catch(() => { }).then(() => hubForm).then((d) => { hubPort = require('./src/server/hub-port.js').wire(d, { hub, server }); }).then(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B2b (the separation, M1 lane B): THE START DECIDES — piped (a start pipe on fd 3) joins the interface's link and never listens; plain listens as before (src/server/hub-port.js). The same boot callback in both · B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
+probeSockets().finally(() => hubForm.then((d) => { hubPort = require('./src/server/hub-port.js').wire(d, { hub, server }); }).then(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B2b (the separation, M1 lane B): THE START DECIDES — piped (a start pipe named by VIBESPACE_START_FD) joins the interface's link and never listens; plain listens as before (src/server/hub-port.js). The same boot callback in both · B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
   console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // lane human-cli: the person's CLI index on the machine's own disk is configured in the listen step's LAST turn (below, B-cd4b: its boot write lists the restored survivors, as when the step was one turn) · + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
@@ -1645,7 +1645,7 @@ probeSockets().catch(() => { }).then(() => hubForm).then((d) => { hubPort = requ
   }, 30000);
 
   console.log(`  Ready.\n`);
-}, 'listen-rest'); }, 'restore'); }));
+}, 'listen-rest'); }, 'restore'); })));   // the B2b cure: the release's .finally — a probe that rejects still reaches unhandledRejection (recorded), after the listen
 
 // On server shutdown: only kill the attach PTYs, NOT the dtach sessions
 // Claude processes in dtach survive the server restart

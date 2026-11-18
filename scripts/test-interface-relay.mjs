@@ -217,7 +217,7 @@ async function syncCalls(I) {
   ok(law.ok && law.n === 0, `10 plain and 4 TLS exchanges, a certificate pushed and renewed, a 2 MB answer: ${law.n} synchronous fs / child_process / zlib calls`, law);
   const files = fs.readdirSync(path.join(REPO, 'src/interface')).filter((f) => f.endsWith('.js'));
   const syncForms = files.flatMap((f) => [...read(`src/interface/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1').matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${f}: ${m[0]}`));
-  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files (a reference taken at load is seen too)`, syncForms);
+  ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js', 'start-pipe.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files (a reference taken at load is seen too)`, syncForms);
   const mutRelay = mutant('src/interface/relay.js', "      stats.toPage += buf.length;", "      stats.toPage += buf.length; require('fs').statSync(__filename);");
   const mut = await syncCalls(interfaceWith({ relay: mutRelay }));
   ok(mut.ok && mut.n > 0, `RED CONTROL — one stat planted on the relay's byte path: ${mut.n} counted`, mut);

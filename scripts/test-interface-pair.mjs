@@ -67,10 +67,10 @@ keep('plain', spawn(process.execPath, ['server.js'], { cwd: wtPlain, env: { ...h
 // THE PAIR: the interface first (its admit for the hub written BEFORE the hub starts), then the hub
 const ifaceSecret = crypto.randomBytes(32).toString('hex'), hubSecret = crypto.randomBytes(32).toString('hex');
 const hubDigest = crypto.createHash('sha256').update(hubSecret).digest('hex');
-const iface = keep('interface', spawn(process.execPath, [path.join(wt, 'src/interface/main.js')], { cwd: wt, env: { PATH: process.env.PATH, PORT: String(IFACE_PORT), HOST: '127.0.0.1' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));
+const iface = keep('interface', spawn(process.execPath, [path.join(wt, 'src/interface/main.js')], { cwd: wt, env: { PATH: process.env.PATH, PORT: String(IFACE_PORT), HOST: '127.0.0.1', VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));   // the B2b cure: the start NAMES its pipe
 iface.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: ifaceSecret, link }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hubDigest }) + '\n');
 await until(() => /listening on/.test(outs.get('interface')), 20000);
-const hub = keep('piped', spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubEnv(fakeHome), ...VNC_PAIR, PORT: String(IFACE_PORT) }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));
+const hub = keep('piped', spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubEnv(fakeHome), ...VNC_PAIR, PORT: String(IFACE_PORT), VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));
 hub.stdio[3].write(JSON.stringify({ op: 'start', party: 'hub', secret: hubSecret, link }) + '\n');
 
 const record = (name) => { const m = [...outs.get(name).matchAll(/\[hub-port\] (\{[^\n]*\})/g)].pop(); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } };
@@ -103,9 +103,11 @@ const TABLE = [
   for (const [name, o] of TABLE) rows.push({ name, plain: await ask(PLAIN_PORT, o), pair: await ask(IFACE_PORT, o) });
   const same = rows.filter((r) => r.plain.status === r.pair.status && r.plain.type === r.pair.type);
   check(`${same.length} of ${rows.length} branches answered as the plain hub answers them: ${rows.map((r) => `${r.name} ${r.plain.status}/${r.pair.status}`).join(' · ')}`, same.length === rows.length && rows[0].plain.status === 200, rows.filter((r) => !same.includes(r)));
-  await sleep(3000);   // tls.js's plan reads the pair; the piped hub pushes it
-  const tPlain = await ask(PLAIN_PORT, { p: '/', secure: true }), tPair = await ask(IFACE_PORT, { p: '/', secure: true });
-  check(`TLS GET /: the plain hub ${tPlain.status || tPlain.type}, through the interface ${tPair.status || tPair.type} — the same`, tPlain.status === tPair.status, { tPlain, tPair });
+  // tls.js's plan reads the pair; the piped hub pushes it — waited for (≤ 20 s), and the same status must be a REAL answer:
+  // two hubs that both fail TLS answer 0 = 0 (the B2b readers' vacuous leg)
+  let tPlain = {}, tPair = {};
+  await until(async () => { tPlain = await ask(PLAIN_PORT, { p: '/', secure: true }); tPair = await ask(IFACE_PORT, { p: '/', secure: true }); return tPlain.status > 0 && tPair.status > 0; }, 20000);
+  check(`TLS GET /: the plain hub ${tPlain.status || tPlain.type}, through the interface ${tPair.status || tPair.type} — the same, and an answer`, tPlain.status > 0 && tPlain.status === tPair.status, { tPlain, tPair });
 }
 
 console.log('③ THE START PIPE\'S SECRETS travel only on fd 3');
