@@ -264,7 +264,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     const spec = { ...b, owner: { conversation: null, sessionId: null, sessionCreatedAt: 0, createdBy: 'user', groupsSnapshot: [] } };
     const r = jm.create(spec, USER);
     if (r.error) return res.status(400).json({ error: r.error });
-    res.json({ success: true, job: r.job, renamed: r.renamed });
+    jm.persisted().then((saved) => { try { res.json({ success: true, job: r.job, renamed: r.renamed, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the answer waits for the store, never the loop
   });
   app.get('/api/jobs/:id', (req, res) => {
     const job = jm.jobs.get(req.params.id);
@@ -326,11 +326,11 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         job.access.lockedBy = req.body?.lock === false ? null : req.body?.lock === true ? 'user' : job.access.lockedBy;
         if (['on', 'off', 'inherit'].includes(req.body?.notify)) job.notify = req.body.notify === 'inherit' ? undefined : req.body.notify; // per-job auto-notify override (2.344.2)
         jm._touch(job); jm._save();
-        return res.json({ success: true, access: job.access, notify: job.notify || 'inherit' });
+        return void jm.persisted().then((saved) => { try { res.json({ success: true, access: job.access, notify: job.notify || 'inherit', ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk
       }
       else return res.status(400).json({ error: `unknown action "${act}"` });
       if (r.error) return res.status(r.code === 'stale-panel' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(Number.isInteger(r.version) ? { version: r.version } : {}) }); // r6 D-F5: a refused answer is named (stale-panel / version-required)
-      res.json({ success: true, ...r });
+      jm.persisted().then((saved) => { try { res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
   // B-e3fe follow-up (主开发 04:02Z: THE HOLD IS NOT SILENT): an unreadable data/msg-queued.json is said in For you, with the person's

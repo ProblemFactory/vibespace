@@ -33,7 +33,10 @@ const cleanup = () => { for (const d of dirs) { try { fs.rmSync(d, { recursive: 
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
-const readStore = (d) => JSON.parse(fs.readFileSync(path.join(d, 'jobs.json'), 'utf-8'));
+// lane lg-store-writes (B-0248 U4): jobs.json is the STORE WRITER's — a read of the FILE first lands what the process's writer owes
+const SWu4 = require(path.join(ROOT, 'src/store-writer.js'));
+const landedU4 = () => { try { SWu4.storeWriter().flushSync(); } catch { } };
+const readStore = (d) => { landedU4(); return JSON.parse(fs.readFileSync(path.join(d, 'jobs.json'), 'utf-8')); };
 const readArchive = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'jobs-archive.json'), 'utf-8')); } catch { return null; } };
 
 /** a route registry standing in for express: handlers are called with fake req/res */
@@ -658,7 +661,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const A = engine({ JobManager }, dA, lA);
   const mt = fs.statSync(SF).mtimeMs;
   const made = A.create(spec, { isUser: true });
-  A._dirty = true; A._save();
+  A._dirty = true; A._save(); landedU4();   // U4: whatever the save handed the writer has landed — the mtime below sees a late write too
   ok(!readable && A.ready && A._unread.store && A._unread.store.code === codeA && A.jobs.size === 0 && asides(dA, 'jobs.json').length === 0 && fs.statSync(SF).mtimeMs === mt, 'B-f276: a store whose READ fails (EACCES, its stat answers) is kept as it is — NOT set aside (the release renamed the live file), and a save writes nothing over it', { unread: A._unread.store, asides: asides(dA, 'jobs.json') });
   ok(made.code === 'records-unread' && new RegExp(`no job is created until they are read — jobs\\.json in VibeSpace's data folder could not be read \\(${codeA}\\).*For you says what to check`).test(made.error) && !made.job, `B-f276: …and no job is created while the records are unread — the refusal NAMES ITS DOOR (the file, For you) [${codeA}]`, made);
   await until(() => A._unreadTries.store >= 3);   // three reads again, each failed
@@ -795,13 +798,13 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const jsrc = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
   const readLine = 'this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));';
   const archLine = 'this._archiveAnswer(SR.storeAnswer(read, { valid: Array.isArray }));';
-  const saveLine = "if (!this._unread.store) timedSync('jobs.write'";
+  const saveLine = "if (!this._unread.store) {";   // lane lg-store-writes U4: the store's write hold now guards its hand-off to the store writer
   ok([readLine, archLine, saveLine].every((x) => jsrc.split(x).length === 2), 'B-f276 control setup: the two reads and the store\'s write hold are each one line');
   const release = (r, f) => `((r) => (r.state === 'unreadable' && fs.existsSync(${f}) ? { ...r, state: 'corrupt' } : r))(${r})`;   // MUTANT: the release
   const JMod = MJ.load('src/jobs.js', jsrc
     .replace(readLine, `this._loadAnswer(${release('SR.storeAnswer(read, { valid: STORE_SHAPE })', 'this.file')});`)
     .replace(archLine, `this._archiveAnswer(${release('SR.storeAnswer(read, { valid: Array.isArray })', 'this.archiveFile')});`)
-    .replace(saveLine, "if (true) timedSync('jobs.write'"));
+    .replace(saveLine, "if (true) {"));
   if (!asRoot) {
   const dX = mkDir('jobs-triage-unread-mut'), XF = path.join(dX, 'jobs.json');
   fs.writeFileSync(XF, body); fs.chmodSync(XF, 0o000);
@@ -824,7 +827,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   fs.renameSync = function (f, ...a) { if (String(f) === ZF) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn.call(this, f, ...a); };
   fs.copyFileSync = function (f, ...a) { if (String(f) === ZF) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return cp.call(this, f, ...a); };
   let Z; try { Z = engine(JMod, dZ, []); } finally { fs.renameSync = rn; fs.copyFileSync = cp; }
-  Z._unreadStopped = true; Z._dirty = true; Z._save();
+  Z._unreadStopped = true; Z._dirty = true; Z._save(); landedU4();   // U4: the save's bytes are the writer's — landed before the file is read
   const zNow = fs.readFileSync(ZF, 'utf-8');
   if (Z._logsNoteP) await Z._logsNoteP;
   Z.shutdown();
@@ -1132,6 +1135,83 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
   for (const rr of copiesCensus(MJ8.files, MJ8.dir, ROOT, { minCopies: 1, label: 'B-8bd5 ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
   ok(/const selfActs = \['progress', 'ask', 'withdraw', 'announce'\];/.test(ar) && !/const needsControl = \[[^\]]*'withdraw'[^\]]*\];/.test(ar) && /if \(!a\.selfJob && act === 'withdraw' && !jobModel\.canEdit\(job, a\.caller\)\) return jobModel\.canView\(job, a\.caller\) \? res\.status\(403\)/.test(ar) && /else if \(act === 'withdraw'\) r = a\.jm\.withdrawAsk\(job, \{ self: !!a\.selfJob \}\);/.test(ar) && /case 'withdraw': \{/.test(cli) && /vibespace-job withdraw \(its cause is gone\)/.test(cli), 'WIRING: a job token withdraws its OWN panel; a conversation only as its owner — a control grant never withdraws (its route leg: test-jobs-addressed §0); the CLI has `withdraw` (in its usage)');
+}
+
+console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH THE STORE WRITER — jobs.json and job-notifications.json are never written on the main thread at a change');
+{
+  const ACC = { view: 'all', control: 'all' };
+  const seedRec = (id) => ({ id, kind: 'task', name: 'u4 ' + id.slice(-2), state: 'done', owner: {}, access: ACC, runs: [{ startedAt: T0 - H - 1000, endedAt: T0 - H, exit: 0 }], createdAt: T0 - H - 1000 });   // ended an hour ago: never archived by the boot sweep's 24 h policy, however slow the box
+  /** a store writer stand-in: it lands NOTHING until told (land / flushSync), records every hand-off */
+  const standIn = () => {
+    const r = { dirties: [], durables: [], flushes: [], owed: new Map(), exitAt: null };
+    r.dirty = (f, o) => { r.dirties.push({ f: path.basename(f), name: o.name, rank: o.rank }); r.owed.set(f, o); };
+    r.durable = (f) => { r.durables.push(path.basename(f)); return Promise.resolve(true); };
+    r.pending = (f) => r.owed.has(f);
+    r.flushSync = (files) => { r.flushes.push(files.map((f) => path.basename(f)).join('+')); for (const f of files) { const o = r.owed.get(f); if (!o) continue; fs.writeFileSync(f, o.produce()); r.owed.delete(f); if (o.onWritten) o.onWritten(true, null); } return { written: files, left: [] }; };
+    r.land = () => r.flushSync([...r.owed.keys()]);
+    r.exitStartedAt = () => r.exitAt;
+    return r;
+  };
+  const scene = (JMod, tag) => {
+    const d = mkDir('jobs-triage-u4-' + tag), F = path.join(d, 'jobs.json');
+    fs.writeFileSync(F, JSON.stringify([seedRec('jb-0248a401')]));
+    const rec = standIn();
+    const J = new JMod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: rec });
+    J.init();
+    const before = fs.readFileSync(F, 'utf-8');
+    const job = J.jobs.get('jb-0248a401');
+    job.name = 'u4 renamed'; J._touch(job); J._save();   // a direct save (an act)
+    return { d, F, rec, J, job, unchanged: fs.readFileSync(F, 'utf-8') === before };
+  };
+  const a = scene({ JobManager }, 'moved');
+  const acts = a.rec.dirties.slice();
+  ok(a.unchanged && acts.some((x) => x.f === 'jobs.json' && x.name === 'jobs.write' && x.rank === 0) && acts.some((x) => x.f === 'job-notifications.json' && x.name === 'jobs-notifs.write' && x.rank === 0)
+    && a.rec.durables.includes('jobs.json') && a.rec.durables.includes('job-notifications.json'),
+    'U4: a direct save (an act) hands jobs.json and job-notifications.json to the writer by name, rank 0 + durable() (urgent) — the file is NOT written on the main thread at the change', { unchanged: a.unchanged, acts, durables: a.rec.durables });
+  a.rec.dirties.length = 0; a.rec.durables.length = 0;
+  a.J._dirty = true; a.J._save({ paced: true });   // the 2 s tick
+  ok(a.rec.dirties.length === 2 && a.rec.dirties.every((x) => x.rank === undefined) && a.rec.durables.length === 0, 'U4: the 2 s tick hands both files PACED — no rank, no durable()', a.rec.dirties);
+  const bytes = JSON.parse(a.rec.owed.get(a.F).produce());
+  ok(bytes.length === 1 && bytes[0].name === 'u4 renamed' && !JSON.stringify(bytes).includes('"_'), 'U4: the bytes are the records when the write is due — a later change rides the same write, runtime-only `_` keys never persisted', bytes);
+  // a new engine in the same process while the writes are owed: its load lands them first
+  const flushes0 = a.rec.flushes.length;
+  // (the first engine stays up — a suite's restart in the same process)
+  const B = new JobManager({ dataDir: a.d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: a.rec });
+  B._load();
+  ok(a.rec.flushes.length === flushes0 + 1 && a.rec.flushes[flushes0] === 'jobs.json+job-notifications.json' && B.jobs.get('jb-0248a401') && B.jobs.get('jb-0248a401').name === 'u4 renamed', 'U4: an engine made AGAIN while the store is owed lands exactly those two files first, then reads them', { flushes: a.rec.flushes });
+  // the hub's exit: the store lands at the writer's exit flush — the lock goes only once jobs.json holds it
+  a.J._touch(a.job); a.J._save({ paced: true });
+  a.rec.exitAt = 1;
+  a.J.shutdown();
+  const lockAtExit = fs.existsSync(a.J.lockFile);
+  a.rec.land();
+  const lockAfter = fs.existsSync(a.J.lockFile);
+  ok(lockAtExit && !lockAfter, 'U4: at the hub\'s exit the lock stays until jobs.json has landed (the writer\'s exit flush), then it goes', { lockAtExit, lockAfter });
+  // a shutdown OUTSIDE the hub's exit (a suite's engine): the store lands now, then the lock goes
+  const c = scene({ JobManager }, 'down');
+  c.J.shutdown();
+  ok(!c.rec.pending(c.F) && JSON.parse(fs.readFileSync(c.F, 'utf-8'))[0].name === 'u4 renamed' && !fs.existsSync(c.J.lockFile), 'U4: a shutdown outside the hub\'s exit lands the store at once (the next engine reads it), then removes the lock', { lock: fs.existsSync(c.J.lockFile) });
+  let done = false; const p = c.J.persisted().then((v) => { done = v; }); await p;
+  ok(done === true, 'U4: persisted() — what an act\'s route waits on — resolves once both files are on disk');
+  c.rec.durable = () => Promise.resolve(false);
+  const notSaved = await c.J.persisted();
+  ok(notSaved === false, 'U4: persisted() answers FALSE when a write did not land (the route says notOnDisk — the act stays applied in memory)');
+  // a CLAIM (a hand-over's stamp) is ON DISK when claimNotifs returns — the exactly-once law (verify r2), through the writer
+  const k = scene({ JobManager }, 'claim');
+  k.J.pendingNotifs.set('conv-u4', [{ jobId: 'jb-0248a401', what: 'done', at: T0 }]);
+  const flushesK = k.rec.flushes.length;
+  k.J.claimNotifs('conv-u4', k.J.pendingNotifs.get('conv-u4'), 'ho-u4');
+  const claimedOnDisk = (() => { try { return (JSON.parse(fs.readFileSync(path.join(k.d, 'job-notifications.json'), 'utf-8'))['conv-u4'] || [])[0].ho === 'ho-u4'; } catch { return false; } })();
+  ok(claimedOnDisk && k.rec.flushes.slice(flushesK).includes('job-notifications.json'), 'U4: a notifications CLAIM is on disk when claimNotifs returns (its one file waited for through the writer) — a kill after it never delivers twice', { claimedOnDisk, flushes: k.rec.flushes.slice(flushesK) });
+  k.J.shutdown();
+  // RED CONTROL: the change removed — the old synchronous save (the writer bypassed)
+  const jsrcU4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const aU4 = "  _writer() { return this.d.writer || require('./store-writer.js').storeWriter(); }";
+  ok(jsrcU4.split(aU4).length === 2, 'U4 ANCHOR: the store\'s one writer line');
+  const SyncJ = mutantCopies('jobs-triage-u4', ROOT).load('src/jobs.js', jsrcU4.replace(aU4, "  _writer() { return { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true, pending: () => false, flushSync: () => ({ written: [], left: [] }), exitStartedAt: () => null }; }"), 'sync-save');
+  const r = scene(SyncJ, 'red');
+  ok(!r.unchanged, 'U4 CONTROL: the old synchronous save (the writer bypassed, a mutant copy) ⇒ jobs.json is written on the main thread at the change — the first check above would be red');
+  r.J.shutdown();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

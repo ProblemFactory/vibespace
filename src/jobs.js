@@ -36,10 +36,11 @@ const PARKED_NO_START = 'it ended out of memory and is parked — raise its boun
 const skeletonAccess = (j) => { if (LS.isSkeleton(j)) { j.owner = {}; j.access = { view: 'session', control: 'session' }; } return j; };
 const LS = require('./job-logs-sweep.js'); // lane job-logs-sweep: what a record no longer lists leaves data/job-logs after 14 days — every removal under job-logs off the main thread
 
+// _-prefixed keys are runtime-only (raw tokens, cursors) — never persisted
+const storeBytes = (obj) => JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1);
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp-' + process.pid;
-  // _-prefixed keys are runtime-only (raw tokens, cursors) — never persisted
-  fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1));
+  fs.writeFileSync(tmp, storeBytes(obj));
   fs.renameSync(tmp, file);
 }
 /** The per-conversation notification cap (30): the oldest UNCLAIMED entries fall off; an entry stamped `ho` is being
@@ -259,7 +260,7 @@ class JobManager {
       this._load();
       this._loadNotifs();
       this.announceOwedWakes();   // B-6721: what a stopped hub left owed a wake — the stash view arms each one's chain
-      if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
+      if (this._skeletonsOwed) { this._skeletonsOwed = false; this._save({ storeOnly: true }); this._onDisk(this.file, 'the recovered skeletons'); }   // B-ef97: the recovered skeletons, on disk before anything else runs — jobs.json ALONE (a notifications file that did not load is not written over here)
       this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
       this._goneSaid = new Set(); this._keepOutOff = PI.keepOut('jobs', () => this._wrappersHeld());   // B-c134 cure (MUST A): no stop's walk enters another job's wrapper
@@ -269,7 +270,7 @@ class JobManager {
       const t1 = setInterval(() => this._sweep().catch((e) => this.d.log('[jobs] sweep failed:', e.message)), 5000);
       const t2 = setInterval(() => this._cronTick().catch((e) => this.d.log('[jobs] cron tick failed:', e.message)), 30_000);
       const t3 = setInterval(() => this._gc().catch((e) => this.d.log('[jobs] gc failed:', e.message)), 3600_000);
-      const t4 = setInterval(() => { if (this._dirty) this._save(); }, 2000);
+      const t4 = setInterval(() => { if (this._dirty) this._save({ paced: true }); }, 2000);   // lane lg-store-writes U4: the 2 s coalesce hands the bytes to the writer PACED
       // lane job-logs-sweep: ONE pass soon after the boot (a hub that restarts more often than hourly never reached its hourly gc)
       const t5 = setTimeout(() => this.sweepLogs({ why: 'boot' }).catch((e) => this.d.log('[jobs] job-logs pass failed:', e.message)), this._logsCfg().bootDelayMs);
       for (const t of [t1, t2, t3, t4, t5]) { t.unref?.(); this._timers.push(t); }
@@ -283,7 +284,46 @@ class JobManager {
     }
   }
   shutdown() { for (const t of this._urlTimers || []) clearTimeout(t); this._urlTimers = new Set(); /* B-74f5 r3: the URL checks end with the engine */ if (this._notifsUnread && this.pendingNotifs.size) this.d.log(`[jobs] job-notifications.json is still held at the engine's end — ${[...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0)} notice(s) that arrived meanwhile are NOT written (the file is kept as it is)`);   // its read r1 (M2): said
-    if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
+    if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save({ paced: true }); } catch { } this._unlockAfterStore(); this._logsStop(); }
+  /** THE LOCK GOES AFTER THE STORE LANDS (lane lg-store-writes U4): the exit's store bytes are the writer's (its exit flush, after
+   *  this) — the lock file is removed once jobs.json holds them, never before (an engine taking the lock in between would read
+   *  the older store). A store with nothing owed releases now; a write that FAILS keeps the lock — the next engine sees its pid
+   *  dead and takes it (_takeLock's liveness). */
+  _unlockAfterStore() {
+    if (this.readOnly) return;
+    let W = null, owed = false, exiting = false;
+    try { W = this._writer(); owed = W.pending(this.file) || W.pending(this.notifsFile); exiting = typeof W.exitStartedAt === 'function' && W.exitStartedAt() != null; } catch { }
+    if (exiting) { if (W.pending(this.file)) { this._unlockWhenLanded = true; return; } }   // the hub's exit: its flush (after this) writes jobs.json, then the lock goes (the notifications land in the same flush; the lock guards the store)
+    else if (owed) { this._onDisk(this.file, 'the store at shutdown'); this._onDisk(this.notifsFile, 'the notifications at shutdown'); }   // a shutdown outside the hub's exit (a suite's engine): they land now
+    this._unlockNow();
+  }
+  /** the engine lock's ONE removal (test-job-logs-sweep counts jobs.js's removal calls by name) */
+  _unlockNow() { try { fs.unlinkSync(this.lockFile); } catch { } }
+  /** the process's store writer (src/store-writer.js) — or a suite's (deps.writer) */
+  _writer() { return this.d.writer || require('./store-writer.js').storeWriter(); }
+  /** a write that must be ON DISK before what follows (the run's intent before its child exists; the boot's recovered
+   *  skeletons): the main thread WAITS for that one file's write (a named wait — test-store-write-census WAITS). A write that
+   *  did not land is said, and what follows goes on, as the release's swallowed write did. */
+  _onDisk(file, what) {
+    try { const r = this._writer().flushSync([file]); const miss = r.left.find((x) => x.file === file); if (miss) this.d.log(`[jobs] ${what}: ${path.basename(file)} not on disk yet (${miss.why}) — kept in memory, the store writer retries`); }
+    catch (e) { this.d.log(`[jobs] ${what}: ${e.message}`); }
+  }
+  /** THE ANSWER OF A PERSON'S ACT WAITS FOR THE STORE (lane lg-store-writes U4): true once jobs.json and job-notifications.json
+   *  hold every change made so far (false: a write failed or is still queued at the writer's bound — said by the writer); the
+   *  loop never waits — only the route's answer */
+  persisted() {
+    if (this.readOnly) return Promise.resolve(true);
+    // bounded 20 s: under the CLI's 30 s call budget (src/cli-call.js) — a stalled mount answers «notOnDisk» in time, never «no
+    // answer» (an agent that retried a create would make a second job)
+    try { const W = this._writer(); return Promise.all([W.durable(this.file, { timeoutMs: 20000 }), W.durable(this.notifsFile, { timeoutMs: 20000 })]).then(([a, b]) => a && b, () => false); }
+    catch { return Promise.resolve(false); }
+  }
+  /** a store write's outcome (the writer's onWritten): a failure said once until one lands; the exit's lock released once landed */
+  _storeWritten(ok, e) {
+    if (!ok) { if (!this._storeOwedSaid) { this._storeOwedSaid = true; this.d.log(`[jobs] save failed: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } return; }
+    if (this._storeOwedSaid) { this._storeOwedSaid = false; this.d.log('[jobs] the store is on disk again'); }
+    if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }   // armed only at the hub's exit (no other engine in this process)
+  }
 
   _takeLock() {
     try {
@@ -296,6 +336,9 @@ class JobManager {
   _load() {
     // B-f276: THE STORE READ (src/store-read.js) — data / missing / unreadable; only bytes that were READ and do not parse are corrupt.
     // The release set the LIVE jobs.json aside on ANY failed read (a storage hiccup: the records became skeletons, then gone)
+    // lane lg-store-writes U4: A LOAD READS WHAT THIS PROCESS STILL OWES — an engine made again in the same process (a suite's
+    // restart) lands the writes the last one handed the writer before it reads (a hub's boot owes nothing: no wait)
+    try { const W = this._writer(), owed = [this.file, this.notifsFile].filter((f) => W.pending(f)); if (owed.length) W.flushSync(owed); } catch { }
     let read; try { read = { text: timedSync('jobs.read', () => fs.readFileSync(this.file, 'utf-8')) }; } catch (error) { read = { error }; }
     this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));
   }
@@ -612,17 +655,31 @@ class JobManager {
     if (w && typeof w.then === 'function') w.then(() => this._logsMarkSaid(name), () => { }); else this._logsMarkSaid(name);
     return v;
   }
-  _save({ storeOnly = false } = {}) {
+  /** THE STORE'S SAVE GOES THROUGH THE STORE WRITER (lane lg-store-writes, B-0248 U4): jobs.json and job-notifications.json were
+   *  written whole (temp + rename) ON THE MAIN THREAD at every save — the 2 s dirty tick and each act — and on the production
+   *  hub's data mount that was 41 s of main-loop holds in five hours (20 holds, 3.9 s the longest), the largest store write
+   *  left. Now both files hand their bytes to the writer by name (made when the write is due — a burst is one write): a
+   *  direct save (an act: create, stop, start, rm, an answer, a claim) is URGENT (rank 0 + durable() — the writer's next
+   *  writes, and the act's route answers once persisted() resolves); the 2 s tick and the exit are PACED. What must be on disk
+   *  before what follows waits for that one file (_onDisk: the run's intent before its child, the boot's skeletons). */
+  _save({ storeOnly = false, paced = false } = {}) {
     // a READ-ONLY engine (second server against a live lock) must never flush
     // its stale in-memory copy over the live engine's store (2.344.1 review
     // catch: shutdown()'s dirty-flush had no guard, and drainNotifs marks
     // dirty even in read-only mode)
     if (this.readOnly) { this._dirty = false; return; }
     try {
+      const W = this._writer();
       // B-f276: an UNREAD store is never written over (its records are on disk, not here) — the notifications are their own file
-      if (!this._unread.store) timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));
+      if (!this._unread.store) {
+        W.dirty(this.file, { name: 'jobs.write', ...(paced ? {} : { rank: 0 }), produce: () => storeBytes([...this.jobs.values()]), onWritten: (ok, e) => this._storeWritten(ok, e) });
+        if (!paced) W.durable(this.file).catch(() => { });
+      }
       if (storeOnly) return;
-      if (!this._notifsUnread) timedSync('jobs-notifs.write', () => writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs)));   // the B-f276 remainder: a held notifications file is never written over
+      if (!this._notifsUnread) {   // the B-f276 remainder: a held notifications file is never written over
+        W.dirty(this.notifsFile, { name: 'jobs-notifs.write', ...(paced ? {} : { rank: 0 }), produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) });
+        if (!paced) W.durable(this.notifsFile).catch(() => { });
+      }
       this._dirty = false;
     } catch (e) { this.d.log('[jobs] save failed:', e.message); }
   }
@@ -1460,7 +1517,7 @@ class JobManager {
     if (!t) return { error: 'text required: vibespace-job announce "what happened"' };
     this._touch(job, { what: `announced: ${t}`, verb: 'poll' });
     this._notifyOwner(job, { what: `announced: ${t}` });
-    this._save();
+    this._save({ paced: true });   // lane lg-store-writes U4: a job's own frequent verb (a watch job announces in a loop) — paced, never urgent
     return { ok: true };
   }
   /** append the FULL drained notification history to a per-conversation file
@@ -1628,7 +1685,10 @@ class JobManager {
   _saveNotifs() {
     if (this.readOnly) return;
     if (this._notifsUnread) { if (!this._notifsSaveSaid) { this._notifsSaveSaid = true; this.d.log('[jobs] a job-notifications.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }   // the B-f276 remainder
-    try { timedSync('jobs-notifs.write', () => writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs))); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
+    // lane lg-store-writes U4: the notifications' bytes go through the store writer — and a claim, a drain, a restore is ON DISK
+    // before what follows (verify r2's exactly-once law: the hand-over's stamp is on disk in both stores before the post
+    // leaves; a drained entry is never delivered twice after a kill) — _onDisk waits for this one file's write
+    try { const W = this._writer(); W.dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, produce: () => storeBytes(Object.fromEntries(this.pendingNotifs)) }); this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)'); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
   }
   /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). */
   restoreNotifs(cid, items) {
@@ -2485,7 +2545,7 @@ class JobManager {
     const hub = M.memoryMbOf(job, this._memoryCtx({ hub: true })); // the spec's: the rlimit / none rungs live inside the hub's own cgroup
     job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
-    this._save(); // intent-before-spawn, flushed
+    this._save(); this._onDisk(this.file, 'the run\'s intent'); // intent-before-spawn, flushed — lane lg-store-writes U4: jobs.json ALONE waits (the notifications follow on the writer)
     // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {

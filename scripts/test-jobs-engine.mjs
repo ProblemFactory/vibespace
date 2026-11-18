@@ -115,7 +115,7 @@ try {
   const rn2 = C.create({ kind: 'task', name: 'notif-stash', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
   const jn2 = C.jobs.get(rn2.job.id);
   ok(await until(() => jn2.lastNotify && jn2.lastNotify.lane === 'stash', 15000), 'unreachable owner → notification stashed (lastNotify lane=stash)', JSON.stringify(jn2.lastNotify));
-  C._save();
+  C._save(); try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U4: landed before the file is read
   const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'job-notifications.json'), 'utf-8'));
   ok(Array.isArray(persisted['conv-T']) && persisted['conv-T'].some((n) => n.jobId === jn2.id), 'stash persists to job-notifications.json keyed by conversation');
   const drained = C.drainNotifs('conv-T');
@@ -374,7 +374,7 @@ try {
   ok(resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false), 'rm clears ALL of the job inbox items', `settled=${settled} state=${jp1.state} rm=${JSON.stringify(rmr)} resolved=${JSON.stringify(resolved)}`);
 
   // 8. store hygiene: raw token never persisted
-  C._save();
+  C._save(); try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // lane lg-store-writes U4: landed before the file is read
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');
 
   // 9. rm --stop on terminal + cleanup

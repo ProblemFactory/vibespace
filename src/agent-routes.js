@@ -2828,8 +2828,9 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
   // piece 7: --propose-wake "why" files the grant's proposal for the NEW job (its answer rides this one; the job exists either way)
+  // lane lg-store-writes U4: the answer waits for the store, never the loop (a write not landed is said: notOnDisk)
   Promise.resolve(b.proposeWake !== undefined ? proposeWake(a, a.jm.jobs.get(r.job.id), b.proposeWake) : null).catch((e) => ({ body: { error: (e && e.message) || String(e), code: 'failed' } })).then((pw) =>
-    res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}) }));   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
+    a.jm.persisted().then((saved) => { try { res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch { } }));
 }));
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -2928,7 +2929,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     else if (act === 'access') {
       for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
       a.jm._touch(job); a.jm._save(); r = { ok: true };
-      return res.json({ success: true, access: job.access });
+      return void a.jm.persisted().then((saved) => { try { res.json({ success: true, access: job.access, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // an authority change: answered once on disk
     }
     else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller, { filter: req.body?.filter });   // canView already proven by findVisible
     else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
@@ -2940,12 +2941,13 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
       if (!['on', 'off', 'inherit'].includes(v)) return res.status(400).json({ error: 'value must be on|off|inherit' });
       job.notify = v === 'inherit' ? undefined : v;
       a.jm._touch(job); a.jm._save();
-      return res.json({ success: true, notify: job.notify || 'inherit', preview: (() => { try { return a.jm.notifyPreview(job); } catch { return null; } })() });
+      return void a.jm.persisted().then((saved) => { try { res.json({ success: true, notify: job.notify || 'inherit', preview: (() => { try { return a.jm.notifyPreview(job); } catch { return null; } })(), ...(saved ? {} : { notOnDisk: true }) }); } catch { } });
     }
     else if (act === 'memory') r = a.jm.setMemory(job, req.body?.value ?? null, { byUser: false }); // lane jobs-memory-bound: owner conversation only (canEdit above)
     else return res.status(400).json({ error: `unknown action "${act}"` });
     if (r.error) return res.status(400).json({ error: r.error });
-    res.json({ success: true, ...r });
+    if (act === 'progress' || act === 'announce') return res.json({ success: true, ...r });   // a job's own frequent verbs: paced, answered at once
+    a.jm.persisted().then((saved) => { try { res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 }

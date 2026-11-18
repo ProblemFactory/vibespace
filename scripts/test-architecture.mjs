@@ -4139,9 +4139,11 @@ await section(async () => {
   ];
   const got = planted.map(([t]) => unwrapped72(body72(t, '_save').text, ['task-groups.write']).length);
   ok(got.join() === planted.map(([, n]) => n).join(), `§72 NEGATIVE CONTROLS: unwrapped / wrong name / beside the span caught, a wrapped write passes (${got.join()})`);
-  const jobsBare = strip72(read('src/jobs.js')).replace("timedSync('jobs.write', () => writeJsonAtomic(this.file, [...this.jobs.values()]));", 'writeJsonAtomic(this.file, [...this.jobs.values()]);');
-  const hit = unwrapped72(body72(jobsBare, '_save').text, ['jobs.write', 'jobs-notifs.write']);
-  ok(hit.length === 1 && /writeJsonAtomic\(this\.file/.test(hit[0]), `§72 CONTROL: the real jobs.js _save with its jobs.json write unwrapped is printed (${hit.join(' | ')})`);
+  // lane lg-store-writes U4: jobs.js's save moved onto the store writer — the control reads a store that still times its own
+  // synchronous write (user-todos' _flush)
+  const todosBare = strip72(read('src/user-todos.js')).replace("timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });", 'fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file);');
+  const hit = unwrapped72(body72(todosBare, '_flush').text, ['user-todos.write']);
+  ok(hit.length === 1 && /fs\.writeFileSync\(tmp, json\)/.test(hit[0]), `§72 CONTROL: the real user-todos.js _flush with its write unwrapped is printed (${hit.join(' | ')})`);
 });
 
 // §73 THE USAGE INDEX IS A SHADOW, ON ITS OWN THREAD (design 011 lane 3, L1 — 2026-10-03). The ledger's SQLite index
@@ -6016,7 +6018,7 @@ await section(async () => {
   // read the engine's SNAPSHOT (its name the accessor's), never a record.
   const NAME_READERS93 = [
     ['src/jobs.js', 'const raw = String((job && (job.name || job.id)) || \'\');', 'THE accessor (labelOf: the name belted on its own, memoised)'],
-    ['src/jobs.js', "fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1));", 'the record\'s writer — a whole-record serialization (r7): data/jobs.json and the archive, the hub\'s own files, never shown'],
+    ['src/jobs.js', "const storeBytes = (obj) => JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1);", 'the record\'s writer — a whole-record serialization (r7): data/jobs.json and the archive, the hub\'s own files, never shown (lane lg-store-writes U4: the bytes the store writer and the archive\'s writeJsonAtomic both write)'],
     ['src/jobs.js', 'name: author || !job.name ? job.name : this.labelOf(job),', 'the author\'s own copy (the create echo, its own views) — a non-author\'s is the accessor\'s'],
     ['src/jobs.js', 'jobName: job.name, ownerCid:', 'a For-you copy\'s FIELD — the store belts jobName on its own (r3)'],
     ['src/jobs.js', "name: `${job.name} run`,", 'the record\'s writer (a scheduled run\'s own record)'],

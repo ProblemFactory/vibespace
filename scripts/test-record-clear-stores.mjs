@@ -580,7 +580,7 @@ console.log('§4 Background Work');
   ok(liveKeys === arcKeys && 'clearedAt' in arc && 'clearedBy' in arc, 'the live and archived snapshots carry the same keys (clearedAt/clearedBy included — test-jobs-triage parity)');
   const cleaned = userTodos.get(jobItem.id);
   ok(cleaned.text === CT && cleaned.sessionName === null && cleaned.jobId === CHILD && cleaned.clearedBy === 'owner', 'THE CASCADE: the job\'s For-you item is cleared too — its words and the job name in its label', cleaned);
-  jm._save();
+  jm._save(); try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync(); } catch { }   // lane lg-store-writes U4: the store's bytes are the writer's — landed before the file is read
   ok(!fs.readFileSync(path.join(DATA, 'jobs.json'), 'utf8').includes(MARK) && !fs.readFileSync(path.join(DATA, 'jobs-archive.json'), 'utf8').includes(MARK) && !fs.readFileSync(path.join(DATA, 'job-notifications.json'), 'utf8').includes(MARK), 'data/jobs.json, data/jobs-archive.json and data/job-notifications.json on disk hold no marker');
   const agentJob = await recordClear.clear({ kind: 'job', id: FOREIGN }, { caller: { role: 'agent', keys: [ME], conversationId: ME_CID, by: ME } });
   ok(!agentJob.ok && agentJob.code === 'not_yours', 'through the ONE entry point an agent may not clear another conversation\'s job', agentJob);
