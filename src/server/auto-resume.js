@@ -403,7 +403,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -670,7 +670,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     } catch (e) { v = { ok: false, why: 'gate-error', detail: (e && e.message) || String(e) }; try { global.__vsEvent?.('spend-gate-error', 'bulk-resume:threw'); } catch { } }
     if (!v || v.ok === false || !Array.isArray(v.holds) || v.holds.length !== chosen.length) {
       if (v && v.ok !== false && Array.isArray(v.holds) && releaseSpend) for (const h of v.holds) { try { releaseSpend(h.sessionId, null, h.hold); } catch { } }
-      rec.refused = { why: (v && v.why) || 'refused', detail: (v && v.detail) || null, identity: (v && v.identity) || null, retryAfter: (v && v.retryAfter) || 0, n: chosen.length, need: v && Number.isFinite(v.need) ? v.need : null, left: v && Number.isFinite(v.left) ? v.left : null };
+      rec.refused = { why: (v && v.why) || 'refused', detail: (v && v.detail) || null, identity: (v && v.identity) || null, retryAfter: (v && v.retryAfter) || 0, n: chosen.length, need: v && Number.isFinite(v.need) ? v.need : null, left: v && Number.isFinite(v.left) ? v.left : null, fitK: v && Number.isFinite(v.fitK) ? v.fitK : null };
       rec.done = true;
       log(`[auto-resume] bulk resume of ${chosen.length} refused by the spend gate — ${rec.refused.why}: ${rec.refused.detail || ''} (none resumed)`);
       return batchStatus(batchId);
@@ -730,7 +730,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
           // A GATE THE LOOP STOPPED WAITING FOR (a Stop, the wait bound) STILL RUNS (U2 cure, the read's should): its pool switch
           // calls fireNow on an armed session, and the single continue would continue a conversation the batch just said it
           // stopped or skipped — the in-flight flag stays up until THE GATE ITSELF settles (bounded: BULK_GATE_HOLD_MS)
-          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const free = () => { clearTimeout(t2); session._arFiring = false; }; t2 = setTimeout(free, BULK_GATE_HOLD_MS); if (t2.unref) t2.unref(); gateP.then(free, free); }
+          // …and frees only ITS hold (U2 cure's should): the bound's timer may free the flag first, a single continue raise it again
+          // for its own gate — the old gate settling later must not take that one down
+          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; session._arHeldBy = tok; const free = () => { clearTimeout(t2); if (session._arHeldBy === tok) { session._arHeldBy = null; session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }
           else session._arFiring = false;
         }
         if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)

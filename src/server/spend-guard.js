@@ -389,7 +389,10 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     });
     if (!v.ok) {
       const g0 = (v.groups && v.groups[0]) || v;
-      return sayRefusal({ reason, sessionId: `a batch of ${list.length}`, identity: g0.identity || null, key: g0.identity && g0.identity.key, v: { ...g0, ...v, counts: g0.counts || { hour: 0, day: 0, instanceDay: 0 }, limits: g0.limits || limits(), identity: g0.identity || null }, now, inbox: false });
+      // a re-ask of ONE continue (the batch's loop, before each deliver) names ITS conversation in the journal, never «a batch of
+      // 1»; «only the first K» fits every slot of THIS batch's order (A.fitPrefix — U2 cure's shoulds)
+      const one = list.length === 1 ? list[0] : null, fitK = A.fitPrefix(resolved.map((it) => it.identity.key), v.fit);
+      return { fitK, ...sayRefusal({ reason, sessionId: one ? one.sessionId || 'a batch of 1' : `a batch of ${list.length}`, sessionName: one ? one.sessionName || null : null, identity: g0.identity || null, key: g0.identity && g0.identity.key, v: { ...g0, ...v, counts: g0.counts || { hour: 0, day: 0, instanceDay: 0 }, limits: g0.limits || limits(), identity: g0.identity || null }, now, inbox: false }) };
     }
     const holds = resolved.map((it) => {
       const hold = `h${++holdSeq}`;

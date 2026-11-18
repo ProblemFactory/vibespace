@@ -1569,7 +1569,7 @@ await (async () => {
   ok('16c. the stop is CLEARED at its continue\'s delivery (so a restart restores none a second press could arm): the engine\'s clear, named', JSON.stringify(clearAt({ create })) === JSON.stringify(['w6:its continue was delivered']), clearAt({ create }));
   const mCl = mutantAr([["      if (clearStopped && session._stoppedBy) { try { clearStopped(id, session, 'its continue was delivered'); }", "      if (false) { try { clearStopped(id, session, 'its continue was delivered'); }"]]);
   ok('16c. RED: the core without the clear at delivery leaves the stop standing', mCl.hits === 1 && !!mCl.mod && clearAt(mCl.mod).length === 0, mCl.err || null);
-  ok('16c. WIRING: server.js hands the core the engine\'s clear (clearStopped → clearStoppedBy, destructured from the engine)', /clearStopped: \(id, s, why\) => \{ try \{ clearStoppedBy\(s, why\); \} catch \{ \} \}/.test(read('server.js')) && /noteTurnError, clearStoppedBy, noteSessionProduced,/.test(read('server.js')));
+  ok('16c. WIRING: server.js hands the core the engine\'s clear (clearStopped → clearStoppedBy, destructured from the engine)', /clearStopped: \(id, s, why\) => \{ try \{ clearStoppedBy\(s, why\); \} catch \{ \} \}/.test(read('server.js')) && /noteTurnError, clearStoppedBy, sessionWallVerdict, noteSessionProduced,/.test(read('server.js')));   // the engine destructure (U2 adds sessionWallVerdict beside it)
   ok('16c. the waiting bound the card paints from is the SERVER\'s (statusFor maxWaitMs → the live fact\'s waitBoundMs) — the page copies no number', (() => { const a7 = mk({ dflt: true }); a7.sessions.set('w7', sess()); return a7.ar.statusFor('w7').maxWaitMs === MAX_WAIT_MS; })() && !/26 \* 3600e3/.test(read('src/lib/session-card.js')) && /Number\(stopF\.waitBoundMs\)/.test(read('src/lib/session-card.js')));
   const mTw = mutantAr([[' && session._stopContinuedAt !== f.at) {', ') {']]);
   ok('16c. never-twice RED: without the «already continued» test the same stop is continued a second time', mTw.hits === 1 && !!mTw.mod && (await twice(mTw.mod)) >= 2, mTw.err || null);
@@ -1846,9 +1846,50 @@ await (async () => {
   // the cure's own read: the gate the Stop abandoned STILL RUNS — its pool switch fires the single continue on an ARMED session;
   // the in-flight flag stays up until that gate settles, so the stopped conversation is not continued behind the batch's back
   const ab = await run(real, { hangGate: true, armB: true, fireBAfter: true });
-  const mG = mutantAr([["          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const free = () => { clearTimeout(t2); session._arFiring = false; }; t2 = setTimeout(free, BULK_GATE_HOLD_MS); if (t2.unref) t2.unref(); gateP.then(free, free); }\n          else session._arFiring = false;", '          session._arFiring = false;   // PRE-AMEND: cleared while the abandoned gate still runs']]);
+  const mG = mutantAr([["          if (gateP && (gate === 'stopped' || gate === 'no-answer')) { let t2 = null; const tok = {}; session._arHeldBy = tok; const free = () => { clearTimeout(t2); if (session._arHeldBy === tok) { session._arHeldBy = null; session._arFiring = false; } }; t2 = setTimeout(free, bulkGateHoldMs); if (t2.unref) t2.unref(); gateP.then(free, free); }\n          else session._arFiring = false;", '          session._arFiring = false;   // PRE-AMEND: cleared while the abandoned gate still runs']]);
   const cG = mG.mod ? await run(mG.mod, { hangGate: true, armB: true, fireBAfter: true }) : null;
   ok('17b. a conversation the Stop left in its gate is NOT continued by that gate\'s pool switch (the in-flight flag held until the gate settles); RED: the flag cleared at once lets the single continue through', ab.L.sent.join() === 'a' && (ab.rec.stopped || []).some((x) => x.id === 'b') && mG.hits === 1 && !!cG && cG.L.sent.join() === 'a,b', mG.err || JSON.stringify({ ab: ab.L.sent, cG: cG && cG.L.sent }));
+  // THE HOLD FREES ONLY ITS OWN (主开发's should on the U2 cure): the bound's timer frees the flag, a single continue raises it
+  // for ITS gate, then the batch's abandoned gate settles at last — that late settle must not take the single continue's flag down
+  const holdScene = async (mod) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkhold-'));
+    const sb = { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'A', _stoppedBy: { kind: 'quota', at: Date.now() - 60000, resetsAt: Date.now() - 1000 } };
+    const active = new Map([['b', sb]]);
+    let release1 = null, gates = 0;
+    const ar = mod.create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: () => true,
+      fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+      beforeFire: () => (gates++ === 0 ? new Promise((r) => { release1 = r; }) : new Promise(() => { })),   // the batch's gate answers LATE; the single continue's stays out
+      authorizeSpendBatch: (items) => ({ ok: true, holds: items.map((x, i) => ({ sessionId: x.id, identity: x.identity, hold: 'h' + i })) }),
+      renewSpend: () => { }, releaseSpend: () => { }, noteBatchSpend: () => { }, wallVerdict: () => ({ usable: true, blockedUntil: 0 }),
+      bulkPaceMs: 5, bulkGateWaitMs: 20, bulkGateHoldMs: 40 });
+    const r0 = ar.resumeBatch({});
+    const until = Date.now() + 3000;
+    while (Date.now() < until && !(ar.batchStatus(r0.batchId) || {}).done) await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 100));   // the hold's bound passes: the flag comes down
+    const down = sb._arFiring === false;
+    sb._autoResume = true; ar.armIfEnabled('b', sb, Date.now() + 3600e3, 'usage limit');
+    ar.fireNow('b', 'a pool switch');   // a single continue raises the flag for ITS gate (still out)
+    const up = sb._arFiring === true;
+    if (release1) release1(true);
+    await new Promise((r) => setTimeout(r, 20));   // the batch's abandoned gate settles at last
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { down, up, after: sb._arFiring, asked: gates };
+  };
+  const hs = await holdScene(real);
+  const mH = mutantAr([["const tok = {}; session._arHeldBy = tok; const free = () => { clearTimeout(t2); if (session._arHeldBy === tok) { session._arHeldBy = null; session._arFiring = false; } };", 'const free = () => { clearTimeout(t2); session._arFiring = false; };   /* the cure\'s form: frees whatever flag is up */']]);
+  const hsRed = mH.mod ? await holdScene(mH.mod) : null;
+  ok('17b. the gate hold frees only ITS hold: after its bound the flag is down, a single continue raises it for its own gate, the abandoned gate\'s late settle leaves it UP; RED: the cure\'s form takes it down', hs.down && hs.up && hs.after === true && hs.asked === 2 && mH.hits === 1 && !!hsRed && hsRed.up && hsRed.after === false, mH.err || JSON.stringify({ hs, hsRed }));
+  // the refusal carries the K that fits every account (fitK, the guard's) to the dialog
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-bulkfit-'));
+    const at = Date.now() - 60000;
+    const active = new Map([['a', { backend: 'claude', mode: 'chat', pty: {}, name: 'A1', _slot: 'A', _stoppedBy: { kind: 'quota', at, resetsAt: Date.now() - 1000 } }], ['b', { backend: 'claude', mode: 'chat', pty: {}, name: 'B1', _slot: 'B', _stoppedBy: { kind: 'quota', at: at + 1, resetsAt: Date.now() - 1000 } }]]);
+    const ar = create({ dataDir: dir, activeSessions: active, serverSetting: () => false, sendToSession: () => true, fireIdentity: (id, s2) => ({ key: s2._slot, name: s2._slot }),
+      authorizeSpendBatch: () => ({ ok: false, why: 'hour-cap', detail: 'A is full', identity: { key: 'A', name: 'A' }, n: 2, need: 1, left: 1, fitK: 0 }), wallVerdict: () => ({ usable: true, blockedUntil: 0 }) });
+    const rf = ar.resumeBatch({});
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('17b. a refused batch hands the dialog the guard\'s fitK beside the bucket\'s left (0 here: the first item is the full account\'s)', !!rf.refused && rf.refused.fitK === 0 && rf.refused.left === 1, JSON.stringify(rf.refused));
+  }
   const mA = mutantAr([["        if (rec.stopAsked) { stopRest(i); break; }   // …and after EVERY gate (a stop during the gate's wait ends the wait)\n", '']]);
   const cA = mA.mod ? await run(mA.mod, { hangGate: true }) : null;
   ok('17b. LAW 3 RED for the look AFTER the gate alone: without it, the conversation whose gate a Stop interrupted is continued anyway', mA.hits === 1 && !!cA && cA.L.sent.join() === 'a,b', mA.err || JSON.stringify(cA && cA.L));
@@ -2136,7 +2177,7 @@ await (async () => {
     ar.tick(far - 5 * 60000 + WF_REREAD_MS + 1000); const againAsks = asks.length;
     fs.rmSync(dir, { recursive: true, force: true });
     ok('18. THE MODULE: an arm an hour from its fire is not asked; in the six minutes before it, at most WF_INFLIGHT_MAX reads at once (the cap holds while they hang); a WATCH is never asked', farAsks === 0 && nearAsks === WF_INFLIGHT_MAX && againAsks === WF_INFLIGHT_MAX && watchArmed && wAsks.length === 0, JSON.stringify({ farAsks, nearAsks, againAsks, watchArmed, wAsks })); }
-  const mW = mutantAr([['continuePromptFor(note, label2, freshRun(id, a2))', 'continuePromptFor(note, label2)']]);
+  const mW = mutantAr([['continuePromptFor(note, label2, freshRun(id, a2))', 'continuePromptFor(note, label2)']]);   // stale-pins: kept — the mutant WRITES the pre-U3 form on purpose
   const ctl = mW.mod ? await fire(mW.mod, async () => ANS()) : null;
   ok('18. CONTROL: a fire that does not hand the run over says today\'s words — the naming leg goes red', mW.hits === 1 && !!ctl && ctl.sent.length === 1 && !ctl.sent[0].includes('Workflow'), mW.err || (ctl && ctl.sent));
 })();

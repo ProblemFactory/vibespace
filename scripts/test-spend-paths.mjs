@@ -4827,6 +4827,32 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   ok('§13 GUARD: a batch that does not fit is refused WHOLE — no hold opened, its bucket + slot named', no.ok === false && no.why === 'hour-cap' && !no.holds && g.snapshot().holdsOpen === 0 && /A has spent 2/.test(no.detail), JSON.stringify(no));
   ok('§13 a refusal made by HOLDS alone promises no instant (retryAfter 0 — never «Next allowed after 12/31/1969»)', /Next allowed after 12\/31\/1969|1970/.test(todos.map((x) => x.text).join()) === false && A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: IA, state: A.emptyBudget(), limits: L, now, pending: Array.from({ length: 5 }, (_, i) => ({ id: 'p' + i, key: 'sub-a', at: now })) }).retryAfter === 0, JSON.stringify(todos.map((x) => x.text)));
   ok('§13 the refusal carries the bucket\'s numbers for the person\'s words: A has LEFT 1 of 3 this hour, the batch NEEDS 2', no.left === 1 && no.need === 2, JSON.stringify({ left: no.left, need: no.need }));
+  ok('§13 …and the K that fits THIS batch (fitK): A has room for 1 ⇒ the first 1', no.fitK === 1, JSON.stringify({ fitK: no.fitK }));
+  // «ONLY THE FIRST K» FITS EVERY ACCOUNT (主开发's should on the U2 cure, 2026-11-18 11:47Z): K was the FIRST refusing slot's
+  // room alone — over two accounts, A (room 3) and B (room 1), in the order A B B A A A, that K = 3 takes A B B and B refuses
+  // the second press too; the K that fits every slot and the instance is 2
+  {
+    const st2 = { v: 1, identities: { 'sub-a': stamps('sub-a', 2, now), 'sub-b': stamps('sub-b', 4, now) }, instance: stamps('i', 2, now), notices: {} };
+    const keys = ['sub-a', 'sub-b', 'sub-b', 'sub-a', 'sub-a', 'sub-a'];
+    const grp = (ks) => { const m = new Map(); for (const k of ks) m.set(k, (m.get(k) || 0) + 1); return [...m].map(([k, n]) => ({ identity: k === 'sub-a' ? IA : IB, n })); };
+    const BB = (ks) => A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups: grp(ks), state: st2, limits: L, now });
+    const r = BB(keys), K = A.fitPrefix(keys, r.fit), again = BB(keys.slice(0, r.left || 0));
+    ok('§13 PURE fitPrefix: A room 3, B room 1, the order A B B A A A ⇒ the first 2 fit every slot — and THAT batch is allowed', r.ok === false && r.identity && r.identity.key === 'sub-a' && r.left === 3 && K === 2 && BB(keys.slice(0, K)).ok === true, JSON.stringify({ fit: r.fit, K, left: r.left }));
+    ok('§13 CONTROL: the old K (the first refusal\'s room alone, 3) is refused AGAIN — by B: the second press the should named', again.ok === false && again.identity && again.identity.key === 'sub-b', JSON.stringify({ why: again.why, who: again.identity }));
+    ok('§13 PURE fitPrefix: the instance\'s room bounds it too; a slot with no room named has none; no fit ⇒ null', A.fitPrefix(['sub-a', 'sub-a'], { byKey: { 'sub-a': 5 }, instance: 1 }) === 1 && A.fitPrefix(['x'], { byKey: {}, instance: 9 }) === 0 && A.fitPrefix(['sub-a'], null) === null);
+    ok('§13 PURE: a refusal that is not a cap\'s (paid overage on B) leaves B no room — the K stops before B\'s first item', (() => { const v = A.authorizeUnattendedBatch({ reason: 'bulk-resume', groups: [{ identity: IA, n: 1 }, { identity: IB, n: 1 }], state, limits: L, now, ofKey: (k) => (k === 'sub-b' ? { overage: { inUse: 'yes' } } : {}) }); return v.why === 'overage-in-use' && v.fit.byKey['sub-b'] === 0 && A.fitPrefix(['sub-a', 'sub-b'], v.fit) === 1; })());
+    ok('§13 the dialog\'s «Resume only the first K» after a refusal reads fitK, never the first refusal\'s room alone', /Number\.isFinite\(rec\.refused\.fitK\) \? Math\.min\(rec\.refused\.fitK, p\.eligible\.length\)/.test(read('src/lib/bulk-resume.js')) && !/Math\.min\(rec\.refused\.left/.test(read('src/lib/bulk-resume.js')));   // stale-pins: kept — an absence check: the first refusal's room alone is gone on purpose
+  }
+  // A RE-ASK OF ONE CONTINUE NAMES ITS CONVERSATION in the journal (the U2 cure's should): the batch's loop asks again before each
+  // deliver with a batch of one — its refusal line said «for a batch of 1»
+  {
+    const logs9 = [];
+    const g9 = guardMod.create({ dataDir: tmpdir('vs-spend-bulk9-'), serverSetting: (k) => settings[k], identityOf: (s) => s && s._slot ? { key: s._slot, name: s._slot } : null, getUserTodos: () => ({ add: () => { } }), log: (l) => logs9.push(String(l)) });
+    const full = g9.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'x1'), sess('A', 'x2'), sess('A', 'x3')] });
+    for (const h of full.holds || []) g9.note({ reason: 'bulk-resume', identity: h.identity, hold: h.hold });
+    const solo = g9.authorizeBatch({ reason: 'bulk-resume', items: [sess('A', 'solo')] });
+    ok('§13 GUARD: a refused batch of ONE names its conversation in the journal («for solo»), never «a batch of 1»', solo.ok === false && solo.why === 'hour-cap' && logs9.some((l) => /refused bulk-resume for solo on A/.test(l)) && !logs9.some((l) => /a batch of 1\b/.test(l)), JSON.stringify(logs9));
+  }
   // RENEWAL (U2 cure, the adversarial read's MUST 1): a batch opens its holds at once and delivers them paced behind bounded
   // gates — a batch longer than RESERVE_TTL_MS must not lose the holds it has not reached yet
   ok('§13 PURE renewPending: the named holds are re-stamped, the others and an unknown id untouched', (() => { const p0 = [{ id: 'h1', key: 'A', at: 1 }, { id: 'h2', key: 'A', at: 2 }]; const p1 = A.renewPending(p0, ['h2', 'nope'], 99); return p1[0].at === 1 && p1[1].at === 99 && p0[1].at === 2 && p1.length === 2; })());

@@ -229,7 +229,7 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       if (rec && rec.refused) {
         const why = el('p', 'resume-stopped-refused', t('The spend limit refused the whole batch — nothing was resumed: {detail}', { detail: batchRefusalWords(rec.refused) }));
         body.insertBefore(why, status.nextSibling);
-        const k = Number.isFinite(rec.refused.left) ? Math.min(rec.refused.left, p.eligible.length) : 0;
+        const k = Number.isFinite(rec.refused.fitK) ? Math.min(rec.refused.fitK, p.eligible.length) : 0;   // every account's room in this order (U2 cure's should), never the first refusal's alone
         if (k > 0 && k < p.eligible.length) {   // the earliest K the ceiling holds — one press, the same road
           const fit = el('button', 'btn-create resume-stopped-fit', t('Resume only the first {k} (earliest stopped first)', { k }));
           fit.onclick = () => { fit.remove(); why.remove(); status.classList.remove('done'); cancel.textContent = t('Close'); busy = false; run(k); };
