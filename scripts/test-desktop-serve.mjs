@@ -828,11 +828,16 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const PID_WAIT = waitOf(/\[ \$n -lt (\d+) \] && \[ -e "\/proc\/\$b" \]; do sleep ([0-9.]+); n=\$\(\(n\+1\)\); done/, 'pidfile wait (bounded by the runner\'s life, r5 L4)');
   const LOCK_WAIT = waitOf(/\[ \$n -le (\d+) \] \|\| \{ echo "[^"\n]*"; exit 125; \}\n {4}sleep ([0-9.]+)\n/, 'lock wait');
   const AT_ONCE_MS = PID_WAIT.capMs / 2;
+  // B-6c46 cure: the launcher's ONE check at its top that sleep takes a fraction is no poll — the counter below skips that
+  // one call, its argument read from the module (never a literal here) and told apart from every wait's poll
+  const FRACTION = (M.INSTALL_LAUNCHER.match(/^sleep ([0-9.]+) 2>\/dev\/null \|\| \{ echo "[^"\n]*a fraction of a second/m) || [])[1] || null;
+  ok(!!FRACTION && Number(FRACTION) * 1000 !== PID_WAIT.pollMs && Number(FRACTION) * 1000 !== LOCK_WAIT.pollMs && M.INSTALL_LAUNCHER.split('\n').filter((l) => l.startsWith(`sleep ${FRACTION} 2>`)).length === 1,
+    `CONTROL setup: the launcher's fraction check is spelled once at its top, its argument (${FRACTION}) no wait's poll — the poll counter skips that one call`);
   /** A `sleep` that appends one line per call to $VS_POLLS, then execs the real one (the wait itself unchanged). On a
    *  launcher's path the only sleepers are its wait loops (and the runner's one /proc retry), so the count is how many
-   *  polls it sat out — an upper bound on any one loop's. */
+   *  polls it sat out — an upper bound on any one loop's. The fraction check's own call is not counted (above). */
   const pollDir = path.join(root, 'bin-polls'); fs.mkdirSync(pollDir, { recursive: true });
-  fs.writeFileSync(path.join(pollDir, 'sleep'), `#!/bin/sh\n[ -z "$VS_POLLS" ] || echo "$*" >> "$VS_POLLS"\nexec ${realBin('sleep')} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(pollDir, 'sleep'), `#!/bin/sh\n[ -z "$VS_POLLS" ] || [ "$*" = '${FRACTION}' ] || echo "$*" >> "$VS_POLLS"\nexec ${realBin('sleep')} "$@"\n`, { mode: 0o755 });
   let pollSeq = 0;
   const withPolls = (env) => { const f = path.join(root, `polls-${++pollSeq}`); return { env: { ...env, PATH: `${pollDir}:${env.PATH || ''}`, VS_POLLS: f }, polls: () => linesIn(f) }; };
   const slotLock = (st, which) => { try { return fs.readFileSync(path.join(st, M.INSTALL_FILES[which]), 'utf8').trim().split(/\s+/).slice(2).join(' ') || null; } catch { return null; } };
@@ -871,7 +876,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // runs (the pidfile's identity needs it; the launcher needs no identity of its own since r4 — the lock is the
   // kernel's). A `cut` that prints nothing stands in for an unreadable /proc/<pid>/stat.
   const noProc = path.join(root, 'bin-noproc'); fs.mkdirSync(noProc, { recursive: true });
-  fs.writeFileSync(path.join(noProc, 'cut'), `#!/bin/sh\ncase "$*" in *-f20*) cat > /dev/null ;; *) exec ${realBin('cut')} "$@" ;; esac\n`, { mode: 0o755 }); // only the starttime field (-f20) reads nothing
+  fs.writeFileSync(path.join(noProc, 'cut'), `#!/bin/sh\ncase "$*" in *-f20*) cat > /dev/null ;; *) exec ${realBin('cut')} "$@" ;; esac\n`, { mode: 0o755 }); // only the RUNNER's starttime read (-f20) reads nothing; the launcher's own read (-f1,20, B-6c46) is untouched
   const envNoProc = { PATH: `${noProc}:/usr/bin:/bin`, HOME: root, XDG_RUNTIME_DIR: XDG };
   const stL8 = path.join(root, 'st-l8-launch');
   const l8l = await launch(M, ['sh', '-c', 'echo never'], stL8, 'start', { env: envNoProc, killAfter: 3000, polls: true });
@@ -988,8 +993,9 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     fs.writeFileSync(goKl, ''); // the first install ends only now — after the second start chose to follow it
     const b = await pB;
     // lane fleet-image-2: the runner, orphaned by the launcher's kill, is reparented to pid 1 — a pid 1 that never reaps
-    // leaves it a ZOMBIE that the launcher's starttime check reads as alive (before B-6c46 its tail did too, so the follower
-    // could never end; now a recorded exit ends it, after a bounded wait); read the runner's state so that machine is NAMED
+    // leaves it a ZOMBIE (before B-6c46 the launcher's starttime check read it as alive, and its tail did too, so the follower
+    // could never end; now the recorded exit ends the follow and a zombie counts as gone — no wait on it); read the runner's
+    // state so that machine is NAMED
     const runnerState = (() => { try { const st = fs.readFileSync(`/proc/${runnerPid}/stat`, 'utf8').replace(/^.*\) /, '').split(' '); return { state: st[0], ppid: Number(st[1]), parent: commOf(Number(st[1])) }; } catch { return null; } })();
     const tailLeft = tailA;   // B-6c46: no follower process outlives the launcher (kept for the result's shape)
     return { K, runnerPid, launcherFd9, ...after, b: { code: b.code, killed: b.killed, followsIt: new RegExp(`already running on this machine \\(pid ${runnerPid}\\)`).test(b.out), ms: b.ms }, runnerState, tailLeft, runs: (() => { try { return fs.readFileSync(runsKl, 'utf8').trim().split('\n'); } catch { return []; } })(), freeAfter: lockFree(K) };
@@ -1144,7 +1150,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   ok(wide.length === 20 && oneEach(wide), `(r4) the same over 20 trials with the windows WIDENED (setsid +0.3 s, flock +0–60 ms) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(wide))}), all answer exit 3`, wide.filter((r) => !oneEach([r])).slice(0, 3));
   ok(killed5.length === 10 && oneEach(killed5) && killed5.every((r) => r.held && r.freed && r.firstRunMs !== null && r.firstRunMs < LOCK_WAIT.capMs / 2), `(r4) a previous install SIGKILLed mid-run, 10 trials (its runner held the lock — fd 9 → the lock file — until the kill: ${killed5.filter((r) => r.held).length}/10; released by the kernel at the kill: ${killed5.filter((r) => r.freed).length}/10) ⇒ five starts ⇒ ONE runner, started at once (first run ${Math.min(...killed5.map((r) => r.firstRunMs))}–${Math.max(...killed5.map((r) => r.firstRunMs))} ms after the starts, < ½ × the ${LOCK_WAIT.capMs} ms lock wait a start sits out when the lock stays held — the kernel released the dead holder's lock; nothing waited)`, killed5.filter((r) => !oneEach([r]) || !(r.firstRunMs < LOCK_WAIT.capMs / 2)).slice(0, 3));
   // B-6c46: on a machine that never reaps orphans the runner stays a ZOMBIE; the second start's follow now ends on the recorded
-  // exit (after a bounded wait), so its bound firing there is a hang — red, never the old SKIP
+  // exit, and the zombie counts as gone (the cure: no wait on it), so its bound firing there is a hang — red, never the old SKIP
   ok(!(kl.b.killed && kl.runnerState && kl.runnerState.state === 'Z'), '(B-6c46) the second start never hangs behind a zombie runner: a recorded exit ends its follow', { killed: kl.b.killed, runnerState: kl.runnerState });
   ok(kl.launcherFd9 === null && kl.runnerAlive && kl.runnerFd9 === kl.K && kl.held && kl.b.followsIt && kl.b.code === 4 && kl.runs.length === 1 && /^run-/.test(kl.runs[0]) && kl.freeAfter, `(r4) the LAUNCHER SIGKILLed mid-install: its runner lives on HOLDING the lock (/proc/${kl.runnerPid}/fd/9 → the lock file; the launcher had closed its own copy) and a concurrent start follows it (answered its exit 4 in ${kl.b.ms} ms) — never a second runner; the lock free once it ended`, kl);
   ok(hw.code === 3 && hw.runners === 1 && hw.ranAfterHolder, `(r4) a lock held by a process that is no recorded install ⇒ a start WAITS (never runs beside it) and runs only once the holder has exited (${hw.gap} ms after the holder's own end stamp, written before it released; answered in ${hw.waitedMs} ms)`, hw);

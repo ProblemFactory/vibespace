@@ -1378,8 +1378,12 @@ async function xpraVersion({ binPath, env = process.env } = {}) {
  *                          `lastInstall` = {code, at (ms), lock} of the last one that ended; `lock` (verify r4) = the lock
  *                          file on local storage the install held — installState()
  */
+// B-6c46 cure (its read's HIGH; a REMOTE machine reads its slot in its own agent — there with the agent's next release): a ZOMBIE is no running install — it has ended, and a pid 1 that never reaps keeps its entry and
+// its starttime for ever: a slot that called it running sent every press to FOLLOW an install that no longer runs (199 each time,
+// and no new install could start)
+const liveRunner = (pid, starttime) => { const s = procSample(pid); return !!s && s.starttime === starttime && !/^[ZXx]$/.test(s.state || ''); };
 /** THE INSTALL SLOT of a machine, read from its state dir (see src/desktop-apps.js INSTALL_LAUNCHER): `installing` only
- *  when the pidfile's pid is alive AND has the recorded starttime (a recycled pid is not the install). `lock` = the lock
+ *  when the pidfile's pid is alive AND has the recorded starttime (a recycled pid is not the install) AND is no zombie. `lock` = the lock
  *  file the launcher named and the install holds (verify r4 — on local storage, never in the state dir; null for a
  *  record written before r4). Never throws. */
 const slotLine = (txt) => { const m = /^(\S+)(?:\s+(\S+))?(?:\s+(.+))?$/.exec(String(txt).trim()); return m ? { a: Number(m[1]), b: Number(m[2]), lock: m[3] || null } : null; }; // "<a> [<b> [<lock…>]]"
@@ -1389,7 +1393,7 @@ async function installState(stateDir) {
   const pidFile = path.join(String(stateDir), INSTALL_FILES.pid);
   try {
     const r = slotLine(await fs.promises.readFile(pidFile, 'utf8'));
-    if (r && Number.isInteger(r.a) && r.a > 0 && Number.isFinite(r.b) && r.b > 0 && procStart(r.a) === r.b) {
+    if (r && Number.isInteger(r.a) && r.a > 0 && Number.isFinite(r.b) && r.b > 0 && liveRunner(r.a, r.b)) {
       let since = null; try { since = Math.round((await fs.promises.stat(pidFile)).mtimeMs); } catch { since = null; }
       out.installing = { pid: r.a, since, lock: r.lock };
     }

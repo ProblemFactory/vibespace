@@ -115,7 +115,7 @@ const INSTALL_LOCK_PREFIX = 'vibespace-xpra-install-';
  * removed lock file lets two holders lock two different files); after taking the lock a start re-reads the pidfile
  * and follows a live recorded install (a belt for a lock file that was removed under a running install).
  * M1 (r3): the winner resets pid/starttime, reads only the NEW pidfile, and the follow reads that runner only while
- * it is not PROVEN gone (since B-6c46 the follow also ends on the exit file — a belt, then). L5: `setsid` and `flock` (util-linux) are checked before anything else. L8: a starttime that
+ * it is not PROVEN gone (since B-6c46 the follow also ends on the exit file — a belt, then). L5: `setsid` and `flock` (util-linux) are checked before anything else but the B-6c46 cure's one check that sleep takes a fraction. L8: a starttime that
  * cannot be read (no /proc) is refused by the runner before it runs (the pidfile's identity needs it).
  * Every refusal is exit 125 with one line naming its cause; nothing here ever signals the install.
  * verify r5 (2026-09-25, four lows):
@@ -147,11 +147,14 @@ const INSTALL_RUNNER = [
 ].join('\n');
 const INSTALL_LAUNCHER = [
   'exec 2>&1',
+  // B-6c46 cure: every wait below is `sleep` of a FRACTION; where sleep refuses one (a minimal busybox), the follow would spin
+  // with no pause for the install's whole life — refused by name, before anything is read, locked or run
+  'sleep 0.01 2>/dev/null || { echo "+ [vibespace] this machine\'s sleep is missing or cannot wait a fraction of a second (sleep 0.01 failed) - the install\'s waits would spin without a pause; nothing was run"; exit 125; }',
   'R=$1; D=${2:-$HOME/.vibespace}; M=$3; shift 3',
   `L=$D/${INSTALL_FILES.log}; P=$D/${INSTALL_FILES.pid}; X=$D/${INSTALL_FILES.exit}`,
-  'st() { sed \'s/^.*) //\' "/proc/$1/stat" 2>/dev/null | cut -d\' \' -f20; }',
-  'live() { [ -n "$1" ] && [ -n "$2" ] && [ "$(st "$1")" = "$2" ]; }',
-  'gone() { [ -z "$1" ] || [ ! -e "/proc/$1" ] || { t=$(st "$1"); [ -n "$t" ] && [ "$t" != "$2" ]; }; }', // PROVEN gone: no /proc entry, or a readable starttime that differs — an empty probe proves nothing
+  'st() { sed \'s/^.*) //\' "/proc/$1/stat" 2>/dev/null | cut -d\' \' -f1,20; }', // B-6c46 cure: its STATE and its starttime, one read
+  'live() { [ -n "$1" ] && [ -n "$2" ] || return 1; t=$(st "$1"); case $t in [ZXx]\' \'*) return 1 ;; esac; [ "${t#* }" = "$2" ]; }', // LIVE: that starttime, and not a zombie
+  'gone() { [ -z "$1" ] || [ ! -e "/proc/$1" ] || { t=$(st "$1"); case $t in [ZXx]\' \'*) return 0 ;; *\' \'?*) [ "${t#* }" != "$2" ] ;; *) return 1 ;; esac; }; }', // PROVEN gone: no /proc entry, a ZOMBIE (it has ended; a pid 1 that never reaps keeps its entry and starttime for ever), or a readable starttime that differs — an empty probe proves nothing
   'rec() { pid=; s=; k=; [ -r "$P" ] && read pid s k < "$P"; live "$pid" "$s"; }', // a live RECORDED install (pid + starttime)
   'run() { echo "+ [vibespace] an install is already running on this machine (pid $pid) - following its log"; }',
   'mine=',
@@ -209,12 +212,14 @@ const INSTALL_LAUNCHER = [
   // before any copy and before the wait below (a start that comes after the runner can hand this launcher another install's
   // exit only inside one round's gap, ≤ 0.2 s, not across the wait) — or the runner is PROVEN gone (pid + starttime); then
   // the last bytes. A log that shrank is not copied from while it stays below the old offset (a newer install's); a round
-  // whose `wc` failed is taken again; a reader gone (SIGPIPE) ends the launcher, as the old tail's death did. Its cost: a
-  // few short processes every 0.2 s for the install's life (a sleeping tail before).
-  'o=0; fo() { z=$({ wc -c < "$L"; } 2>/dev/null) || return 0; [ -n "$z" ] || return 0; z=$((z)); [ "$z" -gt "$o" ] || return 0; { tail -c +$((o+1)) "$L" 2>/dev/null | head -c $((z-o)); } && o=$z || { [ $? -eq 141 ] && exit 141; }; }',
+  // whose `wc` failed is taken again; a reader gone (SIGPIPE) ends the launcher, as the old tail's death did. Its cost, by
+  // this script's own count under dash: 6 short processes a round while the log has not grown (wc and its subshell, the stat read's
+  // sed and cut and its subshell, sleep), 8 when it has (tail and head too) — 5 rounds a second, so 30–40 a second for the
+  // install's life, where one tail slept before; a zombie runner is gone, so no round outlives the runner.
+  'o=0; fo() { z=$({ wc -c < "$L"; } 2>/dev/null) || return 0; [ -n "$z" ] || return 0; z=$((z)); [ "$z" -gt "$o" ] || return 0; { tail -c +$((o+1)) "$L" 2>/dev/null | head -c $((z-o)) 2>/dev/null; } && o=$z || { [ $? -eq 141 ] && exit 141; }; }',
   'c=; while :; do if [ -s "$X" ]; then read c at k < "$X"; break; fi; fo; gone "$pid" "$s" && break; sleep 0.2; done',
   'fo; [ -n "$c" ] || { [ -s "$X" ] && read c at k < "$X"; }',
-  'n=0; while ! gone "$pid" "$s" && [ $n -lt 40 ]; do sleep 0.05; n=$((n+1)); done', // the exit is recorded, the runner ends on its next lines (its pidfile removed; its lock freed unless a process the install left holds it): answer once it is gone — a start right after this one never follows a finished install (about 2 s at most: a pid 1 that never reaps keeps a zombie)
+  'n=0; while ! gone "$pid" "$s" && [ $n -lt 40 ]; do sleep 0.05; n=$((n+1)); done', // the exit is recorded, the runner ends on its next lines (its pidfile removed): the wait is on the RUNNER GONE (pid + starttime; a zombie is gone) — the script never checks the lock: the kernel drops it with its last holder, so it is free then unless a process the install left holds it; about 2 s at most
   `if [ -n "$c" ]; then exit "$c"; fi`,
   'echo "+ [vibespace] the install ended without recording its exit (it was stopped, or the machine restarted) - check again"',
   `exit ${INSTALL_UNRECORDED_EXIT}`,

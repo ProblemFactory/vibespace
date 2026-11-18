@@ -205,8 +205,8 @@ function procUid(pid, opts) {
   return ps && Number.isFinite(ps.uid) ? ps.uid : null;
 }
 
-/** ONE /proc sample of a pid — `{ starttime, cpuTicks, reapedTicks, rssBytes,
- *  anonBytes, pssBytes }` — or null when procfs cannot say (no /proc,
+/** ONE /proc sample of a pid — `{ starttime, state, cpuTicks, reapedTicks, rssBytes,
+ *  anonBytes, pssBytes }` (`state`: the stat line's own letter — Z a zombie, B-6c46) — or null when procfs cannot say (no /proc,
  *  hidepid, vanished). `starttime`
  *  is stat field 22 (clock ticks since boot: pid+starttime is the identity
  *  every keeper adopts by, never a bare pid — pids are recycled), `cpuTicks` =
@@ -281,7 +281,7 @@ function parseProcSample(stat, status, smaps, memory) {
     anonBytes = anon != null && shm != null ? anon + shm : null;
     if (memory) pssBytes = kbLine(smaps, 'Pss');
   }
-  return { starttime, cpuTicks, reapedTicks: Number.isFinite(reapedTicks) ? reapedTicks : 0, rssBytes, anonBytes, pssBytes };
+  return { starttime, state: String(f[0] || ''), cpuTicks, reapedTicks: Number.isFinite(reapedTicks) ? reapedTicks : 0, rssBytes, anonBytes, pssBytes };   // state: the stat line's own letter (B-6c46 cure: a zombie is Z)
 }
 /** The memory metrics a SET can be judged by, strongest first. */
 const MEM_METRICS = Object.freeze(['pss', 'anon', 'rss']);
