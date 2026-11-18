@@ -32,6 +32,9 @@ const DOCKER_PORTS = `command -v docker >/dev/null 2>&1 && docker ps --format '{
 // last-resort OWNER labeling: /proc/net/tcp's uid column names who owns a
 // listener even when the process is invisible to us (root services, other
 // users) — "root"/"postgres" is honest detail where a name is impossible
+/** B-91aa: the names the docker CLI reads from the hub's env (where its daemon is, its config) — the ONLY ones its starter request carries */
+const DOCKER_ENV_NAMES = ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY'];
+const dockerEnv = () => { const o = {}; for (const k of DOCKER_ENV_NAMES) if (typeof process.env[k] === 'string') o[k] = process.env[k]; return o; };
 const UID_PORTS = `cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; echo ---PASSWD---; cat /etc/passwd 2>/dev/null`;
 // local-watch noise: our own infrastructure listeners must not toast
 const LOCAL_IGNORE_PROCS = new Set(['frpc', 'frps', 'tailscaled', 'sshd', 'rclone', 'Xtigervnc', 'Xvfb']);
@@ -288,8 +291,10 @@ class PortForwardManager {
           for (const row of ports) if (owned.has(row.port)) { row.service = nameOf(owned.get(row.port)); row.serviceJob = owned.get(row.port).id; }
         }
       } catch { }
-      const { execFile } = require('child_process');
-      await this._enrichDocker(ports, (cmd) => new Promise((resolve) => execFile('sh', ['-c', cmd], { timeout: 6000, maxBuffer: 1024 * 1024 }, (e, so) => resolve(String(so || '')))));
+      // B-91aa: the docker / uid rungs' `sh` is started by THE STARTER, never a fork of the hub from its 30 s watch; the
+      // docker CLI keeps the DOCKER_* names the hub's env carried (nothing else of it)
+      const starter = require('./server/child-starter').childStarter();
+      await this._enrichDocker(ports, (cmd) => starter.run('sh', ['-c', cmd], { timeoutMs: 6000, maxBuffer: 1024 * 1024, capture: true, envAdd: dockerEnv() }).then((r) => String(r.stdout || '')));
     }
     else {
       const dm = await this.hosts.deviceBounded(hostId);
@@ -364,10 +369,11 @@ class PortForwardManager {
   /** Listening ports on THIS instance (machine #0) — no device link needed;
    *  the pod/host VibeSpace itself runs on is the primary workspace. */
   async detectLocal() {
-    const { execFile } = require('child_process');
-    const out = await new Promise((resolve) => {
-      execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(String(stdout || '')));
-    });
+    // B-91aa: the scan's `sh` is started by THE STARTER (the same command, the same answer) — never a fork of the hub from its
+    // 30 s watch. Not the /proc road alone: its inode → name walk stops at 6 000 readlinks, which a busy hub's own fds can
+    // spend, and a listener whose name is missed is not folded as a system port. No answer ⇒ the /proc road below
+    const out = await require('./server/child-starter').childStarter().run('sh', ['-c', PORT_SCAN], { timeoutMs: 8000, maxBuffer: 4 * 1024 * 1024, capture: true })
+      .then((r) => String(r.stdout || ''));
     const parsed = this._parsePorts(out);
     if (parsed.length) return parsed.map((p) => this._classifyOrphan(this._classify(p)));
     // slim container images ship NEITHER ss NOR lsof (real fleet pods — the

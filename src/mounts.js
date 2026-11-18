@@ -77,6 +77,7 @@ process.stdout.write(JSON.stringify(out));`;
 const PROVIDERS = require('./mount-providers/index.js');   // lane dc-mount-providers: a storage provider = its row file + one list line
 /** A record's storage-provider ROW (src/mount-providers/): every per-provider fact and branch is asked of it. A module
  *  function, not a method — suites call the manager's predicates on a bare `this`. */
+const UNKNOWN_BLOCK_MS = 65000;   // B-91aa: a connect probe that got no answer blocks its path until the next sweep re-checks it (the liveness table's own slowBlockMs, src/mount-liveness.js), never longer
 const healthOf = (r) => (r && typeof r === 'object') ? r.health : r;   // a probe answers {health, ms} (a stub may answer the bare word)
 const rowOf = (m) => PROVIDERS.rowOf(m && m.type);                 // lane cluster-presets: ONE parser for the file and the env
 /** THE effective row of a record (lane mount-liveness): a CHILD mount point (parentId, no type of its own) reads its PARENT's
@@ -1468,6 +1469,9 @@ class MountManager {
     // only the table's teardown verdicts cut the mount loose (the first sweep after a mount starts from strike 0).
     const lv = await this._probeLiveness(m, mp);
     if (lv.teardown) return false;
+    // B-91aa (its read, M2): no answer at connect (the starter dead or slow) is no witness: the connect's block is re-armed to ONE
+    // sweep, so the next sweep decides — never a healthy mount refused for the connect block's whole length
+    if (lv.unknown) { this.blockPath(mp, UNKNOWN_BLOCK_MS); this._notify(); return this.isMounted(m); }
     if (lv.verdict !== 'alive') { this._notify(); return this.isMounted(m); }
     const health = lv.health;
     this.unblockPath(mp);
@@ -1509,15 +1513,33 @@ class MountManager {
   _probeMountpoint(mp, timeoutMs = 6000, verb = 'list') {
     // A killed `ls` on a FUSE mount whose daemon never answers stays in D state (request_wait_answer — measured, lane
     // mount-liveness): it only exits when the daemon answers. Never stack a second one — the held child IS the witness.
-    const key = verb + ':' + mp, held = (this._heldProbes = this._heldProbes || new Map()).get(key);
+    const key = verb + ':' + mp, heldMap = (this._heldProbes = this._heldProbes || new Map()), held = heldMap.get(key);
+    // B-91aa (its read, M1): a held child whose end the hub can no longer hear (its exit line lost, its starter replaced) is
+    // asked of /proc by its pid — gone, or a zombie nobody reaped yet, ⇒ the mark goes and the mount is asked again. A SYNC read of
+    // procfs (r4: an async read waits for a libuv pool thread, which a hung FUSE mount can hold; every other /proc read of the
+    // sweep is sync); only «no such process» (ENOENT) is gone — a /proc we cannot read says nothing, the mark stays
+    if (held && held.pid) {
+      let gone = false;
+      try { const s = fs.readFileSync(`/proc/${held.pid}/stat`, 'utf8'); gone = / Z /.test(s.slice(s.lastIndexOf(')'), s.lastIndexOf(')') + 4)); }
+      catch (e) { gone = !!(e && e.code === 'ENOENT'); }
+      if (!gone) return Promise.resolve({ health: 'hung', ms: Date.now() - held.t0, held: true });
+      if (heldMap.get(key) === held) heldMap.delete(key);
+      return this._probeMountpoint(mp, timeoutMs, verb);
+    }
     if (held) return Promise.resolve({ health: 'hung', ms: Date.now() - held.t0, held: true });
-    return new Promise((resolve) => {
-      const t0 = Date.now();
-      const c = spawn('ls', verb === 'attr' ? ['-d', mp] : [mp], { stdio: 'ignore' });
-      const t = setTimeout(() => { this._heldProbes.set(key, { t0 }); try { c.kill('SIGKILL'); } catch {} resolve({ health: 'hung', ms: Date.now() - t0 }); }, timeoutMs);
-      c.on('exit', (code) => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: code === 0 ? 'ok' : 'error', ms: Date.now() - t0 }); });
-      c.on('error', () => { clearTimeout(t); this._heldProbes.delete(key); resolve({ health: 'error', ms: Date.now() - t0, spawnErr: true }); });
-    });
+    // B-91aa: the `ls` is started by THE STARTER (src/server/child-starter.js) — never a fork of the hub from its sweep. Its
+    // answer: exit 0 'ok', another exit 'error', past its bound 'hung' (killed there; the held key stays until it ends at
+    // last), and NO ANSWER (a dead or slow starter) 'unknown' — never «the mount is down» (no strike, no heal, no remount).
+    // B-e783 (met at 2.369.411's second checkpoint): a child that NEVER STARTED (the starter's spawn error) is `spawnErr` —
+    // _zombieAt answers nothing for it, never «dead»; its `ls` is resolved on the hub's PATH as the direct spawn resolved it
+    const t0 = Date.now();
+    return require('./server/child-starter').childStarter().run('ls', verb === 'attr' ? ['-d', mp] : [mp], { timeoutMs, envAdd: { PATH: process.env.PATH || '' }, onTimeout: (pid) => heldMap.set(key, { t0, pid }), onLateExit: () => heldMap.delete(key) })
+      .then((r) => {
+        if (r.unknown) return { health: 'unknown', ms: Date.now() - t0 };
+        if (r.timedOut) return { health: 'hung', ms: Date.now() - t0 };   // marked at the timeout itself (its read, M1)
+        heldMap.delete(key);
+        return { health: r.code === 0 ? 'ok' : 'error', ms: Date.now() - t0, ...(r.error && r.code == null ? { spawnErr: true } : {}) };
+      });
   }
   /** Back-compat: true only when the mountpoint HANGS. */
   async _probeMountpointHung(mp, timeoutMs = 6000) { return healthOf(await this._probeMountpoint(mp, timeoutMs)) === 'hung'; }
@@ -1816,7 +1838,10 @@ class MountManager {
     const cpu0 = pid ? await this._cpuTicks(pid) : null;
     const st = (r) => { const x = typeof r === 'object' && r ? r : { health: r }; return { state: x.health || 'skipped', ms: x.ms || 0, held: !!x.held }; };
     const attr = st(await this._probeMountpoint(mp, P.attrMs, 'attr'));
-    const list = attr.state === 'hung' ? st('skipped') : st(await this._probeMountpoint(mp, P.listMs));
+    const list = attr.state === 'hung' || attr.state === 'unknown' ? st('skipped') : st(await this._probeMountpoint(mp, P.listMs));
+    // B-91aa: a probe that got NO ANSWER (the starter dead or slow) is no witness at all — the table is not asked, the
+    // verdict stands as it was (a false «down» would strike, heal or remount a healthy mount)
+    if (attr.state === 'unknown' || list.state === 'unknown') return { verdict: 'unknown', unknown: true, health: 'unknown', teardown: false };
     let backend = st('skipped');
     if (list.state === 'hung' && row.rclone !== false) {
       const t0 = Date.now();

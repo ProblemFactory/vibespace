@@ -50,6 +50,8 @@ const M = require('../desktop-apps');
 const RG = require('../runaway-guard'); // the ONE resource verdict + guard pick + report level (2026-09-25: report only, never a stop)
 const LIMITS = require('../keeper-limits');
 const displayFacts = require('../desktop-display');
+// B-91aa: on the hub (device #0) the belt's X tools are started by THE STARTER (one small process), never by a fork of the hub
+displayFacts.useStarter(require('./child-starter').childStarter());
 const DV = require('../desktop-viewers');
 const DS = require('../desktop-serve'); // THE MACHINE HALF (SHARED — the daemon bundles it)
 const fs = require('fs');

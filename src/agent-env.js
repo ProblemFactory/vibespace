@@ -151,4 +151,4 @@ function serviceEnv(base, { keep = [], add = {}, egress = false } = {}) {
   return out;
 }
 
-module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, agentEnv, daemonEnv, serviceEnv };
+module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, SECRET_SHAPE, agentEnv, daemonEnv, serviceEnv };

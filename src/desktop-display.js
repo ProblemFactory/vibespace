@@ -1105,7 +1105,24 @@ function environCensus(needles, { procRoot = '/proc' } = {}) {
 }
 
 // ── window enumeration (P9 reuses this shape) ────────────────────────────────
-function run(bin, args, { env, timeout = 3000 } = {}) {
+// B-91aa: the hub (device #0) hands its STARTER (src/server/child-starter.js): the belt's X tools are then started by that
+// small process, never by a fork of the 5 GB hub. The daemon hands none — its starts fork its own small process, as before.
+// A request carries only the names that decide WHICH program runs and HOW it reaches X: PATH / HOME / the X and locale
+// names, as the site's env has them (a name the site's env lacks is removed) — never the rest of its env, never a secret
+let _starter = null;
+const X_ENV_NAMES = Object.freeze(['PATH', 'HOME', 'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'LC_ALL', 'LC_CTYPE', 'LANG', 'LOCPATH']);
+function useStarter(s) { _starter = s && typeof s.run === 'function' ? s : null; }
+// ONLY THE BELT's calls ride it (`belt: true` — what the fit runs on its timer: windowTree, viewableWindows, displaySize, the xrandr
+// resize, the wmctrl / xdotool fit, and xpraVersion, which the facts refresh of every belt tick asks; the same functions answer a
+// person's window list too, through the same small process); every other caller (an app's launch probes, the a11y bus read, an
+// unmount) starts as before
+function run(bin, args, { env, timeout = 3000, belt = false } = {}) {
+  if (_starter && belt) {
+    const envAdd = {};
+    if (env) for (const k of X_ENV_NAMES) envAdd[k] = typeof env[k] === 'string' ? env[k] : null;
+    return _starter.run(bin, args, { timeoutMs: timeout, maxBuffer: 4 * 1024 * 1024, capture: true, env, envAdd })
+      .then((r) => ({ err: r.code === 0 && !r.timedOut ? null : Object.assign(new Error(r.unknown ? 'the starter gave no answer' : r.timedOut ? 'timed out' : (r.error || `exit ${r.code}`)), { code: r.code, killed: !!r.timedOut }), stdout: String(r.stdout || '') }));
+  }
   return new Promise((resolve) => {
     execFile(bin, args, { env, timeout, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') }));
   });
@@ -1242,7 +1259,7 @@ async function windowTree({ hostId = null, display, authFile, env = process.env,
   if (!bin) return { ok: false, why: 'xwininfo not on PATH', rows: [], text: '' };
   // LC_ALL=C.UTF-8: xwininfo converts a UTF-8 _NET_WM_NAME to the LOCALE's charset and prints a
   // "failure in conversion" under C/POSIX (measured) — we decode its stdout as UTF-8, so we ask for UTF-8
-  const tree = await run(bin, ['-root', '-tree'], { env: utf8Env(x11Env(env, { display, authFile })) });
+  const tree = await run(bin, ['-root', '-tree'], { env: utf8Env(x11Env(env, { display, authFile })), belt: true });
   if (tree.err) return { ok: false, why: `xwininfo failed: ${tree.err.message}`, rows: [], text: '' };
   return { ok: true, why: null, rows: parseWininfoTree(tree.stdout), text: tree.stdout };
 }
@@ -1253,7 +1270,7 @@ async function viewableWindows({ hostId = null, display, authFile, env = process
   assertLocal(hostId, 'viewableWindows');
   const bin = (bins && bins.xdotool) || (bins ? null : binOnPath('xdotool', { env }));
   if (!bin) return null;
-  const vis = await run(bin, ['search', '--onlyvisible', '--name', ''], { env: x11Env(env, { display, authFile }) });
+  const vis = await run(bin, ['search', '--onlyvisible', '--name', ''], { env: x11Env(env, { display, authFile }), belt: true });
   return vis.err ? null : new Set(vis.stdout.split(/\s+/).filter(Boolean).map((s) => parseInt(s, 10)));
 }
 /** Tree rows + the viewable set ⇒ rows with `mapped` true/false (null when unknown). */
@@ -1282,7 +1299,7 @@ async function displaySize({ hostId = null, display, authFile, env = process.env
   assertLocal(hostId, 'displaySize');
   const bin = (bins && bins.xdpyinfo) || binOnPath('xdpyinfo', { env });
   if (!bin) return { ok: false, w: 0, h: 0, why: 'xdpyinfo not on PATH' };
-  const r = await run(bin, [], { env: x11Env(env, { display, authFile }) });
+  const r = await run(bin, [], { env: x11Env(env, { display, authFile }), belt: true });
   if (r.err) return { ok: false, w: 0, h: 0, why: `xdpyinfo failed: ${r.err.message}` };
   const m = DIMS_RE.exec(r.stdout);
   if (!m) return { ok: false, w: 0, h: 0, why: 'xdpyinfo printed no dimensions line' };
@@ -1296,7 +1313,7 @@ async function setDisplaySize({ hostId = null, display, authFile, env = process.
   assertLocal(hostId, 'setDisplaySize');
   const bin = (bins && bins.xrandr) || binOnPath('xrandr', { env });
   if (!bin) return { ok: false, why: 'xrandr not on PATH' };
-  const r = await run(bin, ['--fb', `${Number(w)}x${Number(h)}`], { env: x11Env(env, { display, authFile }), timeout: 5000 });
+  const r = await run(bin, ['--fb', `${Number(w)}x${Number(h)}`], { env: x11Env(env, { display, authFile }), belt: true, timeout: 5000 });
   return r.err ? { ok: false, why: `xrandr --fb ${w}x${h} failed: ${String(r.err.message || r.err).slice(0, 200)}` } : { ok: true, why: null };
 }
 /**
@@ -1331,12 +1348,12 @@ async function applyWindowPlan({ hostId = null, display, authFile, env = process
   const t0 = Date.now();
   let acts = 0;
   if (viaWm) {
-    const w = await run(b.wmctrl, ['-i', '-r', String(plan.resize.id), '-b', 'add,maximized_vert,maximized_horz'], { env: xenv, timeout: 5000 });
+    const w = await run(b.wmctrl, ['-i', '-r', String(plan.resize.id), '-b', 'add,maximized_vert,maximized_horz'], { env: xenv, timeout: 5000, belt: true });
     if (w.err) return { ok: false, why: `wmctrl failed: ${w.err.message}`, ms: Date.now() - t0, acts: 0, via: 'wm' };
     acts++;
   }
   if (args.length) {
-    const r = await run(b.xdotool, args, { env: xenv, timeout: 5000 });
+    const r = await run(b.xdotool, args, { env: xenv, timeout: 5000, belt: true });
     if (r.err) return { ok: false, why: `xdotool failed: ${r.err.message}`, ms: Date.now() - t0, acts, via: viaWm ? 'wm' : 'xdotool' };
     acts += (plan.resize && !viaWm ? 1 : 0) + (plan.moves || []).length + (plan.clamps || []).length;
   }
@@ -1348,7 +1365,7 @@ async function applyWindowPlan({ hostId = null, display, authFile, env = process
 async function xpraVersion({ binPath, env = process.env } = {}) {
   const bin = binPath || binOnPath('xpra', { env });
   if (!bin) return null;
-  const r = await run(bin, ['--version'], { env, timeout: 5000 });
+  const r = await run(bin, ['--version'], { env, timeout: 5000, belt: true });   // B-91aa r4: the belt's facts refresh (60 s) asks it
   const raw = r.stdout.trim();
   const m = /xpra\s+v?(\d+(?:\.\d+)+)/i.exec(raw) || /(\d+\.\d+(?:\.\d+)?)/.exec(raw);
   return { version: m ? m[1] : null, raw: raw.slice(0, 200), error: r.err ? r.err.message : null };
@@ -1576,6 +1593,7 @@ module.exports = {
   appSecretsFacts: (o) => require('./app-secrets').appSecretsFacts(o), appSecretsOf: (o) => require('./app-secrets').appSecretsOf(o), forgetAppSecrets: (o) => require('./app-secrets').forgetAppSecrets(o), // lane app-display-secrets (src/app-secrets.js)
   assertLocal, binOnPath, landMounts, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, profileLockFact /* lane app-launch-singleton */, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
+  useStarter,   // B-91aa: the hub hands its starter (src/server/desktop-app-keeper.js)
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES, rdpBuildFacts, rdpTrustRun,
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows, appWindowRow,
