@@ -310,8 +310,8 @@ class HostManager {
   reshapeStore(fn) {
     const rep = fn(this._state);
     this._save();
-    this.flushThrottled();   // B-48a4 cure: a migration's reshape is ON DISK before its ledger says done (a boot-time kill leaves no unmigrated file under a stamped ledger)
     this._reachChanged('reshape');
+    this.flushThrottled();   // B-48a4 cure: a migration's reshape is ON DISK before its ledger says done (a boot-time kill leaves no unmigrated file under a stamped ledger)
     return rep;
   }
 

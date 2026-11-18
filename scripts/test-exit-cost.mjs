@@ -39,6 +39,7 @@ import path from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -69,8 +70,7 @@ const DA = require(path.join(REPO, 'src/device-acts.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));
 const SW = require(path.join(REPO, 'src/store-writer.js'));
 
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
+const { ok, report } = checker();   // THE ONE ASSERTION HELPER (scripts/lib/check.mjs): the condition first, a boolean — a swap throws
 const SCR = scratch('exitcost');
 fs.mkdirSync(SCR, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(SCR, { recursive: true, force: true }); } catch { } });
@@ -226,7 +226,7 @@ console.log('③ the one appender (src/device-audit.js journal) over a stand-in 
   const inFlight = B.st.opts.produce();   // the writer took line 0 and never answers (a storage that hangs)
   for (let n = 1; n <= 6; n++) jb.append(JSON.stringify({ n, MB }) + '\n', { id: 'b' + n });
   const left = jb.pending().map((t) => JSON.parse(t).n);
-  ok(inFlight && left[0] === 0 && left.length < 7 && left[left.length - 1] === 6 && saidB.filter((m) => /oldest unwritten lines are dropped/.test(m)).length === 1, `past the queue's bound (${DAU.QUEUE_MAX / 1048576} MB) the oldest unwritten lines go — never the one in flight, never the newest — said once (left ${left.join(',')})`);
+  ok(!!(inFlight && left[0] === 0 && left.length < 7 && left[left.length - 1] === 6 && saidB.filter((m) => /oldest unwritten lines are dropped/.test(m)).length === 1), `past the queue's bound (${DAU.QUEUE_MAX / 1048576} MB) the oldest unwritten lines go — never the one in flight, never the newest — said once (left ${left.join(',')})`);
   // the reader: the queued lines first (the newest), a line on disk AND still queued read once, a queued id inside a text hides nothing
   const dir = path.join(SCR, 'tail'); fs.mkdirSync(dir, { recursive: true });
   const T = { opts: null };
@@ -239,7 +239,7 @@ console.log('③ the one appender (src/device-audit.js journal) over a stand-in 
   ok(store.tail({ hostId: 'h1' }).length === 4, 'a line on disk whose TEXT holds a queued line\'s id is still read (its own id is its last field)');
   let midRead = null;
   const b = T.opts.produce(); fs.appendFileSync(path.join(dir, DAU.AUDIT_FILE), b.append); midRead = store.tail({ hostId: 'h1' }); T.opts.onWritten(true);   // landed, the answer not back yet
-  ok(midRead && midRead.length === 4 && new Set(midRead.map((r) => r.id)).size === 4, `a line on disk and still queued is read ONCE (${midRead && midRead.length} of 4)`);
+  ok(!!(midRead && midRead.length === 4 && new Set(midRead.map((r) => r.id)).size === 4), `a line on disk and still queued is read ONCE (${midRead && midRead.length} of 4)`);
   const after = store.tail({ hostId: 'h1' });
   ok(after.length === 4 && after[0].at === 1002, 'after the answer the lines are read from the file', after.map((r) => r.at));
 }
@@ -357,13 +357,13 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   wa.hm._save();
   const pa = await wa.hm.persisted(), why = wa.hm.whyNotDurable();
   const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), MPW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(pa === false && why && why.why === 'queued' && (ER.match(/if \(await notDurable\(res\)\) return;/g) || []).length === 3 && (MPW.match(/typeof hosts\.persisted === 'function' && !\(await hosts\.persisted\(\)\)/g) || []).length === 2,
+  ok(!!(pa === false && why && why.why === 'queued' && (ER.match(/if \(await notDurable\(res\)\) return;/g) || []).length === 3 && (MPW.match(/typeof hosts\.persisted === 'function' && !\(await hosts\.persisted\(\)\)/g) || []).length === 2),
     'a save the writer cannot make durable says why; the doors that take a person\'s act on a machine (add, remove, the exit-access PATCH; the pairing mint and the graduation) answer only once it is on disk', { pa, why });
   // (b) a migration's reshape on disk before its ledger says done (read in the same tick: no wait)
   const wb = await world(); await wb.hm.persisted();
   wb.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; });
   const nb = JSON.parse(fs.readFileSync(path.join(wb.dataDir, 'hosts.json'), 'utf8')).hosts[0].name;
-  const HMr = compileAt('src/hosts.js', [["    this._save();\n    this.flushThrottled();   // B-48a4 cure: a migration's reshape", "    this._save();\n    // (control) // B-48a4 cure: a migration's reshape"]]);
+  const HMr = compileAt('src/hosts.js', [["    this.flushThrottled();   // B-48a4 cure: a migration's reshape", "    // (control) // B-48a4 cure: a migration's reshape"]]);
   const wbc = await world({ HM: HMr.HostManager }); await wbc.hm.persisted();
   wbc.hm.reshapeStore((st) => { st.hosts[0].name = 'reshaped'; return { n: 1 }; });
   const nbc = JSON.parse(fs.readFileSync(path.join(wbc.dataDir, 'hosts.json'), 'utf8')).hosts[0].name;
@@ -376,7 +376,7 @@ console.log('⑦ the cure — the readers\' SHOULDs');
   let thrown = null; try { writeJob({ file: fc, append: true, parts: [Buffer.from('new line\n')], rotateAt: 1000 }, refusing); } catch (e) { thrown = e; }
   const WKr = compileAt('src/store-writer-worker.js', [["        try { fs.renameSync(m.file, m.file + '.1'); } catch {", "        { fs.renameSync(m.file, m.file + '.1'); } if (0) {"]]);
   let thrownC = null; try { WKr.writeJob({ file: fc, append: true, parts: [Buffer.from('control line\n')], rotateAt: 1000 }, refusing); } catch (e) { thrownC = e; }
-  ok(!thrown && fs.readFileSync(fc, 'utf8').endsWith('new line\n') && thrownC && thrownC.code === 'EACCES', `a rotation's rename the storage refuses keeps the ring recording past its bound; CONTROL (RED): without the fallback the append fails (${thrownC && thrownC.code})`);
+  ok(!!(!thrown && fs.readFileSync(fc, 'utf8').endsWith('new line\n') && thrownC && thrownC.code === 'EACCES'), `a rotation's rename the storage refuses keeps the ring recording past its bound; CONTROL (RED): without the fallback the append fails (${thrownC && thrownC.code})`);
   // (d) generateKey reads the key fresh: the kept facts are dropped
   const wd = await world();
   const k1 = wd.hm.keyInfo().publicKey;
@@ -431,5 +431,4 @@ console.log('⑧ (B) — THE CENSUS: the membership decides a verdict only throu
     && (PX.match(/this\._ctxAgain\(session, sessionId, /g) || []).length === 2, 'the run\'s two verdicts after the judge ask the membership again exactly when the lists they read name a group (to or except)');
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+report();
