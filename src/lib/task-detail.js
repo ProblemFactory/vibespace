@@ -515,7 +515,9 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // the U5a read, 4: an edit reads the list as the store last answered it (never the last paint), one write at a time
     let parentsBusy = false;
     const parentsNow = () => { const cur = (sidebar._tasks || []).find((g) => g.id === task.id) || task; return (Array.isArray(cur.parents) ? cur.parents : []).filter((id) => byId.has(id)); };
-    const setParents = async (next) => { if (parentsBusy) return; parentsBusy = true; parSec.classList.add('busy'); try { await patch({ parents: next }); } finally { parentsBusy = false; parSec.classList.remove('busy'); } };
+    // the chain's cure (A): the copy the next edit reads is the store's ANSWER at once — an answer without the list is the empty
+    // list, never the old one (the last parent removed then a parent added before the broadcast put the removed one back)
+    const setParents = async (next) => { if (parentsBusy) return; parentsBusy = true; parSec.classList.add('busy'); try { const r = await patch({ parents: next }); const m = r && r.task ? (sidebar._tasks || []).find((g) => g.id === task.id) : null; if (m) m.parents = Array.isArray(r.task.parents) ? [...r.task.parents] : []; } finally { parentsBusy = false; parSec.classList.remove('busy'); } };
     const parList = document.createElement('div'); parList.className = 'task-parents-list';
     if (!parents.length) parList.innerHTML = `<span class="task-detail-hint">${escHtml(t('No parent group'))}</span>`;
     for (const pid of parents) {

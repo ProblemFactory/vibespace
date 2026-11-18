@@ -489,6 +489,22 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const td = read('src/lib/task-detail.js');
     ok(/const parSec = section\(host, t\('Parent groups'\)/.test(td) && /setParents\(\[\.\.\.parentsNow\(\), g\.id\]\)/.test(td) && /setParents\(parentsNow\(\)\.filter\(\(p\) => p !== pid\)\)/.test(td) && /await patch\(\{ parents: next \}\)/.test(td) && /const below = new Set\(Array\.isArray\(task\.descendants\) \? task\.descendants : \[\]\);/.test(td) && /off: t\('sits below this group — it cannot also be its parent'\)/.test(td) && !/disabled: true/.test(td) && /chip\('children', t\('Child groups see it'\)/.test(td) && /children: r\.children !== true/.test(td) && /task\.ancestors/.test(td), 'U5a: the Settings tab — the parents row writes through PATCH (the store judges), greys a group below this one from the view\'s descendants; each Context row\'s 含子组 chip; the inherited rules and rows drawn from the view\'s ancestors');
   }
+  // the chain's cure (A, the U5a must): the last parent removed, then a parent added BEFORE any broadcast — the page's copy
+  // merges the store's answer ({...old, ...answer}, the sidebar's _upsertTaskLocal) and its next edit reads that copy
+  const lastParentScene = (store) => {
+    const P = store.create({ title: 'P7' }), Q = store.create({ title: 'Q7' }), C = store.create({ title: 'C7', parents: [P.id] });
+    const copy = { ...store.view(C.id) };
+    Object.assign(copy, store.update(C.id, { parents: [] }));   // × on the last parent: the answer merged into the copy
+    const next = [...(Array.isArray(copy.parents) ? copy.parents : []), Q.id];   // + Add a parent group… reads the copy
+    store.update(C.id, { parents: next });
+    return { P: P.id, Q: Q.id, stored: store.get(C.id).parents || [] };
+  };
+  {
+    const r7 = lastParentScene(freshStore());
+    ok(same(r7.stored, [r7.Q]), 'cure (A): removing the LAST parent and adding one before any broadcast stores ONLY the new parent (the answer says [] — the removed parent never comes back)', r7);
+    const td7 = read('src/lib/task-detail.js');
+    ok(/const r = await patch\(\{ parents: next \}\); const m = r && r\.task \? \(sidebar\._tasks \|\| \[\]\)\.find\(\(g\) => g\.id === task\.id\) : null; if \(m\) m\.parents = Array\.isArray\(r\.task\.parents\) \? \[\.\.\.r\.task\.parents\] : \[\];/.test(td7), 'cure (A): the page sets its copy\'s parents from the store\'s answer at once (an absent list is the empty list)');
+  }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
   try {
@@ -501,6 +517,13 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const a = sm.create({ title: 'A' }), b = sm.create({ title: 'B', parents: [a.id] });
     let threw = false; try { sm.update(a.id, { parents: [b.id] }); } catch { threw = true; }
     ok(!threw && same(sm.get(a.id).parents, [b.id]), 'CONTROL: a store without the cycle check WRITES the cycle — ⑥ «refused parent_cycle» would be red');
+    // CONTROL (A): an answer that omits an empty list (the unit's own spelling) lets the merged copy keep the removed parent
+    const OUT = '  _out(t) { return { ...t, parents: Array.isArray(t.parents) ? [...t.parents] : [] }; }';
+    ok(src.split(OUT).length === 2, 'CONTROL setup: the answer\'s list line is found exactly once');
+    const MO = MZ.load('src/task-groups.js', src.replace(OUT, '  _out(t) { return Array.isArray(t.parents) ? { ...t, parents: [...t.parents] } : { ...t }; }'), 'answer-omits-empty').TaskGroupManager;   // stale-pins: kept (the mutant restores the unit's own answer line)
+    const dmo = path.join(SCR, 'data-mut-out'); fs.mkdirSync(dmo, { recursive: true });
+    const ro = lastParentScene(new MO({ dataDir: dmo }));
+    ok(same(ro.stored, [ro.P, ro.Q]), 'CONTROL (A): a store whose answer omits the empty list lets the next edit PUT THE REMOVED PARENT BACK — the leg above would be red', ro);
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 

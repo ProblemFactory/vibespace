@@ -2743,7 +2743,9 @@ class TaskGroupManager {
     return dropped;
   }
   /** (the U2 read, 8) a record handed back to a caller: a copy of the live parents list, never the list itself */
-  _out(t) { return Array.isArray(t.parents) ? { ...t, parents: [...t.parents] } : { ...t }; }
+  // the chain's cure (A, the U5a must): an answer ALWAYS says the list — `[]` when none is stored. A copy that MERGES the answer
+  // ({...old, ...answer}, the sidebar's) kept the old parents when the key was absent, and its next edit wrote them back
+  _out(t) { return { ...t, parents: Array.isArray(t.parents) ? [...t.parents] : [] }; }
 
   create({ title, kind, archived, objective, sessions, ctx, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap, parents } = {}, { bearer = false } = {}) {
     this._refuseUnread('a new Task Group'); // THE STORE HELD UNREAD: refused BY NAME before anything moves
