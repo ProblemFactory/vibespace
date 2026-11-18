@@ -413,6 +413,7 @@ await (async () => {
   const Module = require('module');
   const UWF = path.join(REPO, 'src/usage-cache-write.js'), HUBF = path.join(REPO, 'src/server/usage-cache-hub.js');
   const UW = require(UWF), HUB = require(HUBF), RR = require(path.join(REPO, 'src/run-reads.js'));
+  const QM = require(path.join(REPO, 'src/quota-model.js'));
   const d11 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-u65-'));
   const standIn = () => {
     const r = { dirties: [], durables: [], owed: new Map(), landed: 0 };
@@ -562,7 +563,7 @@ await (async () => {
     const b1 = await bound(HUB, 'cure');
     ok(b1.maxPerEvent <= HUB.REPLAY_CAP && b1.gone && b1.five === 48 && b1.seven === 49,
       `⑪ THE CURE 2: landings that FAIL 8 times while 40 events arrive — no re-merge replays more than ${HUB.REPLAY_CAP} calls (at most ${b1.maxPerEvent}); a good landing afterwards leaves no pending copy and the file holds the events' latest limits`, JSON.stringify(b1));
-    const aFail = 'if (!ok) { if (p.calls) { p.calls = []; p.noReplay = true; } return; }', aCap = ' if (p.calls.length > REPLAY_CAP) { p.calls = []; p.noReplay = true; } }';
+    const aFail = 'if (!ok) { if (p.calls) { p.calls = []; p.noReplay = true; } return; }', aCap = ' if (p.calls.length > _cap) { p.calls = []; p.noReplay = true; } }';
     ok(src.split(aFail).length === 2 && src.split(aCap).length === 2, '⑪ ANCHORS: the failed landing\'s drop and the cap');
     const b2 = await bound(loadAs(src.replace(aFail, 'if (!ok) return;').replace(aCap, ' }')), 'red');
     ok(b2.maxPerEvent > HUB.REPLAY_CAP, `⑪ CURE 2 CONTROL: without the bound (a mutant copy) the replay grows with every event (${b2.maxPerEvent} merges for one event) — the main loop held longer at each`, JSON.stringify(b2));
@@ -582,6 +583,110 @@ await (async () => {
       ok(kept && HUB.pendingText(f) === null && util(JSON.parse(fs.readFileSync(f, 'utf8')), 'sevenDay') === 25 && util(JSON.parse(fs.readFileSync(f, 'utf8')), 'fiveHour') === 15,
         '⑪ PINNED: the older bytes landing after a newer event arrived leave the copy (the newer generation waits; the reader answers it) — its own landing then clears it with both limits on disk', JSON.stringify({ kept }));
       HUB.useStoreWriter(null);
+    }
+    // (9) THE WALK (主开发 14:21Z — the third round whose must came out of the last cure's own lines: the copy's machine is walked
+    // EXHAUSTIVELY by a fast leg). The REAL module over a stand-in store whose TAKING, LANDINGS and the re-merge's START and READ
+    // are events the walk releases (no clock). EVERY sequence of inputs up to WALK_DEPTH, each input only where it can happen: an
+    // event on the 5h or the 7d lane (E5 / E7), a REFUSAL on the 7d lane (R7 — the event's stamp, a refusal mark), the writer TAKING the owed bytes, a landing GOOD or FAILED (OK / FAIL — a failed one
+    // is owed again, as the writer's fail() does), a re-merge's START (BEGIN) and its READ answering (END — the file as it is
+    // then), and — once a sequence — ANOTHER process's read-merge-write of the file (OTHER: the statusline's own older reading).
+    // After EVERY input: (III) every hub reader sees every event's latest value, every event's passive answer (its producer's
+    // witness entry — a field the merge takes from the base) and the 7d lane's refusal mark as the SYNCHRONOUS chain of the
+    // same events holds it (each merged over the last, as the device road writes), and no re-merge replays past the cap.
+    // Every sequence is then brought to rest by GOOD landings: (I) every event's effect is on disk; (II) no pending copy outlives
+    // its newest bytes on disk. The cap is 1 here (the same code path as 16, reached in two events). RED: the three rounds'
+    // defects planted back, each must be found.
+    const WALK_DEPTH = Number(process.env.VS_U65_WALK_DEPTH) || 5, WALK_CAP = 1;
+    const walk = async (M, { stopAtFirst = false } = {}) => {
+      const key = 'sub-W', f = UW.cacheFileFor(d11, key);
+      const realMerge = UW.mergeCacheObject;
+      let replays = 0;
+      UW.mergeCacheObject = (...x) => { if (x[2] && x[2].quiet) replays++; return realMerge(...x); };
+      const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+      const fileObj = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+      let sequences = 0; const found = [];
+      const t0 = process.hrtime.bigint();
+      const run = async (seq) => {
+        M.useStoreWriter(null); try { fs.rmSync(f, { force: true }); } catch { }
+        const st = { owed: null, last: null, inflight: null }, begins = [], reads = [];
+        const store = { dirty: (file, o) => { st.owed = o; st.last = o; }, durable: () => Promise.resolve(true) };
+        M.useStoreWriter(store, { dropRun: () => { }, readFile: () => new Promise((res, rej) => reads.push({ res, rej })), schedule: (fn) => begins.push(fn), replayCap: WALK_CAP });
+        let n = 0, otherUsed = false, bad = null;
+        const last = { fiveHour: null, sevenDay: null }, producers = [];
+        let chain = null;   // the synchronous chain: every event merged over the last, nothing else
+        const markOf = (o) => { const e = QM.lanesOfReading(o).find((x) => x.lane === 'plan:7d'); return e ? !!e.mark : null; };
+        const lostOf = (o) => producers.filter((x) => !(o && o.fiveHourAbsentWitnesses && o.fiveHourAbsentWitnesses[x]));
+        const apply = async (inp) => {
+          replays = 0;
+          if (inp === 'E5' || inp === 'E7' || inp === 'R7') {
+            // an event through THE write entry every producer calls, carrying the stream capture's PASSIVE ANSWER (its producer,
+            // a fresh session each event): its witness entry is a field the merge takes from the BASE, not from the call — so a
+            // re-merge over an OLDER file without a call loses it (what round 3's defect loses: the limits ride each call as merged)
+            n++; const five = inp === 'E5', dead = inp === 'R7', u = dead ? 100 : 10 + n, at = 1000 + n * 10, lane = five ? 'fiveHour' : 'sevenDay', lk = five ? 'plan:5h' : 'plan:7d';
+            const args = { cacheDir: d11, key, obj: { fetchedAt: at, source: 'rate-limit-event', [lane]: { utilization: u / 100, resetsAt: five ? 1786900000 : 1787500000 } }, measuredAt: at, source: 'rate-limit-event', backend: 'claude',
+              passiveAnswer: { producer: 'sess-' + n, weekSig: 'wk', fiveHour: null, absent5h: false }, stated: [lk], refused: dead ? [lk] : [] };
+            UW.writeCacheObject(args);
+            const c = realMerge(chain, { ...args, obj: { ...args.obj } }, { quiet: true }); if (c.ok) chain = c.out;
+            last[lane] = u; producers.push('sess-' + n);
+          } else if (inp === 'TAKE') { st.inflight = { bytes: st.owed.produce(), on: st.owed.onWritten }; st.owed = null; }
+          else if (inp === 'OK') { const w = st.inflight; st.inflight = null; fs.writeFileSync(f, w.bytes); if (w.on) w.on(true, null); }
+          else if (inp === 'FAIL') { const w = st.inflight; st.inflight = null; if (w.on) w.on(false, Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })); if (!st.owed) st.owed = st.last; }
+          else if (inp === 'BEGIN') begins.shift()();
+          else if (inp === 'END') { const r = reads.shift(); let t = null; try { t = fs.readFileSync(f, 'utf8'); } catch (e) { r.rej(e); } if (t !== null) r.res(t); }
+          else if (inp === 'OTHER') {
+            otherUsed = true;
+            const m = realMerge(fileObj(), { cacheDir: d11, key, obj: { fetchedAt: 500, source: 'statusline', fiveHour: { utilization: 0.05, resetsAt: 1786900000 }, sevenDay: { utilization: 0.05, resetsAt: 1787500000 } }, measuredAt: 500, source: 'statusline' }, { quiet: true });
+            if (m.ok) fs.writeFileSync(f, JSON.stringify(m.out));
+          }
+          await flush();
+          if (!bad && replays > WALK_CAP) bad = `the bound — ${replays} replays in one step (${inp})`;
+          let seen = null; try { seen = UW.readCacheJson(f); } catch { }
+          for (const lane of ['fiveHour', 'sevenDay']) if (!bad && last[lane] != null && util(seen, lane) !== last[lane]) bad = `(III) after ${inp} the reader answers ${lane} ${util(seen, lane)}, the last event said ${last[lane]}`;
+          if (!bad && lostOf(seen).length) bad = `(III) after ${inp} the reader has lost the passive answers of ${lostOf(seen).join(', ')}`;
+          if (!bad && markOf(chain) !== null && markOf(seen) !== markOf(chain)) bad = `(III) after ${inp} the reader's 7d refusal mark is ${markOf(seen)}, the synchronous chain's ${markOf(chain)}`;
+        };
+        for (const inp of seq) { await apply(inp); if (bad) break; }
+        const enabled = ['E5', 'E7', 'R7', ...(st.owed && !st.inflight ? ['TAKE'] : []), ...(st.inflight ? ['OK', 'FAIL'] : []), ...(begins.length ? ['BEGIN'] : []), ...(reads.length ? ['END'] : []), ...(otherUsed ? [] : ['OTHER'])];
+        if (!bad) {   // brought to rest by GOOD landings
+          for (let i = 0; i < 64; i++) {
+            if (reads.length) await apply('END'); else if (begins.length) await apply('BEGIN'); else if (st.inflight) await apply('OK'); else if (st.owed) await apply('TAKE'); else break;
+            if (bad) break;
+          }
+        }
+        if (!bad) {
+          const disk = fileObj();
+          for (const lane of ['fiveHour', 'sevenDay']) if (!bad && last[lane] != null && util(disk, lane) !== last[lane]) bad = `(I) at rest the file holds ${lane} ${util(disk, lane)}, the last event said ${last[lane]}`;
+          if (!bad && lostOf(disk).length) bad = `(I) at rest the file has lost the passive answers of ${lostOf(disk).join(', ')}`;
+          if (!bad && markOf(chain) !== null && markOf(disk) !== markOf(chain)) bad = `(I) at rest the file's 7d refusal mark is ${markOf(disk)}, the synchronous chain's ${markOf(chain)}`;
+          if (!bad && M.pendingText(f) !== null) bad = '(II) at rest a pending copy outlives its newest bytes on disk';
+        }
+        return { enabled, bad };
+      };
+      const dfs = async (prefix) => {
+        if (stopAtFirst && found.length) return;
+        const r = await run(prefix); sequences++;
+        if (r.bad) { found.push({ seq: prefix.join(' ') || '(none)', why: r.bad }); return; }
+        if (prefix.length >= WALK_DEPTH) return;
+        for (const inp of r.enabled) await dfs([...prefix, inp]);
+      };
+      try { await dfs([]); }
+      finally { UW.mergeCacheObject = realMerge; M.useStoreWriter(null); try { fs.rmSync(f, { force: true }); } catch { } }
+      return { sequences, found, ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e6) };
+    };
+    const wk = await walk(HUB);
+    console.log(`    the walk: ${wk.sequences} sequences (every prefix brought to rest) up to depth ${WALK_DEPTH}, cap ${WALK_CAP}, in ${wk.ms} ms`);
+    ok(!wk.found.length, `⑪ THE WALK: every sequence of up to ${WALK_DEPTH} inputs (E5 E7 R7 TAKE OK FAIL BEGIN END, OTHER once) — ${wk.sequences} sequences, each brought to rest — keeps the laws: every reader sees every event (its value, its passive answer, the 7d refusal mark as the synchronous chain holds it), no re-merge past the cap, every event on disk, no pending copy outliving its newest bytes`, JSON.stringify(wk.found.slice(0, 3)));
+    const plants = [
+      ['round 1 — the law not asked at the re-merge\'s exit (the copy stranded)', '} else settle(file, p); };', '} };'],
+      ['round 2 — no bound (no drop at a failed landing, no cap)', aFail + '|' + aCap, null],
+      ['round 3 — an OLDER landing ends the no-replay flag (readings lost)', 'if (p.producedGen === p.gen) p.noReplay = false;', 'p.noReplay = false;'],
+    ];
+    for (const [name, a, b] of plants) {
+      let text = src;
+      if (b === null) { const [x, y] = a.split('|'); text = text.replace(x, 'if (!ok) return;').replace(y, ' }'); ok(src.includes(x) && src.includes(y), `⑪ WALK ANCHORS (${name})`); }
+      else { ok(src.split(a).length === 2, `⑪ WALK ANCHOR (${name})`); text = text.replace(a, b); }
+      const r = await walk(loadAs(text), { stopAtFirst: true });
+      ok(r.found.length > 0, `⑪ WALK CONTROL: ${name} — planted back, the walk finds it: «${r.found[0] ? r.found[0].seq + ' ⇒ ' + r.found[0].why : 'NOT FOUND'}»`, JSON.stringify({ sequences: r.sequences }));
     }
     // (4) a SIDECAR (the `.window-` stamp) is handed whole; its one reader sees it before it lands
     const w4 = standIn(); HUB.useStoreWriter(w4, { dropRun: () => { } });

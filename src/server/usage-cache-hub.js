@@ -25,14 +25,20 @@ const UW = require('../usage-cache-write.js');
 let _W = null, _dropRun = null;
 const HUB = { pendingText: (f) => pendingText(f), pendingIn: (d) => pendingIn(d), handOff: (...a) => handOff(...a) };   // what the cache module's hook calls
 const _pending = new Map();   // file → { bytes, gen, v, bytesV, calls: [{v, at, args}] | null (a sidecar), reading, again, producedGen, producedV, landedGen, epoch }
-const REPLAY_CAP = 16;        // the cure 2: a re-merge replays at most this many calls — past it the pending bytes (which hold every call's effect) stand alone until the next good landing
+const REPLAY_CAP = 16;        // the cure 2: a re-merge replays at most this many calls — past it the pending bytes (which hold every call's effect) stand alone until the NEWEST bytes land. 16 is ARBITRARY: a burst a few times the ordinary one (an account's events come a few a minute; a write lands in seconds), small enough that one re-merge stays a few ms of merges
 const PACED_MS = 60000;       // the R1 hand-off's pace: only the exit's net (the exit writes whatever is dirty) and a re-merge that never came — R2's urgent bytes come first
 const cloneData = (x) => (x == null || typeof x !== 'object' ? x : JSON.parse(JSON.stringify(x)));
 const readFileOffLoop = (f) => fs.promises.readFile(f, 'utf-8');
-let _readFile = readFileOffLoop;
+const nextTurn = (fn) => setImmediate(fn);
+let _readFile = readFileOffLoop, _schedule = nextTurn, _cap = REPLAY_CAP;
 /** THE HUB'S INJECTION: its store writer (src/store-writer.js) and run-reads' dropRun. null ⇒ synchronous again (and nothing kept).
- *  `readFile` — a suite's seam only (a read it can hold open, to land a write inside it); the hub's is fs.promises. */
-function useStoreWriter(writer, { dropRun = null, readFile = null } = {}) { _W = writer || null; _dropRun = typeof dropRun === 'function' ? dropRun : null; _readFile = typeof readFile === 'function' ? readFile : readFileOffLoop; if (!_W) _pending.clear(); UW.useHub(_W ? HUB : null); }
+ *  A suite's seams only — `readFile` (a read it can hold open), `schedule` (when a re-merge starts: an event it releases),
+ *  `replayCap` (a smaller bound, so a walk reaches it in a few steps); the hub's: fs.promises, the next turn, REPLAY_CAP. */
+function useStoreWriter(writer, { dropRun = null, readFile = null, schedule = null, replayCap = null } = {}) {
+  _W = writer || null; _dropRun = typeof dropRun === 'function' ? dropRun : null;
+  _readFile = typeof readFile === 'function' ? readFile : readFileOffLoop; _schedule = typeof schedule === 'function' ? schedule : nextTurn; _cap = Number.isFinite(replayCap) ? replayCap : REPLAY_CAP;
+  if (!_W) _pending.clear(); UW.useHub(_W ? HUB : null);
+}
 /** the hook's two readers (R1): a pending reading's bytes, and the pending files of a folder */
 function pendingText(file) { const p = _pending.get(file); return p ? p.bytes : null; }
 function pendingIn(dir) { const at = path.resolve(dir), out = []; for (const f of _pending.keys()) if (path.dirname(path.resolve(f)) === at) out.push(path.basename(f)); return out; }
@@ -53,7 +59,9 @@ function handTo(file, p, { urgent = false } = {}) {
       // call on the main loop): no replay protects anything now — another process's write cannot land on a refusing mount either
       // — and the pending bytes already hold every call's effect: the list goes, the bytes stand alone until the next good landing
       if (!ok) { if (p.calls) { p.calls = []; p.noReplay = true; } return; }
-      p.noReplay = false;
+      // the CURE 3 (主开发 14:21Z — both readers, the skeptic twice): the flag ends ONLY when the NEWEST bytes landed — an OLDER
+      // landing ending it let the next re-merge replay over the older file without the calls the flag had dropped (readings lost)
+      if (p.producedGen === p.gen) p.noReplay = false;
       p.epoch++;   // what the file holds changed: a re-merge whose read began before this is over an older file
       if (p.calls) p.calls = p.calls.filter((c) => c.v > p.producedV);   // the calls these bytes held are on disk now
       p.landedGen = p.producedGen; settle(file, p);   // the NEWEST bytes landed, nothing to replay ⇒ the file is the reading again
@@ -65,19 +73,19 @@ function handOff(file, call, out, { sidecar = false } = {}) {
   if (!p) { p = { bytes: null, gen: 0, v: 0, bytesV: 0, calls: sidecar ? null : [], reading: false, again: false, producedGen: 0, producedV: 0, landedGen: 0, epoch: 0 }; _pending.set(file, p); }
   p.v++; p.gen++; p.bytes = sidecar ? out : JSON.stringify(out); p.bytesV = p.v;
   if (!sidecar && p.noReplay) { /* a failed landing or the cap: the bytes carry this call (R1 merged it over them) */ }
-  else if (!sidecar) { const a = call.args; p.calls.push({ v: p.v, at: call.at, args: { ...a, obj: cloneData(a.obj), set: cloneData(a.set), absentWindows: cloneData(a.absentWindows), passiveAnswer: cloneData(a.passiveAnswer), refused: cloneData(a.refused), refusalMarks: cloneData(a.refusalMarks) } }); if (p.calls.length > REPLAY_CAP) { p.calls = []; p.noReplay = true; } }   // cloned: a caller may change its objects after the write returns
+  else if (!sidecar) { const a = call.args; p.calls.push({ v: p.v, at: call.at, args: { ...a, obj: cloneData(a.obj), set: cloneData(a.set), absentWindows: cloneData(a.absentWindows), passiveAnswer: cloneData(a.passiveAnswer), refused: cloneData(a.refused), refusalMarks: cloneData(a.refusalMarks) } }); if (p.calls.length > _cap) { p.calls = []; p.noReplay = true; } }   // cloned: a caller may change its objects after the write returns
   dropRunNow();
   if (sidecar) { handTo(file, p, { urgent: true }); return; }
   handTo(file, p);
   if (p.noReplay) return;   // the bytes stand alone until the next good landing: no re-merge (nothing to replay)
-  if (!p.reading) { p.reading = true; setImmediate(() => remerge(file, p)); } else p.again = true;
+  if (!p.reading) { p.reading = true; _schedule(() => remerge(file, p)); } else p.again = true;
 }
 /** R2: the file's own reading NOW (off the loop), every pending call replayed over it, the bytes handed as an act. A read the
  *  mount refused keeps the R1 bytes (never a reading wiped); a write that landed while the read ran makes it stale (again). */
 function remerge(file, p) {
   const epoch0 = p.epoch;
   // every exit: another re-merge if a call came meanwhile, else THE LAW's one question (settle)
-  const next = () => { if (p.again) { p.again = false; p.reading = true; setImmediate(() => remerge(file, p)); } else settle(file, p); };
+  const next = () => { if (p.again) { p.again = false; p.reading = true; _schedule(() => remerge(file, p)); } else settle(file, p); };
   Promise.resolve().then(() => _readFile(file)).then((t) => { try { return { base: JSON.parse(t) || null }; } catch { return { base: null } } }, (e) => (e && e.code === 'ENOENT' ? { base: null } : { refused: true })).then(({ base, refused }) => {
     if (_pending.get(file) !== p) return;
     p.reading = false;
