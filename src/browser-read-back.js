@@ -55,7 +55,7 @@ function driverRead(r, { absentIsEmpty = false } = {}) {
     const d = j.data;
     if (typeof d === 'string') return d;
     if (d && typeof d === 'object') for (const k of ['value', 'text', 'result', 'attribute', 'attr']) if (typeof d[k] === 'string') return d[k];
-    if (absentIsEmpty && (d == null || (typeof d === 'object' && Object.values(d).every((x) => x == null)))) return '';
+    if (absentIsEmpty && (d == null || (typeof d === 'object' && (d.value === null || Object.values(d).every((x) => x == null))))) return '';
   }
   return null;
 }
@@ -94,6 +94,7 @@ async function readBack({ plan, run, json = false, now = Date.now, budgetMs = RE
       const kind = driverRead(await call(['get', 'attr', plan.sel, 'type', '--json']), { absentIsEmpty: true }); // get attr <selector> <name>
       // a kind the browser could not read is never judged as a field: «could not confirm», the value never shown
       if (kind === null) return unavailable('its kind could not be read through the browser, so what it holds could not be confirmed');
+      if (kind === '' && v === '' && plan.asked !== '') return unavailable('it carries no type attribute (a textarea, a list or a rich editor reads empty here) and reads empty, so what landed could not be confirmed');
       const k = String(kind).toLowerCase() || 'text';
       if (FIELD_FORMS[k]) {
         f = { tag: 'input', kind: k, has: true, equal: false, includes: false, len: v.length, locked: false, value: v };

@@ -132,7 +132,7 @@ const probe = (p, asked, target) => JSON.parse(p.run(RB.fieldProbeJs(asked, targ
   ok(none.tag === null, 'nothing focused ⇒ the probe says so (tag null)', none);
   ok(RB.evalAnswer({ code: 0, out: JSON.stringify({ a: 1 }, null, 2) + '\n' }).a === 1 && RB.evalAnswer({ code: 0, out: 'noise\n' + JSON.stringify(JSON.stringify({ a: 2 })) + '\n' }).a === 2 && RB.evalAnswer({ code: 1, out: '{}' }) === null,
     'evalAnswer parses the WHOLE answer first (an object printed over several lines), then its last line; a failed run answers null');
-  ok(RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":"4"}}' }) === '4' && RB.driverRead({ code: 0, out: '{"success":true,"data":"4"}' }) === '4' && RB.driverRead({ code: 0, out: '✓ 4' }) === null && RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }) === null && RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }, { absentIsEmpty: true }) === '',
+  ok(RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":"4"}}' }) === '4' && RB.driverRead({ code: 0, out: '{"success":true,"data":"4"}' }) === '4' && RB.driverRead({ code: 0, out: '✓ 4' }) === null && RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }) === null && RB.driverRead({ code: 0, out: '{"success":true,"data":{"value":null}}' }, { absentIsEmpty: true }) === '', RB.driverRead({ code: 0, out: '{"success":true,"data":{"name":"type","value":null}}' }, { absentIsEmpty: true }) === '' && RB.driverRead({ code: 0, out: '{"success":true,"data":{"name":"type","value":null}}' }) === null &&
     'driverRead takes only the driver\'s JSON answer — any other shape is UNREADABLE (null), never an empty field; an absent attribute is empty only when asked');
 }
 
@@ -264,6 +264,8 @@ async function readBackCensus(readBack) {
   say('a bare keyboard type into a code box that moved the focus to the empty next one ⇒ SAID (exit 0) as the focused field afterwards — never «the page refused or cleared it»', t.r && t.r.code === 0 && /the field focused afterwards \(text\) is empty/.test(t.r.out) && !/refused or cleared/.test(t.r.out), t.r);
   t = await judge(readBack, { verb: 'fill', sel: '@e2', asked: '0123' }, fakePage({ t: { kind: 'text', value: '01' } }), { refs: { '@e2': 't' }, attrFails: true });
   say('the MUST: an @ref whose KIND the browser could not read and whose value does not match ⇒ «could not be confirmed» (exit 0, a note), never «nothing landed», the value never shown', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && /could not be confirmed/.test(t.r.note) && !t.r.code && !/"01"/.test(t.r.note), t.r);
+  t = await judge(readBack, { verb: 'fill', sel: '@e7', asked: 'notes' }, fakePage({ ta: { tag: 'textarea' } }), { refs: { '@e7': 'ta' } });
+  say('an @ref with NO type attribute that reads empty (a textarea, a list, a rich editor) ⇒ «could not be confirmed» (exit 0, a note) — never the strict «nothing landed»', t.r && t.r.note && /\[read_back_unavailable\]$/.test(t.r.note) && /no type attribute/.test(t.r.note) && !t.r.code, t.r);
   t = await judge(readBack, { verb: 'fill', sel: '#d', asked: '2027-01-07' }, fakePage({ d: DATE({ value: '2027-01-07' }) }));
   say('a date field that already holds the asked value ⇒ the driver\'s answer stands, no setter (no extra input / change)', t.r === null && t.d.calls.length === 1 && t.page.events.length === 0, t.r);
   t = await judge(readBack, { verb: 'keyboard type', sel: null, asked: 'hello\n' }, fakePage({ t: { kind: 'text' } }, { focused: 't' }));
