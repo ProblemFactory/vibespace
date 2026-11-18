@@ -55,6 +55,7 @@ const ROWS = [
   ['integrations-window.js', 'integ-input-multiline', 'a several-line SECRET field of an integration card (an ssh deploy key pasted whole) — a key paste, not a message; a secret never goes to a dictation vendor', 1], // lane engine-distribution
   ['vault-use-row.js', 'vw-use-policy-in', 'an entry\'s policy for the vault\'s decision-API judge (lane vault-use-grants R4) — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
   ['vault-paste-box.js', 'vault-secret-note', 'a note stored beside a secret in the vault (「其他密钥或密码…」) — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
+  ['vault-file-row.js', 'vault-secret-note', 'lane lg-vault-file (B-0830 U1b): a FILE entry\'s description in 添加… › 文件… — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
   ['vault-paste-box.js', 'ut-secret-desc', 'lane vault-entry-description: a new entry\'s description in the paste box, beside the masked field — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
   ['vault-paste-box.js', 'vault-words-note', 'lane vault-entry-description: an entry\'s description in Edit… — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
   ['doc-window-ui.js', 'doc-raw-edit', 'a doc block\'s raw source — an editor of the document, not a message', 1],

@@ -229,6 +229,7 @@ function doorsOf({ store, entry, field }) {
   // lane vault-paste-request: a free entry — its own delete door (the run door's switch and grants on it go with it)
   if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: cf }, rotate: null };
   if (store === 'secrets' && PROXY_LOGIN_ROW_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/proxy-logins/${enc(e)}`, confirm: cf }, rotate: null };   // B-8b87: its own delete door
+  if (store === 'secrets' && KEYFILE_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/files/${enc(e.slice(8))}`, confirm: cf }, rotate: null };   // lane lg-vault-file: the owner's file — its delete shreds the sealed file
   if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: cf }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
   if (store === 'secrets' && /^provider:pv-[a-z0-9][a-z0-9-]{0,63}$/.test(e)) return { delete: { method: 'DELETE', path: `/api/providers/${enc(e.slice(9))}`, confirm: cf }, rotate: null };   // lane lg-providers: the provider's own remove (its record goes with it)
   if (store === 'secrets' && AGENT_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/agent-secrets/${enc(e)}`, confirm: cf }, rotate: null };   // B-3fb5: an agent's own entry — its delete door (the person's; the whole name, encoded)
@@ -370,6 +371,7 @@ function provenanceOf(row) {
   if (row.provenance && row.provenance.prov === 'vault-minted') return 'agent-mint';   // lane browser-login: an agent's registration — the vault made the password, nobody saw it
   if (row.origin === 'qr' || row.origin === 'paste') return 'scan';
   if (row.store === 'secrets' && /^totp:/.test(entry)) return 'me';
+  if (row.file && row.store === 'secrets' && /^keyfile:/.test(entry)) return 'me';   // lane lg-vault-file: the owner's FILE is never shown (a download) — and it is the owner's, never «System»
   if (row.revealable === false) return 'system';
   if (row.store === 'automation' || row.origin === 'mint' || (row.store === 'secrets' && /^(?:apikey|frp|host|file):/.test(entry))) return 'hub-mint';
   return 'me';

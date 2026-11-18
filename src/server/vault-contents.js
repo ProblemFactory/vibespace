@@ -116,6 +116,20 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     }
     const v = door(who, page, ip);
     if (!v.ok) return v;
+    // lane lg-vault-file (B-0830, design q-058 §1 reveal): a FILE entry is never SHOWN — the owner DOWNLOADS it, inside the same
+    // window, through the engine's ONE road (fileOpen); the bytes ride this answer once (base64), never its file key
+    const ff = ref.store === 'secrets' && typeof vault.fileOf === 'function' ? vault.fileOf(ref.entry) : null;
+    // the U1a cure: the engine reads a file OFF the main loop — this branch answers a promise (the route's person() awaits it;
+    // every other reveal stays a plain answer)
+    if (ff) return (async () => {
+      const fo = typeof vault.fileOpen === 'function' ? await vault.fileOpen(ref.entry) : { ok: false, code: 'unreadable' };
+      if (!fo || !fo.ok) { vault.audit('vault-reveal-unreadable', { who: whoOf(who), ip, store: ref.store, entry: ref.entry, field: ref.field, code: String((fo && fo.code) || 'unreadable').slice(0, 60) }); return { ok: false, code: String((fo && fo.code) || '').includes('vault_locked') ? 'vault_locked' : 'unreadable', why: (fo && fo.code) || null }; }
+      let bytes;
+      try { bytes = fo.bytes.toString('base64'); } finally { fo.bytes.fill(0); }
+      if (typeof vault.noteUse === 'function') vault.noteUse(ref.entry, { by: 'human', door: 'vault-window' });
+      vault.audit('vault-download', { who: whoOf(who), ip, by: 'human', store: ref.store, entry: ref.entry, field: ref.field, size: fo.file.size });   // the name and the size — never a byte
+      return { ok: true, id: VI.refOf(ref.store, ref.entry, ref.field), file: fo.file, bytes, leftMs: v.leftMs };
+    })();
     const src = sourceOf(ref.store);
     let value = null;
     try { value = src && typeof src.vaultReveal === 'function' ? src.vaultReveal(ref.entry, ref.field) : null; }

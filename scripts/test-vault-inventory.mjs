@@ -575,6 +575,7 @@ console.log('⑳ A FILE ENTRY\'S ROW (lane lg-vault-file, B-0830): its name, its
   const ag = VI.rowOf('secrets', VI.secretRowOf({ name: 'agent:conv-1/deploy-key', at: 3, prov: 'stored', actor: 'Lane X', file: { ...facts, id: '00aa11bb22', sha256: 'f'.repeat(64) } }));
   ok(ag && ag.kind === 'file' && ag.revealable === false && ag.file && ag.file.name === 'id_ed25519' && !('id' in ag.file) && !('sha256' in ag.file) && ag.provenance && ag.provenance.prov === 'stored',
     'an agent\'s FILE (put --file) is its own entry\'s row with kind `file` and the public facts — the id and digest a box keeps never reach a row', ag);
+  ok(VI.provenanceOf(row) === 'me' && VI.provenanceOf(ag) === 'agent-put', 'a file row\'s provenance: the owner\'s file is «By you» (never «System» for a value that is not shown), an agent\'s put --file «an agent saw it»', [VI.provenanceOf(row), VI.provenanceOf(ag)]);
   const txt = VI.rowOf('secrets', VI.secretRowOf({ name: 'agent:conv-1/vendor-key', at: 3, prov: 'stored', actor: 'Lane X' }));
   ok(txt && txt.kind === 'secret' && txt.revealable === true && !('file' in txt), 'a TEXT entry\'s row is as before (no `file`, revealable)');
 }

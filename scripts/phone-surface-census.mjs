@@ -189,6 +189,7 @@ export const OPENERS = {
   'dialog:vault-ak-mint': { open: `M['vault-automation'].showMintDialog({ refresh: () => {} })`, mods: ['src/lib/vault-automation.js'] },
   'dialog:vault-login-add': { open: `M['vault-login-row'].showLoginAddDialog({})`, mods: ['src/lib/vault-login-row.js'] },
   'dialog:vault-secret-add': { open: `M['vault-paste-box'].showSecretAddDialog({})`, mods: ['src/lib/vault-paste-box.js'] },
+  'dialog:vault-file-add': { open: `M['vault-file-row'].showFileAddDialog({})`, mods: ['src/lib/vault-file-row.js'] },   // lane lg-vault-file (B-0830 U1b): 添加… › 文件…
   'dialog:vault-totp-add': { open: `M['vault-totp-row'].showTotpAddDialog({})`, mods: ['src/lib/vault-totp-row.js'] },
   'dialog:vault-unlock-dialog': { open: `M['vault-unlock'].showUnlock({})`, mods: ['src/lib/vault-unlock.js'] },
   'dialog:vault-setup-dialog': { open: `M['vault-unlock'].showSetup({})`, mods: ['src/lib/vault-unlock.js'] },

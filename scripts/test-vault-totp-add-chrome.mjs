@@ -138,7 +138,7 @@ console.log('② 添加… ▸ 两步验证… — the door (the kind registry\'
 check('the Vault window opens with its bar (unlocked ⇒ 添加…)', !!(await openWindow()));
 await click('.vw-add');
 const items = await menuItems();
-check('添加… lists 两步验证… after Channel account… — the registry\'s order: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password…', !!items && items.join('|') === 'Account…|Integration key…|Channel account…|Two-step code…|Automation key…|Website login…|Other key or password…', items);
+check('添加… lists 两步验证… after Channel account… — the registry\'s order: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password… · File…', !!items && items.join('|') === 'Account…|Integration key…|Channel account…|Two-step code…|Automation key…|Website login…|Other key or password…|File…', items);
 await shot('vt-0-menu.png');
 const opened = (await pickMenu('Two-step code…')) && !!(await until(visible(D), { timeout: 5000 }));
 check('两步验证… opens its dialog', opened);

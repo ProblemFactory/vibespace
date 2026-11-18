@@ -271,6 +271,8 @@ export const CENSUS = [
   ['stream-stats.js', 'canvas', 'none', 'the stream details\' three charts (a hover / a tap reads a second; no keys, no tabindex; the pinned panel sits beside the picture shell, never in it)'],
   ['vault-automation.js', 'input', 'text+control', 'Mint an automation key: its name (text); the verbs\' and Grant to\'s checkboxes (control) — design q-046'],
   ['vault-login-grants.js', 'select', 'choice', 'a web login\'s two-step code: the vault\'s codes by name, or none (its row\'s and its dialog\'s «Change…» / «Bind…» — the owner 2026-11-17)'],
+  ['vault-file-row.js', 'input', 'text', 'lane lg-vault-file: 添加 › 文件…\'s file chooser (a type=file input inside its drop box) and its name; (U3a) the masked passphrase of «Decrypt and store…»'],
+  ['vault-file-row.js', 'textarea', 'text', 'lane lg-vault-file: 添加 › 文件…\'s description'],
   ['vault-paste-box.js', 'input', 'text', 'an agent\'s paste request: THE masked field (type=password — the tray row\'s box and its dialog); 「其他密钥或密码…」\'s name and value (lane vault-paste-request)'],
   ['vault-paste-box.js', 'select', 'choice', '「其他密钥或密码…」\'s kind (password · API key · secret)'],
   ['vault-paste-box.js', 'textarea', 'text', '「其他密钥或密码…」\'s note'],

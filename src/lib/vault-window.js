@@ -42,6 +42,7 @@ import { wideHeaderDoors, loginHeld, showLoginGrantPicker, showAnySiteDialog, sh
 const LOGIN_DOORS = Object.freeze({ held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog });   // handed to each login row (it imports no dialog — the paste box's bundle stays as it is)
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
 import { totpNote } from './vault-totp-row.js';   // r3275 (4): the two-step grants list's ONE note (its own line: test-vault-kinds-census cuts the line above by its text)
+import { fileExtras, showFileAddDialog } from './vault-file-row.js'; // lane lg-vault-file (B-0830): a FILE's row — its name, size, kind, the passphrase it needs + Download; 文件…
 import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
 import { buttonsOf } from '../foryou-actions.js'; // B-ef1b: a band item's DECLARED buttons (the registry's words; runAction runs them)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
@@ -120,6 +121,7 @@ const CONFIRM_WORDS = {
   'agent-secret': (row) => ({ title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).'), confirm: t('Delete') }),   // B-3fb5: an agent's own entry (mint / put)
   'web-login': (row) => ({ title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') }),   // lane browser-login
   'proxy-login': (row) => ({ title: t('Delete the proxy login "{name}"?', { name: row.label }), message: t('Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.'), confirm: t('Delete') }),   // B-8b87
+  keyfile: (row) => ({ title: t('Delete the file "{name}"?', { name: row.label }), message: t('The file leaves the vault and its sealed copy is overwritten. A conversation that uses it in a command loses it at its next run.'), confirm: t('Delete') }),   // lane lg-vault-file
   totp: (row) => ({ title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') }),
   provider: (row, app) => providerRemoveWords(row, namedLiveRows(app)),   // lane lg-providers (B-d578): ONE wording with the roster's Remove… — the provider by its name, the conversations on it as the sidebar names them
 };
@@ -201,6 +203,8 @@ registerVaultAdd({ id: 'automation', label: () => t('Automation key…'), run: (
 // API key, an OAuth client secret — a FREE entry `secret:<id>` (name, kind, value, note), the same masked field as For you's paste box
 registerVaultAdd({ id: 'web-login', label: () => t('Website login…'), run: (app, c) => showLoginAddDialog({ refresh: c.refresh }) });   // lane browser-login: the owner's own login (Hub types it on that site; VibeSpace never hands it to agents)
 registerVaultAdd({ id: 'secret', label: () => t('Other key or password…'), run: (app, c) => showSecretAddDialog({ refresh: c.refresh }) });
+// lane lg-vault-file (B-0830, design q-058): a FILE — an SSH key, a certificate, a kubeconfig, a licence file (`keyfile:<id>`)
+registerVaultAdd({ id: 'keyfile', label: () => t('File…'), run: (app, c) => showFileAddDialog({ refresh: c.refresh }) });
 
 /** THE WINDOW (singleton). `focus` = a row (or an entry) to bring into view — a 「需要你」 item's door. */
 export function openVaultWindow(app, { syncId, focus = null } = {}) {
@@ -396,7 +400,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const meta = [];
     if (row.detail && row.store !== 'automation' && !(hasWords(row) && row.note && row.note.startsWith(row.detail))) meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // lane vault-entry-description r2: a free entry's detail IS its description — said once, on its own line   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
     meta.push(kindWord(row.kind));
-    if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
+    if (!(row.store === 'secrets' && row.size === 'unknown') && !row.file) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
     if (row.createdAt) meta.push(t('saved {when}', { when: when(row.createdAt, { words: true }) }));
     if (Array.isArray(row.hosts) && row.hosts.length) meta.push(t('for {hosts}', { hosts: row.hosts.join(', ') }));   // lane vault-use-grants: the hosts its request named
     // lane vault-agent-own: what an agent kept itself says its rule — its own conversation uses it with no switch, no card —
@@ -456,7 +460,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       x.stopCode = totpTx.stop;
       val.append(...totpTx.value);
       if (row.revealable !== false) val.append(mask, show);
-    } else if (row.revealable === false) val.append(mask);   // int317: a machine's link token / a sealed file's key — never shown (the hub refuses it by name): no 显示 at all
+    } else if (row.file) { /* lane lg-vault-file: a FILE — its line and its Download (fileExtras below), never a mask, never 显示 */ } else if (row.revealable === false) val.append(mask);   // int317: a machine's link token / a sealed file's key — never shown (the hub refuses it by name): no 显示 at all
     else val.append(mask, show, copy);
     const doors = vwEl('div', 'vw-doors');
     let wide = null;   // lane vault-key-row-compact: an automation key's head chips count, its limits line + grants fold sit UNDER the head (full width)
@@ -465,6 +469,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (Array.isArray(row.jobs) && row.jobs.length) main.append(jobExtras(row, { refresh }).box);   // lane vault-job-approval: its Background jobs' chips (each ✕ stops it)
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
     if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show, doors: LOGIN_DOORS }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
+    if (row.file) { const fx = fileExtras(row); main.append(fx.box); chips.append(...fx.chips); doors.append(...fx.doors); }   // lane lg-vault-file: the file's line + the passphrase chip + Download
     if (words) { const b = btnEl(t('Edit…'), 'vw-words-edit', { title: t('Its name and description') }); b.onclick = () => showWordsEditDialog({ row, refresh }); doors.append(b); }   // lane vault-entry-description
     if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
     if (row.doors && row.doors.delete) { const b = btnEl(t('Delete'), 'vw-del'); b.onclick = () => doDelete(row); doors.append(b); }

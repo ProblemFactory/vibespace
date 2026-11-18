@@ -263,7 +263,8 @@ console.log('⑧ MUTANTS — each RED');
   const A = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
   const mutants = [
     ['/reveal answers TWO values', { contentsSrc: C.replace("return { ok: true, id: VI.refOf(ref.store, ref.entry, ref.field), value, leftMs: v.leftMs };", "return { ok: true, id: VI.refOf(ref.store, ref.entry, ref.field), value, leftMs: v.leftMs, next: src.vaultReveal(ref.entry === 'e-a' ? 'e-b' : 'e-a', ref.field) };") }],
-    ['a reveal without the window check', { contentsSrc: C.replace("const v = door(who, page, ip);\n    if (!v.ok) return v;\n    const src", "const v = door(who, page, ip);\n    if (!v.ok && v.code !== 'reveal_needs_password') return v;\n    const src") }],
+    // lane lg-vault-file (U1b): the reveal's window check is followed by the FILE branch now — anchored on its first line
+    ['a reveal without the window check', { contentsSrc: C.replace("const v = door(who, page, ip);\n    if (!v.ok) return v;\n    // lane lg-vault-file (B-0830, design q-058 §1 reveal)", "const v = door(who, page, ip);\n    if (!v.ok && v.code !== 'reveal_needs_password') return v;\n    // lane lg-vault-file (B-0830, design q-058 §1 reveal)") }],
     ['a reveal WITHOUT the page secret accepted (the sign-in\'s window)', { contentsSrc: C.replace("return p ? windows.get(keyOf(who, p)) || null : null; };", "return (p && windows.get(keyOf(who, p))) || [...windows.values()].find((w) => w.who === whoOf(who)) || null; };") }],
     ['an agent token let through the contents doors', { routesSrc: Rt.replace("app.post('/api/vault/reveal', person((req) =>", "app.post('/api/vault/reveal', ((fn) => async (req, res) => res.json(await fn(req)))((req) =>") }],
     ['a store row worded from its value', { store: fakeStore((k) => PLANT[k]) }],
@@ -280,6 +281,31 @@ console.log('⑧ MUTANTS — each RED');
     H.close();
     ok(applied && red.length > 0, `RED: ${name} (${applied ? red[0] || 'NOT CAUGHT' : 'the mutant did not apply'})`);
   }
+}
+
+console.log('⑳ THE OWNER\'S DOWNLOAD (lane lg-vault-file, B-0830): a FILE is never shown — inside the window it is downloaded, through the engine\'s ONE road');
+{
+  const d = path.join(ROOT, 'file-download'); fs.mkdirSync(d, { recursive: true });
+  const v = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false });
+  await v.setup(PW);
+  const VCm = require(path.join(REPO, 'src/server/vault-contents.js'));
+  const c = VCm.create({ vault: v, sources: { secrets: () => VCm.secretSource({ vault: v }) } });
+  const BYTES = Buffer.concat([Buffer.from([0, 255, 0]), crypto.randomBytes(300)]);
+  ok((await v.filePut('keyfile:0a1b2c3d4e', BYTES, { filename: 'licence.lic', prov: 'uploaded', label: 'Licence' })).ok && (await v.agentFilePut('agent:conv-1/deploy-key', BYTES, { filename: 'id_ed25519', actor: 'Lane X' })).ok, 'two files: the owner\'s and an agent\'s');
+  const id = 'secrets:keyfile:0a1b2c3d4e#file';
+  const before = await c.reveal('owner', null, id);
+  ok(!before.ok && before.code === 'reveal_needs_password' && !('bytes' in before), 'without the window ⇒ reveal_needs_password, no byte');
+  const w = await c.startReveal('owner', PW);
+  const got = await c.reveal('owner', w.page, id);   // the U1a cure: a file's download answers a promise (read off the main loop)
+  ok(got.ok && typeof got.bytes === 'string' && Buffer.from(got.bytes, 'base64').equals(BYTES) && got.file.name === 'licence.lic' && !('value' in got), 'inside the window ⇒ { file: {name, size, kind}, bytes (base64) } — the file whole, ONCE; never `value`', { code: got.code });
+  const ag = await c.reveal('owner', w.page, 'secrets:agent:conv-1/deploy-key#secret');
+  ok(ag.ok && Buffer.from(ag.bytes, 'base64').equals(BYTES) && ag.file.name === 'id_ed25519', 'an agent\'s file downloads the same way (the owner\'s door — an agent never reads it back)');
+  const audit = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
+  ok((audit.match(/"event":"vault-download"/g) || []).length === 2 && !audit.includes(BYTES.toString('base64').slice(0, 24)), 'each download is ONE audit line (vault-download: who, the entry, the size) — no byte');
+  v.lock('door');
+  const lk = await c.reveal('owner', w.page, id);
+  ok(!lk.ok && !('bytes' in lk), 'a lock ends the window: no byte after it', lk.code);
+  v.close();
 }
 
 console.warn = warn0;

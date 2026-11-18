@@ -109,6 +109,7 @@ const ROWS = {
   ],
   // lane vault-paste-request: the paste box's own state line INSIDE its For-you item (and the ⑥ dialog's verdict) — a field verdict
   // while the person is at the box, its 解锁… button beside it (the box IS the For-you item: the telling and the door in one place)
+  'src/lib/vault-file-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'lane lg-vault-file: the Vault window\'s file dialogs (添加 › 文件…, and U3a\'s «Decrypt and store…») say it in their error line — the window\'s own head carries the 解锁… door beside them']],
   'src/lib/vault-otp-field.js': [['The vault is locked, so its two-step codes cannot be read', 'label', 'lane vault-2fa-pick: the two-step field\'s OWN list says a locked vault in its state line with THE Unlock… button beside the words (the door; the list reads again after it) — a field state, never «could not be read»']],
   'src/lib/vault-paste-box.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the paste box\'s state line inside its For-you item (its 解锁… button beside the words — the door), the refusal said in the same line, and 「其他密钥或密码…」\'s save-time verdict — a field verdict while the person is in the box, not a background refusal (lane vault-entry-description: + the words rule\'s refusals — the box and the Vault window\'s Edit…)', { count: 4 }],
     // lane login-request-card, the use door's cure (主开发 12:17Z): «Use a login you already saved…» on a LOCKED vault says so — never «none saved»

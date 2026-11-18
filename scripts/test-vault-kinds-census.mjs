@@ -325,8 +325,8 @@ printTable(VK.FAMILIES, R);
 ok(VK.FAMILIES.length >= 15 && new Set(VK.FAMILY_IDS).size === VK.FAMILIES.length, `${VK.FAMILIES.length} kind families, ids unique`);
 ok(R.problems.length === 0, 'every family\'s declared surfaces are in the tree, and nothing in the tree is outside the registry', R.problems);
 ok(real.doors.size >= 7 && [...real.doors.keys()].every((d) => VK.addOrderOf(d) != null), `the 添加… doors registered in the window (${[...real.doors.keys()].join(', ')}) are the registry's`, [...real.doors]);
-ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret' && VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order),
-  '添加…\'s order is the registry\'s: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password…', VK.ADD_DOORS);
+ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret,keyfile' && VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order),
+  '添加…\'s order is the registry\'s: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password… · File… (lane lg-vault-file)', VK.ADD_DOORS);
 ok(R.cells.get('totp') && R.cells.get('totp').add.mark === '✓', 'TOTP\'s add surface: the 两步验证… door is registered (the gap the owner found is closed)', R.cells.get('totp'));
 ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,keyfile,web-login,proxy-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
 ok(VI.PURPOSES === VK.CATEGORIES && VI.PURPOSE_IDS.join() === VK.CATEGORY_IDS.join(), 'the inventory\'s purposes ARE the registry\'s categories (one list — the rail reads it)');
@@ -411,7 +411,7 @@ console.log('④ RED CONTROLS (in memory)');
   ok(unmounted.problems.length === 1 && /^totp·route: not mounted: POST \/api\/vault\/totp$/.test(unmounted.problems[0]), 'a declared person route that is not mounted ⇒ RED', unmounted.problems);
   // lane vault-entry-description: the WORDS surface — its doors mounted, its verbs in the usage, its row carrying the description
   const noWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/entry-words',", "app.post('/api/vault/entry-words-gone',") })));
-  ok(noWords.problems.length === 2 && noWords.problems.every((p) => /^(agent|free)-secret·words: the words door «POST \/api\/vault\/entry-words» is not mounted$/.test(p)), 'the owner\'s words door unmounted ⇒ RED on both kinds that carry words', noWords.problems);
+  ok(noWords.problems.length === 3 && noWords.problems.every((p) => /^(agent-secret|free-secret|owner-file)·words: the words door «POST \/api\/vault\/entry-words» is not mounted$/.test(p)), 'the owner\'s words door unmounted ⇒ RED on every kind that carries words (an agent\'s, a free entry, the owner\'s file — lane lg-vault-file)', noWords.problems);
   const usage = realRead('data/bin/vibespace-vault');
   // lane login-request-card: THE REQUEST surface — its doors mounted, its kind in the CLI's usage, the verdict landing the family's own target
   const noAnswer = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/secret-requests/:id/answer',", "app.post('/api/vault/secret-requests/:id/answer-gone',") })));

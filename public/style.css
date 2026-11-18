@@ -9262,6 +9262,14 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .vault-secret-label { color: var(--text-dim); }
 .vault-secret-kind { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
 .vault-secret-error { min-height: 1em; font-size: 12px; color: var(--attn-text); }
+/* lane lg-vault-file (B-0830): a FILE in the vault — the row's file line (name · size · kind), 添加 › 文件…'s drop box */
+.vw-file { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 12px; }
+.vw-file-name { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text); overflow-wrap: anywhere; min-width: 0; }
+.vw-file-meta { color: var(--text-dim); }
+.vault-file-add-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; min-width: min(420px, 90vw); }
+.vault-file-drop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-sm); background: var(--bg-input); min-width: 0; }
+.vault-file-drop.vault-file-over { border-color: var(--accent); background: var(--accent-dim); }
+.vault-file-picked { color: var(--text-dim); overflow-wrap: anywhere; min-width: 0; }
 /* lane vault-totp-add: 添加… ▸ 两步验证… (design q-047 §3's mock) — two ways in (a segmented pair), a masked field + its 显示, the
    link's facts, 高级's settings, the hub's preview (code · ring · seconds), the refusal line with 解锁… when locked */
 .dialog.vault-totp-add-dialog { width: min(520px, 94vw); }
