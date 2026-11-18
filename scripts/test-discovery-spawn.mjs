@@ -591,13 +591,13 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
       CP.execFile(cmd, args, opts || {}, (e, out) => (e && !out ? rej(e) : res(out))));
     let fn;
     try {
-      fn = new Function('session', 'pidsMatchingCmdline', 'execFileAsync', 'process', 'fs',
+      fn = new Function('session', 'pidsMatchingCmdline', 'execFileAsync', 'process', 'fs', 'ownTree', 'readTree',   // B-c134's tree read on the kill path: off here (a person's Terminate asks it; this leg measures the fork)
         `return (async () => {${src}})();`);
     } catch (e) { return { error: `could not build the sliced body: ${e.message}` }; }
     censusStart();
     const t0 = process.hrtime.bigint();
     try {
-      await fn({ socketPath: NEEDLE, pty: { pid: PTY_PID } }, ident.pidsMatchingCmdline, execFileAsync, fakeProcess, fs);
+      await fn({ socketPath: NEEDLE, pty: { pid: PTY_PID } }, ident.pidsMatchingCmdline, execFileAsync, fakeProcess, fs, false, () => { });
     } catch (e) { censusStop(); return { error: `the sliced body threw: ${e.message}` }; }
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     const tally = censusStop();

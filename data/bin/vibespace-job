@@ -212,8 +212,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     case 'run': case 'notify-cron': {
       const isNotify = verb === 'notify-cron';
       // B-70f9 ②: the retired flag says so by name (an older habit, an older agent's note) — never a generic unknown flag
-      if (flags['stop-with-owner'] !== undefined) { console.error('--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was sent'); process.exit(2); }
       const unknown = Object.keys(flags).filter((k) => !RUN_FLAGS.includes(k));
+      if (unknown.includes('stop-with-owner')) { console.error('--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was sent'); process.exit(2); }   // read off the unknown list, never `flags[…]` — test-jobs-cli-body: a flag the branch reads is one the usage prints
       if (unknown.length) { console.error(`vibespace-job ${verb}: ${unknown.length === 1 ? 'an unknown flag' : `${unknown.length} unknown flags`} (${unknown.map((k) => (/^[a-z][a-z0-9-]{0,39}$/.test(k) ? '--' + k : 'a flag of another shape')).join(', ')}) — nothing was sent. The flags ${verb} knows: ${RUN_FLAGS.map((f) => '--' + f).join(' ')}`); process.exit(2); }
       const vaultBad = vaultRefusal(flags.vault, isNotify);
       if (vaultBad) { console.error(vaultBad); process.exit(2); }

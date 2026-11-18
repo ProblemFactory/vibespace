@@ -428,11 +428,7 @@ function registerWsHandler(wss, ctx) {
     if (session) {
       console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
       global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
-      session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
-      endTraces(data.sessionId); // r5 N: the conversation's end — its copies leave every desktop's dedup trace
-      // Cancel any pending delayed-SIGINT from a recent interrupt — after
-      // kill, the childPid may be reused by an unrelated process
-      if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
+      // (B-c134's tree helpers stand BEFORE the actor mark: they read, they kill nothing — the mark stays within reach of each kill)
       // B-c134 A CONVERSATION'S END LEAVES NOTHING OF ITS OWN RUNNING: the tree under its process is read BEFORE the first signal
       // (src/proc-identity.js treeOf — the children lists, procfs, the tree's own cost, bounded), and a moment after the teardown what of it SURVIVED hears the stop, once (the hangup reached the rest — never a
       // second signal), its grace, then by force — said in one line. Roots: the dtach master(s) of a local terminal conversation and
@@ -443,6 +439,19 @@ function registerWsHandler(wss, ctx) {
       const readTree = (pid) => { const t = PI.treeOf([pid], { since: Number((PI.identityOf(pid) || {}).starttime) || 0 }); if (t.cut) treeCut = true; if (t.pruned) console.log(`[session] ${data.sessionId}: its tree walk left alone ${t.pruned} process${t.pruned === 1 ? '' : 'es'} it does not own (the hub's, another conversation's or job's, the device agent's)`); treeRoots.push(...t); };   // procfs, the tree's own cost, bounded
       const ownTree = (endTree === true || data.endTree === true) && !capsOf(session.backend).terminalOnly;   // a plain shell's leftovers are the person's (the declared row, never an id); only an end that asks (above)
       const localPty = ownTree && session.pty && Number(session.pty.pid) > 1 && session.pty.constructor && session.pty.constructor.name !== 'Object' && !session.socketPath ? Number(session.pty.pid) : 0;
+      const treeName = session.name || data.sessionId;
+      // cure (MUST B): what could not be ended — or a walk CUT, even when all it read has ended — is told to the PERSON through the
+      // end path's notice (every page toasts it, in the person's words), the journal line kept
+      const say = (r) => {
+        const line = PI.treeLine(r, { cut: treeCut }); if (line) console.log(`[session] ${data.sessionId} "${treeName}": its end ${line}`);
+        const tn = PI.treeNotice(r, { cut: treeCut }, treeName);
+        if (tn) { try { ctx.serverNotice?.(`tree-left:${data.sessionId}`, tn.text, { level: 2, i18n: { key: tn.key, params: tn.params } }); } catch { } }   // level 2: the page's warning toast; one key a conversation
+      };
+      session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
+      endTraces(data.sessionId); // r5 N: the conversation's end — its copies leave every desktop's dedup trace
+      // Cancel any pending delayed-SIGINT from a recent interrupt — after
+      // kill, the childPid may be reused by an unrelated process
+      if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
       // Kill the dtach session process (which kills claude as its child)
       // The dtach process is the parent of our attach PTY's target
       if (session.socketPath) {
@@ -466,14 +475,6 @@ function registerWsHandler(wss, ctx) {
       }
       if (localPty) readTree(localPty);   // B-c134: read before the pty's kill
       if (treeRoots.length || treeCut) {   // cure 2 (its reading): a walk cut before its first row still speaks
-        const name = session.name || data.sessionId;
-        // cure (MUST B): what could not be ended — or a walk CUT, even when all it read has ended — is told to the PERSON through the
-        // end path's notice (every page toasts it, in the person's words), the journal line kept
-        const say = (r) => {
-          const line = PI.treeLine(r, { cut: treeCut }); if (line) console.log(`[session] ${data.sessionId} "${name}": its end ${line}`);
-          const tn = PI.treeNotice(r, { cut: treeCut }, name);
-          if (tn) { try { ctx.serverNotice?.(`tree-left:${data.sessionId}`, tn.text, { level: 2, i18n: { key: tn.key, params: tn.params } }); } catch { } }   // level 2: the page's warning toast; one key a conversation
-        };
         const t = setTimeout(() => {
           const left = treeRoots.filter((m) => PI.aliveIdentity(m) === true);
           if (!left.length && !treeCut) return;
