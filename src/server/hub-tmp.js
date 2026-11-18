@@ -44,7 +44,8 @@ async function hubTmpDir(purpose, { dataDir, tmpRoot = os.tmpdir(), uid = myUid(
   if (!/^[a-z][a-z0-9-]{0,39}$/.test(String(purpose))) throw new Error(`hub-tmp: bad purpose ${JSON.stringify(purpose)}`);
   const root = hubTmpRoot({ dataDir, tmpRoot, uid });
   const why = await ownChain([root, path.join(root, purpose)], { uid, fs });
-  return why ? { dir: null, why: `${why} — this hub never uses a temp folder that is not its own` } : { dir: path.join(root, purpose) };
+  // B-3767 follow-up (主开发 11:37Z): the refusal names the way out, not only the path and the reason
+  return why ? { dir: null, why: `${why} — this hub never uses a temp folder that is not its own (the way out: remove that folder if this hub did not make it, or start the hub with TMPDIR set to a private folder)` } : { dir: path.join(root, purpose) };
 }
 
 /** A multer disk storage whose destination is this hub's own `purpose` folder; a refusal becomes the request's error BY NAME. */

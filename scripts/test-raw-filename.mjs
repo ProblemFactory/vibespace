@@ -650,8 +650,8 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     fs.rmSync(path.join(root, 'uploads'), { recursive: true, force: true });
     fs.symlinkSync(path.join(DIR, 'elsewhere10'), path.join(root, 'uploads'));
     const b = await post();
-    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && b.j.error.includes(path.join(root, 'uploads')) && /SYMLINK/.test(b.j.error),
-      `B-3767: a temp folder the hub cannot use (here a link) is the upload's answer BY NAME, with the path — never a hang: ${JSON.stringify(b)}`);
+    ok(b.status === 500 && b.j.code === 'hub_tmp_refused' && b.j.error.includes(path.join(root, 'uploads')) && /SYMLINK/.test(b.j.error) && /the way out: remove that folder .*TMPDIR/.test(b.j.error),
+      `B-3767: a temp folder the hub cannot use (here a link) is the upload's answer BY NAME, with the path and the way out — never a hang: ${JSON.stringify(b)}`);
     const st = (o) => ({ isSymbolicLink: () => !!o.link, isDirectory: () => o.dir !== false, uid: o.uid ?? uid, mode: o.mode ?? 0o40700 });
     ok(/owned by uid/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && !/socket/.test(HT.ownVerdict(st({ uid: uid + 1 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40777 }), { uid })) && /group\/other/.test(HT.ownVerdict(st({ mode: 0o40755 }), { uid })) && /not a directory/.test(HT.ownVerdict(st({ dir: false }), { uid })) && HT.ownVerdict(st({}), { uid }) === null,
       "B-3767: the verdict (sock-path's own) refuses another user's folder, one open to others (0777 and 0755 alike), and a file; this user's private folder passes");
@@ -663,7 +663,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     ok(e2.status === 400 && e2.j.code === 'bad_name' && !fs.existsSync(path.join(root, 'escape.txt')), `B-3767: …a name that is not a plain file name is refused (${e2.status} ${e2.j.code})`);
     fs.rmSync(path.join(root, 'editor'), { recursive: true, force: true }); fs.symlinkSync(path.join(DIR, 'elsewhere10e'), path.join(root, 'editor'));
     const e3 = await tmpFile({ name: 'chat-block-2.txt', content: 'x' });
-    ok(e3.status === 500 && e3.j.code === 'hub_tmp_refused' && e3.j.error.includes(path.join(root, 'editor')), `B-3767: …and a folder it cannot use is its answer by name, with the path: ${JSON.stringify(e3)}`);
+    ok(e3.status === 500 && e3.j.code === 'hub_tmp_refused' && e3.j.error.includes(path.join(root, 'editor')) && /the way out: .*TMPDIR/.test(e3.j.error), `B-3767: …and a folder it cannot use is its answer by name, with the path: ${JSON.stringify(e3)}`);
     const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
     ok(cr.includes("fetch('/api/file/temp'") && !cr.includes("'/tmp/claude-webui") && cr.includes(".then((tmpPath) => {"), "B-3767: the client asks the hub for its temp file and opens the path the hub answered (it spells no /tmp folder)");   // stale-pins: kept — an absence check: the client spells no /tmp folder
     ok(HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/b/data', tmpRoot: '/t', uid: 7 }) && HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 7 }) !== HT.hubTmpRoot({ dataDir: '/a/data', tmpRoot: '/t', uid: 8 }),

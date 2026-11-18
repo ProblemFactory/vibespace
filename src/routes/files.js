@@ -711,7 +711,7 @@ router.post('/api/paste-image', async (req, res) => {
     const pasteDir = await HUB_TMP.hubTmpDir('paste', { dataDir: HUB_DATA });
     if (!pasteDir.dir) return res.status(500).json({ error: `the paste's temp folder: ${pasteDir.why}`, code: 'hub_tmp_refused' });
     const tmpPath = path.join(pasteDir.dir, `claude-paste-${Date.now()}.${ext}`);
-    fs.writeFileSync(tmpPath, buf);
+    await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should)
     sweepPasteTemps();
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
     const isMac = process.platform === 'darwin';

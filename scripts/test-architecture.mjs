@@ -7832,13 +7832,16 @@ await section(async () => {
   // a /tmp, /var/tmp or /private/tmp path wherever it starts (a quote, a shell word, `:-` of a parameter), its regex spelling (\/tmp), os.tmpdir()
   const NAMES110 = /os\.tmpdir\(\)|\btmpdir\(\)|(?<![\w.$])\/(?:var\/|private\/)?tmp(?![\w-])|\\\/(?:var\\\/)?tmp(?![\w-])/;
   const linesOf110 = (src) => src.split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*|#)/.test(l) && NAMES110.test(l));
+  // B-3767 follow-up (主开发 11:37Z): a row COUNTS its lines — one by default, its fifth field when it holds more — so a second
+  // line carrying an existing row's words is red (a substring alone would absorb any number of them)
   const judge110 = (filesWithText) => {
-    const used = new Set(), fresh = [];
+    const hits = new Map(), fresh = [];
     for (const [f, text] of filesWithText) for (const l of linesOf110(text)) {
       const i = ROWS110.findIndex(([rf, needle]) => rf === f && l.includes(needle));
-      if (i < 0) fresh.push(`${f}: ${l.trim().slice(0, 120)}`); else used.add(i);
+      if (i < 0) fresh.push(`${f}: ${l.trim().slice(0, 120)}`); else hits.set(i, (hits.get(i) || 0) + 1);
     }
-    return { fresh, stale: ROWS110.filter((_, i) => !used.has(i)).map(([f, n]) => `${f} «${n}»`) };
+    const miscount = ROWS110.map((r, i) => [r, hits.get(i) || 0]).filter(([r, n]) => n > 0 && n !== (r[4] || 1)).map(([r, n]) => `${r[0]} «${r[1]}» holds ${n} line(s), its row says ${r[4] || 1}`);
+    return { fresh, miscount, stale: ROWS110.filter((_, i) => !hits.has(i)).map(([f, n]) => `${f} «${n}»`) };
   };
   // the product: its code, its CLIs, and the shell it ships (the supervisor, the installers, the docker entry, the Ctrl+G helper)
   const product110 = trackedFiles(REPO, 'src', 'server.js', 'data/bin', 'run.sh', 'install.sh', 'editor-helper.sh', 'deploy/docker', 'scripts/update.sh', 'scripts/install-service.sh', 'scripts/vibespace-agentd-install.sh')
@@ -7848,12 +7851,16 @@ await section(async () => {
   const j110 = judge110(texts110);
   const byKind = [...KINDS110].map((k) => `${k} ${ROWS110.filter((r) => r[2] === k).length}`).join(', ');
   console.log(`  · ${ROWS110.length} rows over ${product110.length} product files — ${byKind}`);
-  ok(ROWS110.every((r) => r.length === 4 && KINDS110.has(r[2]) && String(r[3]).length > 3), '§110 every row names its kind (per-data / per-user / unique / system / read / by-hand) and its reason');
-  ok(!j110.fresh.length && !j110.stale.length, `§110 every product line naming the temp folder is a row, and every row still finds its line${j110.fresh.length ? ' — NEW: ' + j110.fresh.join(' | ') : ''}${j110.stale.length ? ' — STALE: ' + j110.stale.join(' | ') : ''}`);
+  ok(ROWS110.every((r) => (r.length === 4 || (r.length === 5 && Number.isInteger(r[4]) && r[4] > 1)) && KINDS110.has(r[2]) && String(r[3]).length > 3), '§110 every row names its kind (per-data / per-user / unique / system / read / words / by-hand), its reason and, past one, its count');
+  ok(!j110.fresh.length && !j110.stale.length && !j110.miscount.length, `§110 every product line naming the temp folder is a row, every row still finds its line, and each row holds exactly its count${j110.fresh.length ? ' — NEW: ' + j110.fresh.join(' | ') : ''}${j110.stale.length ? ' — STALE: ' + j110.stale.join(' | ') : ''}${j110.miscount.length ? ' — COUNT: ' + j110.miscount.join(' | ') : ''}`);
   const files110 = texts110.find(([f]) => f === 'src/routes/files.js')?.[1] || '';
   const plug110 = texts110.find(([f]) => f === 'src/server/plugin-loader.js')?.[1] || '';
   const back = judge110([['src/routes/files.js', files110 + "\nconst upload = multer({ dest: '/tmp/claude-webui-uploads/' });\n"], ['src/server/plugin-loader.js', plug110 + "\n      const up = multer({ dest: path.join(os.tmpdir(), 'vibespace-plugin-uploads') });\n"]]);   // stale-pins: kept — the release's two upload lines, planted on purpose (§110's red control)
   ok(back.fresh.length === 2 && back.fresh.every((x) => /claude-webui-uploads|vibespace-plugin-uploads/.test(x)), `§110 RED CONTROL: the release's two machine-wide upload folders are new, unrowed lines (red): ${back.fresh.join(' | ')}`);   // stale-pins: kept — the planted lines' names (§110's red control)
+  // the count's own RED control: one of files.js's rowed lines planted twice — the substring finds both, the count says so
+  const dupRow = ROWS110.find((r) => r[0] === 'src/routes/files.js' && !r[4]), dupLine = dupRow ? linesOf110(files110).find((l) => l.includes(dupRow[1])) : null;
+  const twice = dupLine ? judge110([['src/routes/files.js', files110 + '\n' + dupLine + '\n']]) : null;
+  ok(!!twice && !twice.fresh.length && twice.miscount.length === 1 && twice.miscount[0].includes(dupRow[1]), `§110 RED CONTROL: a second line carrying an existing row's words is red by its count (${twice ? twice.miscount.join(' | ') : 'no files.js row found'})`);
   ok(judge110([['src/x.js', "// a comment naming '/tmp/x'\nconst b = path.join(os.homedir(), 'y');\n"]]).fresh.length === 0 && judge110([['src/x.js', "const d = path.join(os.tmpdir(), 'fixed-name');\n"]]).fresh.length === 1, '§110 CONTROL: a whole-line comment and a home path are not temp names; a new fixed name is');
 });
 
