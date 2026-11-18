@@ -546,7 +546,6 @@ try {
           const afterRelease = { err2, error: rowB().error || null };
           await mm._up(mm._state.mounts.find((r) => r.id === 'mm-b'));
           out.hung = { ...after, afterRelease, cleared: rowB().error == null && rowB().live };
-          hungFor = mpB; try { await mm._up(mm._state.mounts.find((r) => r.id === 'mm-b')); } catch { }   // live already: a no-op
           if (mm._pullErrors) mm._pullErrors.set('mm-b', 'could not release the folder (planted)');
           await mm.unmount('mm-b'); out.hung.entryGone = !(mm._pullErrors && mm._pullErrors.has('mm-b')); hungFor = null; }
       } finally { clearInterval(mm._sweep); }
@@ -565,7 +564,7 @@ try {
       }
       // the cure (the readers' 3): the boot's releases go ONE AFTER ANOTHER, every record marked at once — a machine that dials
       // in meanwhile WAITS for its records' releases instead of racing them
-      const boot = async (MM, { removeE = false } = {}) => {
+      const boot = async (MM, { removeE = false, readd = false, hangE = false } = {}) => {
         const dataDir = path.join(tmp, 'fcc7-boot-' + Math.random().toString(36).slice(2)); fs.mkdirSync(dataDir, { recursive: true });
         const mpC = path.join(tmp, 'fcc7', 'boot-c'), mpE = path.join(tmp, 'fcc7', 'boot-e');
         fs.writeFileSync(path.join(dataDir, 'machine-mounts.json'), JSON.stringify({ mounts: [
@@ -575,8 +574,8 @@ try {
         const online = { d2: false }, ev = [], pend = [];
         let auto = false;   // until set, a release HOLDS (a gate the leg opens); after, it answers at once
         const hosts = { get: (id) => { if (id !== 'h2') throw new Error('unknown machine'); return { id: 'h2', transport: 'dial', deviceId: 'd2' }; }, dialOnline: (d) => !!online[d], deviceBounded: async () => ({}), findByDeviceId: () => ({ id: 'h2' }) };
-        DMX.releaseStale = async (mp) => { const n = path.basename(mp); ev.push('release-start ' + n); if (!auto) await new Promise((r) => pend.push({ mp, open: r })); ev.push('release-end ' + n); return []; };
-        DMX.deviceFolderMount = async ({ mountpoint }) => { ev.push('mount ' + path.basename(mountpoint)); return { mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } }; };
+        DMX.releaseStale = async (mp) => { const n = path.basename(mp); ev.push('release-start ' + n); if (!auto) await new Promise((r) => pend.push({ mp, open: r })); ev.push('release-end ' + n); if (hangE && n === 'boot-e') { hangE = false; ev.push('release-hung boot-e'); throw Object.assign(new Error(`could not release the folder ${mp} — its unmount did not answer in 10 s`), { code: 'unmount_hung' }); } return []; };
+        DMX.deviceFolderMount = async ({ mountpoint, remotePath }) => { ev.push('mount ' + path.basename(mountpoint) + (remotePath === '/w2' ? ' again' : '')); return { mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } }; };
         const mm = new MM({ dataDir, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: () => { } });
         clearInterval(mm._sweep);
         const restored = mm.restore();
@@ -585,35 +584,120 @@ try {
         online.d2 = true; mm.onMachineLinked('h2');   // the machine dials in WHILE the boot still releases
         await quiet(() => ev.length);
         if (removeE) await mm.unmount('mm-e');   // cure 2: the person removes a pull WHILE its heal waits for the boot release
+        let readdP = null, racedF = false;
+        if (readd) {   // cure 3 (the cure-2 read #3): … and adds the SAME folder again (a new record, a new id) while the boot still holds it
+          const from = ev.length;   // only what the NEW record does counts (cure-3 read #1)
+          readdP = mm.mountPull('h2', { remotePath: '/w2', mountpoint: mpE }).catch((e) => ({ err: e && e.message }));
+          await quiet(() => ev.length);
+          racedF = ev.slice(from).some((e) => e === 'release-start boot-e' || e === 'mount boot-e again');
+        }
         const raced = ev.filter((e) => e === 'release-start boot-c').length > 1 || ev.some((e) => e.startsWith('mount'));
         auto = true; for (const g of pend.splice(0)) g.open();
         await restored;
-        await until(() => ev.filter((e) => e.startsWith('mount')).length >= (removeE ? 1 : 2));
+        await until(() => ev.filter((e) => e.startsWith('mount')).length >= (removeE && !readd ? 1 : 2));
         if (removeE) await quiet(() => ev.length);
+        const f = readdP ? await readdP : null;
         const at = (e) => ev.indexOf(e);
         return { firstOnly, raced, oneByOne: at('release-end boot-c') >= 0 && at('release-start boot-e') > at('release-end boot-c'),
-          waited: at('mount boot-c') > at('release-end boot-c') && (removeE || at('mount boot-e') > at('release-end boot-e')), mountedE: ev.includes('mount boot-e'), liveE: mm._live.has('mm-e'), ev };
+          waited: at('mount boot-c') > at('release-end boot-c') && (removeE || at('mount boot-e') > at('release-end boot-e')), mountedE: ev.includes('mount boot-e'), liveE: mm._live.has('mm-e'),
+          racedF, liveF: !!(f && f.live), fAfter: ev.indexOf('release-hung boot-e') >= 0 && ev.indexOf('mount boot-e again') > ev.indexOf('release-hung boot-e'), wordsE: !!(mm._pullErrors && mm._pullErrors.has('mm-e')), ev };
       };
       const bo = await boot(require('../src/machine-mounts.js').MachineMounts);
       check('B: at boot the offline machine\'s releases run ONE AFTER ANOTHER; a dial-in meanwhile starts nothing on a record until ITS release has ended (never racing it)', bo.firstOnly && !bo.raced && bo.oneByOne && bo.waited, JSON.stringify(bo));
+      // cure 3: ONE record, the chain's doors held open by the leg (the cure-2 read #4, #6)
+      const mini = (MM, { online, mount, release }) => {
+        const dataDir = path.join(tmp, 'fcc7-mini-' + Math.random().toString(36).slice(2)); fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(path.join(dataDir, 'machine-mounts.json'), JSON.stringify({ mounts: [{ id: 'mm-g', dir: 'pull', hostId: 'h2', remotePath: '/g', mountpoint: path.join(tmp, 'fcc7', 'mini-g'), createdAt: 1 }] }));
+        DMX.releaseStale = release; DMX.deviceFolderMount = mount;
+        const hosts = { get: () => ({ id: 'h2', transport: 'dial', deviceId: 'd2' }), dialOnline: () => online, deviceBounded: async () => ({}), findByDeviceId: () => ({ id: 'h2' }) };
+        const mm = new MM({ dataDir, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: () => { } });
+        clearInterval(mm._sweep);
+        return mm;
+      };
+      const held = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open: () => open(), at: 0 }; };
+      // #4: the person removes the pull WHILE its mount is being made — the mount lets go when it lands (the second check)
+      const landGone = async (MM) => {
+        const g = held(); let torn = 0;
+        const mm = mini(MM, { online: true, release: async () => [], mount: async ({ mountpoint }) => { g.at++; await g.p; return { mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { torn++; } }; } });
+        try { const up = mm._up(mm._state.mounts[0]); await until(() => g.at === 1); await mm.unmount('mm-g'); g.open(); await up; return { torn, live: mm._live.has('mm-g') }; } finally { clearInterval(mm._sweep); }
+      };
+      // #6: the person removes the pull WHILE its release runs, and the release hangs — no words come back for a gone record
+      const wordsGone = async (MM, road) => {
+        const g = held();
+        const mm = mini(MM, { online: road === 'heal', release: async (mp) => { g.at++; await g.p; throw Object.assign(new Error(`could not release the folder ${mp} — its unmount did not answer in 10 s`), { code: 'unmount_hung' }); }, mount: async () => { throw new Error('not reached'); } });
+        try {
+          const ran = road === 'heal' ? mm._up(mm._state.mounts[0]).catch(() => { }) : mm.restore();
+          await until(() => g.at === 1); await mm.unmount('mm-g'); g.open(); await ran;
+          return !!(mm._pullErrors && mm._pullErrors.has('mm-g'));
+        } finally { clearInterval(mm._sweep); }
+      };
+      // cure-3 read #2: a LINKED machine's pull on the folder an OFFLINE machine's record holds (a replacement under the same
+      // name lands on the same default mount point) — at boot its heal waits for the offline record's step on that folder
+      const twin = async (MM) => {
+        const dataDir = path.join(tmp, 'fcc7-twin-' + Math.random().toString(36).slice(2)); fs.mkdirSync(dataDir, { recursive: true });
+        const mpT = path.join(tmp, 'fcc7', 'twin'), g = held(), evs = [];
+        fs.writeFileSync(path.join(dataDir, 'machine-mounts.json'), JSON.stringify({ mounts: [
+          { id: 'mm-x', dir: 'pull', hostId: 'h2', remotePath: '/t', mountpoint: mpT, createdAt: 1 },
+          { id: 'mm-y', dir: 'pull', hostId: 'h1', remotePath: '/t', mountpoint: mpT, createdAt: 2 },
+        ] }));
+        DMX.releaseStale = async () => { evs.push('release'); if (g.at++ === 0) await g.p; return []; };
+        DMX.deviceFolderMount = async ({ mountpoint }) => { evs.push('mount'); return { mountpoint, devicePort: 1, bridgePort: 1, teardown: async () => { } }; };
+        const hosts = { get: (id) => { const h = ({ h1: { id: 'h1', transport: 'dial', deviceId: 'd1' }, h2: { id: 'h2', transport: 'dial', deviceId: 'd2' } })[id]; if (!h) throw new Error('unknown machine'); return h; },
+          dialOnline: (d) => d === 'd1', deviceBounded: async () => ({}), findByDeviceId: () => null };
+        const mm = new MM({ dataDir, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: () => { } });
+        clearInterval(mm._sweep);
+        try {
+          const restored = mm.restore();
+          for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));   // every stub answers in microtasks
+          const before = evs.slice();
+          g.open(); await restored; await until(() => mm._live.has('mm-y'));
+          return { raced: before.length !== 1 || before.includes('mount'), before, live: mm._live.has('mm-y'), evs };
+        } finally { clearInterval(mm._sweep); }
+      };
+      // the controls: ONE patched copy of machine-mounts.js, each cut behind its own flag (one compile — the fast tier's cap);
+      // every anchor found exactly once or the control is red by name (no older object is read — §2j)
       const MSRC = fs.readFileSync(path.join(SRC, 'machine-mounts.js'), 'utf8');
-      const noWait = '    if (rel) { try { await rel; } catch { } }\n';
-      if (!MSRC.includes(noWait)) check('CONTROL: the wait anchor was found in machine-mounts _up', false);
+      const mcuts = [
+        ['wait', "    if (rel) { try { await rel; } catch { } }\n", "    if (rel && !globalThis.__mmCut.wait) { try { await rel; } catch { } }\n"],
+        ['byId get', "this._releasing.get(path.resolve(rec.mountpoint));", "this._releasing.get(globalThis.__mmCut.byId ? rec.id : path.resolve(rec.mountpoint));"],
+        ['byId set', "      const key = path.resolve(rec.mountpoint);\n", "      const key = globalThis.__mmCut.byId ? rec.id : path.resolve(rec.mountpoint);\n"],
+        ['order heal', "    for (const hostId of linked) { try { this.onMachineLinked(hostId); } catch { } }\n", "    if (!globalThis.__mmCut.order) for (const hostId of linked) { try { this.onMachineLinked(hostId); } catch { } }\n"],
+        ['order first', "    let prev = Promise.resolve();\n", "    if (globalThis.__mmCut.order) for (const hostId of linked) { try { this.onMachineLinked(hostId); } catch { } }\n    let prev = Promise.resolve();\n"],
+        ['gone1', "    if (!this._state.mounts.some((m) => m.id === rec.id)) return;\n    if (this._live.has(rec.id)", "    if (!globalThis.__mmCut.gone1 && !this._state.mounts.some((m) => m.id === rec.id)) return;\n    if (this._live.has(rec.id)"],
+        ['gone2', "      if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }", "      if (!globalThis.__mmCut.gone2 && !this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }"],
+        ['words1', "      if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said", "      if (e && e.code === 'unmount_hung' && (globalThis.__mmCut.words1 || this._state.mounts.some((m) => m.id === rec.id))) { const said"],
+        ['words2', "        if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors", "        if (e && e.code === 'unmount_hung' && (globalThis.__mmCut.words2 || this._state.mounts.some((m) => m.id === rec.id))) { (this._pullErrors"],
+      ];
+      const mmiss = mcuts.filter(([, a]) => MSRC.split(a).length !== 2).map(([k]) => k);
+      let MG = null;
+      if (mmiss.length) check('CONTROL: the machine-mounts.js anchors were found once each', false, mmiss.join());
       else {
-        const cpW = path.join(tmp, 'machine-mounts-no-wait.js');
-        fs.writeFileSync(cpW, MSRC.replace(noWait, '').replace(/require\('\.\//g, `require('${SRC}/`));
-        const bw = await boot(require(cpW).MachineMounts);
+        globalThis.__mmCut = {};
+        const cpG = path.join(tmp, 'machine-mounts-cuts.js');
+        fs.writeFileSync(cpG, mcuts.reduce((x, [, a, b]) => x.replace(a, () => b), MSRC).replace(/require\('\.\//g, `require('${SRC}/`));
+        MG = require(cpG).MachineMounts;
+      }
+      const mcut = async (k, f) => { globalThis.__mmCut = { [k]: true }; try { return await f(); } finally { globalThis.__mmCut = {}; } };
+      if (MG) {
+        const bw = await mcut('wait', () => boot(MG));
         check('CONTROL (the dial-in does not wait): the heal releases / mounts a record while its boot release still runs (red)', bw.raced, JSON.stringify(bw));
       }
-      const br = await boot(require('../src/machine-mounts.js').MachineMounts, { removeE: true });
+      const MM3 = require('../src/machine-mounts.js').MachineMounts;
+      const br = await boot(MM3, { removeE: true, readd: true, hangE: true });
       check('B: cure 2 (as if a must) — a pull the person REMOVED while its heal waited for the boot release is never mounted (no rclone, no live entry for a gone record)', !br.mountedE && !br.liveE && br.waited, JSON.stringify(br));
-      const cure1 = (() => { try { return require('child_process').execFileSync('git', ['show', 'a1c1b8075:src/machine-mounts.js'], { cwd: path.join(SRC, '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } })();
-      if (cure1 == null) console.log('  SKIP test-pull-refresh §15 B cure-2 CONTROL: the first cure a1c1b8075 is not in this checkout (a depth-1 clone)');
-      else {
-        const cpR = path.join(tmp, 'machine-mounts-cure1.js');
-        fs.writeFileSync(cpR, cure1.replace(/require\('\.\//g, `require('${SRC}/`));
-        const bc = await boot(require(cpR).MachineMounts, { removeE: true });
-        check('CONTROL (the first cure: no record check after the wait): the removed pull is mounted anyway (red)', bc.mountedE, JSON.stringify(bc));
+      check('B: cure 3 (the cure-2 read #3, #6) — the same folder added again meanwhile (a NEW record) waits for the boot\'s step on that folder, then mounts; the removed record\'s hung step leaves no words', !br.racedF && br.liveF && br.fAfter && !br.wordsE, JSON.stringify(br));
+      const lg = await landGone(MM3), wh = await wordsGone(MM3, 'heal'), wb = await wordsGone(MM3, 'boot'), tw = await twin(MM3);
+      check('B: cure 3 (the cure-3 read #2) — every offline mark is set BEFORE a linked machine heals: its pull on the same folder waits for the offline record\'s step, then mounts', tw.raced === false && tw.live === true, JSON.stringify(tw));
+      check('B: cure 3 (the cure-2 read #4) — a pull removed WHILE its mount is being made: the mount lets go when it lands, no live entry for a gone record', lg.torn === 1 && lg.live === false, JSON.stringify(lg));
+      check('B: cure 3 (the cure-2 read #6) — a pull removed WHILE its release hangs gets no «could not release» words back, on the heal\'s road and on the boot\'s', wh === false && wb === false, JSON.stringify({ wh, wb }));
+      if (MG) {
+        const bc = await mcut('gone1', () => boot(MG, { removeE: true })), bi = await mcut('byId', () => boot(MG, { removeE: true, readd: true }));
+        const lc = await mcut('gone2', () => landGone(MG)), w1 = await mcut('words1', () => wordsGone(MG, 'heal')), w2 = await mcut('words2', () => wordsGone(MG, 'boot')), to = await mcut('order', () => twin(MG));
+        check('CONTROL (the linked machines heal before the offline marks are set): the heal releases the folder while the offline record\'s step still runs (red)', to.raced === true, JSON.stringify(to));
+        check('CONTROL (no record check after the wait): the removed pull is mounted anyway (red)', bc.mountedE === true, JSON.stringify(bc));
+        check('CONTROL (the boot\'s mark keyed by the record id, at the mark and at the wait): the pull added again on the same folder releases it while the boot still holds it — the removed record\'s own heal still waits (red)', bi.racedF === true && !bi.raced, JSON.stringify(bi));
+        check('CONTROL (no record check when the mount lands): a live entry for the removed pull (red)', lc.live === true && lc.torn === 0, JSON.stringify(lc));
+        check('CONTROL (the words set whatever the record): the removed pull gets its words back on both roads (red)', w1 === true && w2 === true, JSON.stringify({ w1, w2 }));
       }
     } finally { Object.assign(DMX, real); }
     check('B: the recorded pull mounts at boot while its machine is linked', o.up === true, JSON.stringify(o));

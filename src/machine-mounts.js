@@ -475,8 +475,11 @@ class MachineMounts {
   }
 
   async _up(rec) {
-    // the cure (the readers' 3): a boot release of THIS record still running is WAITED for — never raced
-    const rel = this._releasing && this._releasing.get(rec.id);
+    if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;   // up or being made: nothing to wait for (a second press never queues)
+    // the cure (the readers' 3): a boot release of THIS record's folder still running is WAITED for — never raced. Keyed by
+    // the MOUNT POINT, resolved (cure-2 read #3): a pull removed and added again on the same folder meanwhile has a new id
+    // and waits too — never mounted before the boot's step releases that folder under it
+    const rel = this._releasing && this._releasing.get(path.resolve(rec.mountpoint));
     if (rel) { try { await rel; } catch { } }
     // cure 2 (主开发's «as if a must»): the wait can last minutes — a pull the person REMOVED meanwhile is never mounted
     // (an rclone and a live entry with no row and no door)
@@ -519,7 +522,8 @@ class MachineMounts {
     } catch (e) {
       // the cure (the readers' 1): a release that HUNG is SAID where the row is read (list().error), once, and the record
       // leaves the mounting set (the finally) so the next check may try again — never a silent forever-«mounting»
-      if (e && e.code === 'unmount_hung') { const said = this._pullErrors || (this._pullErrors = new Map()); if (said.get(rec.id) !== e.message) { said.set(rec.id, e.message); this._notify(); } }
+      // cure-2 read #6: said only while the record exists — a pull removed during its release gets no words back
+      if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { const said = this._pullErrors || (this._pullErrors = new Map()); if (said.get(rec.id) !== e.message) { said.set(rec.id, e.message); this._notify(); } }
       throw e;
     } finally { this._mounting.delete(rec.id); }
   }
@@ -644,27 +648,30 @@ class MachineMounts {
   async restore() {
     this.gcOrphanTokens();
     const byHost = new Set(this._state.mounts.map((m) => m.hostId));
-    const offline = [];
+    const linked = [], offline = [];
     for (const hostId of byHost) {
-      if (this._online(hostId)) { try { this.onMachineLinked(hostId); } catch { } }
+      if (this._online(hostId)) linked.push(hostId);
       // B-fcc7: an offline machine's recorded pull may still be mounted by the LAST hub's rclone (detached, it outlived
       // that hub; its bridge died with it) — released now, not at the next mount: the reader meets an empty folder
       else offline.push(...this._state.mounts.filter((m) => m.dir === 'pull' && m.hostId === hostId && !this._live.has(m.id) && !this._mounting.has(m.id)));
     }
-    // the cure (the readers' 3): ONE AFTER ANOTHER (never every release at once), each MARKED while it runs — a machine that
-    // dials in meanwhile waits for its record's release in _up instead of racing it (children and async /proc reads only;
-    // the boot's caller does not wait on restore)
-    // every one is MARKED at once (a dial-in during the first release must wait for ITS record's too), run one by one
+    // the cure (the readers' 3): the releases run ONE AFTER ANOTHER (never every one at once) and every one is MARKED at once,
+    // BEFORE any linked machine heals (cure-3 read #2) — a heal of the same folder, a dial-in meanwhile, waits in _up for the
+    // step on its folder instead of racing it. The mark is the MOUNT POINT's (cure-2 read #3). A record removed while it
+    // waited still has its folder released (the last hub's FUSE entry has nobody else to let it go); its words are set only
+    // while the record exists (#6). Children and async /proc reads only; the boot's caller does not wait on restore
     this._releasing = this._releasing || new Map();
     let prev = Promise.resolve();
     for (const rec of offline) {
+      const key = path.resolve(rec.mountpoint);
       const p = prev.then(() => DM.releaseStale(rec.mountpoint, { log: this.log })).then(() => { if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify(); }).catch((e) => {
-        if (e && e.code === 'unmount_hung') { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
+        if (e && e.code === 'unmount_hung' && this._state.mounts.some((m) => m.id === rec.id)) { (this._pullErrors = this._pullErrors || new Map()).set(rec.id, e.message); this._notify(); }
       });
-      this._releasing.set(rec.id, p);
-      p.then(() => { if (this._releasing.get(rec.id) === p) this._releasing.delete(rec.id); });
+      this._releasing.set(key, p);
+      p.then(() => { if (this._releasing.get(key) === p) this._releasing.delete(key); });
       prev = p;
     }
+    for (const hostId of linked) { try { this.onMachineLinked(hostId); } catch { } }
     await prev;
   }
 
