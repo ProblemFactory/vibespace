@@ -1871,6 +1871,7 @@ const iRecvOf = (read) => read.endsWith('()') ? read : read.replace(/\.[^.]+$/, 
 // carrier the per-site class is in I_SITES. A (file, receiver) the table does not name is RED; a row the tree no longer has is RED.
 const I_RECORD_KINDS = new Set([...RC.RECORD_KINDS, 'carrier']);
 const I_RECV = {
+  'src/lib/telemetry-client.js|x': ['words', 'B-402f: a PURE verdict over a window error (windowErrorEntry) — the error\'s own message / place / stack, or the browser\'s ResizeObserver note\'s words; never a record\'s'],
   // ── the five kinds and their carriers ──
   'src/agent-routes.js|e': ['carrier', 'a stash entry drained into the agent\'s next turn (the ladder\'s and the jobs engine\'s) — drawn as the chat card of what the agent received'],
   'src/agent-routes/status.js|add': ['todo', 'the agent\'s OWN For-you item (vibespace-ask) — the record itself'],

@@ -2,6 +2,7 @@
 // stamps ITS OWN, which hid the stale-tab fleet incident (old bundle looked
 // current in every telemetry event)
 import { BUILD_VERSION } from './build-version.js';
+import { isBrowserNote, BROWSER_NOTE } from '../browser-notes.js'; // B-402f: the browser's ResizeObserver loop note is a note, never a client error
 // Client-side telemetry: catches what today's audits kept finding the hard
 // way — silent boot crashes, runtime exceptions in long-running tabs — plus a
 // few coarse feature events so rollout iteration has usage signal.
@@ -77,11 +78,21 @@ export function track(kind, name, detail, stack) {
   else if (!flushTimer) flushTimer = setTimeout(flush, 15000);
 }
 
+/** B-402f: what a window 'error' event IS for the telemetry — `{kind, name, detail, stack}`: an error, or the browser's
+ *  own ResizeObserver loop note (src/browser-notes.js) as a NOTE (kind 'event', never counted as a client error) */
+export function windowErrorEntry(e) {
+  const message = (e && e.error && e.error.message) || (e && e.message) || 'window.onerror';
+  if (isBrowserNote(message)) return { kind: 'event', name: BROWSER_NOTE, detail: String(message).slice(0, 200) };
+  return { kind: 'error', name: message, detail: `${(e && e.filename) || ''}:${(e && e.lineno) || 0}`, stack: e && e.error && e.error.stack };
+}
+
 export function installTelemetry() {
   setTimeout(drainParked, 3000); // failed batches from a server-restart window resend after boot
+  let noted = false;   // B-402f: the browser's note fires at every resize burst — ONE per page is the whole fact
   window.addEventListener('error', (e) => {
-    track('error', (e.error && e.error.message) || e.message || 'window.onerror',
-      `${e.filename || ''}:${e.lineno || 0}`, e.error && e.error.stack);
+    const x = windowErrorEntry(e);
+    if (x.kind !== 'error') { if (noted) return; noted = true; }
+    track(x.kind, x.name, x.detail, x.stack);
   });
   window.addEventListener('unhandledrejection', (e) => {
     const r = e.reason;

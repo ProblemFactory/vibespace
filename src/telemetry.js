@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
+const { isBrowserNote } = require('./browser-notes.js'); // B-402f: the browser's ResizeObserver loop note — never an error group (older pages sent it as one)
 
 class Telemetry {
   constructor({ dataDir, version, getForwardUrl, getForwardToken }) {
@@ -148,7 +149,7 @@ class Telemetry {
         g.total++;
         g.lastTs = Math.max(g.lastTs, r.ts);
         if (r.version) g.versions[r.version] = (g.versions[r.version] || 0) + 1;
-        if (r.kind === 'error' || r.kind === 'server-error') {
+        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {   // B-402f: the browser's note is no error in the fleet view either
           g.errors++;
           errors.push({ ts: r.ts, inst: r.inst, name: r.name, detail: r.detail, stack: r.stack, version: r.version });
         }
@@ -212,7 +213,7 @@ class Telemetry {
         const day = new Date(r.ts).toISOString().slice(0, 10);
         byDay[day] = (byDay[day] || 0) + 1;
         if (r.version) byVersion[r.version] = (byVersion[r.version] || 0) + 1;
-        if (r.kind === 'error' || r.kind === 'server-error') {
+        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {
           errors.push({ ts: r.ts, name: r.name, detail: r.detail, stack: r.stack, version: r.version });
         }
         if (r.kind === 'metric' && Number.isFinite(r.value)) {

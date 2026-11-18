@@ -171,7 +171,9 @@ console.log(JSON.stringify(out));`;
     const TC = path.join(ROOT, 'src/lib/telemetry-client.js'), TSRC = fs.readFileSync(TC, 'utf8');
     const bv = path.join(ROOT, 'src/lib/build-version.js');
     fs.writeFileSync(path.join(dir, 'build-version.js'), fs.existsSync(bv) ? fs.readFileSync(bv, 'utf8') : "export const BUILD_VERSION = 'test';\n");
-    const copy = (name, src) => { const f = path.join(dir, name + '.mjs'); fs.writeFileSync(f, src.replace("from './build-version.js'", "from './build-version.js'")); return f; };
+    // the copy's one relative import outside src/lib (B-402f: the browser's notes, PURE) points at the real module
+    const notesUrl = JSON.stringify(new URL('../src/browser-notes.js', import.meta.url).href);
+    const copy = (name, src) => { const f = path.join(dir, name + '.mjs'); fs.writeFileSync(f, src.replace("from './build-version.js'", "from './build-version.js'").replace("from '../browser-notes.js'", `from ${notesUrl}`)); return f; };
     const sim = (mod, kind, L, act = 0) => { try { return JSON.parse(cp.execFileSync(process.execPath, [path.join(dir, 'sim.mjs'), mod, kind, String(L), String(act)], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').pop()); } catch (e) { return { error: String(e.message || e).slice(0, 200) }; } };
     const real = copy('telemetry-client', TSRC);
     const tasks = [1100, 1200, 1500, 1900, 2500].map((L) => [L, sim(real, 'task', L)]);
@@ -249,6 +251,60 @@ console.log(JSON.stringify(out));`;
   const carries = (t) => /out\.fetchTimings = window\.__vsFetchTimings \? window\.__vsFetchTimings\(\)\.slice\(-20\) : null;/.test(t);
   ok(carries(rec), 'WIRING: the incident snapshot carries the page\'s last 20 requests (route, ms)');
   ok(!carries(rec.replace(/\n.*out\.fetchTimings = .*/, '')), 'RED CONTROL: the base recorder (no such line) carries no timing — inc-mvk5jyv3\'s bundle');
+}
+// ── B-402f: THE BROWSER'S RESIZEOBSERVER LOOP NOTE IS A NOTE, NEVER A CLIENT ERROR (the Diagnostics rail badge read 3 → 4 → 5
+// at page loads in turn-never-silent's picture walks — one «ResizeObserver loop completed with undelivered notifications.» each)
+{
+  const { createRequire } = await import('node:module');
+  const path = await import('node:path');
+  const os = await import('node:os');
+  const { execFileSync } = await import('node:child_process');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const req = createRequire(import.meta.url);
+  const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+  const BN = req('../src/browser-notes.js');
+  const CHROME = 'ResizeObserver loop completed with undelivered notifications.', OLD = 'ResizeObserver loop limit exceeded';
+  ok(BN.isBrowserNote(CHROME) && BN.isBrowserNote(OLD) && BN.isBrowserNote('Uncaught ' + CHROME) && BN.isBrowserNote('Error: ' + OLD),
+    'B-402f: both ResizeObserver loop notes (Chrome\'s / Firefox\'s, the older wording, an «Uncaught» / «Error:» head) are the browser\'s notes');
+  ok(!BN.isBrowserNote('ResizeObserver is not defined') && !BN.isBrowserNote("Cannot read properties of undefined (reading 'x')") && !BN.isBrowserNote('my ' + CHROME) && !BN.isBrowserNote(null),
+    'B-402f: a real error — even one naming ResizeObserver — is never a note');
+  const note = tc.windowErrorEntry({ message: CHROME, error: null, filename: '', lineno: 0 });
+  const err = new TypeError('x is not a function');
+  const real = tc.windowErrorEntry({ message: 'Uncaught TypeError: x is not a function', error: err, filename: 'https://h/bundle.js', lineno: 1 });
+  ok(note.kind === 'event' && note.name === BN.BROWSER_NOTE && note.detail === CHROME && real.kind === 'error' && real.name === 'x is not a function' && real.detail === 'https://h/bundle.js:1' && real.stack === err.stack,
+    'B-402f: windowErrorEntry — the note becomes kind «event» named browser-note; a real error stays kind «error» with its name, place and stack', [note, { ...real, stack: !!real.stack }]);
+  const src = fs.readFileSync(new URL('../src/lib/telemetry-client.js', import.meta.url), 'utf8');
+  const wired = (t) => /window\.addEventListener\('error', \(e\) => \{\s*const x = windowErrorEntry\(e\);\s*if \(x\.kind !== 'error'\) \{ if \(noted\) return; noted = true; \}\s*track\(x\.kind, x\.name, x\.detail, x\.stack\);/.test(t);
+  ok(wired(src), 'B-402f WIRING: the page\'s window error listener tracks what windowErrorEntry says, the note ONCE per page');
+  let base = ''; try { base = execFileSync('git', ['show', 'b06f36e90:src/lib/telemetry-client.js'], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { base = ''; }
+  if (base) ok(!wired(base) && /track\('error', \(e\.error && e\.error\.message\) \|\| e\.message \|\| 'window\.onerror'/.test(base), 'B-402f RED CONTROL: the release b06f36e90\'s listener tracked EVERY window error as an error (the note included)');
+  else console.log('  · SKIP: the release b06f36e90 is not in this clone');
+  // the hub's summary: a stored note (an older page sent it as kind «error») is no error group; a real one is
+  const summarize = (Tele) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-browser-note-'));
+    try {
+      const T = new Tele({ dataDir: dir, version: 'x' });
+      const now = Date.now();
+      T.record({ kind: 'error', name: CHROME, detail: ':0', t: now });
+      T.record({ kind: 'error', name: CHROME, detail: ':0', t: now });
+      T.record({ kind: 'error', name: 'x is not a function', detail: 'bundle.js:1', t: now });
+      T.record({ kind: 'event', name: BN.BROWSER_NOTE, detail: CHROME, t: now });
+      T.flush();
+      const r = T.summary({ days: 1 });
+      return (r.errors || []).reduce((a, g) => a + (g.count || 0), 0) + ':' + (r.errors || []).map((g) => g.name).join('|');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  };
+  const live = summarize(req('../src/telemetry.js').Telemetry || req('../src/telemetry.js'));
+  ok(live === '1:x is not a function', 'B-402f: the summary the Diagnostics badge sums counts the real error only — two stored notes and a note event add nothing', live);
+  const rel = 'src/telemetry.js', tsrc = fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const needle = "        if ((r.kind === 'error' || r.kind === 'server-error') && !(r.kind === 'error' && isBrowserNote(r.name))) {";
+  ok(tsrc.includes(needle), 'B-402f control needle exists');
+  const MUT = mutantCopies('browser-note', REPO);
+  const mut = MUT.write(rel, tsrc.split(needle).join("        if (r.kind === 'error' || r.kind === 'server-error') {"), 'no-note-filter');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: 'B-402f ' })) ok(row.pass, row.name, row.detail);
+  const M = req(mut);
+  const red = summarize(M.Telemetry || M);
+  ok(red === '3:' + [CHROME, 'x is not a function'].sort((a, b) => (a === CHROME ? -1 : 1)).join('|') || red.startsWith('3:'), 'B-402f RED CONTROL: the summary without the filter counts the two stored notes as errors (the red badge)', red);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
