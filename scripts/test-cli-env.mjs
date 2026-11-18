@@ -527,8 +527,9 @@ async function filterLegs(mod) {
   c.register('codex', { name: 'codex', current: HUBP }); // the boot walk found it on the hub's PATH
   c.register('opencode', { name: 'opencode', current: 'opencode' }); // the boot walk found nothing (the bare name)
   c.register('claude', { name: '/opt/x/claude', current: '/opt/x/claude' }); // an operator's absolute command
-  const before = ['codex', 'opencode', 'claude', 'shell'].map((id) => (typeof c.resolvedHere === 'function' ? c.resolvedHere(id) : 'no resolvedHere'));
-  leg('THE FILTER before any ask = the boot fact: an absolute path here, the bare name not, an operator\'s path here, a harness with no CLI (shell) here — and the reads ask nothing', JSON.stringify(before) === '[true,false,true,true]' && asked === 0, JSON.stringify(before));
+  c.register('antigravity', { name: 'agy', current: 'agy' }); // its program `agy`: the boot walk found nothing either (the bare name)
+  const before = ['codex', 'opencode', 'claude', 'antigravity', 'shell'].map((id) => (typeof c.resolvedHere === 'function' ? c.resolvedHere(id) : 'no resolvedHere'));
+  leg('THE FILTER before any ask = the boot fact: an absolute path here, the bare name not (opencode, antigravity\'s agy), an operator\'s path here, a harness with no CLI (shell) here — and the reads ask nothing', JSON.stringify(before) === '[true,false,true,false,true]' && asked === 0, JSON.stringify(before));
   const acpBare = typeof c.resolvedHere === 'function' ? c.resolvedHere('opencode', { unaskedBare: true }) : 'no resolvedHere';
   leg('…an ACP / exe harness\'s bare name NOT ASKED YET stays here (unaskedBare — its section shown until its shell says; a program only the person\'s shell finds is the case the law is for)', acpBare === true && asked === 0, String(acpBare));
   let refused = null;
