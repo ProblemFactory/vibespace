@@ -84,7 +84,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Channels: an agent's status and search, one account's list and the remove dialog now read only that account's conversations, not every account's.
 - The Background Work list no longer fails when one job record's run list is damaged; that job lists with no runs.
 - A job command given as several unquoted words is refused with the quoted form to use; only its first word used to run, reported as done.
-- Starting a job while its stop is still ending now starts it once the stop ends, instead of «already running»; vibespace-job restart does both.
 - Right after VibeSpace starts, the groups list no longer freezes it while unread messages are counted; a count shown as zero fills in a moment later.
 - An app or desktop install no longer says it ended without recording its exit while it is still running (seen on Ubuntu 26.04).
 - When a desktop app's saved login cannot be written to disk, the app is told it was not saved instead of being told it was.
@@ -124,6 +123,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
 - A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
 - A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
+- A job started while its stop is still ending now starts once the stop ends (unless VibeSpace restarts first); vibespace-job restart does both.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
