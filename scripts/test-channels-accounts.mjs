@@ -1126,6 +1126,18 @@ console.log('⑫ verify r5: refresh races + the identity door');
     // disconnected while A is in flight ⇒ nothing written, the record as the owner left it; the refusal's tail says
     // what the record holds ("keeps its current sign-in" on a connected one, "nothing was connected" after a disconnect)
     const SEQS = [['A', 'B', 'rA', 'Bl', 'rB'], ['A', 'B', 'Bl', 'rB', 'rA'], ['A', 'B', 'Bl', 'rA', 'rB'], ['A', 'B', 'cB', 'rA'], ['A', 'B', 'Bl', 'cB', 'rB', 'rA'], ['A', 'B', 'Bl', 'cB', 'rA', 'rB'], ['A', 'B', 'dc', 'rA'], ['A', 'B', 'Bl', 'dc', 'rB', 'rA'], ['A', 'B', 'Bl', 'dc', 'rA', 'rB'], ['A', 'B', 'Bl', 'rB', 'dc', 'rA']];
+    // THE VERDICT READS THE DISK — so it waits for the EVENT, the memory record's token ON disk: the record's write runs
+    // after the browser's landing answers (onPendingDone / the door's write), is applied in memory, and lands when the
+    // off-loop writer lands it (the hosted try 1 of 2.369.410 at load 2.3 read the file 120 ms after B's landing: live
+    // 1//ch-cB-5, disk still the pre-flow token). Bounded by a COUNT of turns, then the store's own landed().
+    const settled = async (c) => {
+      for (let turn = 0; turn < 250; turn++) {
+        const rec = row(c.e), disk = diskOf(c.dir).find((x) => x.id === 'gmail');
+        if (rtOf(c.dir, rec) === rtOf(c.dir, disk)) break;
+        await sleep(20);
+      }
+      await c.e.store.adapters.landed();
+    };
     for (const pth of ['door', 'pend']) for (const [i, seq] of SEQS.entries()) {
       const c = boot(ENG, `ord-${pth}-${i}`); const { e, v } = c; const t0 = await connected(c); const key0 = row(e).credentialKey;
       const flows = {}; const rels = {}; const landings = {}; let cancelledB = false, disconnected = false; let sDc = 0; let tokenWrites = 0;
@@ -1139,6 +1151,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
         else if (step === 'dc') { disconnected = true; await e.disconnect('gmail'); sDc = v.st.sends; }
       }
       await sleep(60);
+      await settled(c);   // the disk verdict waits for the write to land (never a longer sleep)
       const r = snap(c, disconnected ? sDc : s0); const wroteA = /cA/.test(r.disk || ''); const wroteB = /cB/.test(r.disk || '');
       const bLanded = seq.includes('rB'); const bCancelled = cancelledB && (seq.indexOf('cB') < seq.indexOf('rB') || !bLanded); const dcAfterB = disconnected && bLanded && seq.indexOf('dc') > seq.indexOf('rB');
       let good, why;
