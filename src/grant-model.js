@@ -450,6 +450,9 @@ function factsOf(f = {}) {
   return { keys, groups, inherited, unreadable: !!f.groupsUnreadable || badLineage, forkPending: !!f.forkPending };
 }
 const SPECIFIC = Object.freeze({ conversation: 2, group: 1, everyone: 0 });
+/** How SPECIFIC an admission's kind is — its own › a Task Group's › All agents' (B-3190 follow-up: the automation keys' pick
+ *  reads THIS order, never a copy); a kind it does not know ranks below every one. */
+const specificityOf = (kind) => (typeof kind === 'string' && Object.prototype.hasOwnProperty.call(SPECIFIC, kind) ? SPECIFIC[kind] : -1);
 /** ONE row against the caller → `{state:'ok', hits}` | `{state:'excepted', entry}` | `{state:'unreadable'}` |
  *  `{state:'unknown', why}` | `{state:'no'}`. */
 function judgeRow(raw, F) { return judgePrepared(normRow(raw), F); }
@@ -889,7 +892,7 @@ const LEGACY = Object.freeze({
 
 module.exports = {
   DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf, scopeListOf,
-  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow,
+  principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, exceptUnnamed, EXCEPT_UNNAMED_WORDS, onlyCarried, ONLY_UNNAMED_WORDS, factsOf, admits, prepareRow, prepareFacts, hitsOf, sharesGroup, names, namesNow, specificityOf,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,
   fromAutomationReach, fromChannelPrincipal, toChannelPrincipal, fromChannelAccess, fromChannelRows, fromChannelApiRows,

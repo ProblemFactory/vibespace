@@ -10365,7 +10365,7 @@ export default {
   "{who} used an automation key for “{verb}” — refused": "{who} が自動化キーで「{verb}」をしようとして拒否されました", // lane vault-key-row-compact
   "An automation key was refused for “{verb}”": "自動化キーでの「{verb}」は拒否されました", // lane vault-key-row-compact
   "The vault is locked — Unlock… at the top of the page": "保管庫がロック中——ページ上部の「解除…」から解除してください", // lane vault-key-row-compact
-  "The key is not granted to {target} (nor to one of its Task Groups) and did not open it — grant it there in the Vault window (授权给…), or answer the card next time": "このキーは {target}（またはそのタスクグループ）に許可されておらず、その会話を開いたのでもありません——保管庫ウィンドウで許可する（授权给…）か、次回カードに答えてください", // lane vault-key-row-compact
+  "The key is not granted to the calling conversation — grant it to that conversation in the Vault window (授权给…), or answer the card next time": "このキーは呼び出し元の会話に許可されていません——保管庫ウィンドウでその会話に許可する（授权给…）か、次回カードに答えてください", // lane vault-key-row-compact
   "The key does not hold that verb — add it with Edit… on the key's row in the Vault window": "このキーはその操作を持っていません——保管庫ウィンドウのキーの行の「編集…」で追加してください", // lane vault-key-row-compact
   "The one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window": "許可した 1 回分は使い切りました——次のカードで「一直」を選ぶか、保管庫ウィンドウでこのキーを許可してください", // lane vault-key-row-compact
   "The key was revoked — mint a new one in the Vault window and grant it": "このキーは失効しています——保管庫ウィンドウで新しいキーを作って許可してください", // lane vault-key-row-compact
@@ -10374,10 +10374,10 @@ export default {
   "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "{target} にはまだ未回答の「あなた宛て」の質問があります——先にそのカードに答えるか、呼び出し側に --resolve-asks を付けさせてください", // lane vault-key-row-compact
   "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace)": "このキーは {target} を開いておらず、許可の対象範囲は自分が開いた会話だけです——保管庫ウィンドウのキーの行で対象範囲を広げてください（这些岗位的会话 / 整个 VibeSpace）", // lane vault-key-row-compact
   "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace)": "{target} は許可の対象タスクグループにありません——保管庫ウィンドウのキーの行で対象範囲を広げてください（整个 VibeSpace）", // lane vault-key-row-compact
-  "No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time": "{target} に許可されたキーがありません——保管庫ウィンドウで許可する（授权给…）か、次回カードに答えてください", // lane vault-key-row-compact
+  "No key is granted to the calling conversation — grant one to it in the Vault window (授权给…), or answer the card next time": "呼び出し元の会話に許可されたキーがありません——保管庫ウィンドウでその会話に許可する（授权给…）か、次回カードに答えてください", // lane vault-key-row-compact
   "1 thing it may do": "1 件の操作", // lane vault-key-row-compact
   "{n} things it may do": "{n} 件の操作", // lane vault-key-row-compact
-  "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "{target} に許可されたキーはどれもその操作を持っていません——保管庫ウィンドウでキーの行の「編集…」から追加してください", // lane vault-key-row-compact
+  "No key granted to the calling conversation holds that verb — add it with Edit… on a key's row in the Vault window": "呼び出し元の会話に許可されたキーはどれもその操作を持っていません——保管庫ウィンドウでキーの行の「編集…」から追加してください", // lane vault-key-row-compact
   "The log could not be read: {reason}": "API ログを読み込めませんでした：{reason}", // lane channel-api-log-blank
   "the answer holds no lines": "応答にログ行がありません", // lane channel-api-log-blank
   "You have unsaved changes": "保存していない変更があります", // lane dialog-unsaved-guard

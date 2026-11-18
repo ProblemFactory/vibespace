@@ -557,7 +557,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       // notice in For you — ONE per key per hour (src/server/vault-hooks.js createVaultAttention; the rule PURE in vault-inventory)
       // lane conversations-archive-verb: the notice names the VERB, the TARGET (its name when the verb found it, else the id the
       // caller gave, else the caller itself) and the REASON — one notice per key × verb × reason per hour
-      if (!r.ok && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name, verb, target: (r.target != null ? String(r.target) : null) || (args && args.target != null ? String(args.target) : null) || (caller && caller.name) || null, why: r.why || null, reach: r.reach || null }); } catch { } }   // lane key-instance-scope: a reach refusal names the reach
+      // r3 (B-3190 follow-up): a Task Group the CALLER is not in (reach 'member' — open --task / bind) is the caller's own mistake,
+      // answered by name; no grant or reach cures it, so the owner gets no card
+      if (!r.ok && r.reach !== 'member' && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name, verb, target: (r.target != null ? String(r.target) : null) || (args && args.target != null ? String(args.target) : null) || (caller && caller.name) || null, why: r.why || null, reach: r.reach || null }); } catch { } }   // lane key-instance-scope: a reach refusal names the reach
       return r;
     };
     if (!subject || !A.isSubject(subject)) return done(named('unauthorized', 'the calling conversation has no id yet — send it one message first'));
@@ -575,7 +577,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const groupsUnreadable = !!caller.groupsUnreadable;
     const pick = A.pickKey({ keys: db.keys, grants: liveGrants(), want, subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, verb });   // B-3190 r1: the grants the verdict below judges (a once-grant dead since a lock or a restart ranks nothing)
     // lane key-folder-picker-all: the keys this conversation holds lack the verb (the owner took it off, or never gave it) ⇒ said by name
-    if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : pick.code === 'verb_not_in_scope' ? `the key${pick.names.length > 1 ? 's' : ''} granted to this conversation (${pick.names.join(', ')}) do${pick.names.length > 1 ? '' : 'es'} not hold ${verb} — the owner adds it with Edit… in the Vault window` : pick.code === 'groups_unreadable' ? `this conversation's Task Groups could not be read just now, so which key it may use for ${verb} could not be judged (${pick.names.join(', ')}) — nothing ran; call again in a moment` : null), args: v0.args });
+    if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : pick.code === 'verb_not_in_scope' ? `the key${pick.names.length > 1 ? 's' : ''} granted to this conversation (${pick.names.join(', ')}) do${pick.names.length > 1 ? '' : 'es'} not hold ${verb} — the owner adds it with Edit… in the Vault window` : pick.code === 'groups_unreadable' ? `this conversation's Task Groups could not be read just now, so which key it may use for ${verb} could not be judged (${pick.names.join(', ')}) — nothing ran; call again in a moment${pick.works ? `, or call with --key ${pick.works.id} («${pick.works.name}», granted to this conversation now)` : ''}` : null), args: v0.args });
     const key = pick.key;
     let verdict = A.useVerdict({ key, grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
     let asked = null;
@@ -675,7 +677,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // lane grants-unify: THE ONE ADMISSION over each grant's use row (its own conversation, a Task Group — minus the members left out)
     const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || [], groupsUnreadable: !!caller.groupsUnreadable };   // lane key-grant-everyone r2
     return db.keys.filter((k) => !k.revokedAt).map((k) => {
-      const gs = db.grants.filter((g) => g.keyId === k.id && g.subject !== 'external' && GM.admits([A.useRowOf(g)].filter(Boolean), facts).ok && !(g.mode === 'once' && g.spentAt));
+      const gs = liveGrants().filter((g) => g.keyId === k.id && g.subject !== 'external' && GM.admits([A.useRowOf(g)].filter(Boolean), facts).ok && !(g.mode === 'once' && g.spentAt));   // B-3190 follow-up: the LIVE grants (a once-grant dead since a lock or a restart is listed nowhere)
       const always = gs.filter((g) => g.mode === 'always');
       return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode, reach: g.reach })), limits: k.limits,
         reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs.slice().sort((a, b) => A.viaRank(GM.admits([A.useRowOf(b)].filter(Boolean), facts).via) - A.viaRank(GM.admits([A.useRowOf(a)].filter(Boolean), facts).via))[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's — B-3190 r1: its most specific once-grant)

@@ -50,7 +50,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Settings no longer shows an agent's section when your login shell finds no program for it, which starting a conversation with that agent already says.
 - A command's «Technical details» or «Show output» on a Machines card now stays open while the chat redraws; it closed by itself before.
 - A command's short output on a Machines card is shown without its leading spaces (e.g. «42», not «      42»); Copy still copies it exactly.
-- An automation key at «Only the conversations it opens» now acts only on what it opened and on itself, not on conversations another grant of the key names.
+- A coordinator no longer renames or ends conversations its key is also granted to at «Only the conversations it opens»; widen the reach in the Vault if wanted.
 - A conversation that names no key now uses the key granted to it directly before a Task Group's or All agents' key.
 - Later changes to the Cache warmth colours now reach the custom themes you save, unless you changed those colours yourself.
 - After your home folder is renamed, a second VibeSpace install on the same home now updates its own saved folder paths too.

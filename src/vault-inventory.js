@@ -429,7 +429,7 @@ const USE_FAIL_HEADS = Object.freeze({
 });
 const USE_FAIL_LINES = Object.freeze({
   vault_locked: i18nKey('The vault is locked — Unlock… at the top of the page'),
-  not_granted: i18nKey('The key is not granted to {target} (nor to one of its Task Groups) and did not open it — grant it there in the Vault window (授权给…), or answer the card next time'),
+  not_granted: i18nKey('The key is not granted to the calling conversation — grant it to that conversation in the Vault window (授权给…), or answer the card next time'),   // B-3190 follow-up: the CALLER's grant — a grant to a named target cures nothing since rule (b) went
   verb_not_in_scope: i18nKey('The key does not hold that verb — add it with Edit… on the key\'s row in the Vault window'),
   once_spent: i18nKey('The one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window'),
   key_revoked: i18nKey('The key was revoked — mint a new one in the Vault window and grant it'),
@@ -446,8 +446,8 @@ const USE_FAIL_REACH_LINES = Object.freeze({
  *  all, no granted key holding the verb (pickKey names the held keys to the caller). Any other code says the named line. */
 const USE_FAIL_NAMELESS = Object.freeze({
   vault_locked: USE_FAIL_LINES.vault_locked,
-  not_granted: i18nKey('No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time'),
-  verb_not_in_scope: i18nKey('No key granted to {target} holds that verb — add it with Edit… on a key\'s row in the Vault window'),
+  not_granted: i18nKey('No key is granted to the calling conversation — grant one to it in the Vault window (授权给…), or answer the card next time'),   // r2: pickKey judged the CALLER — never the target's name
+  verb_not_in_scope: i18nKey('No key granted to the calling conversation holds that verb — add it with Edit… on a key\'s row in the Vault window'),
 });
 const USE_FAIL_MERGE_MS = 60 * 60e3;   // one card per key × verb × reason per hour: the failures inside it are counted on that card
 /** prev = this (key, verb, reason)'s running hour (or null) → { counted, fresh (a new hour: file the card), next }. The hour

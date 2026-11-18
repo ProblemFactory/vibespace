@@ -357,10 +357,11 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
     if (external) { if (g.subject === 'external') cands.push({ g, via: 'external' }); continue; }
     if (g.subject === 'external') continue;
     const v = GM.admits([useRowOf(g)].filter(Boolean), facts);
-    if (v.ok) cands.push({ g, via: v.via }); else if (v.code === 'excepted') excepted = true;
+    const canAdmit = !(g.mode === 'once' && g.spentAt);   // B-3190 follow-up: a spent once-grant can never admit — it decides nothing, excepted or undecided
+    if (v.ok) cands.push({ g, via: v.via }); else if (v.code === 'excepted' && canAdmit) excepted = true;
     // B-3190 r1: a grant a Task Group decides, not judged (the groups unreadable), counts only when it COULD be used — a spent
     // once-grant could not, read or not; `could` = the best of them (how specific it could be, its mode) — pickKey's question
-    else if (v.code === 'groups_unreadable' && !(g.mode === 'once' && g.spentAt)) { const c = { spec: viaRank(undecidedVia(g)), always: g.mode === 'always' }; if (!could || c.spec > could.spec || (c.spec === could.spec && c.always && !could.always)) could = c; }
+    else if (v.code === 'groups_unreadable' && canAdmit) { const c = { spec: viaRank(undecidedVia(g)), always: g.mode === 'always' }; if (!could || c.spec > could.spec || (c.spec === could.spec && c.always && !could.always)) could = c; }
   }
   const unreadable = !!could, cx = could ? { could } : {};
   if (!cands.length) return { ok: false, code: unreadable ? 'groups_unreadable' : excepted ? 'excepted' : 'not_granted', ...cx };
@@ -380,8 +381,9 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   // groups_unreadable by name (that grant may admit the moment the groups read) — never a first-use card
   return { ok: false, code: unreadable ? 'groups_unreadable' : 'once_spent', ...cx };
 }
-/** How SPECIFIC an admission is (grant-model's order — its own › a Task Group's › All agents'); anything else ranks last. */
-const viaRank = (via) => (via === 'conversation' ? 2 : via === 'group' ? 1 : via === 'everyone' ? 0 : -1);
+/** How SPECIFIC an admission is — the grant model's own order (GM.specificityOf: its own › a Task Group's › All agents'), read,
+ *  never restated (B-3190 follow-up); anything else ranks last. */
+const viaRank = (via) => GM.specificityOf(via);
 /** An undecided grant (a Task Group decides it, the groups unreadable) at best: a Task Group's when its row names one, else All agents'. */
 const undecidedVia = (g) => { const n = GM.normRow(useRowOf(g)); return n && n.ok && n.row.to.some((e) => e.kind === 'group') ? 'group' : 'everyone'; };
 
@@ -416,7 +418,7 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
     // an undecided grant that would OUTRANK the pick once the groups read ⇒ said by name — never a quiet pick of another
     // key's reach and limits (r1: one that could not outrank it — spent, or below it — refuses nothing)
     const over = judged.filter((x) => x !== pick && x.v.could && above(rank(x.v.could.spec, x.v.could.always, x.k), rk(pick)) > 0).map((x) => x.k.name);
-    if (over.length) return { ok: false, code: 'groups_unreadable', names: over.slice(0, 20) };
+    if (over.length) return { ok: false, code: 'groups_unreadable', names: over.slice(0, 20), works: { id: pick.k.id, name: pick.k.name } };   // r2: the key granted to the caller NOW — the door that works without waiting (r3: by id — names are not unique)
     return { ok: true, key: pick.k, ask: false };
   }
   if (live.length === 1) return { ok: true, key: live[0], ask: true };

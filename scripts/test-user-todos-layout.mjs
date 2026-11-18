@@ -1619,8 +1619,8 @@ console.log('㉓ THE VAULT\'S TWO PRODUCERS (lane vault-window-v2, design q-047 
       'a second failure of the SAME key × verb × reason inside the hour COUNTS on the same card (2; the card keeps its first target, the last one is a detail line)', m.get(a.id).i18n.detail);
     const b2 = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'not_granted', who: 'Release helper', verb: 'conversations.open', target: 'lane a' });
     const b3 = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', who: 'Release helper', verb: 'conversations.end', target: 'lane a' });
-    ok(b2 && b2.id !== a.id && b3 && b3.id !== a.id && b3.id !== b2.id && open().length === 3 && b2.i18n.detail[0].key === VI.USE_FAIL_LINES.not_granted && /grant it there in the Vault window/.test(b2.text) && b2.i18n.text.key === a.i18n.text.key && JSON.stringify(b3.i18n.text.params.verb) === '{"key":"End a conversation"}',
-      'another REASON (not granted — the door: grant it to that Task Group) and another VERB (end) are their own cards — one notice per (key, verb, reason)', { b2: b2 && b2.text, b3: b3 && b3.text });
+    ok(b2 && b2.id !== a.id && b3 && b3.id !== a.id && b3.id !== b2.id && open().length === 3 && b2.i18n.detail[0].key === VI.USE_FAIL_LINES.not_granted && /grant it to that conversation in the Vault window/.test(b2.text) && b2.i18n.text.key === a.i18n.text.key && JSON.stringify(b3.i18n.text.params.verb) === '{"key":"End a conversation"}',
+      'another REASON (not granted — the door: grant it to the calling conversation) and another VERB (end) are their own cards — one notice per (key, verb, reason)', { b2: b2 && b2.text, b3: b3 && b3.text });
     ok(att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'ask_denied', verb: 'conversations.open', target: 'lane a' }) === null && m.get(a.id).i18n.detail[1].params.n === 2, 'the owner\'s own refusal (ask_denied) is no failure: nothing counted, nothing filed');
     m.setStatus(a.id, 'done', 'user');
     clock += 10 * 60e3;
@@ -1651,8 +1651,8 @@ console.log('㉓ THE VAULT\'S TWO PRODUCERS (lane vault-window-v2, design q-047 
     ok(u && u.ok === false && u.code === 'vault_locked' && att2._hours.get('apikey:*|conversations.rename|vault_locked') && att2._hours.get('apikey:*|conversations.rename|vault_locked').next.causes.locked === 1 && fromEngine && fromEngine.status === 'open' && fromEngine.i18n.text.params.who === 'Release helper' && fromEngine.i18n.text.key === VI.USE_FAIL_HEADS.who && fromEngine.i18n.detail[0].params.target === 'Release helper',
       'THE REAL automation engine: a use refused locked reaches the producer (the automation door\'s card, the verb and the caller as the target — a rename of itself)', { u, h: att2._hours.get('apikey:*|conversations.rename|vault_locked') });
     const src = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8'), wiring = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-    ok(/if \(!r\.ok && attention && typeof attention\.useFailed === 'function'\)/.test(src) && /const vaultAttention = require\('\.\/vault-hooks\.js'\)\.createVaultAttention\(\{ userTodos \}\);/.test(wiring) && /userTodos, attention: vaultAttention,/.test(wiring),
-      'the wiring: the engine\'s ONE audit exit hands every refusal to the producer; the hub builds the producer over the For-you store and gives it to the engine');
+    ok(/if \(!r\.ok && r\.reach !== 'member' && attention && typeof attention\.useFailed === 'function'\)/.test(src) && /const vaultAttention = require\('\.\/vault-hooks\.js'\)\.createVaultAttention\(\{ userTodos \}\);/.test(wiring) && /userTodos, attention: vaultAttention,/.test(wiring),
+      'the wiring: the engine\'s ONE audit exit hands every refusal to the producer (B-3190 follow-up: but a Task Group the caller is not in — its own mistake, answered by name); the hub builds the producer over the For-you store and gives it to the engine');
     m.stop();
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

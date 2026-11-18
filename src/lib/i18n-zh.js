@@ -10366,7 +10366,7 @@ export default {
   "{who} used an automation key for “{verb}” — refused": "{who} 用自动化 key 做「{verb}」被拒", // lane vault-key-row-compact
   "An automation key was refused for “{verb}”": "自动化 key 做「{verb}」被拒", // lane vault-key-row-compact
   "The vault is locked — Unlock… at the top of the page": "保险库已锁——在页面顶部点「解锁…」", // lane vault-key-row-compact
-  "The key is not granted to {target} (nor to one of its Task Groups) and did not open it — grant it there in the Vault window (授权给…), or answer the card next time": "这把 key 没有授权给 {target}（也没授权给它所在的任务组），也不是它开的——在保险库窗口把 key 授权过去（授权给…），或者下次回答卡片", // lane vault-key-row-compact
+  "The key is not granted to the calling conversation — grant it to that conversation in the Vault window (授权给…), or answer the card next time": "这把 key 没有授权给调用它的会话——在保险库窗口把 key 授权给那个会话（授权给…），或者下次回答卡片", // lane vault-key-row-compact
   "The key does not hold that verb — add it with Edit… on the key's row in the Vault window": "这把 key 不含这个动作——在保险库窗口该 key 的行里用「编辑…」加上", // lane vault-key-row-compact
   "The one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window": "你允许的那一次已经用掉了——下次卡片选「一直」，或在保险库窗口授权这把 key", // lane vault-key-row-compact
   "The key was revoked — mint a new one in the Vault window and grant it": "这把 key 已撤销——在保险库窗口铸造一把新的并授权", // lane vault-key-row-compact
@@ -10375,10 +10375,10 @@ export default {
   "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "{target} 还有未处理的「待你处理」提问——先回答它的卡片，或让调用方加 --resolve-asks", // lane vault-key-row-compact
   "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace)": "这把 key 没有开过 {target}，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace）", // lane vault-key-row-compact
   "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace)": "{target} 不在授权触及的岗位里——在保险库窗口该 key 的行里扩大作用范围（整个 VibeSpace）", // lane vault-key-row-compact
-  "No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time": "没有任何 key 授权给 {target}——在保险库窗口授权一把（授权给…），或者下次回答卡片", // lane vault-key-row-compact
+  "No key is granted to the calling conversation — grant one to it in the Vault window (授权给…), or answer the card next time": "没有任何 key 授权给调用它的会话——在保险库窗口给它授权一把（授权给…），或者下次回答卡片", // lane vault-key-row-compact
   "1 thing it may do": "1 个动作", // lane vault-key-row-compact
   "{n} things it may do": "{n} 个动作", // lane vault-key-row-compact
-  "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "授权给 {target} 的 key 都不含这个动作——在保险库窗口某把 key 的行里用「编辑…」加上", // lane vault-key-row-compact
+  "No key granted to the calling conversation holds that verb — add it with Edit… on a key's row in the Vault window": "授权给调用它的会话的 key 都不含这个动作——在保险库窗口某把 key 的行里用「编辑…」加上", // lane vault-key-row-compact
   "The log could not be read: {reason}": "无法读取 API 日志：{reason}", // lane channel-api-log-blank
   "the answer holds no lines": "回复里没有日志行", // lane channel-api-log-blank
   "You have unsaved changes": "有未保存的更改", // lane dialog-unsaved-guard

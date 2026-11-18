@@ -143,7 +143,7 @@ vibespace-api conversations archive <conversation id>                 when the l
 | `vault_locked` (423) | the vault is locked — every call waits until the user unlocks it on the page. The user has already been told (For you names this conversation and the verb): never ask them to unlock it or for the password — wait, or do other work (exit code 3) |
 | `not_granted` | no grant lets this conversation use the key, or a `--target` is outside the grant's reach (the message names the reach and the door that widens it) |
 | `excepted` | the user left this conversation (or one of its Task Groups) out of the key's grant to a Task Group or to All agents — no card is filed; ask the user to lift the exception or to grant the key to this conversation |
-| `groups_unreadable` (409) | this conversation's Task Groups could not be read just now, and a grant's Task Group (or its exception) decides — nothing ran; call again in a moment |
+| `groups_unreadable` (409) | this conversation's Task Groups could not be read just now, and a grant's Task Group (or its exception) decides — nothing ran; call again in a moment — or, when a key is granted to this conversation now, call with `--key <its id>` (the answer names it) |
 | `key_revoked` / `verb_not_in_scope` | the user revoked the key / the key does not hold this verb — the keys granted to this conversation are named; the user adds a verb to a key with Edit… on its row in the Vault window (its grants then cover it, no new question) |
 | `ask_denied` / `ask_expired` / `ask_quiet` | the user refused / nobody answered in 60 s / a refusal is still in its 10 minutes |
 | `once_spent` | a one-time grant was used; the next call asks again |

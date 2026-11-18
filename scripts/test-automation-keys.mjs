@@ -90,6 +90,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const R = (rel) => require(path.join(ROOT, rel));
 const A = R('src/automation-keys.js');
+const GM = R('src/grant-model.js');
 const ENG = R('src/server/automation-engine.js');
 const VE = R('src/server/vault-engine.js');
 const { UserTodoManager } = R('src/user-todos.js');
@@ -1867,6 +1868,7 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   const u2 = A.pickKey({ keys: [kOld, kOwn], grants: [GX], subject: 'session:conv-m', verb: 'conversations.rename', ...un });
   ok(u2.ok === false && u2.code === 'groups_unreadable' && u2.names.join() === 'old-all' && A.pickKey({ keys: [kOld, kOwn], grants: [GX], subject: 'session:conv-m', subjectGroups: ['T-in'], verb: 'conversations.rename' }).key.name === 'old-all',
     'r2\'s minor: two keys hold the verb, the granted one cannot be judged ⇒ groups_unreadable naming it — not key_ambiguous (that steered the caller to --key a key the owner never granted)', u2);
+  ok(u1.works && u1.works.id === kOld.id && u1.works.name === 'old-all' && !('works' in u2), 'follow-up r2: the answer that holds back a granted pick NAMES it (the door that works now: --key it); the all-undecided one names none (only «call again»)', { u1, u2 });
   // r1 (the adversarial read): an undecided grant that could NOT outrank the pick refuses nothing — a SPENT once-grant to a Task
   // Group, a same-rank once-grant on a newer key; nor does a spent one turn a spent once-grant of the caller's own into «call again»
   const c1 = pk(A, [G({ keyId: kOld.id, subject: ALL6 }), G({ n: 3, keyId: kGrp.id, subject: 'group:T-1', mode: 'once', spentAt: NOW })], un);
@@ -1875,13 +1877,13 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   const d1 = A.useVerdict({ key: K(), grants: [G({ n: 2, subject: 'session:conv-m', mode: 'once', spentAt: NOW }), G({ n: 6, subject: 'group:T-9', mode: 'once', spentAt: NOW })], subject: 'session:conv-m', subjectGroups: [], subjectGroupsUnreadable: true, verb: 'conversations.rename', vaultState: 'unlocked' });
   ok(c1.ok && c1.key.name === 'old-all' && c2.ok && c2.key.name === 'old-all' && d1.code === 'once_spent',
     'r1: a SPENT once-grant to a Task Group, or a newer key\'s once-grant that could only tie, refuses nothing (the pick stands); both once-grants spent ⇒ once_spent (a card), never «call again»', { c1, c2: c2.key && c2.key.name, d1: d1.code });
-  const USPENT = "else if (v.code === 'groups_unreadable' && !(g.mode === 'once' && g.spentAt)) {";
+  const USPENT = "else if (v.code === 'groups_unreadable' && canAdmit) {";   // B-3190 follow-up: the one «could it ever admit» flag of both branches
   ok(SRC.split(USPENT).length === 2, 'ANCHOR: an undecided grant counts only when it could be used — spelled once');
   const Ms = M.load('src/automation-keys.js', SRC.replace(USPENT, "else if (v.code === 'groups_unreadable') {"), 'b3190-unread-spent');
   const ms1 = pk(Ms, [G({ keyId: kOld.id, subject: ALL6 }), G({ n: 3, keyId: kGrp.id, subject: 'group:T-1', mode: 'once', spentAt: NOW })], un);
   ok(ms1.ok === false && ms1.code === 'groups_unreadable', 'MUTANT RED: a spent undecided grant counted ⇒ the call is refused «call again» though nothing could change the pick', ms1);
   const UAMB = "  if (unread.length) return { ok: false, code: 'groups_unreadable', names: unread };\n  return { ok: false, code: 'key_ambiguous'";
-  const UWIN = "    if (over.length) return { ok: false, code: 'groups_unreadable', names: over.slice(0, 20) };\n";
+  const UWIN = "    if (over.length) return { ok: false, code: 'groups_unreadable', names: over.slice(0, 20), works: { id: pick.k.id, name: pick.k.name } };   // r2: the key granted to the caller NOW — the door that works without waiting (r3: by id — names are not unique)\n";
   ok(SRC.split(UAMB).length === 2 && SRC.split(UWIN).length === 2, 'ANCHOR: the two unreadable answers, spelled once');
   const Mu1 = M.load('src/automation-keys.js', SRC.replace(UAMB, "  return { ok: false, code: 'key_ambiguous'"), 'b3190-unread-ambiguous');
   const Mu2 = M.load('src/automation-keys.js', SRC.replace(UWIN, ''), 'b3190-unread-switch');
@@ -1943,7 +1945,29 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   const ge = w.engine.grant(m3.key.id, ['everyone:*'], { by: 'user', mode: 'once', reach: 'instance' }), go = w.engine.grant(m3.key.id, ['session:coord-6'], { by: 'user', mode: 'once' });
   const kf3 = w.engine.keysFor(C6()).find((k) => k.id === m3.key.id);
   ok(!!(ge.ok && go.ok && kf3 && kf3.reach === 'opened'), 'keysFor: two once-grants (All agents at 整个 VibeSpace, its own at 只有它开的会话) ⇒ the reach said is its own grant\'s — the one the use rides', { ge: ge.ok, go: go.ok, reach: kf3 && kf3.reach });
+  // the follow-up (主开发's reading of a6704ab2d): the keys listing reads the LIVE grants — a once-grant persisted from the run
+  // before a RESTART (boot is a lock: dead to the pick and the verdict, its store row unspent) is listed nowhere
+  const m4 = w.engine.mint({ name: 'live6', scopes: ['conversations.status'], limits: OPEN_LIMITS, by: 'user' });
+  const g4 = w.engine.grant(m4.key.id, ['session:coord-6'], { by: 'user', mode: 'once' });
+  const before4 = !!w.engine.keysFor(C6()).find((k) => k.id === m4.key.id);
+  const listedAfterBoot = (Mod) => !!Mod.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs }).keysFor(C6()).find((k) => k.id === m4.key.id);
+  const after4 = listedAfterBoot(ENG);
+  ok(!!(g4.ok && before4 && !after4), 'follow-up (3): keysFor reads the LIVE grants — a once-grant from before a restart (boot is a lock; the pick and the verdict skip it) is no longer listed', { before4, after4 });
+  const KLIVE = '      const gs = liveGrants().filter((g) => g.keyId === k.id';
+  ok(ENGS.split(KLIVE).length === 2, 'ANCHOR: keysFor reads liveGrants(), spelled once');
+  ok(listedAfterBoot(M.load('src/server/automation-engine.js', ENGS.replace(KLIVE, '      const gs = db.grants.filter((g) => g.keyId === k.id'), 'b3190-keys-store')) === true,
+    'MUTANT RED: keysFor over the store\'s rows ⇒ the dead once-grant is listed after a restart (a key the pick then refuses)');
+  // (4) one law, one place: the rank is the grant model's
+  ok(/const viaRank = \(via\) => GM\.specificityOf\(via\);/.test(SRC) && GM.specificityOf('conversation') > GM.specificityOf('group') && GM.specificityOf('group') > GM.specificityOf('everyone') && GM.specificityOf('x') < GM.specificityOf('everyone')
+    && [GM.specificityOf('conversation'), GM.specificityOf('group'), GM.specificityOf('everyone'), GM.specificityOf(undefined), GM.specificityOf(['group']), GM.specificityOf('external')].join() === '2,1,0,-1,-1,-1',
+    'follow-up (4): pickKey\'s rank IS the grant model\'s specificity (read, never restated)');
+  // (5) a spent once-grant decides nothing — in the excepted branch as in the unreadable one
+  const spentEx = A.useVerdict({ key: K(), grants: [G({ subject: 'group:T-1', mode: 'once', spentAt: NOW, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'group', id: 'T-1' }], except: [{ kind: 'conversation', key: 'conv-x' }] } })], subject: 'session:conv-x', subjectGroups: ['T-1'], verb: 'conversations.rename', vaultState: 'unlocked' });
+  ok(spentEx.ok === false && spentEx.code === 'not_granted', 'follow-up (5): a SPENT once-grant that would except the caller decides nothing (not_granted, the first-use road) — as a spent undecided one', spentEx);
   ok(/const v = A\.reachVerdict\(\{ keyId: key\.id, caller: caller\.conversationId, target, opened: db\.opened, reach: verdict\.reach, reachRows: verdict\.reachRows \}\)/.test(ENGS)
+    && /call again in a moment\$\{pick\.works \? `, or call with --key \$\{pick\.works\.id\} \(«\$\{pick\.works\.name\}», granted to this conversation now\)` : ''\}` : null/.test(ENGS)
+    && (fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8').match(/code: 'not_granted', reach: 'member', why: 'the calling conversation is not in that Task Group'/g) || []).length === 2
+    && /const gs = liveGrants\(\)\.filter\(\(g\) => g\.keyId === k\.id/.test(ENGS)
     && /const pick = A\.pickKey\(\{ keys: db\.keys, grants: liveGrants\(\), want,/.test(ENGS)
     && /pick\.code === 'groups_unreadable' \? `this conversation's Task Groups could not be read just now, so which key it may use for \$\{verb\} could not be judged/.test(ENGS),
     'the engine: reachVerdict without the grant list · a pick refused groups_unreadable says why and «call again in a moment»');
