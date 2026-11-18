@@ -1,0 +1,37 @@
+{
+ "//": "B-0d3e (lane lg-leak-census): per script, the anchor helpers (a function whose own parameter is an anchor and whose body reaches a loader — a suite's cut / swap / mutantOf / patch) that neither throw nor build through scripts/scratch.mjs anchored(): when the anchor moves they answer null or an unpatched copy. ONE-WAY (test-suite-files-parse §3): a file that adds one is red by name; a fall is only said.",
+ "files": {
+  "test-boot-phase.mjs": 1,
+  "test-browser-stuck.mjs": 1,
+  "test-browser-unresponsive.mjs": 1,
+  "test-channel-outbox.mjs": 2,
+  "test-channel-send-files.mjs": 1,
+  "test-channel-touch.mjs": 10,
+  "test-conversation-ops.mjs": 1,
+  "test-cpu-capture-live.mjs": 1,
+  "test-design-model.mjs": 3,
+  "test-loop-hold.mjs": 1,
+  "test-mount-starting.mjs": 1,
+  "test-pool-auto.mjs": 2,
+  "test-reset-credit-verdict.mjs": 2,
+  "test-still-press.mjs": 1,
+  "test-stream-op.mjs": 1,
+  "test-user-state-echo.mjs": 2,
+  "test-vault-job-model.mjs": 1,
+  "test-vault-run-model.mjs": 1,
+  "test-vault-run.mjs": 1,
+  "test-voice-proxy.mjs": 1
+ },
+ "why": {
+  "test-boot-phase.mjs#mutant": "its caller reds by the control's name with «(anchor moved)» in the reds it prints",
+  "test-channel-outbox.mjs#mutant": "its caller reds with «the <line> is not spelled once» — the anchor named",
+  "test-channel-outbox.mjs#ocdRed": "its caller reds with «not spelled once in the bundle: <anchor>» — the anchor named",
+  "test-design-model.mjs#copy": "its caller names the anchor: «CONTROL setup: the \"<rule>\" anchor is found exactly once» (red, then the loop goes on to the next rule — a throw would hide the other rules' verdicts)",
+  "test-design-model.mjs#ucopy": "its caller names the anchor: «CONTROL setup: the \"<rule>\" anchor is found exactly once» (red, then the loop goes on to the next rule)",
+  "test-design-model.mjs#tcopy": "its caller names the anchor: «CONTROL setup: the \"<rule>\" anchor is found exactly once» (red, then the loop goes on to the next rule)",
+  "test-reset-credit-verdict.mjs#patched": "its caller reds «NEGATIVE CONTROL (<what>): the patch hit the product source» and goes on to the next control",
+  "test-still-press.mjs#mutate": "its caller reds by the mutant's name with «(the anchor is gone)»",
+  "test-user-state-echo.mjs#mutant": "its caller reds «MUTANTS (…) hit their anchors» before it judges them",
+  "test-vault-run.mjs#mutate": "its caller's red says «the patch hits once» (it counts the anchor's hits, n)"
+ }
+}

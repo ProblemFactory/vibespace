@@ -251,7 +251,7 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
 {
   // CONTROLS (patched copies, scripts/mutant-copy.mjs): each must turn a leg above red
   const src = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8');
-  const redOf = (needle, repl, tag) => { if (!src.includes(needle)) return null; const C = M.load('src/browser-tabs.js', src.replace(needle, repl), tag); return pureLegs(C, '[' + tag + '] ').filter((l) => !l.c).map((l) => l.n); };
+  const redOf = (needle, repl, tag) => { if (!src.includes(needle)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(needle).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const C = M.load('src/browser-tabs.js', src.replace(needle, repl), tag); return pureLegs(C, '[' + tag + '] ').filter((l) => !l.c).map((l) => l.n); };
   const c1 = redOf("  if (owner === 'other' || human) return no('not_your_tab');\n", "  if (human) return no('not_your_tab');\n", 'other-closable');
   ok(Array.isArray(c1) && c1.some((n) => /USER'S VERDICT/.test(n)) && c1.some((n) => /ROW MODEL/.test(n) || /USER/.test(n)), 'CONTROL: a verdict that lets the user switch / close ANOTHER conversation\'s tab from a view he drives — the verdict + row legs go red', c1);
   const c2 = redOf("  const own = rows.filter((x) => owners.get(idKey(x.targetId)) === str(me)).map(tabRow);", '  const own = rows.map(tabRow);', 'view-leaks');

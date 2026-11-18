@@ -3319,7 +3319,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     '㉒e WHY THE ENGINE HANDS THE READING: the estimator overlay re-bases a rolled week onto next week\'s reset and reads as proven — judged on the reading it is a guess (usage-pool-engine poolReadReading)');
   // ㉒f RED controls — each rule on a patched copy of the real module
   const SRC = fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8');
-  const patched = (tag, from, to) => { const hit = SRC.split(from).length === 2; return { hit, mod: hit ? require(MUTC.write('src/quota-model.js', SRC.replace(from, to), tag, { esm: false })) : null }; };
+  const patched = (tag, from, to) => { const hit = SRC.split(from).length === 2; if (!hit) throw new Error(`ANCHOR GONE OR NOT UNIQUE (${SRC.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return { hit, mod: require(MUTC.write('src/quota-model.js', SRC.replace(from, to), tag, { esm: false })) }; };
   const noGrace = patched('q22grace', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000))', 'if (mayRoll && resetSec != null && resetSec * 1000 <= now /* PATCHED: the bare instant */)');
   ok(noGrace.hit && noGrace.mod.windowDisplay({ utilization: 0.9, resetsAt: R }, (R + 1) * 1000).state === 'reset-unconfirmed',
     '㉒f RED: without the grace the display calls a bucket reset 1 s after a minute-precise instant — while the pool still counts it spent (the ㉒b leg goes red)');

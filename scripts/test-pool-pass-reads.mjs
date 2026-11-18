@@ -56,7 +56,7 @@ const RR_SRC = fs.readFileSync(RRpath, 'utf8');
 const ENG_SRC = fs.readFileSync(ENGpath, 'utf8');
 const ASK_FNS = ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature'];
 /** a copy of a product file with ONE named edit — null when its needle does not hit exactly once (said as a red by the caller) */
-const copyOf = (rel, src, from, to, tag) => (src.split(from).length === 2 ? MU.write(rel, src.replace(from, to), tag) : null);
+const copyOf = (rel, src, from, to, tag) => (src.split(from).length === 2 ? MU.write(rel, src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
 /** swap a copy's asks onto the module every routed site reads through (`RR.readText(…)` is looked up at each call) */
 async function withAsks(copy, fn) { const saved = {}; for (const k of ASK_FNS) { saved[k] = RR[k]; RR[k] = copy[k]; } try { return await fn(); } finally { Object.assign(RR, saved); } }
 const tok = (k) => ['tok', k, 'x'.repeat(8)].join('-');
@@ -341,7 +341,7 @@ console.log('⑦ ONE WRAPPER PER PROCESS — a second copy of the module, one wr
 {
   const w = world({ S: 1, M: 1 });
   const p = path.join(w.cacheDir, w.ids[0] + '.json');
-  const B = require(MU.write('src/run-reads.js', RR_SRC, 'second'));
+  const B = require(MU.write('src/run-reads.js', RR_SRC, 'second', { same: true }));
   B.watch(w.cacheDir);
   const G = globalThis[Symbol.for('vibespace.run-reads.writes')];
   await turn();
@@ -619,7 +619,7 @@ console.log('⑮ dropRun() — the hand-off for a write no wrapper sees — drop
 {
   const w = world({ S: 1, M: 1 });
   const p = path.join(w.cacheDir, w.ids[0] + '.json');
-  const B = require(MU.write('src/run-reads.js', RR_SRC, 'drop-second'));
+  const B = require(MU.write('src/run-reads.js', RR_SRC, 'drop-second', { same: true }));
   B.watch(w.cacheDir);
   await turn();
   const r = countRun(w.root, () => { RR.readText(p); B.readText(p); RR.dropRun(); RR.readText(p); B.readText(p); });

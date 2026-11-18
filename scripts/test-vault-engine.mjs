@@ -724,7 +724,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
   // (3) MUTANTS — a copy dropping ONE consequence ⇒ RED, on that one
   const MO = mutantCopies('vault-engine-lock', REPO);
   const CSRC = read('src/server/vault-contents.js'), DSRC = read('src/server/vault-run-door.js');
-  const patch = (rel, srcText, from, to, tag) => (srcText.split(from).length === 2 ? MO.load(rel, srcText.replace(from, to), tag) : null);
+  const patch = (rel, srcText, from, to, tag) => (srcText.split(from).length === 2 ? MO.load(rel, srcText.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${srcText.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const MUT = [
     ['view', 'a lock that leaves the reveal window open', { contentsMod: patch('src/server/vault-contents.js', CSRC, "vault.onLock(() => { windows.clear(); });", "vault.onLock(() => { });", 'view') }],
     ['asks', 'a lock that leaves an agent\'s request open', { doorMod: patch('src/server/vault-run-door.js', DSRC, "for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked');", '', 'asks') }],

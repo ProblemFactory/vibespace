@@ -236,7 +236,7 @@ console.log('ⓒ a workspace-level record: byte-identical to the copy without th
   ok(!!orgCopy && wire(orgLane.reqs) !== wire(orgCopy.reqs), 'CONTROL — the org record\'s requests are NOT the copy\'s (the comparison sees team_id)');
   if (process.env.SLACK_ORG_BASE) {
     const BASESRC = fs.readFileSync(process.env.SLACK_ORG_BASE, 'utf8');
-    const B = require(MC.write('src/channels/slack.js', BASESRC, 'base'));
+    const B = require(MC.write('src/channels/slack.js', BASESRC, 'base', { same: true }));
     const wsBase = await sweep(B, WS_HELD);
     ok(wire(wsBase.reqs) === wire(wsLane.reqs) && wsBase.steps.every((s, i) => s.out.ok === wsLane.steps[i].out.ok), `SLACK_ORG_BASE (${path.basename(process.env.SLACK_ORG_BASE)}): the base file's ${wsBase.reqs.length} requests for the same record are byte-identical to this tree's`);
   }

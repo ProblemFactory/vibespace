@@ -1499,7 +1499,7 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   for (const [name, pass_, detail] of census(slackSrc, serverTexts)) ok(pass_, '§12 ' + name, detail);
   const MUT = mutantCopies('vendor-whitelist-slack', REPO);
   const reds = (rows) => rows.filter((r) => !r[1]).map((r) => r[0]);
-  const mut = (tag, from, to) => { if (!slackSrc.includes(from)) return null; const f = MUT.write(slackRel, slackSrc.replace(from, to), tag); return fs.readFileSync(f, 'utf-8'); };
+  const mut = (tag, from, to) => { if (!slackSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = MUT.write(slackRel, slackSrc.replace(from, to), tag); return fs.readFileSync(f, 'utf-8'); };
   const keeps = mut('keeps-credentials', '    const appId = typeof a.app_id', '    const kept = a.credentials && a.credentials.client_secret; void kept;\n    const appId = typeof a.app_id');
   ok(keeps && reds(census(keeps, { ...serverTexts, [slackRel]: keeps })).some((n) => /KEPT/.test(n)), '§12 CONTROL: a copy that reads the create\'s credentials is RED');
   const twice = mut('second-caller', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n', '    async listConversations({ cursor = null, limit = 100 } = {}) {\n      if (cursor === \'x\') await createApp(\'\', \'\');\n');

@@ -161,7 +161,7 @@ console.log('\n§9 the scratch-orphan reaper');
   // NEGATIVE CONTROLS (scripts/mutant-copy.mjs, each copy ONE edit, loaded beside the real modules): the legs above can go red.
   const M9 = mutantCopies('cigate9-reaper', REPO);
   const src9 = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  const mutant9 = async (tag, from, to) => { if (!src9.includes(from)) return { missing: from }; const f = M9.write('scripts/ci.mjs', src9.replace(from, to), tag); return import(pathToFileURL(f).href); };
+  const mutant9 = async (tag, from, to) => { if (!src9.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = M9.write('scripts/ci.mjs', src9.replace(from, to), tag); return import(pathToFileURL(f).href); };
   const pidsOf = (mod) => (mod && mod.scratchOrphans ? mod.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).map((o) => o.pid).sort((a, b) => a - b) : null);
   const cA = await mutant9('name-gate', "    const claims = scratchRootClaims(i); if (!claims.length) continue;", "    if (!reapNamed(i.a0)) continue; const claims = scratchRootClaims(i); if (!claims.length) continue;");
   const pA = pidsOf(cA);
@@ -482,7 +482,7 @@ console.log('\n§9d the directory sweep (B-60d2)');
   const MOVE = "process.removeListener('exit', endAll); process.on('exit', endAll);\n", FIN = 'try { return emit.call(this, event, ...rest); } finally { endAll(); }';
   ok(SCRSRC.includes(MOVE) && SCRSRC.includes(FIN), 'CONTROL B-0d6d: the patched lines are in scratch.mjs');
   const orderBody = (urls) => `import fs from 'node:fs';\n${urls.map((u, i) => `import { scratchDir as m${i} } from ${JSON.stringify(u)};`).join('\n')}\nconst roots = [${urls.map((_, i) => `m${i}('cigate9d-order${i}')`).join(', ')}];\nfor (const r of roots) fs.writeFileSync(r + '/launches.log', '1');\nconst seen = [];\nconst read = (tag) => () => seen.push(tag + ':' + roots.every((r) => fs.existsSync(r + '/launches.log')));\nprocess.on('exit', read('same-turn'));\nawait new Promise((r) => setTimeout(r, 5));\nprocess.once('exit', read('later'));\nprocess.on('exit', () => console.log(JSON.stringify({ roots, seen })));\nif (process.argv[2] === 'hook-throws') process.on('exit', () => { throw new Error('a hook that throws'); });\nif (process.argv[2] === 'throw') throw new Error('a red suite'); else if (process.argv[2] !== 'natural') process.exit(0);\n`;
-  const twinUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC, 'twin')).href;
+  const twinUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC, 'twin', { same: true })).href;
   const oldUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC.replace(MOVE, ''), 'old-order')).href;
   const noFinUrl = pathToFileURL(M9d.write('scripts/scratch.mjs', SCRSRC.replace(FIN, 'return emit.call(this, event, ...rest);'), 'no-finally')).href;   // the move kept, the finally gone (a copy that parses)
   const runOrder = (file, urls, road) => new Promise((res) => {

@@ -2334,11 +2334,11 @@ await section(async () => {
   const { mutantCopies } = await import(path.resolve('scripts/mutant-copy.mjs'));
   const M = mutantCopies('arch51', REPO);
   const orig = fs.readFileSync('src/server/spend-guard.js', 'utf8');
-  const loaded = (() => { try { return M.load('src/server/spend-guard.js', orig); } catch (e) { return e; } })();
+  const loaded = (() => { try { return M.load('src/server/spend-guard.js', orig, 'as-is', { same: true }); } catch (e) { return e; } })(); // an unpatched copy on purpose (B-0d3e: said)
   const body = fs.readFileSync(M.files[0], 'utf8');
   ok(typeof loaded.create === 'function' && body.split('\n').length === orig.split('\n').length && !path.relative(REPO, M.files[0]).startsWith('src'),
     '§51 mutant-copy: a CJS copy of a module with relative requires loads, keeps every line number, and is written outside the checkout');
-  const esm = M.write('src/lib/chat-view.js', fs.readFileSync('src/lib/chat-view.js', 'utf8'));
+  const esm = M.write('src/lib/chat-view.js', fs.readFileSync('src/lib/chat-view.js', 'utf8'), 'as-is', { same: true });
   const eb = fs.readFileSync(esm, 'utf8');
   ok(esm.endsWith('.mjs') && !/from\s*['"]\.\.?\//.test(eb) && /from "file:\/\//.test(eb),
     '§51 mutant-copy: an ESM copy has every relative specifier rewritten to the real file\'s URL');

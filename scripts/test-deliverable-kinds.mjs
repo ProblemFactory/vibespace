@@ -112,7 +112,7 @@ console.log('— ⑨ CONTROLS');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-deliverable-kinds-'));
 process.on('exit', () => { try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { } });
 const afSrc = read('src/artifacts.js');
-const afCopy = (tag, from, to) => { if (!afSrc.includes(from)) return null; const d = path.join(scratch, tag, 'src'); fs.mkdirSync(d, { recursive: true }); for (const f of fs.readdirSync(path.join(repo, 'src')).filter((x) => /\.js$/.test(x))) fs.copyFileSync(path.join(repo, 'src', f), path.join(d, f)); fs.writeFileSync(path.join(d, 'artifacts.js'), afSrc.replace(from, to)); return require(path.join(d, 'artifacts.js')); };
+const afCopy = (tag, from, to) => { if (!afSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const d = path.join(scratch, tag, 'src'); fs.mkdirSync(d, { recursive: true }); for (const f of fs.readdirSync(path.join(repo, 'src')).filter((x) => /\.js$/.test(x))) fs.copyFileSync(path.join(repo, 'src', f), path.join(d, f)); fs.writeFileSync(path.join(d, 'artifacts.js'), afSrc.replace(from, to)); return require(path.join(d, 'artifacts.js')); };
 const byTitle = afCopy('title', "  const e = FILE_TYPES[extOf(r.path)];", "  if (/design|设计/i.test(String(r.name || ''))) return 'design';\n  const e = FILE_TYPES[extOf(r.path)];");
 ok(byTitle && byTitle.deliverableKind(row({ kind: 'doc', path: H + '/设计稿.md', name: '设计稿 design.md' })) === 'design', 'CONTROL a kind guessed from the title ⇒ the «设计稿 design.md» leg is RED');
 const anyPage = afCopy('anypage', "  if (r.presented || (r.kind === 'page' && (r.state === 'published'", "  if (r.presented || (r.kind === 'page' || (r.state === 'published'");
@@ -120,7 +120,7 @@ ok(anyPage && anyPage.deliverableKind(row({ kind: 'page', path: H + '/site/index
 const media = afCopy('media', "  if (cat === 'image') return 'image';", "  if (cat === 'image' || cat === 'audio' || cat === 'video') return 'image';");
 ok(media && media.deliverableKind(row({ kind: 'media', path: H + '/s.mp3' })) === 'image', 'CONTROL sound counted a picture ⇒ the mp3 leg is RED');
 const mSrc = read('src/lib/artifacts-list-model.js');
-const mCopy = async (tag, from, to) => { if (!mSrc.includes(from)) return null; const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, mSrc.replace(from, to)); return import(pathToFileURL(f).href); };
+const mCopy = async (tag, from, to) => { if (!mSrc.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, mSrc.replace(from, to)); return import(pathToFileURL(f).href); };
 const rawKind = await mCopy('raw', "export const kindKey = (r) => (r && KIND_ORDER.includes(r.dk) ? r.dk : (r && RAW_KIND[r.kind]) || 'file');", "export const kindKey = (r) => (r && RAW_KIND[r.kind]) || 'file';");
 ok(rawKind && rawKind.listPlan(V, { group: 'kind' }).sections.filter((s) => s.head.group === 'kind').map((s) => s.head.label + ' ' + s.head.count).join(' · ') !== heads.join(' · '), 'CONTROL the list grouping by the RAW kind (not dk) ⇒ the groups leg is RED');
 const noAlone = await mCopy('noalone', "  const all = alone ? railRows([...items, ...code], alone) : [...items, ...code];", "  const all = [...items, ...code];");

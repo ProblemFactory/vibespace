@@ -121,7 +121,7 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
   // A lane that changes a provider's behaviour ON PURPOSE re-points BASE at its own base commit (the diff names the field).
   if (!baseSrc) console.log(`  SKIP ③ the differential — ${BASE} is not in this checkout (a shallow clone)`);
   else ok(!baseSrc.includes(NEEDLE), `③ the pre-move manager is readable (${BASE}:src/mounts.js, no provider list)`);
-  const OLD = baseSrc ? MC.load('src/mounts.js', baseSrc, 'base').MountManager : null;
+  const OLD = baseSrc ? MC.load('src/mounts.js', baseSrc, 'base', { same: true }).MountManager : null;
   const ADDS = [
     { type: 's3', endpoint: 'https://s3.example', bucket: 'b', prefix: '/p/q/', accessKey: 'AK', secretKey: 'SK', sessionToken: 'ST' },
     { type: 'drive', token: 'Paste: {"access_token":"a","expiry":"x"} done', driveFolder: '/F/', driveMode: 'shared-drive', teamDriveId: ' TD ', clientId: 'cid', clientSecret: 'cs' },

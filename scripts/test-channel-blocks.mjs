@@ -490,7 +490,7 @@ const SRC = {
 console.log('⑫ controls: a patched copy per rule turns its own leg red');
 {
   const M = mutantCopies('chan-blocks', REPO);
-  const mutate = (rel, from, to) => { const s = read(rel); if (!s.includes(from)) return null; return s.replace(from, to); };
+  const mutate = (rel, from, to) => { const s = read(rel); if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return s.replace(from, to); };
   // (a) safeHref without the scheme check
   {
     const src = mutate('src/channel-record.js', "  if (!LINK_SCHEMES.includes(u.protocol)) return null;\n", '');
@@ -678,7 +678,7 @@ const LINEAR_BOUND_X = 150;
 // CONTROLS for the verify round's rules: each patched copy turns its own leg red
 {
   const M = mutantCopies('chan-blocks-vr', REPO);
-  const mutate = (rel, from, to) => { const s = read(rel); if (!s.includes(from)) return null; return s.replace(from, to); };
+  const mutate = (rel, from, to) => { const s = read(rel); if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); return s.replace(from, to); };
   // (i) mailto without the address-only rule (the old "one @" regex)
   {
     const src = mutate('src/channel-record.js', "  if (u.protocol === 'mailto:') return MAILTO_RE.test(s) ? s : null;", "  if (u.protocol === 'mailto:') return /^mailto:[^@\\s]+@[^@\\s]+$/i.test(s) ? s : null;");

@@ -144,7 +144,7 @@ const CASES = {
 };
 const keeperTable = async (file) => Object.fromEntries(await Promise.all(Object.entries(CASES).map(async ([k, f]) => [k, await stopCase(file, f, k + '-' + path.basename(file))])));
 // mutants on the same table: a copy that compares nothing, and a copy that signals an unprovable (birth-less) record
-const mutKeeper = (name, from, to) => { const t = keeperSrc.replace(from, to); const f = path.join(tmp, name); fs.writeFileSync(f, t); return t !== keeperSrc ? f : null; };
+const mutKeeper = (name, from, to) => { const t = keeperSrc.replace(from, to); if (t === keeperSrc) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); const f = path.join(tmp, name); fs.writeFileSync(f, t); return f; };
 const mNoCompare = mutKeeper('keeper-no-compare', "    if (v === 'same') return true;", '    return true;');
 const mUnprovable = mutKeeper('keeper-unprovable', "  const ok = role === 'child' ? isOurChildPid(pid, m) : isKeeperPid(pid);", '  const ok = true;');
 const [KT, MT1, MT2] = await Promise.all([keeperTable(KEEPER), mNoCompare && keeperTable(mNoCompare), mUnprovable && keeperTable(mUnprovable)]); // stop waits 2.5 s — the 12 stops run at once

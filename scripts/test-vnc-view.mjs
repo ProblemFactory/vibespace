@@ -415,7 +415,7 @@ console.log('§9 lane desktop-keepalive K2/K3 (userW inc-muoshmqn-dect: two Past
   const old = spawnSyncGit(['show', 'b924041f:src/lib/picture-shell.js']);
   if (old === null) console.log('  SKIP (LOUD): git cannot read b924041f here — the .199 proof needs it');
   else {
-    const OLD = await import(M9.write('src/lib/picture-shell.js', old, 'old-199', { esm: true }));
+    const OLD = await import(M9.write('src/lib/picture-shell.js', old, 'old-199', { esm: true, same: true }));
     // (a) a plain-http page (no clipboard API): the box opens, NO toast
     toasts.length = 0;
     const o1 = OLD.createPictureShell(host(), {}); o1.emit('connected');

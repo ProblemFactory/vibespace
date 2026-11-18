@@ -639,7 +639,7 @@ try {
     // both copies live OUTSIDE the checkout (scripts/mutant-copy.mjs, test-architecture §51); their
     // relative imports (inbox-reply.js, inbox-origin.js) are rewritten to the real files' URLs
     const MUT = mutantCopies('inbox-reply-ui-14', repo);
-    const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real');
+    const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real', { same: true });
     const patchedF = MUT.write('src/lib/user-todos-layout.js', src.split(FILTER).join('true'), 'patched');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑭ ' })) check(row.name, row.pass, row.detail);
     {
@@ -913,7 +913,7 @@ try {
     const FILTER = "shown: f === 'all' || f === origin";
     check('the PURE module carries the filter the panel hides by', src.includes(FILTER) && fs.readFileSync(path.join(repo, 'src/lib/user-todos-panel.js'), 'utf8').includes("const disp = g.shown ? '' : 'none';"));
     const MUT = mutantCopies('inbox-reply-ui-19', repo); // outside the checkout (§51), as ⑭
-    const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real');
+    const realF = MUT.write('src/lib/user-todos-layout.js', src, 'real', { same: true });
     const patchedF = MUT.write('src/lib/user-todos-layout.js', src.split(FILTER).join('shown: true'), 'patched');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2, label: '⑲ ' })) check(row.name, row.pass, row.detail);
     {

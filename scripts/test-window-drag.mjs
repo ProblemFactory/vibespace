@@ -586,7 +586,7 @@ console.log('§3 controls — patched copies outside the tree (scripts/mutant-co
     const tgUrl = pathToFileURL(tgPath).href;
     const text = apply(winSrc, PATCH_WIN).replace("from './drag-feed.js'", `from ${JSON.stringify(dfUrl)}`).replace("from './tab-group.js'", `from ${JSON.stringify(tgUrl)}`);
     ok(missed.length === 0 && text.includes(dfUrl) && text.includes(tgUrl), 'the pre-capture control found every line it reverts (the capture, the feed names, the shield, both no-button rules) and the window copy imports the patched feed and tab-group copies', missed);
-    const dePath = MUT.write('src/lib/drag-end.js', deSrc, 'real-for-prefix', { esm: true }); copies.push(dePath);
+    const dePath = MUT.write('src/lib/drag-end.js', deSrc, 'real-for-prefix', { esm: true, same: true }); copies.push(dePath);
     const WM = await loadWith(dePath, 'prefix-feed', text);
     const wm = mkWm(WM);
     // the drag released over the iframe: the mouseup reaches nobody of ours

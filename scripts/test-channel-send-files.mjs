@@ -166,12 +166,12 @@ const MC = mutantCopies('send-files', REPO);
 // lane dc-channels-seams: the engine's patched copy is the engine + its three family files as ONE closed world
 async function mutantEngine(from, to, judge, tag) {
   const s = engineSource(REPO);
-  if (!s.includes(from)) return null;
+  if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   return judge(require(MC.write('src/server/channels-engine.js', s.replace(from, to), tag)));
 }
 async function mutant(file, from, to, judge, tag) {
   const s = fs.readFileSync(path.join(REPO, 'src', file), 'utf8');
-  if (!s.includes(from)) return null;
+  if (!s.includes(from)) throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`);
   return judge(require(MC.write(`src/${file}`, s.replace(from, to), tag)));
 }
 
@@ -861,7 +861,7 @@ ok(rej.length === 0, `the words reach the agent (real engine over the Slack adap
 {
   const keepR = setInterval(() => {}, 1000);
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
-  const copy = (src, file, from, to, tag) => (src.includes(from) ? require(MC.write(`src/channels/${file}`, src.replace(from, to), tag)) : null);
+  const copy = (src, file, from, to, tag) => (src.includes(from) ? require(MC.write(`src/channels/${file}`, src.replace(from, to), tag)) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const redBy = async (M, judge, pins) => { if (!M) return null; const r = await judge(M); return pins.filter((p) => r[p]); };
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const NO_RETRY = '        if (!next.go) throw stoppedUpload(e, n, next.stop);';
@@ -1198,7 +1198,7 @@ ok(!zw['m2·lark'], `m2 lark: a pace that eats the window before the retry's upl
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
   const both = (pS, pL, tag) => {
     const s2 = pS(SS), l2 = pL(LS);
-    return s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`)), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`)) } : null;
+    return s2 && l2 ? { S: require(MC.write('src/channels/slack.js', s2, `${tag}-slack`, { same: s2 === SS })), L: require(MC.write('src/channels/lark.js', l2, `${tag}-lark`, { same: l2 === LS })) } : null; // a side left as it is (`(src) => src`) says so (B-0d3e); `sub` answers null when its anchor is gone
   };
   const sub = (from, to) => (src) => (src.includes(from) ? src.replace(from, to) : null);
   const ASK_ON = '{ convId, windowOf: () => windowOf(ASK_WINDOW) }';

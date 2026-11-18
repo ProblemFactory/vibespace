@@ -202,7 +202,7 @@ const routeHub = async (TaskStore, mirrorOpts) => {
   const shown = spawnSync('git', ['-C', REPO, 'show', 'c8aa8820:src/task-groups.js'], { encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 16 << 20 });
   if (shown.status !== 0 || !shown.stdout) console.log(`  SKIP ④ CONTROL: the base store c8aa8820 is not in this checkout (a depth-1 clone: ${String(shown.stderr || shown.error || '').trim().slice(0, 120)})`);
   else {
-    const { TaskGroupManager: BaseStore } = mutantCopies('cli-call', REPO).load('src/task-groups.js', shown.stdout, 'base');
+    const { TaskGroupManager: BaseStore } = mutantCopies('cli-call', REPO).load('src/task-groups.js', shown.stdout, 'base', { same: true }); // a revision of the file: it may equal HEAD (B-0d3e)
     const H = await routeHub(BaseStore, {});
     const realWrite = fs.writeFileSync;
     fs.writeFileSync = function (p, ...rest) { if (String(p).startsWith(H.ctx) && /TASK\.md/.test(String(p))) { const until = Date.now() + 1200; while (Date.now() < until) { /* the stalled mount */ } } return realWrite.call(this, p, ...rest); };
