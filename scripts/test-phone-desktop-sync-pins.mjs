@@ -4,12 +4,11 @@
 //   ⑭ THE CAPTURE CENSUS (static): every call of a raw page capture (captureState / captureWindows / captureWin), of THE
 //      ONE CAPTURE (desktop-manager.js captureBuilt) and of recordFor in src/lib, grep-derived per enclosing method — a
 //      site the table does not name is RED (a new back door), so is a dead row; the RED control runs it on the base
-// It reads every src/lib file BY NAME (src/lib/app.js, src/lib/desktop-manager.js, … — the walk names the directory), so ci.mjs's affected
+// It reads every src/lib file BY NAME (src/lib/app.js, src/lib/desktop-manager.js, … — the walk names the directory 'src/lib'), so ci.mjs's affected
 // rule selects this suite on a change of any of them.
 // Run: node scripts/test-phone-desktop-sync-pins.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 1500) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
@@ -67,20 +66,16 @@ const captureCensus = (srcs) => {
   const unpinned = CAPTURE_SITES.filter((r) => r[5] && tally.has(rowKey(r)) && !(bodies.get(`${r[0]} · ${r[1]}`) || '').includes(r[5])).map(rowKey);
   return { sites, unknown, dead, unpinned };
 };
-const libSources = (ref) => {
+const libSources = () => {   // this tree's src/lib, file by file (the heavy's git-base branch stays with its ⑩–⑬ controls)
   const out = [];
-  if (!ref) {
-    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (e.name.endsWith('.js')) out.push([path.relative(path.join(repo, 'src', 'lib'), f), fs.readFileSync(f, 'utf8')]); } };
-    walk(path.join(repo, 'src', 'lib'));
-  } else {
-    try { for (const f of execFileSync('git', ['-C', repo, 'ls-tree', '-r', '--name-only', ref, 'src/lib'], { encoding: 'utf8' }).split('\n').filter((x) => x.endsWith('.js'))) out.push([f.slice('src/lib/'.length), execFileSync('git', ['-C', repo, 'show', `${ref}:${f}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })]); } catch { return null; }
-  }
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (e.name.endsWith('.js')) out.push([path.relative(path.join(repo, 'src/lib'), f), fs.readFileSync(f, 'utf8')]); } };
+  walk(path.join(repo, 'src/lib'));
   return out;
 };
 
 if (want(14)) {
   console.log('— ⑭ THE CAPTURE CENSUS: every raw capture / ONE-capture / recordFor call site in src/lib');
-  const c = captureCensus(libSources(null));
+  const c = captureCensus(libSources());
   console.log('    ⑭ sites: ' + c.sites.join(' | '));
   ok(c.sites.length >= CAPTURE_SITES.length && !c.unknown.length, `⑭: every capture call site in src/lib (${c.sites.length}) is THE ONE CAPTURE, a raw primitive's own body, a record through it, or a pinned no-desktop-manager fallback — none unnamed`, J(c.unknown));
   ok(!c.dead.length && !c.unpinned.length, '⑭: no dead row; every pinned row\'s method holds its pin (the choke ends in captureForViewport, its callers pass the held record)', J({ dead: c.dead, unpinned: c.unpinned }));
@@ -88,9 +83,15 @@ if (want(14)) {
   // RED CONTROL (lane lg-text-legs-2): a back door PLANTED in a copy of desktop-manager.js's text — a raw capture in a method the table
   // does not name — is named by the census (the heavy's control read the fix's base commit through git; on this tree that base is
   // gone from history, so it only ever skipped — and a history read is §2j's off-master census's business)
-  const planted = libSources(null).map(([f, t]) => [f, f === 'desktop-manager.js' ? t.replace(/\n}\s*$/, '\n  _plantedCapture() {\n    return this.captureWindows();\n  }\n}\n') : t]);
+  const planted = libSources().map(([f, t]) => [f, f === 'desktop-manager.js' ? t.replace(/\n}\s*$/, '\n  _plantedCapture() {\n    return this.captureWindows();\n  }\n}\n') : t]);
   const pc = captureCensus(planted);
   ok(planted.some(([f, t]) => f === 'desktop-manager.js' && t.includes('_plantedCapture()')) && pc.unknown.some((k) => /desktop-manager\.js · _plantedCapture · captureWindows/.test(k)), '⑭ RED control: a raw capture planted in a copy of desktop-manager.js is a site the table does not name (the census goes red on it)', J(pc.unknown));
+  // RED CONTROL, THE OTHER DIRECTION (主开发's 07:14Z verdict — the heavy's base control was red both ways): a PINNED row's needle removed in
+  // a copy of layout.js — savePreset captures the page itself again, the pre-fix shape; the call site stays — is named «unpinned»
+  const PIN = 'const state = dm?.presetState ? dm.presetState() : this.captureState();';
+  const lib = libSources(), unpin = lib.map(([f, t]) => [f, f === 'layout.js' ? t.replace(PIN, 'const state = this.captureState();') : t]);
+  const uc = captureCensus(unpin);
+  ok(lib.some(([f, t]) => f === 'layout.js' && t.split(PIN).length === 2) && uc.unpinned.includes('layout.js · savePreset · captureState') && !uc.unknown.length, '⑭ RED control (the other direction): savePreset\'s pin removed in a copy of layout.js — the census names the row «unpinned»', J({ unpinned: uc.unpinned, unknown: uc.unknown }));
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''})`);

@@ -1,6 +1,5 @@
 // tool_progress must never be treated as a subagent message (2.227.7).
 // Real record shape captured from a live stream buffer.
-import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(new URL('../server.js', import.meta.url));
