@@ -720,9 +720,6 @@
   "src/lib/file-explorer.js": [
    ".status"
   ],
-  "src/lib/chat-renderers.js": [
-   ".outcome"
-  ],
   "src/lib/sidebar-tasks.js": [
    ".status"
   ],
