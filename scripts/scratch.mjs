@@ -599,7 +599,10 @@ export function endRootedProcesses(root, { signal = 'SIGKILL', procRoot = '/proc
 /** The env names a vibespace-device daemon takes its root from (src/agentd/agentd.js ROOT: VIBESPACE_DEVICE_ROOT, else
  *  VIBESPACE_AGENTD_ROOT, else ~/.vibespace/agentd under HOME) — both kept by agent-env.js daemonEnv across a re-exec. */
 export const DAEMON_ROOT_ENV = Object.freeze(['VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT']);
-const DAEMON_ARGV = /(?:^|\/)(?:vibespace-)?agentd\.js$/;
+/** A daemon's argv (the bundle it runs) and its comm (vibespace-device, cut to 15 bytes by the kernel) — exported so a suite that
+ *  ends a daemon by its own pid judges it by THIS rule, never a copy (B-b403 cure 3). */
+export const DAEMON_ARGV = /(?:^|\/)(?:vibespace-)?agentd\.js$/;
+export const DAEMON_COMM = 'vibespace-devic';
 /** B-442c (2026-10-02, the 16:23 OOM): END THE DAEMON(S) OF ONE DAEMON ROOT, MID-RUN — and nothing else its server started
  *  (a suite restarting its server over a fresh daemon keeps its dtach sessions). A daemon = a process whose
  *  VIBESPACE_DEVICE_ROOT / VIBESPACE_AGENTD_ROOT lies in `root` AND that is one (comm `vibespace-devic…`, or an argv
@@ -623,7 +626,7 @@ export function endDaemonsOf(root, { signal = 'SIGKILL', procRoot = '/proc', pas
       if (!DAEMON_ROOT_ENV.some((n) => under((env.find((kv) => kv.startsWith(n + '=')) || '').slice(n.length + 1)))) continue;
       let comm = '', argv = []; try { comm = fs.readFileSync(`${procRoot}/${pid}/comm`, 'utf8').trim(); } catch { }
       try { argv = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split('\0'); } catch { }
-      if (comm.startsWith('vibespace-devic') || argv.some((a) => DAEMON_ARGV.test(a))) end(pid);
+      if (comm.startsWith(DAEMON_COMM) || argv.some((a) => DAEMON_ARGV.test(a))) end(pid);
     }
   }
   return [...hit];
