@@ -77,16 +77,70 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   // 1573 before), so the window is 3000 chars (.388, the train's seam; was 2000). The other sites sit 195–411 chars from
   // their mark. The window stays under every same-file gap between two builders (20 251 / 160 630 now) — ASSERTED below —
   // so it cannot borrow the NEXT builder's mark; the NEGATIVE CONTROL (a builder with no mark call is reported) is
-  // unchanged. Judging by method scope and order instead of a distance is backlog B-8f7a.
-  const WIN = 3000;
-  const scan = (src) => {
-    const out = { builders: 0, marks: (src.match(MARK) || []).length, unmarked: [] };
-    for (const b of src.matchAll(BUILDER)) {
-      out.builders++;
-      const win = src.slice(b.index, b.index + WIN);
-      if (!MARKED.test(win) && !DELEGATE.test(win)) {
-        out.unmarked.push(src.slice(0, b.index).split('\n').length);
+  // unchanged. Judging by method scope and order instead of a distance: B-8f7a, below.
+  // B-8f7a (lane bl-tests-e, 2026-11-17 — 主开发's ruling 2026-11-10 00:17Z on the .388 mirror's heavy 6/6 red): judged by METHOD
+  // SCOPE and ORDER, never by a character distance (a 2000- then 3000-char window reddened a train on moved text: midturn-order's
+  // counted-card lines pushed _onCreateMessage's builder 1573 → 2056 chars from its mark, the law intact). For each builder call:
+  // its ENCLOSING function (brace depth back to the first `name(…) {` / `function …(…) {` / `=> {` that is no if / for / while /
+  // switch / catch), and inside it, after the builder, the mark (directly or through the swap method) must come BEFORE the first
+  // store or insert (`this._elements.set(`, `insertBefore(`, `appendChild(el`), with only element-less exits (`return;`,
+  // `return null;`) between the builder and the mark. A mark in ANOTHER method — the next one, however near — never counts.
+  // a store or an insert OF THE BUILDER'S OWN ELEMENT (the name its result is bound to — `el`, `newEl`): the index set, or any
+  // DOM placement that takes it (B-8f7a reader: `oldEl.replaceWith(newEl)`, `.append(el)` — the swap method's own insert)
+  const storeRe = (v) => new RegExp(`this\\._elements\\.set\\(|\\b(?:insertBefore|appendChild|append|prepend|replaceWith|replaceChildren|after|before)\\(\\s*${v.replace(/\$/g, '\\$')}\\b`, 'g');
+  // the source with strings, templates and comments blanked (same length) — braces inside them are not code
+  const maskOf = (src) => {
+    let out = '', k = 0;
+    const blank = (s) => s.replace(/[^\n]/g, ' ');
+    while (k < src.length) {
+      const c = src[k], n = src[k + 1];
+      if (c === '/' && n === '/') { const e = src.indexOf('\n', k); const j = e < 0 ? src.length : e; out += blank(src.slice(k, j)); k = j; continue; }
+      if (c === '/' && n === '*') { const e = src.indexOf('*/', k + 2); const j = e < 0 ? src.length : e + 2; out += blank(src.slice(k, j)); k = j; continue; }
+      if (c === "'" || c === '"' || c === '`') {
+        let j = k + 1, d = 0;
+        for (; j < src.length; j++) { const x = src[j]; if (x === '\\') { j++; continue; } if (c === '`' && x === '$' && src[j + 1] === '{') { d++; j++; continue; } if (c === '`' && d && x === '}') { d--; continue; } if (x === c && !d) break; if (x === '\n' && c !== '`') break; }
+        out += c + blank(src.slice(k + 1, j)) + (src[j] === c ? c : ''); k = src[j] === c ? j + 1 : j; continue;
       }
+      out += c; k++;
+    }
+    return out;
+  };
+  const NOT_FN = new Set(['if', 'for', 'while', 'switch', 'catch', 'with', 'return', 'typeof']);
+  const isFnHead = (m, k) => {   // m[k] === '{' — is it a function body?
+    const head = m.slice(Math.max(0, k - 400), k).replace(/\s+$/, '');
+    if (head.endsWith('=>')) return true;
+    if (!head.endsWith(')')) return false;
+    let d = 0, i = head.length - 1;
+    for (; i >= 0; i--) { if (head[i] === ')') d++; else if (head[i] === '(' && --d === 0) break; }
+    const word = (head.slice(0, i).match(/([A-Za-z_$][\w$]*)\s*$/) || [])[1];
+    return !!word && !NOT_FN.has(word);
+  };
+  const fnOf = (m, at) => {   // [open, close] of the function body that encloses `at`, or null
+    let d = 0, open = -1;
+    for (let k = at; k >= 0; k--) { const c = m[k]; if (c === '}') d++; else if (c === '{') { if (d > 0) d--; else if (isFnHead(m, k)) { open = k; break; } } }
+    if (open < 0) return null;
+    for (let k = open, e = 0; k < m.length; k++) { if (m[k] === '{') e++; else if (m[k] === '}' && --e === 0) return [open, k]; }
+    return null;
+  };
+  const firstAt = (re, s) => { re.lastIndex = 0; const x = new RegExp(re.source, 'g').exec(s); return x ? x.index : -1; };
+  const scan = (src) => {
+    const m = maskOf(src), out = { builders: 0, marks: (src.match(MARK) || []).length, unmarked: [], scopes: 0 };
+    for (const b of m.matchAll(BUILDER)) {
+      out.builders++;
+      const line = src.slice(0, b.index).split('\n').length, fn = fnOf(m, b.index);
+      if (!fn) { out.unmarked.push(`${line} (in no function)`); continue; }
+      out.scopes++;
+      const body = m.slice(b.index, fn[1]);
+      // the statement the builder sits in (from the last ; { } or case label before it): what its result is bound to, and
+      // whether the statement itself already carries the element out (`return …build(m)`, `this._elements.set(id, …build(m))`)
+      const head = m.slice(fn[0] + 1, b.index), stmt = head.slice(Math.max(head.lastIndexOf(';'), head.lastIndexOf('{'), head.lastIndexOf('}'), head.search(/case [^:]*:[^:]*$/)) + 1);
+      const bound = (stmt.match(/([A-Za-z_$][\w$]*)\s*=\s*[\w$.]*$/) || [])[1] || 'el';
+      if (/\breturn\b/.test(stmt) || /(?:this\._elements\.set|insertBefore|appendChild|append|prepend|replaceWith)\s*\([^)]*$/.test(stmt)) { out.unmarked.push(`${line} (the element leaves in the builder's own statement, before any mark)`); continue; }
+      const mk = Math.min(...[firstAt(MARKED, body), firstAt(DELEGATE, body)].filter((x) => x >= 0), Infinity), st = firstAt(storeRe(bound), body);
+      const exits = [...body.slice(0, Number.isFinite(mk) ? mk : body.length).matchAll(/\breturn\b\s*([^;\n}]*)/g)].map((x) => x[1].trim()).filter((e) => e && !/^(?:null|undefined|false)$/.test(e));
+      if (!Number.isFinite(mk)) out.unmarked.push(`${line} (no mark in its own method)`);
+      else if (st >= 0 && st < mk) out.unmarked.push(`${line} (stored / inserted before its mark)`);
+      else if (exits.length) out.unmarked.push(`${line} (an exit carries the element out before its mark: return ${exits[0]})`);
     }
     return out;
   };
@@ -94,18 +148,16 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   // to land in a new mixin file as in these two (chat-view-seek itself was
   // split out of chat-view, and that split is how this defect got in).
   const files = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f);
-  let builders = 0, marks = 0;
+  let builders = 0, marks = 0, scopes = 0;
   const unmarked = [];
   for (const f of files) {
     const r = scan(fs.readFileSync(path.join(repo, f), 'utf8'));
-    builders += r.builders; marks += r.marks;
+    builders += r.builders; marks += r.marks; scopes += r.scopes;
     for (const line of r.unmarked) unmarked.push(`${f}:${line}`);
   }
-  // THE WINDOW'S PREMISE (.388): no two builders in one file sit closer than WIN — else a site with no mark of its own
-  // could pass on the NEXT builder's call
-  const gaps = files.flatMap((f) => { const at = [...fs.readFileSync(path.join(repo, f), 'utf8').matchAll(BUILDER)].map((m) => m.index); return at.slice(1).map((x, i) => ({ f, gap: x - at[i] })); });
-  check(`…the window (${WIN} chars) is under every same-file gap between two builders, so it cannot borrow the next builder's mark`,
-    gaps.every((g) => g.gap > WIN), JSON.stringify(gaps));
+  // B-8f7a: the census FOUND each builder's own method (the window and its premise — no two builders closer than it — are gone)
+  check(`…each builder's enclosing method was found (${scopes} of ${builders}) — the mark is judged inside it, by order, at any distance`,
+    builders >= 4 && scopes === builders, `scopes=${scopes} builders=${builders}`);
   check(`every path that BUILDS an element for a message re-derives its marks, directly or through the ONE swap method (${builders} builders, ${marks} direct call sites)`,
     builders >= 4 && marks >= 1 && unmarked.length === 0,
     unmarked.length ? 'unmarked builders: ' + unmarked.join(', ') : `builders=${builders} marks=${marks}`);
@@ -122,19 +174,41 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
     }
     return null;
   })();
-  check('…and the ONE swap method re-derives the marks itself — the delegation the guard accepts is not a hole in it',
-    !!swapBody && MARKED.test(swapBody) && /oldEl\.replaceWith\(newEl\)/.test(swapBody),
+  check('…and the ONE swap method re-derives the marks itself, BEFORE it places the element (B-8f7a: its mark precedes `oldEl.replaceWith(newEl)`) — the delegation the guard accepts is not a hole in it',
+    !!swapBody && MARKED.test(swapBody) && /oldEl\.replaceWith\(newEl\)/.test(swapBody) && swapBody.search(MARKED) < swapBody.indexOf('oldEl.replaceWith(newEl)'),
     swapBody ? swapBody.slice(0, 160) : 'no _swapMessageEl found');
   // NEGATIVE CONTROL for the guard itself — a matcher that can only ever say
   // "clean" is not a guard. The exact shape round 3 found (a builder switch
   // with no mark call) must be REPORTED, and the fixed shape must not be.
-  const bad = scan("switch(m.role){case 'assistant': el = this._renderers.renderAssistantMsg(m); break;}\nel.classList.add('chat-gap-msg');\nreturn el;");
-  const good = scan("switch(m.role){case 'assistant': el = this._renderers.renderAssistantMsg(m); break;}\nthis._applyElementMarks(el, m);\nreturn el;");
-  const viaSwap = scan("switch(m.role){case 'assistant': el = this._renderers.renderAssistantMsg(m); break;}\nthis._swapMessageEl(oldEl, el, id);\nreturn el;");
+  // (B-8f7a: each plant is a METHOD now — the census judges inside the builder's own function)
+  const M = (body) => `_build(m, oldEl, id) {\n  let el = null;\n  switch (m.role) { case 'assistant': el = this._renderers.renderAssistantMsg(m); break; default: return; }\n${body}\n}\n`;
+  const bad = scan(M("  el.classList.add('chat-gap-msg');\n  return el;"));
+  const good = scan(M("  this._applyElementMarks(el, m);\n  this._elements.set(m.id, el);\n  return el;"));
+  const viaSwap = scan(M("  this._swapMessageEl(oldEl, el, id);\n  return el;"));
   check('NEGATIVE CONTROL: the guard actually detects an unmarked builder (and passes both the marked twin and the one that delegates)',
     bad.builders === 1 && bad.unmarked.length === 1 && good.builders === 1 && good.unmarked.length === 0
     && viaSwap.builders === 1 && viaSwap.unmarked.length === 0,
     JSON.stringify([bad, good, viaSwap]));
+  // B-8f7a's laws, each planted: far is fine (the moved-text case), the NEXT method's mark never counts, a store before the
+  // mark is red, an exit carrying the element before the mark is red, an element-less exit is not, braces in strings are text
+  const far = scan(M("  const pad = 1;\n" + "  this._noteCount(m); // counted-card lines\n".repeat(120) + "  if (!el) { this._log('none'); return; }\n  this._applyElementMarks(el, m);\n  this._elements.set(m.id, el);"));
+  const nextMethod = scan(M("  return el;") + "_other(el, m) {\n  this._applyElementMarks(el, m);\n}\n");
+  const storedFirst = scan(M("  this._elements.set(m.id, el);\n  this._applyElementMarks(el, m);"));
+  const escapes = scan(M("  if (m.quick) return el;\n  this._applyElementMarks(el, m);\n  return el;"));
+  const braces = scan(M("  const t = '}{ } }';\n  const u = `${'}'} {`;\n  this._applyElementMarks(el, m); // } a brace in a comment\n  return el;"));
+  const N = (body) => `_swap(m, oldEl, id) {\n  let newEl = null;\n  switch (m.role) { case 'assistant': newEl = this._renderers.renderAssistantMsg(m); break; }\n${body}\n}\n`;
+  const replacedFirst = scan(N("  oldEl.replaceWith(newEl);\n  this._applyElementMarks(newEl, m);"));
+  const appendedFirst = scan(M("  this.list.append(el);\n  this._applyElementMarks(el, m);"));
+  const otherAppend = scan(M("  el.append(this._badge(m));\n  this._applyElementMarks(el, m);\n  this._elements.set(m.id, el);"));
+  const wrapReturn = scan("_quick(m) {\n  if (m.quick) return this._renderers.renderAssistantMsg(m);\n  const el = this._renderers.renderAssistantMsg(m);\n  this._applyElementMarks(el, m);\n  return el;\n}\n");
+  const wrapStore = scan("_store(m, id) {\n  this._elements.set(id, this._renderers.renderAssistantMsg(m));\n}\n");
+  check('B-8f7a: by SCOPE and ORDER — a mark far from its builder (5 000+ chars) in the same method passes; the next method\'s mark, a store or ANY placement of the built element before the mark (replaceWith, append), an exit carrying it, and a builder whose own statement returns or stores it are each red; another element\'s append is not; braces in strings and comments are text',
+    far.unmarked.length === 0 && far.builders === 1 && nextMethod.unmarked.length === 1 && /no mark in its own method/.test(nextMethod.unmarked[0])
+    && storedFirst.unmarked.length === 1 && /stored/.test(storedFirst.unmarked[0]) && escapes.unmarked.length === 1 && /return el/.test(escapes.unmarked[0])
+    && braces.unmarked.length === 0 && braces.builders === 1
+    && replacedFirst.unmarked.length === 1 && appendedFirst.unmarked.length === 1 && otherAppend.unmarked.length === 0
+    && wrapReturn.unmarked.length === 1 && /own statement/.test(wrapReturn.unmarked[0]) && wrapStore.unmarked.length === 1,
+    JSON.stringify({ far: far.unmarked, nextMethod: nextMethod.unmarked, storedFirst: storedFirst.unmarked, escapes: escapes.unmarked, braces: braces.unmarked, replacedFirst: replacedFirst.unmarked, appendedFirst: appendedFirst.unmarked, otherAppend: otherAppend.unmarked, wrapReturn: wrapReturn.unmarked, wrapStore: wrapStore.unmarked }));
 }
 
 // ── ⓪ b SESSION DEATH RETIRES EVERY CLIENT-HELD "RIGHT NOW" CLAIM ───────
