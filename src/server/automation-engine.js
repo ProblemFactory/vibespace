@@ -686,7 +686,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   }
   /** «WHAT IT MAY USE» (Session Properties, unit what-it-may-use): every live key grant judged for ONE conversation by the
    *  same calls keysFor makes — THE model's `admits` over the grant's use row (its own conversation, a Task Group, everyone,
-   *  minus the members left out), a spent once-grant held by nobody — answered as may-use-model rows: the key's NAME, never a
+   *  minus the members left out), a spent once-grant held by nobody — over the LIVE grants as the door reads them (liveGrants:
+   *  a once-grant from before a vault lock or a restart is spent; restack onto 2.369.410, its B-3190 follow-up) — answered as
+   *  may-use-model rows: the key's NAME, never a
    *  value; the refusals a person must see (a 「除了」, Task Groups that could not be read, a row this release cannot read). */
   function mayUseFor(facts = {}) {
     db = read();
@@ -694,7 +696,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const out = [];
     for (const k of db.keys) {
       if (k.revokedAt) continue;
-      for (const g of db.grants) {
+      for (const g of liveGrants()) {
         if (g.keyId !== k.id || g.subject === 'external' || (g.mode === 'once' && g.spentAt)) continue;
         const row = A.useRowOf(g);
         const base = { door: 'automation-key-use', resource: String(g.id), name: String(k.name || k.id), detail: { mode: g.mode, keyId: String(k.id), scopes: Array.isArray(k.scopes) ? k.scopes.slice() : [] } };

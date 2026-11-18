@@ -22,12 +22,15 @@
 //      tick — RED: the whole-row rule), MUST 2 «may request» is its own answer (RED: a lister that drops the level), MUST 3 exits
 //      and windows never cut, SHOULD e a 「除了」 said behind three granted rows + sums of the granted only, SHOULD a a stopped
 //      conversation from the KEPT rows inside the budget (a sweep only when none; paused said), SHOULD b an untick says why
+//   ⑭ THE RESTACK ONTO 2.369.410: the key lister reads the door's LIVE grants (a once-grant from before a restart is not
+//      listed; RED: a lister over the raw store) — the release's B-3190 follow-up made the key door read them
 //   ⑧ THE FORM'S ROWS BYTE FOR BYTE: src/lib/may-use-rows.js renders what the released form's closures rendered (a frozen copy of
 //      2.369.407's, scripts/fixtures/may-use/) over the same rows — the lift changed no byte
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { scratch } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -336,6 +339,39 @@ console.log('— ⑫ CURE r1 SHOULD a — a STOPPED conversation: the rows the s
   ok(!pa.ok && pa.code === 'list_paused' && /paused/.test(pa.error), '⑫ discovery paused and nothing kept ⇒ said by name (list_paused), never a sweep', pa);
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok(/const k = S\.keptSessions\(\);/.test(wiring) && /if \(k\.rows\) return find\(k\.rows\); if \(k\.paused\) return \{ paused: true \};/.test(wiring), '⑫ the wiring reads the sessions route\'s keptSessions() first (routes/sessions)');
+}
+
+// ── ⑭ THE RESTACK ONTO 2.369.410 (主开发 20:03Z): the release's B-3190 follow-up made the key door judge its LIVE grants
+// (pickKey, useVerdict and keysFor read liveGrants(): a once-grant from before a vault lock or a restart is spent). The
+// unit's key lister follows the door's own reading — a once-grant from before a restart is not listed as granted.
+console.log('— ⑭ THE KEY DOOR, LIVE (restack onto 2.369.410): a once-grant from before a restart is not listed, as the door reads it');
+{
+  const AENG = require(path.join(REPO, 'src/server/automation-engine.js'));
+  const dir14 = scratch('may-use-keys'); fs.mkdirSync(dir14, { recursive: true });
+  const secrets = new Map();
+  const vault14 = { state: () => 'unlocked', onLock() {}, secretPut: (n, v) => { secrets.set(n, String(v)); return { ok: true }; }, secretGet: (n) => (secrets.has(n) ? { ok: true, value: Buffer.from(secrets.get(n)) } : { ok: false, code: 'not_found' }), secretDrop: (n) => { secrets.delete(n); return { ok: true }; } };
+  const LIM = { cwdRoots: ['/tmp'], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] };
+  const boot = (Mod) => Mod.create({ dataDir: dir14, vault: vault14, now: () => 1795000000000, verbs: {} });
+  const F14 = { conversationKeys: ['c14'], groupIds: [], groupsUnreadable: false };
+  const listed = (eng) => eng.mayUseFor(F14).filter((r) => r.ok).map((r) => r.name).sort();
+  const e1 = boot(AENG);
+  const kA = e1.mint({ name: 'always14', scopes: ['conversations.status'], limits: LIM, by: 'user' }), kO = e1.mint({ name: 'once14', scopes: ['conversations.status'], limits: LIM, by: 'user' });
+  const gA = kA.ok ? e1.grant(kA.key.id, ['session:c14'], { by: 'user' }) : null, gO = kO.ok ? e1.grant(kO.key.id, ['session:c14'], { by: 'user', mode: 'once' }) : null;
+  const before = listed(e1);   // this run's once-grant is live: listed
+  const e2 = boot(AENG);   // a restart — boot is a lock: the door counts the unspent once-grant as spent
+  const after = listed(e2), door = e2.keysFor({ conversationId: 'c14', groups: [] }).map((k) => k.name).sort();
+  ok(!!(gA && gA.ok && gO && gO.ok) && JSON.stringify(before) === '["always14","once14"]' && JSON.stringify(after) === '["always14"]' && JSON.stringify(door) === JSON.stringify(after),
+    '⑭ the key lister reads the door\'s LIVE grants: a once-grant from before a restart is not listed as granted — the same keys the door\'s own keysFor lists', { before, after, door });
+  // RED CONTROL — it proves its plant first: the walk over liveGrants() is in the lister once, and the copy walks the raw store
+  const ENGS = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf8');
+  const LIVE = "      for (const g of liveGrants()) {\n        if (g.keyId !== k.id || g.subject === 'external' || (g.mode === 'once' && g.spentAt)) continue;";
+  const STORE = LIVE.replace('for (const g of liveGrants()) {', 'for (const g of db.grants) {');
+  const planted = ENGS.split(LIVE).length === 2 ? ENGS.replace(LIVE, STORE) : null;
+  ok(!!planted && planted.split(STORE).length === 2 && planted.split(LIVE).length === 1, '⑭ CONTROL plant: the lister\'s walk over liveGrants() stands once in automation-engine.js, and the copy walks the raw store there instead');
+  const MC14 = mutantCopies('may-use-keys', REPO);
+  const red = planted ? listed(boot(MC14.load('src/server/automation-engine.js', planted, 'keys-store'))) : null;
+  ok(!!red && red.includes('once14'), '⑭ RED CONTROL: a lister over the raw store lists the dead once-grant as granted (the door refuses it)', red);
+  for (const r of copiesCensus(MC14.files, MC14.dir, REPO, { minCopies: 1, label: '⑭ ' })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
