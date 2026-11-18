@@ -186,9 +186,9 @@ console.log('\n§2 tier hygiene');
     ok(r.problems.some((p) => /heavy by THE TIER RULE, over or not/.test(p)), 'NEG: an over on a row that boots a server is red (a server / browser / binary row is heavy, over or not)', r.problems); }
   const slowRows = fast.filter((s) => { const f = fastRuleFindings(s, ''); return f.kind !== 'EXCEPTION' && f.measuredMs >= FAST_MAX_MS; }).map((s) => s.name).sort();
   const overRows = fast.filter((s) => s.over !== undefined).map((s) => s.name).sort();
-  // the debt count's bound: 12 since lane fast-tier-ratchet (2026-10-20); 12 → 14 (B-e601, 2026-11-18): the readings ALONE on the test machine
-  // put five more rows over 10 s (9 at the release + 5 = 14), each with its over naming B-54a9 — the bound falls back as those debts are paid
-  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 14,
+  // the debt count's bound: 12 since lane fast-tier-ratchet (2026-10-20) — B-e601 r2 (the coordinator, 23:23Z): it STAYS 12; a row
+  // over 10 s leaves (a heavy twin, or cut) before the bound moves
+  ok(JSON.stringify(slowRows) === JSON.stringify(overRows) && overRows.length <= 12,
     `the over-list == the fast rows ≥ 10 s by their stated time (${overRows.length}: ${overRows.join(', ') || 'none'}) — no silent slow row, no paid debt kept`);
   for (const s of fast.filter((x) => x.over !== undefined)) console.log(`      over · ${s.name} · ${(fastRuleFindings(s, '').measuredMs / 1000).toFixed(1)} s · ${s.over}`);
   // MEASURED AGAINST STATED (B-eedd): the rule above judges the STATED time, so a whole green tier records its readings

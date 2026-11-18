@@ -71,11 +71,18 @@ for (const rel of trackedFiles(REPO, 'data/bin')) {
   }
 }
 
+// B-e601 r2 (the coordinator's ruling (A), 2026-11-18): ONE read per server-side file. About a dozen passes below each read
+// the ~1 100 files of `files` afresh (src + server.js + data/bin, ~41 MB); they read the SAME bytes, so each is read once here
+// (a failed read is kept and thrown again: every pass keeps its own catch). Only the whole-tree passes use it — a mutant
+// copy or a scratch file is always read from disk.
+const SRC_TEXT = new Map();
+const readSrc = (f) => { let t = SRC_TEXT.get(f); if (t === undefined) { try { t = fs.readFileSync(f, 'utf8'); } catch (e) { t = e; } SRC_TEXT.set(f, t); } if (t instanceof Error) throw t; return t; };
+
 // ── 1+2: request constructions near a vendor string, per file ──
 // A "construction" = a vendor endpoint within ±4 lines of a request primitive.
 const constructions = {}; // rel → count
 for (const f of files) {
-  let text; try { text = fs.readFileSync(f, 'utf-8'); } catch { continue; }
+  let text; try { text = readSrc(f); } catch { continue; }
   const rel = path.relative(REPO, f);
   if (rel.startsWith('data/bin/vibespace-agentd')) continue; // asserted separately below
   const lines = text.split('\n');
@@ -153,7 +160,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
     const NAME = new RegExp(`\\b(?:${urlExportsOf(vm).join('|')})\\b`), stem = path.basename(vm, '.js');
     return Object.entries(texts).filter(([rel, t]) => rel !== vm && t.includes(stem) && NAME.test(t)).map(([rel]) => `${rel} ← ${vm}`);
   });
-  const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]; } catch { return [path.relative(REPO, f), '']; } }));
+  const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), readSrc(f)]; } catch { return [path.relative(REPO, f), '']; } }));
   const names = urlExportsOf('src/server/dropline-client.js');
   ok(['DROPLINE_BASE', 'OAUTH_BASE', 'AUTHORIZE_URL'].every((n) => names.includes(n)), `the vendor module's exported URL constants are derived (${names.join(', ')})`, names.join());
   const readers = baseReaders(texts);
@@ -235,7 +242,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const DEFAULT_PRIM = '(...a) => globalThis.fetch(...a)';
   const primCount = (text) => (code(text).split(DEFAULT_PRIM).join('').match(PRIM) || []).length;
   const reaches = (text) => /text-model-client|\.textModel\b/.test(code(text));
-  const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]; } catch { return [path.relative(REPO, f), '']; } }));
+  const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), readSrc(f)]; } catch { return [path.relative(REPO, f), '']; } }));
   const reachSites = (all) => Object.entries(all).filter(([rel, t]) => rel !== REL && reaches(t) && primCount(t) > 0)
     .filter(([rel, t]) => !ALLOW[rel] || primCount(t) > ALLOW[rel].max).map(([rel, t]) => `${rel} (${primCount(t)} request primitive(s), allowlisted ${ALLOW[rel] ? ALLOW[rel].max : 0})`);
   const bodyWrites = (text) => (code(text).match(/\b(?:Object\.assign|Object\.defineProperty|Reflect\.set|Reflect\.deleteProperty)\s*\(\s*body\b|\bbody\s*(?:\.\s*\w+|\[[^\]\n]*\])\s*(?:[-+*\/|&]?=(?!=)|\+\+|--)|\bdelete\s+body\b/g) || []).length;
@@ -441,7 +448,7 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   // the helper: ONE implementation in the PURE model, and it IS a one-shot stream of the bytes (a behaviour read)
   const DM_REL = 'src/decision-model.js', dmCode = code(fs.readFileSync(path.join(REPO, DM_REL), 'utf-8'));
   const STREAM = 'return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });';
-  const streams = files.map((f) => path.relative(REPO, f)).filter((rel) => { try { return /\bnew\s+ReadableStream\b/.test(code(fs.readFileSync(path.join(REPO, rel), 'utf-8'))); } catch { return false; } });
+  const streams = files.map((f) => path.relative(REPO, f)).filter((rel) => { try { return /\bnew\s+ReadableStream\b/.test(code(readSrc(path.join(REPO, rel)))); } catch { return false; } });
   const DMod = require(path.join(REPO, DM_REL));
   const probe = new TextEncoder().encode('{"q":1}');
   const st = DMod.oneShotBody(probe), rd = st instanceof ReadableStream ? st.getReader() : null, r1 = rd ? await rd.read() : {}, r2 = rd ? await rd.read() : {};   // no stream ⇒ RED by name, never a crash
@@ -579,11 +586,11 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
   const callsIn = (t) => (strip(t).match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
   const found = {};
-  for (const f of [...srcFiles('src'), 'server.js']) { const t = fs.readFileSync(path.join(REPO, f), 'utf-8'); if (/cli-usage-door|createCliUsageDoor|door: usageDoor|\bdoor\.read\(/.test(t) && callsIn(t)) found[f] = callsIn(t); }
+  for (const f of [...srcFiles('src'), 'server.js']) { const t = readSrc(path.join(REPO, f)); if (/cli-usage-door|createCliUsageDoor|door: usageDoor|\bdoor\.read\(/.test(t) && callsIn(t)) found[f] = callsIn(t); }
   ok(JSON.stringify(Object.keys(found).sort()) === JSON.stringify(Object.keys(CALLERS).sort()) && Object.entries(CALLERS).every(([f, c]) => found[f] === c.n),
     '5c: the usage door has exactly THREE callers — a person\'s press (account-usage-routes), the wall one-shot (stream-wall) and the read after a stretch of work (after-turn-read) — one call each', JSON.stringify(found));
   for (const [f, c] of Object.entries(CALLERS)) {
-    const t = fs.readFileSync(path.join(REPO, f), 'utf-8');
+    const t = readSrc(path.join(REPO, f));
     const missing = c.gates.filter((g) => !g.test(t)).map(String);
     ok(!missing.length, `5c: ${f} keeps its gates (${c.gates.length})`, missing.join(' · '));
   }
@@ -642,7 +649,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const pressIn = (f, t) => (f.startsWith('src/lib/') ? 0 : (strip(t).match(/\.press\(|\{[^}\n]*\bpress\b[^}\n]*\}\s*=\s*[\w.]+/g) || []).length);
   const found = {}, makers = [], mints = {}, readers = [], presses = [];
   for (const f of [...srcFiles('src'), 'server.js']) {
-    const t = fs.readFileSync(path.join(REPO, f), 'utf-8');
+    const t = readSrc(path.join(REPO, f));
     if (f === 'src/server/cli-models-door.js') continue;
     if (callsIn(t)) found[f] = callsIn(t);
     if (mintsIn(t)) mints[f] = mintsIn(t);
@@ -890,7 +897,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     return rows;
   };
   const serverTexts = {};
-  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
+  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = readSrc(f); } catch { } }
   const engineRel = 'src/server/channels-engine.js', routesRel = 'src/routes/channels.js';
   const engineSrc = serverTexts[engineRel], routesSrc = serverTexts[routesRel];
   for (const [name, pass, detail] of attachmentCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7 ${name}`, detail);
@@ -1031,7 +1038,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   // the keeper (ONE text: the keeper + the slot + every INSTALLERS row file), never as "another module" calling the installs
   const INSTALL_FILES = ['src/server/browser-installs.js', ...[...fs.readFileSync(path.join(REPO, 'src/server/browser-installs.js'), 'utf-8').matchAll(/require\('\.\/([\w-]+\.js)'\)/g)].map((m) => 'src/server/' + m[1])];
   const keeperSrc = [keeperRel, ...INSTALL_FILES].map((rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8')).join('\n'), routesSrc = fs.readFileSync(path.join(REPO, routesRel), 'utf-8');
-  const serverTexts = Object.fromEntries(files.map((f) => [path.relative(REPO, f), (() => { try { return fs.readFileSync(f, 'utf-8'); } catch { return ''; } })()]));
+  const serverTexts = Object.fromEntries(files.map((f) => [path.relative(REPO, f), (() => { try { return readSrc(f); } catch { return ''; } })()]));
   for (const rel of INSTALL_FILES) { if (serverTexts[rel] != null) serverTexts[keeperRel] = keeperSrc; delete serverTexts[rel]; } // the slot + rows ride the keeper's text
   const slotCensus = (K, R, texts) => {
     const rows = [];
@@ -1143,7 +1150,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     return rows;
   };
   const serverTexts = {};
-  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
+  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = readSrc(f); } catch { } }
   const engineRel = 'src/server/channels-engine.js';
   const engineSrc = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text
   ok(typeof engineSrc === 'string', '§9 the engine is in the server census');
@@ -1192,7 +1199,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   for (const f of files) {
     const rel = path.relative(REPO, f);
     if (rel.startsWith('data/bin/vibespace-agentd')) continue; // the built bundle carries copies of the two rows above
-    let t = ''; try { t = strip8(fs.readFileSync(f, 'utf8')); } catch { continue; }
+    let t = ''; try { t = strip8(readSrc(f)); } catch { continue; }
     const n = (t.match(APP_SERVER) || []).length;
     if (n) hits8[rel] = n;
   }
@@ -1278,7 +1285,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   // file planted — the other files' findings are the same text's, so only the planted file is judged again (was ~14 × the tree)
   const CALL_MEMO = new Map();
   const callCensus = (texts) => { const bad = []; for (const [rel, t] of Object.entries(texts)) { const hit = CALL_MEMO.get(rel); if (hit && hit.t === t) { bad.push(...hit.bad); continue; } const at = bad.length; const n = consumeCalls(t); if (n && n !== (ALLOW_CONSUME_CALLS[rel] || 0)) bad.push(`${rel}: ${n} call(s), allowed ${ALLOW_CONSUME_CALLS[rel] || 0}`); const m = consumeRefs(t); if (m && m !== (ALLOW_CONSUME_REFS[rel] || 0)) bad.push(`${rel}: ${m} reference(s), allowed ${ALLOW_CONSUME_REFS[rel] || 0}`); if (consumeBound(t)) bad.push(`${rel}: consumeResetCreditFor bound with bind/call/apply`); if (consumeUnderTimer(t)) bad.push(`${rel}: a consumeResetCreditFor call under a timer`); if (consumeDynamic(t)) bad.push(`${rel}: a dynamic reach into the engine object (engine[…] / Reflect.get(engine / { …engine })`); CALL_MEMO.set(rel, { t, bad: bad.slice(at) }); } return bad; };
-  const treeTexts = {}; for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; try { treeTexts[rel] = fs.readFileSync(f, 'utf8'); } catch { } }
+  const treeTexts = {}; for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; try { treeTexts[rel] = readSrc(f); } catch { } }
   const badCalls = callCensus(treeTexts);
   ok(badCalls.length === 0, '§10 TREE CENSUS (verify r2): consumeResetCreditFor is CALLED only by the route\'s POST (twice) and defined once in the engine — no other caller, none under a timer anywhere in the server tree', badCalls.join(' | '));
   ok(Object.keys(ALLOW_CONSUME_CALLS).every((rel) => consumeCalls(treeTexts[rel] || '') === ALLOW_CONSUME_CALLS[rel]), '§10 TREE CENSUS: the allowlist rows still match (route 2, engine 1)');
@@ -1492,7 +1499,7 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
     return rows;
   };
   const serverTexts = {};
-  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
+  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = readSrc(f); } catch { } }
   const slackRel = 'src/channels/slack.js';
   const slackSrc = serverTexts[slackRel];
   ok(typeof slackSrc === 'string' && typeof serverTexts['src/channels/slack-manifest.js'] === 'string', '§12 slack.js and slack-manifest.js are in the server census');

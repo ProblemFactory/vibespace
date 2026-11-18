@@ -88,7 +88,7 @@ if (P) {
     ['scripts/test-cli-registry.mjs', 'the EXCLUDED row for the new data/bin wrapper'], ['scripts/test-peer-text-census.mjs', 'the DECLARED_CLIS row'],
     ['scripts/test-settings-view.mjs', 'the installed-CLI facts + the (h.acp || h.exe) pin + the advanced bound'], ['scripts/test-codex-pool.mjs', 'the .sort(rosterSort) count'],
     ['scripts/test-harness-spawn.mjs', 'the spawn-form leg'], ['scripts/test-quota-source.mjs', 'the registry roster + its count pin'], ['scripts/test-agent-env.mjs', 'the keyEnvVars strip (HOME guarded)'],
-    ['scripts/ci.mjs', 'the fast row for the harness suite (and the real-program names)'], ['scripts/test-channels-egress.mjs', 'the host-literal rule'], ['scripts/test-record-clear-census.mjs', 'the alias pass'],
+    ['scripts/ci.mjs', 'the fast row for the harness suite (and the real-program names)'], ['scripts/test-channels-egress.mjs', 'the host-literal rule'], ['scripts/test-record-clear-census-interp.mjs', 'the alias pass (§I, its heavy twin since B-e601 r2)'],
     ['scripts/test-ci-gate.mjs', 'the Date.now() rule'], ['scripts/test-changelog-style.mjs', 'the bullet caps'], [`public/brand/${PROBE.id}.svg`, 'the brand svg'], ['public/index.html', 'the backend option'],
     ['src/lib/i18n-zh.js', 'the zh label key'], ['src/lib/i18n-ja.js', 'the ja label key'], ['docs/kb-features.md', 'the Harnesses tables + entry'],
   ];
