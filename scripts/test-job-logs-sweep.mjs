@@ -77,11 +77,11 @@ try {
   {
     // f. §S, stronger: every removal call of jobs.js is a listed site; no alias of a removing fs call; the record never written by hand
     const JS4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile', 'fs.promises.rename(f'];   // bl-jobs B-f276 cure r1: + the lifted note's rename to <store>.unread-done-<ms>
+    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile', 'fs.promises.rename(f', 'fs.promises.rename(file'];   // bl-jobs B-f276 cure r1: + the lifted note's rename to <store>.unread-done-<ms>; r2: + the late load's set-aside of a store (off the loop)
     const removals = [...JS4.matchAll(/fs\.(?:unlink|rm|rmdir|rename)Sync\(\s*[^,)]*|fs\.promises\.(?:rm|unlink|rmdir|rename)\(\s*[^,)]*/g)].map((m) => m[0]);
     const strangers = removals.filter((r) => !REMOVALS_OK.includes(r));
-    ok(removals.length === 7 && !strangers.length, `jobs.js's removal calls are exactly the listed seven (the set-aside rename of a store, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock, the lifted note's rename) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
-    ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js');
+    ok(removals.length === 8 && !strangers.length, `jobs.js's removal calls are exactly the listed eight (the set-aside renames of a store — at boot and in the late load —, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock, the lifted note's rename) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
+    ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\.promises\b(?!\s*\.)/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js (nor of fs.promises — its renames would leave the count above)');
     const saveBody = (JS4.match(/  _logsSave\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
     ok(saveBody && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');
   }
@@ -94,7 +94,7 @@ try {
   // round 4
   {
     const JS5 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-    const held = (JS5.match(/  _logsHeldFile\(file, e, what, exists\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+    const held = (JS5.match(/  _logsHeldFile\(file, e, what, exists, pre = null\) \{[\s\S]*?\n  \}\n/) || [''])[0];   // bl-jobs B-f276 cure r2: `pre` (a set-aside made off the loop)
     ok(held && !/readdirSync|writeFileSync|existsSync|statSync/.test(held) && /this\._logsNoteOwed\[what\] = /.test(held), 'round 4 §3: a failed load\'s branch on the MAIN THREAD lists nothing, writes no note and checks no existence a second time — the hold is set there, the note is the child\'s');
     const pass = (JS5.match(/  async _logsPass\(at, why\) \{[\s\S]*?\n  \}\n/) || [''])[0];
     const iHold = pass.indexOf('return this._logsHeldUnnoted(cfg)'), iOwed = pass.indexOf('await this._logsWhole([...this._logsOwed])'), iWalk = pass.indexOf('this._logsRemover().sweep(');

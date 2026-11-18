@@ -640,8 +640,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const until = async (fn, ms = 3000) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); } return !!fn(); };
   const asides = (d, base) => fs.readdirSync(d).filter((n) => n.startsWith(base + '.corrupt-') && n !== base + '.corrupt-unread');
   const rec = (id, extra = {}) => ({ id, kind: 'task', name: 'kept ' + id.slice(-2), state: 'done', owner: {}, access: acc, runs: [{ startedAt: T0 - 3 * D, endedAt: T0 - 3 * D + 1000, exit: 0 }], createdAt: T0 - 3 * D, ...extra });
-  let itemSeq = 0; const resolved = [];
-  const engine = (Mod, d, logs, extra = {}) => { const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true, id: 'it-f276-' + (++itemSeq) }), resolveNotice: (id) => resolved.push(id), log: (...a) => logs.push(a.join(' ')), archivePolicy: () => policy, unreadRetry: { firstMs: 5, maxMs: 10 }, ...extra }); J.init(); return J; };
+  let itemSeq = 0; const resolved = [], filed = [];
+  const engine = (Mod, d, logs, extra = {}) => { const J = new Mod.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: (n) => { filed.push(n); return { ok: true, id: 'it-f276-' + (++itemSeq) }; }, resolveNotice: (id) => resolved.push(id), log: (...a) => logs.push(a.join(' ')), archivePolicy: () => policy, unreadRetry: { firstMs: 5, maxMs: 10 }, ...extra }); J.init(); return J; };
   // cure r1: a FAULT ROOT MEETS TOO — a folder where the file should be (EISDIR); mode 000 (EACCES) where it refuses (not root)
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   const plant = (F, body, how) => { if (how === 'mode') { fs.writeFileSync(F, body); fs.chmodSync(F, 0o000); } else { fs.mkdirSync(F); } };
@@ -671,6 +671,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(back && made2 && made2.job && lA.some((l) => /jobs\.json read again after \d+ tr(y|ies): 2 record\(s\) — writes resume/.test(l)), 'B-f276: the store is READ AGAIN off the loop: its records are loaded, writes resume, a job can be created', { back, made2: made2 && (made2.error || 'ok') });
   // cure r1, the ruling: a read that ANSWERED and LOADED lifts what the failure filed — its note marked done, its item resolved
   const lifted = await until(() => !fs.existsSync(noteA) && fs.readdirSync(dA).some((n) => /^jobs\.json\.unread-done-\d+$/.test(n)));
+  const told = filed.find((n) => n && n.fact === 'records-read-again');
+  ok(!!told && told.urgency === 'low' && /could not be read from \{when\} to \{until\} \(\{error\}\); VibeSpace read them again and nothing was lost/.test(told.words.key) && Number.isFinite(told.words.params.when.at) && Number.isFinite(told.words.params.until.at) && told.words.params.until.at >= told.words.params.when.at && !/written over: keep the note/.test(told.words.key), 'B-f276 cure r2 (the ruling): the person who was told hears ONE TRUE SENTENCE — could not be read from … to …, read again, nothing lost (never «may already have been written over»)', told && told.words);
   ok(noteThere && lifted && A._logsUnread.store === null && resolved.length >= 1 && lA.some((l) => /jobs\.json was read again: its note jobs\.json\.corrupt-unread is marked done \(renamed\), 1 For-you item\(s\) resolved, the job-logs clean-up resumes/.test(l)), 'B-f276 cure (the ruling): the read again that loaded marks its note done (renamed — no hold reads it), resolves its For-you item, and the clean-up resumes', { noteThere, lifted, resolved });
   A.shutdown();
   ok(JSON.parse(fs.readFileSync(SF, 'utf-8')).map((j) => j.id).filter((id) => id.startsWith('jb-f2760a')).sort().join() === 'jb-f2760a01,jb-f2760a02', 'B-f276: …and the store on disk still holds every record it held (none written over)');
@@ -830,12 +832,59 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(!gx.kept && !gx.inStore, 'B-f276 CONTROL (no write guard, in a copy): the boot sweep WRITES OVER the unread archive — its record is gone from the file', { kept: gx.kept });
   if (gx.J._logsNoteP) await gx.J._logsNoteP;
   gx.J.shutdown();
-  const dropL = "      for (const [id, j] of this.jobs) if (LS.isSkeleton(j)) this.jobs.delete(id);   // the skeletons of an earlier answer: the new answer rebuilds its own, or has the records\n";
-  const adoptL = "      if (!this._unread.store && !this.readOnly) { this._adoptAndReplay(); this._dirty = true; }   // the boot's adoption, late: the records are this process's now\n";
+  // cure r2 (主开发 02:23Z): THE LATE LOAD MAKES NO FILE CALL ON THE LOOP — every synchronous fs call on the data folder while the read
+  // again loads its answer is counted (the async prefetch and set-aside are not): a data answer with a live record to adopt, and torn bytes
+  const syncCalls = async (J, d, fn) => {
+    const names = ['readFileSync', 'readdirSync', 'renameSync', 'copyFileSync', 'statSync', 'existsSync'], orig = {}, calls = [];
+    // the LOAD's own calls: every read, listing and stat on the data folder, and a rename / copy OF a record store (its set-aside) —
+    // never the store writer's tmp-then-rename of a file it writes (the notifications' save rides the 2 s write, not the load)
+    const counted = (n, f) => String(f).startsWith(d) && (!/^(renameSync|copyFileSync)$/.test(n) || /^jobs(-archive)?\.json$/.test(path.basename(String(f))));
+    for (const n of names) { orig[n] = fs[n]; fs[n] = function (f, ...a) { if (counted(n, f)) calls.push(n + ' ' + path.basename(String(f))); return orig[n].call(this, f, ...a); }; }
+    try { await fn(); } finally { for (const n of names) fs[n] = orig[n]; }
+    return calls;
+  };
+  const loopScene = async (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json'), RT = T0 - 3600e3;
+    const lb = JSON.stringify([{ id: 'jb-f2760n01', kind: 'task', name: 'ended meanwhile', state: 'up', owner: { conversation: { id: 'conv-n' } }, access: acc, runs: [{ startedAt: RT, trigger: 'manual' }], createdAt: RT }]);
+    const ctl = path.join(d, 'job-logs', 'jb-f2760n01', String(RT)); fs.mkdirSync(ctl, { recursive: true });
+    fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify({ pid: 4194301, starttime: 1, bootId: 'another-boot-of-this-machine', startedAt: RT }));
+    fs.writeFileSync(path.join(ctl, 'exit.json'), JSON.stringify({ code: 0, endedAt: RT + 1000 }));
+    plant(F, lb, 'folder');
+    const J = engine(Mod, d, [], { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    unplant(F, lb, 'folder');
+    const dataCalls = await syncCalls(J, d, () => J._unreadRetry('store'));
+    const done = J.jobs.get('jb-f2760n01') && J.jobs.get('jb-f2760n01').state;
+    if (J._logsNoteP) await J._logsNoteP; J.shutdown();
+    // torn bytes whose set-aside failed at the boot, read again once the rename works: set aside OFF the loop, listed off it
+    const d2 = mkDir(name + '-torn'), F2 = path.join(d2, 'jobs.json'); fs.writeFileSync(F2, torn); fs.mkdirSync(path.join(d2, 'job-logs', 'jb-f2760c01'), { recursive: true });
+    fs.renameSync = function (f, ...a) { if (String(f) === F2) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn.call(this, f, ...a); };
+    fs.copyFileSync = function (f, ...a) { if (String(f) === F2) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return cp.call(this, f, ...a); };
+    let J2; try { J2 = engine(Mod, d2, [], { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } }); } finally { fs.renameSync = rn; fs.copyFileSync = cp; }
+    const tornCalls = await syncCalls(J2, d2, () => J2._unreadRetry('store'));
+    const aside = fs.readdirSync(d2).some((n) => /^jobs\.json\.corrupt-\d+$/.test(n));
+    if (J2._logsNoteP) await J2._logsNoteP; J2.shutdown();
+    return { dataCalls, done, tornCalls, aside };
+  };
+  const ls = await loopScene({ JobManager }, 'jobs-triage-reread-loop');
+  ok(ls.done === 'done' && ls.dataCalls.length === 0 && ls.aside && ls.tornCalls.length === 0, 'B-f276 cure r2: the late load makes NO synchronous file call on the data folder — a live record\'s control files and the torn bytes\' set-aside and listing are done off the loop, then loaded', ls);
+  // cure r2: an UNREAD archive's refusal is said ONCE a hold (never every sweep), and a clear that cannot reach it SAYS so
+  {
+    const d = mkDir('jobs-triage-unread-archive-once'), AF2 = path.join(d, 'jobs-archive.json'), lo = [];
+    fs.writeFileSync(path.join(d, 'jobs.json'), JSON.stringify([rec('jb-f2760o01')]));
+    fs.mkdirSync(AF2);
+    const J = engine({ JobManager }, d, lo, { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    J.archiveSweep({ now: T0 }); J.archiveSweep({ now: T0 + 1 }); J.archiveSweep({ now: T0 + 2 });
+    const cl = J.clearJobs(['jb-f2760o01'], { allow: () => true });
+    ok(lo.filter((l) => /released but NOT archived/.test(l)).length === 1 && J.jobs.has('jb-f2760o01'), 'B-f276 cure r2: while the archive cannot be read its sweep\'s refusal is said ONCE a hold, not every sweep — the record stays in the store', lo.filter((l) => /NOT archived/.test(l)));
+    ok(cl && /archived records could not be reached, so their words were not cleared — clear them again once it reads — jobs-archive\.json in VibeSpace's data folder could not be read \(EISDIR\)/.test(cl.archiveUnread || ''), 'B-f276 cure r2: a clear that cannot reach a held archive SAYS so in its answer', cl);
+    if (J._logsNoteP) await J._logsNoteP; J.shutdown();
+  }
+  const dropL = "        for (const [id, j] of this.jobs) if (LS.isSkeleton(j)) this.jobs.delete(id);   // the skeletons of an earlier answer: the new answer rebuilds its own, or has the records\n";
+  const adoptL = "        if (!this._unread.store && !this.readOnly) { this._adoptAndReplay(); this._dirty = true; }   // the boot's adoption, late: the records are this process's now\n";
   const armL = "    this._unreadRetrySoon(which);   // the next try first: whatever this one does\n";
-  const liftL = "      this._unreadLift(which).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));\n";
+  const liftL = "      this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));\n";
   ok([dropL, adoptL, armL, liftL].every((x) => jsrc.split(x).length === 2), 'B-f276 cure control setup: the drop, the late adoption, the armed next try and the lift are each one line');
-  const JC = MJ.load('src/jobs.js', jsrc.replace(dropL, '      // MUTANT: no drop\n').replace(adoptL, '      // MUTANT: no late adoption\n').replace(armL, '    // MUTANT: the next try only after an answer\n').replace(liftL, '      // MUTANT: no lift\n'), 'cure');
+  const JC = MJ.load('src/jobs.js', jsrc.replace(dropL, '        // MUTANT: no drop\n').replace(adoptL, '        // MUTANT: no late adoption\n').replace(armL, '    // MUTANT: the next try only after an answer\n').replace(liftL, '      // MUTANT: no lift\n'), 'cure');
   const drx = await dropScene(JC, 'jobs-triage-reread-drop-mut');
   ok(drx.skel && drx.real, 'B-f276 cure CONTROL (no drop, in a copy): the skeleton of the earlier answer stays beside the records', drx);
   const enx = await endScene(JC, 'jobs-triage-reread-ended-mut');
@@ -854,9 +903,14 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const lf = await liftScene({ JobManager }, 'jobs-triage-reread-lift');
   const lfx = await liftScene(JC, 'jobs-triage-reread-lift-mut');
   ok(lf.wrote && !lf.noteLeft && !lf.held && lfx.wrote && lfx.noteLeft && lfx.held, 'B-f276 cure (the ruling) + CONTROL (no lift, in a copy): a folder fault writes the note; the read again that loads lifts it — without the lift it holds the clean-up for good', { lf, lfx });
+  const preL = "    const pre = await this._unreadPrefetch(which, a, file);\n";
+  ok(jsrc.split(preL).length === 2, 'B-f276 cure r2 control setup: the late load\'s prefetch is one line');
+  const JP = MJ.load('src/jobs.js', jsrc.replace(preL, '    const pre = null; // MUTANT: the late load reads on the loop\n'), 'prefetch');
+  const lsx = await loopScene(JP, 'jobs-triage-reread-loop-mut');
+  ok(lsx.dataCalls.length > 0 && lsx.tornCalls.length > 0, 'B-f276 cure r2 CONTROL (no prefetch, in a copy): the late load makes synchronous file calls on the data folder', { data: lsx.dataCalls.length, torn: lsx.tornCalls.length });
   const hgx = await hangScene(JC, 'jobs-triage-reread-hang-mut');
   ok(!hgx.armed || hgx.triesAt < 4, 'B-f276 cure CONTROL (the next try only after an answer, in a copy): a hung read STOPS the tries', hgx);
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 2, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 3, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
