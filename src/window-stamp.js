@@ -17,7 +17,6 @@
 // A missing one THROWS; a malformed one THROWS. A stamp the login did not write CARRIES the row's identity it replaces
 // (`login` — PURE identityCarry over the stamp on disk NOW, never a memo: verify r3 L-R3), so no writer ever demotes a
 // row's proven identity; a login stamp carries nothing.
-const fs = require('fs');
 const path = require('path');
 const { windowSidecarName } = require('./reading-lag.js');
 const { identityCarry } = require('./oat-identity-model.js');
@@ -28,7 +27,8 @@ function isWindowProducer(p) { return p === null || (typeof p === 'string' && PR
 
 /** THE ONE READER: the account's `.window-` stamp, or null (absent, unreadable, not an object) */
 function readWindowStamp(cacheDir, key) {
-  try { const j = JSON.parse(fs.readFileSync(path.join(cacheDir, windowSidecarName(key)), 'utf-8')); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; }
+  // through the cache module's reader (lane lg-store-writes, B-0248 U6.3), required here as the writer below is (no cycle at load)
+  try { const j = require('./usage-cache-write.js').readCacheJson(path.join(cacheDir, windowSidecarName(key))); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; }
 }
 
 /** THE ONE WRITER. `producer` is mandatory (see above; undefined or malformed ⇒ throws). The stamp's own `producer` /

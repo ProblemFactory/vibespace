@@ -38,6 +38,9 @@ const { accountLoginState } = require('./login-state.js');
 const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the accounts a reading can land on
 
 function _readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } }
+// a READING (a file of data/usage-cache): through the cache module's reader (lane lg-store-writes, B-0248 U6.3 — the one place
+// that will consult a write still on its way first); null on any failure, as _readJson
+function _readCacheJson(f) { try { return _usageWrite.readCacheJson(f); } catch { return null; } }
 function _writeAtomic(f, text) { fs.writeFileSync(f + '.tmp', text); fs.renameSync(f + '.tmp', f); }
 // THE ONE WRITE PATH, in its REPLACE mode (src/usage-cache-write.js). This
 // migration is the single writer allowed to replace a cache's limits instead of
@@ -60,7 +63,7 @@ const { familyOfScopedBucket: _familyOf } = require('./model-family.js');
 // which tombstone predates them (the by-slot repair: laid while the login was alive; the by-window repairs: laid
 // before the foreign snapshot was read). A foreign one is never copied onto the account — its own 5h window stands.
 function _keepOwnAbsence(cacheDir, key, obj, ownTomb = null) {
-  const own = _readJson(_usageWrite.cacheFileFor(cacheDir, key));
+  const own = _readCacheJson(_usageWrite.cacheFileFor(cacheDir, key));
   const since = own && !(own.fiveHour && typeof own.fiveHour === 'object') && Number(own.fiveHourAbsent) > 0 ? Number(own.fiveHourAbsent) : 0;
   if (!since || (ownTomb && !ownTomb(since)) || !(Number(obj.fetchedAt) > 0)) return obj;
   if (obj.fiveHour && !(Number(obj.fetchedAt) > since)) delete obj.fiveHour;
@@ -271,13 +274,13 @@ function _readAnchorFiles(anchorsDir) {
 function repairUsageCaches({ cacheDir, archiveDir, markers, anchorFiles, id }) {
   const res = { scanned: 0, foreign: 0, restored: 0, blanked: 0 };
   let names = [];
-  try { names = fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json') && f !== '__models__.json'); } catch { return res; }
+  try { names = _usageWrite.listCacheDir(cacheDir).filter((f) => f.endsWith('.json') && f !== '__models__.json'); } catch { return res; }
   for (const fn of names) {
     const key = fn.slice(0, -5);
     const marker = markers.get(key);
     if (!marker) continue;
     const fp = path.join(cacheDir, fn);
-    const cur = _readJson(fp);
+    const cur = _readCacheJson(fp);
     if (!cur || typeof cur.fetchedAt !== 'number') continue;
     res.scanned++;
     if (!isForeign(markers, key, cur.fetchedAt)) continue;
@@ -1318,7 +1321,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   const archived = [];
   for (const key of ids) {
     const apiwinPath = path.join(cacheDir, apiWindowSidecarName(key));
-    const apiwin = _readJson(apiwinPath);
+    const apiwin = _readCacheJson(apiwinPath);
     const ev = apiPhaseFor({ key, anchorRows, mismatchRows, apiwin, now, horizonMs });
     const row = { key, name: nameOf(key), apiPhase: null, resetsAt: null, n: 0, of: ev.total, sources: ev.sources, sidecar: 'no-evidence', sidecarWas: null, apiwin: 'kept', cache: 'kept', readmitted: 0 };
     report.identities.push(row);
@@ -1327,7 +1330,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     const api = ev.top.resetsAt;
     row.apiPhase = ev.top.phase; row.resetsAt = api; row.n = ev.top.n;
     const cacheFile = _usageWrite.cacheFileFor(cacheDir, key);
-    const cur = _readJson(cacheFile);
+    const cur = _readCacheJson(cacheFile);
     const sc = windowStamp.readWindowStamp(cacheDir, key);
     // every scoped bucket this account is known to hold is judged on the 7d phase
     const names = new Set();
@@ -1408,7 +1411,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     // newer than what the file now holds, in time order, through the SAME
     // producer that would have written them (idempotent: the file's fetchedAt
     // ends on the newest one, so a second run finds nothing newer)
-    const floor = Number((_readJson(cacheFile) || {}).fetchedAt) || 0;
+    const floor = Number((_readCacheJson(cacheFile) || {}).fetchedAt) || 0;
     const cands = mismatchRows.filter((x) => x && x.key === key && /^rate-limit-event:/.test(String(x.what || '')) && now - (x.at || 0) <= readmitMs && (x.at || 0) > floor)
       .filter((x) => {
         const e = x.entry && x.entry.ev, sl = x.entry && x.entry.slot;

@@ -406,7 +406,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   try {
     let base = null, baseAt = -1, ownFile = null;
     for (const id of ids) {
-      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch { }
+      try { const c = usageWriteMod().readCacheJson(fileFor(id)) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch { }
     }
     const cache = applyTo(base ? { ...base } : {}, ownFile);
     // The freshest SIBLING was chosen for its READINGS; its `limits` describe a
@@ -448,7 +448,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
     for (const id of ids) {
       if (id === key) continue;
       try {
-        let c2; try { c2 = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || null; } catch { c2 = null; }
+        let c2; try { c2 = usageWriteMod().readCacheJson(fileFor(id)) || null; } catch { c2 = null; }
         if (!c2) continue; // never create a sibling
         applyTo(c2); // fetchedAt deliberately untouched
         delete c2.limits; // the sibling's own limits are rebuilt from its own (now updated) view

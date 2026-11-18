@@ -77,8 +77,7 @@ export const ROWS = [
   ['src/proc-identity.js', 'own-tree', 16, null, `${PROC}; B-91aa +1: statOf — a held probe child\'s stat [state, starttime], sync, «gone» apart from «unreadable» (met at 2.369.412\'s second checkpoint); B-f64b +1: startToken's one /proc/self stat (is this Linux's procfs — read once) — procfs, never a mount; lane bl-jobs B-c134 +2 (childTreeOf — the tree a stop started, by the parent chain: each process's main-thread children list and stat — procfs, never a mount); lane jobs-memory-bound round 6 +2 (membersOf — a recorded run's processes at clear time): the /proc listing and a process's environ (the job's mark) — procfs, never a mount; round 8 +2: a candidate's <pid>/task/<pid>/children and an unreadable environ's <pid>/status (its owner) — procfs; lane bl-jobs B-2c5c +1: keptByChain — a process's stat up its parent chain (is it the hub's)`],
   ['src/proc-listen.js', 'own-tree', 4, null, PROC],
   ['src/quota-model-migrate.js', 'own-tree', 2, null, CLI],
-  ['src/rate-limit-capture.js', 'own-tree', 2, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
-  ['src/reading-repair.js', 'own-tree', 14, null, CLI], // B-1319: +4 = prefetchAnchorRows (readdir / stat / readFile through fs.promises) + the size+mtime check before its rows are taken
+  ['src/reading-repair.js', 'own-tree', 13, null, CLI], // lane lg-store-writes U6.3 −1: the folder's listing through the cache module (listCacheDir) — B-1319: +4 = prefetchAnchorRows (readdir / stat / readFile through fs.promises) + the size+mtime check before its rows are taken
   ['src/remote-fs.js', 'own-tree', 1, null, DATA],
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
   ['src/routes/browser-trace.js', 'own-tree', 2, null, DATA],
@@ -245,7 +244,6 @@ export const ROWS = [
   ['src/vnc.js', 'own-tree', 3, null, PROC],
   ['src/webdav.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name; lane hub-fuse-sync-guard: the /dav verbs are async fs (exists() = one fsp.access) — −5 sites'],
   ['src/weekly-lanes-unfold.js', 'own-tree', 8, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
-  ['src/window-stamp.js', 'own-tree', 1, null, DATA], // lane oat-identity-fix-r3: the `.window-` sidecar's ONE reader (data/usage-cache)
   ['src/window-targets.js', 'own-tree', 2, null, PROC],
   ['src/watch-door.js', 'exempt', 3, null, 'the watch door (the 2026-11-19 hotfix): the container probe — /.dockerenv and /run/.containerenv, fixed system paths read once at a notice; procfs /proc/sys/fs/inotify/max_user_watches read at a notice (the command offers double it, S2); its poll stats only a path its CALLER already follows (a helper\'s transcript under ~/.claude, the presets folder, a workflow run\'s folder), async, through the fs handed to it'],
   ['src/workflow-usage-tailer.js', 'own-tree', 4, null, CLI],

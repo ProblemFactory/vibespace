@@ -1940,10 +1940,7 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
   // file → [count, class, why]; 'debt' = a raw read U6.2–U6.4 move onto the door (a row only falls); 'folder' = the folder itself
   // made / checked, never a reading
   const READINGS_ROWS = {
-    'src/reading-repair.js': [6, 'debt', 'the reading repair\'s own _readJson / readdir over the folder — U6.3'],
-    'src/rate-limit-capture.js': [2, 'debt', 'a capture\'s base read (fileFor) — shared with the device agent — U6.3'],
     'src/quota-model-migrate.js': [2, 'debt', 'the quota model\'s migration walk (readdir + each reading) — U6.4'],
-    'src/window-stamp.js': [1, 'debt', 'the `.window-` sidecar\'s ONE reader — U6.3'],
     'src/weekly-lanes-unfold.js': [1, 'debt', 'the weekly lanes\' unfold walk (readdir) — U6.4'],
     'src/server/auto-cli-loop.js': [1, 'debt', 'the auto-cli loop\'s per-account reading — U6.4'],
     'src/server/cli-env.js': [1, 'debt', 'the CLI env\'s __models__ read — U6.4'],
@@ -1962,15 +1959,15 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
   };
   const RC0 = readingsCensus();
   const sumR = [...RC0.got.values()].reduce((n, x) => n + x.length, 0);
-  ok(!RC0.bad.length, `the readings folder: ${sumR} raw reads in ${RC0.got.size} files outside the cache module, each file a row with its count (U6.1: usage-routes' nine moved onto the door — readCacheJson / listCacheDir; U6.2: the pool engine's twelve — through B-403e's memo as the door's «via»)`, RC0.bad);
+  ok(!RC0.bad.length, `the readings folder: ${sumR} raw reads in ${RC0.got.size} files outside the cache module, each file a row with its count (U6.1: usage-routes' nine moved onto the door — readCacheJson / listCacheDir; U6.2: the pool engine's twelve — through B-403e's memo as the door's «via»; U6.3: the reading repair's six, the capture's two, the window stamp's one)`, RC0.bad);
   ok(!RC0.got.has('src/usage-routes.js'), 'usage-routes reads the readings folder ONLY through the cache module (U6.1)');
   const CE = fs.readFileSync(path.join(REPO, 'src/server/cli-env.js'), 'utf8'), WS = fs.readFileSync(path.join(REPO, 'src/window-stamp.js'), 'utf8'), UR = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8');
   const c1 = readingsCensus({ 'src/zz-readings-plant.js': "const fs = require('fs'); const usageWrite = require('./usage-cache-write.js');\nfunction zz(USAGE_CACHE_DIR) { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'a.json')); }\n" });
   ok(c1.bad.some((x) => /^UNNAMED: src\/zz-readings-plant\.js /.test(x)), 'NEGATIVE CONTROL: a NEW file reading the folder raw is red by name', c1.bad);
   const c2 = readingsCensus({ 'src/server/cli-env.js': CE + "\nfunction zzLocal() { const f9 = path.join(USAGE_CACHE_DIR, 'y.json'); return fs.readFileSync(f9, 'utf-8'); }\n" });
-  ok(c2.bad.some((x) => /^src\/server\/cli-env\.js: 2 raw reads/.test(x)), 'NEGATIVE CONTROL: a raw read through a LOCAL built from the folder path (a plain pattern misses it) is red by name', c2.bad);
+  ok(c2.bad.some((x) => /src\/server\/cli-env\.js/.test(x)), 'NEGATIVE CONTROL: a raw read through a LOCAL built from the folder path (a plain pattern misses it) is red by name (whether its file has a row or not)', c2.bad);
   const c3 = readingsCensus({ 'src/window-stamp.js': WS + "\nfunction zzRd(p) { return fs.readFileSync(p, 'utf8'); }\nfunction zzUse(cacheDir) { return zzRd(path.join(cacheDir, 'z.json')); }\n" });
-  ok(c3.bad.some((x) => /^src\/window-stamp\.js: 2 raw reads/.test(x)), 'NEGATIVE CONTROL: a raw read through a same-file HELPER that reads its parameter is red by name', c3.bad);
+  ok(c3.bad.some((x) => /src\/window-stamp\.js/.test(x) && /\bzzRd\b/.test(x)), 'NEGATIVE CONTROL: a raw read through a same-file HELPER that reads its parameter is red by name (the helper named — whether its file has a row or not)', c3.bad);
   const c4 = readingsCensus({ 'src/server/cli-env.js': CE + "\n// fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'))\nconst zzS = \"fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'))\";\n" });
   ok(!c4.bad.length, '…while the same read in a comment and in a string adds nothing', c4.bad);
   const c5 = readingsCensus({ 'src/usage-routes.js': UR + "\nfunction zzBack() { return fs.readFileSync(path.join(USAGE_CACHE_DIR, 'x.json'), 'utf-8'); }\n" });
