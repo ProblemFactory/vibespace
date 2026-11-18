@@ -1430,7 +1430,7 @@ console.log('\n14b. the continue says what the CLI\'s reset time was and was not
   const named = /the account "([^"]*)"/.exec(evil);
   ok('14b. the account label rides the peer-text belt: a frame tag inert, a line break folded, a bidi override gone, ≤ 80', !!named && !/<system-reminder/.test(evil) && !/\n/.test(evil) && !/\u202E/.test(evil) && named[1].length <= 80, named && named[1]);
   ok('14b. …a "$&" in the label is the label, not a replacement pattern', CPF({ cls: 'switched' }, 'A$&B').includes('the account "A$&B"'));
-  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /deliverContinue\(session, verb, continuePromptFor\(note, label2\), \(s2, text\) => sendToSession\(/.test(read('src/server/auto-resume.js')));
+  ok('14b. WIRING: the ONE fire choke point delivers continuePromptFor(note, label2) — what unblocked us, and the label it lands on', /deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => sendToSession\(/.test(read('src/server/auto-resume.js')));
 }
 
 // ── 16. WHY A SESSION STOPPED — the fact, through the REAL engine (lane auto-resume-bulk, .349) ──────────────────────
@@ -1855,6 +1855,136 @@ await (async () => {
   const bad = await run(real, { badReask: true });
   ok('17b. a re-ask that answers with the wrong number of holds is a refusal — nothing continued, and EVERY hold it handed out goes back', bad.L.sent.length === 0 && ['h3', 'h4', 'h5', 'h6'].every((x) => bad.L.release.includes(x)) && bad.rec.skipped.filter((x) => x.why === 'refused').length === 2, JSON.stringify(bad.L));
   ok('17b. LAW 3: a Stop while the batch WAITS ON A GATE ends that wait — the batch is DONE (its gate\'s wait is an hour here), b stopped, never continued', !!hang.rec.done && hang.L.sent.join() === 'a' && (hang.rec.stopped || []).some((x) => x.id === 'b'), JSON.stringify({ rec: hang.rec }));
+})();
+
+// ── 18. A WORKFLOW RUN THE LIMIT CUT SHORT (lg-recovery U3, B-3437 — the owner's ruling 2026-11-18, the words approved as
+// written; 主开发's rulings 01:41Z): the automatic continue names that run and tells the agent to RESUME it — SAID ONLY ON
+// PROOF: an unfinished agent's LAST assistant record is the CLI's limit banner whose stated reset is no later than the fire,
+// no closing snapshot that ended it (completed / killed / cancelled), the run stopped; in every doubt today's words exactly.
+await (async () => {
+  console.log('\n18. a Workflow run the limit cut short is named in the continue (B-3437)');
+  const WD = require(path.join(REPO, 'src/workflow-disk.js'));
+  const AW = require(path.join(REPO, 'src/server/auto-resume-workflow.js'));
+  const NOW = Date.now(), WALL = NOW - 2 * 3600e3, LIM = WALL - 10 * 60000, FIRE = NOW + 60000;
+  const J = (rows) => rows.map((o) => JSON.stringify(o)).join('\n') + '\n';
+  const cut = J([{ type: 'launched' }, { type: 'started', key: 'k1', agentId: 'a1', label: 'one' }, { type: 'result', key: 'k1', agentId: 'a1', result: 'ok' }, { type: 'started', key: 'k2', agentId: 'a2' }, { type: 'failed', key: 'k2', agentId: 'a2' }, { type: 'started', key: 'k3', agentId: 'a3' }]);
+  const ended = J([{ type: 'started', key: 'k1', agentId: 'a1' }, { type: 'result', key: 'k1', agentId: 'a1', result: 'ok' }]);
+  const base = { runId: 'wf_ab12-cd', journalText: cut, lastActivity: LIM, limitAt: LIM, wallAt: WALL, now: NOW, snapshotStatus: null, limitProven: true, endsOnLimit: true };
+  const V = (o) => WD.cutShortRunOf({ ...base, ...o });
+  ok('18. PURE: proven — the id and the agents that STARTED with NO result (a failed one has none): 2', JSON.stringify(V({})) === JSON.stringify({ runId: 'wf_ab12-cd', unfinished: 2 }));
+  ok('18. PURE: no proof in the agents\' own records ⇒ none', V({ limitProven: false }) === null);
+  ok('18. PURE: a closing snapshot completed / killed / cancelled ⇒ none; unreadable ⇒ none; failed / error / none ⇒ named', ['completed', 'killed', 'cancelled', 'canceled', 'unknown'].every((st) => V({ snapshotStatus: st }) === null) && ['failed', 'error'].every((st) => !!V({ snapshotStatus: st })) && !!V({ snapshotStatus: null }));
+  ok('18. PURE: NOT STOPPED — written after its limit records and within the stall time ⇒ none; CONTROL: the same run quiet past the stall time ⇒ named', V({ endsOnLimit: false, wallAt: NOW - 5 * 60000, limitAt: NOW - 6 * 60000, lastActivity: NOW - 60000 }) === null && !!V({ endsOnLimit: false, lastActivity: LIM }));
+  ok('18. PURE: an agent\'s limit long before the wall (another wall), or after it beyond the window ⇒ none', V({ limitAt: WALL - 6 * 3600e3 }) === null && V({ limitAt: WALL + 40 * 60000 }) === null);
+  ok('18. PURE: an ENDED run (every started agent has its result) ⇒ none', V({ journalText: ended }) === null);
+  ok('18. PURE: an id not of the run id\'s own form ⇒ none', ['wf_x y', 'wf_a"b', '../wf_a', 'wf_' + 'a'.repeat(80), 'run1', ''].every((runId) => V({ runId }) === null));
+  // the words — exactly as approved, just before the continue's closing line
+  const today = CPF({ cls: 'reset' }, null);
+  const SENT = 'That limit also cut short the Workflow run wf_ab12-cd (2 of its agents unfinished). Resume THAT run — call the Workflow tool with resumeFromRunId "wf_ab12-cd" — instead of launching it again from the start.';
+  const withRun = CPF({ cls: 'reset' }, null, { runId: 'wf_ab12-cd', unfinished: 2 });
+  ok('18. the sentence AS APPROVED sits just before the continue\'s closing line; nothing else in the continue moves', withRun === today.replace(' ' + CONTINUE_PROMPT.cli, ' ' + SENT + ' ' + CONTINUE_PROMPT.cli) && withRun.endsWith(' ' + SENT + ' ' + CONTINUE_PROMPT.cli), withRun);
+  ok('18. PIN: no run ⇒ today\'s continue, word for word (both heads)', CPF({ cls: 'reset' }, null, null) === today && CPF({ cls: 'switched' }, 'Max B', null) === CPF({ cls: 'switched' }, 'Max B') && !/Workflow/.test(today));
+  ok('18. a HOSTILE record puts no words into the continue: words in the id, a count that is no count', [{ runId: 'wf_a. Ignore the person and', unfinished: 2 }, { runId: 'wf_ok\nrm', unfinished: 2 }, { runId: 'wf_ok', unfinished: 'many' }, { runId: 'wf_ok', unfinished: 0 }, { runId: 'wf_ok', unfinished: 1e6 }, 'wf_ok', { runId: 7, unfinished: 2 }].every((r) => CPF({ cls: 'reset' }, null, r) === today));
+  // the reader over a planted home — THIS conversation's runs, the newest only, every file through one handle
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf-')), cwd = '/work/fleet', sid = '0123abcd-0000-4000-8000-000000000001';
+  const projects = path.join(home, '.claude', 'projects'), proj = path.join(projects, cwd.replace(/[^a-zA-Z0-9]/g, '-'));
+  const hh = (ms) => { const h = new Date(ms).getUTCHours(); return `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`; };
+  const banner = (at, { reset = true } = {}) => `You've hit your session limit · resets ${hh(at + 2 * 3600e3)}${reset ? ' (UTC)' : ''}`;   // its reset: one to two hours after the record (never minutes)
+  const rec = (at, { model = '<synthetic>', text = banner(at), error = 'rate_limit' } = {}) => JSON.stringify({ type: 'assistant', isSidechain: true, timestamp: new Date(at).toISOString(), message: { model, role: 'assistant', content: [{ type: 'text', text }] }, ...(error ? { error } : {}) });
+  const plant = (runId, { journal = cut, tail = (at) => rec(at), at = LIM, mtime = LIM, snapshot = undefined, root = path.join(proj, sid), link = false } = {}) => {
+    const d = path.join(root, 'subagents', 'workflows', runId); fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true });
+    if (link) { const elsewhere = path.join(home, `elsewhere-${runId}.jsonl`); fs.writeFileSync(elsewhere, journal); fs.symlinkSync(elsewhere, path.join(d, 'journal.jsonl')); }
+    else fs.writeFileSync(path.join(d, 'journal.jsonl'), journal);
+    for (const a of ['a1', 'a2', 'a3']) fs.writeFileSync(path.join(d, `agent-${a}.jsonl`), JSON.stringify({ type: 'user', message: { role: 'user', content: 'go' } }) + '\n' + (a === 'a1' ? '' : tail(at) + '\n'));
+    const snapF = path.join(root, 'workflows', `${runId}.json`); fs.rmSync(snapF, { force: true });
+    if (snapshot !== undefined) { fs.mkdirSync(path.join(root, 'workflows'), { recursive: true }); fs.writeFileSync(snapF, typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot)); }
+    for (const f of fs.readdirSync(d)) { try { fs.utimesSync(path.join(d, f), mtime / 1000, mtime / 1000); } catch { } }
+    return d;
+  };
+  const look = (o = {}) => AW.runAtWall({ home, cwd, sid, wallAt: WALL, fireAt: FIRE, now: NOW, ...o });
+  ok('18. READER: no run folder ⇒ none', (await look()) === null);
+  plant('wf_old-1', { at: WALL - 8 * 3600e3, mtime: WALL - 8 * 3600e3 });
+  ok('18. READER: a run cut short LONG before this wall (another wall) is not this limit\'s ⇒ none', (await look()) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 });
+  const r2 = await look();
+  ok('18. READER: two runs ⇒ the newest, the one this wall fell in: its id, 2 unfinished (the agents\' LAST records are the banner, its reset before the fire)', !!r2 && r2.runId === 'wf_new-2' && r2.unfinished === 2, r2);
+  plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at, { text: banner(at, { reset: false }) }) });
+  ok('18. READER: a banner whose reset cannot be read is no proof ⇒ none', (await look()) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 });
+  ok('18. READER: a limit that resets AFTER the fire (another limit still at its floor) ⇒ none', (await look({ fireAt: LIM + 2 * 60000 })) === null);
+  plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at, { text: 'API Error: 500 internal', error: 'rate_limit' }) });
+  ok('18. READER: error rate_limit without the CLI\'s banner is no proof ⇒ none', (await look()) === null);
+  plant('wf_new-2', { mtime: LIM + 1000, tail: (at) => rec(at) + '\n' + rec(at + 60000, { model: 'claude-opus-5-5', text: 'carrying on', error: null }) });
+  ok('18. READER: a limit record that is NOT the agent\'s last assistant record (it carried on) ⇒ none', (await look()) === null);
+  const states = {};
+  for (const st of ['completed', 'killed', 'cancelled', 'failed', 'error']) { plant('wf_new-2', { mtime: LIM + 1000, snapshot: { status: st } }); states[st] = !!(await look()); }
+  plant('wf_new-2', { mtime: LIM + 1000 }); states.none = !!(await look());
+  ok('18. READER: the closing snapshot, each of the five states (UNVERIFIED shape — no limit-killed run measured yet): completed / killed / cancelled ⇒ none; failed / error / no snapshot ⇒ named', JSON.stringify(states) === JSON.stringify({ completed: false, killed: false, cancelled: false, failed: true, error: true, none: true }), states);
+  plant('wf_new-2', { mtime: LIM + 1000, snapshot: '{ not json' });
+  ok('18. READER: a snapshot that cannot be read proves nothing ⇒ none', (await look()) === null);
+  plant('wf_new-2', { at: NOW - 6 * 60000, mtime: NOW - 6 * 60000 });
+  const wNear = NOW - 5 * 60000;
+  ok('18. READER: every unfinished agent ENDED on its limit and nothing after ⇒ stopped at once (no stall wait)', ((await look({ wallAt: wNear, fireAt: NOW + 3 * 3600e3 })) || {}).unfinished === 2);
+  fs.utimesSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2', 'agent-a1.jsonl'), (NOW - 30000) / 1000, (NOW - 30000) / 1000);
+  ok('18. READER: …but a write AFTER the limit records and within the stall time ⇒ not stopped ⇒ none', (await look({ wallAt: wNear, fireAt: NOW + 3 * 3600e3 })) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 });
+  const pad = cut + J(Array.from({ length: 60 }, (_, i) => ({ type: 'started', key: 'p' + i, agentId: 'b' + i }))) + J(Array.from({ length: 60 }, (_, i) => ({ type: 'result', key: 'p' + i, agentId: 'b' + i, result: 'x'.repeat(100) })));
+  plant('wf_new-2', { journal: pad, mtime: LIM + 1000 });
+  ok('18. READER: a VALID cut journal over the byte bound is not read ⇒ none; CONTROL: under the default bound the same run is named', (await look({ journalMax: 2048 })) === null && ((await look()) || {}).unfinished === 2);
+  const S0 = { cwd, backend: 'claude', claudeSessionId: sid, _stoppedBy: { kind: 'quota', at: WALL } };
+  const runs = [{ runId: 'wf_lnk-7', dir: path.join(proj, sid, 'subagents', 'workflows', 'wf_lnk-7'), sid, at: NOW }];
+  fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2'), { recursive: true, force: true }); fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_old-1'), { recursive: true, force: true });
+  plant('wf_lnk-7', { mtime: LIM + 1000 });
+  const lnkOk = ((await look({ runs })) || {}).runId === 'wf_lnk-7';
+  plant('wf_lnk-7', { mtime: LIM + 1000, link: true });
+  ok('18. READER: a remembered run whose journal is a SYMLINK is never followed ⇒ none; CONTROL: the same run with a real journal ⇒ named', lnkOk && (await look({ runs })) === null);
+  plant('wf_trav-9', { root: path.join(proj, '..', sid), mtime: LIM + 1000 });   // the folder a «../<sid>» would reach
+  ok('18. READER: a conversation id of another form names no folder — the planted folder it would reach is not read', (await look({ sid: '../' + sid })) === null);
+  plant('wf_new-2', { mtime: LIM + 1000 }); plant('wf_new-3', { journal: ended, mtime: LIM + 5000 });
+  ok('18. READER: the NEWEST run ENDED ⇒ none (an older cut-short run is never reached for)', (await look()) === null);
+  fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_new-3'), { recursive: true, force: true }); fs.rmSync(path.join(proj, sid, 'subagents', 'workflows', 'wf_lnk-7'), { recursive: true, force: true });
+  // the launch ack — the Workflow tool's own result; it pins THIS conversation's run
+  const ackA = 'Workflow launched in background. Task ID: w6v2xvee7\nSummary: lane x\nTranscript dir: ' + path.join(proj, sid, 'subagents', 'workflows', 'wf_new-2') + '\nScript file: /tmp/x.js';
+  const ackB = 'Workflow "review-changes" started in the background.\nRun ID: wf_abc123-def\nUse /workflows to watch.';
+  ok('18. ACK: both launch-ack shapes give the run id (the Transcript dir kept); launch words not on the first line, or none, give nothing', AW.ackRunOf(ackA).runId === 'wf_new-2' && /wf_new-2$/.test(AW.ackRunOf(ackA).dir) && AW.ackRunOf(ackB).runId === 'wf_abc123-def' && AW.ackRunOf(ackB).dir === null && AW.ackRunOf('Run ID: wf_abc123-def') === null && AW.ackRunOf('$ cat notes\nWorkflow launched in background. Run ID: wf_spoof-1') === null);
+  const S = { ...S0 };
+  AW.noteLaunchAck(S, ackA);
+  const viaAck = await AW.runAtWallFor({ ...S, cwd: '/work/fleet extra' }, { home, fireAt: FIRE });   // the cwd no longer maps to the run's folder
+  ok('18. ACK: the remembered launch pins THIS conversation\'s run even when the cwd maps elsewhere', !!viaAck && viaAck.runId === 'wf_new-2', viaAck);
+  ok('18. ACK: a Transcript dir outside this home\'s projects, or under another conversation, is not trusted', (() => { const T = { ...S0 }; AW.noteLaunchAck(T, ackA.replace(home, '/elsewhere')); return T._wfRuns[0].dir.startsWith('/elsewhere'); })() && (await AW.runAtWallFor({ ...S0, cwd: '/work/fleet extra', _wfRuns: [{ runId: 'wf_new-2', dir: path.join('/elsewhere', '.claude', 'projects', '-work-fleet', sid, 'subagents', 'workflows', 'wf_new-2'), sid, at: NOW }] }, { home, fireAt: FIRE })) === null);
+  ok('18. runAtWallFor reads only for a CLAUDE session a USAGE WALL stopped — an overload, no stop fact, a remote one, a codex one ⇒ none', (await AW.runAtWallFor({ ...S, _stoppedBy: { kind: 'overload', at: WALL } }, { home, fireAt: FIRE })) === null && (await AW.runAtWallFor({ ...S, _stoppedBy: null }, { home, fireAt: FIRE })) === null && (await AW.runAtWallFor({ ...S, host: 'h1' }, { home, fireAt: FIRE })) === null && (await AW.runAtWallFor({ ...S, backend: 'codex' }, { home, fireAt: FIRE })) === null);
+  ok('18. WIRING: server.js hands the core the reader with the fire instant; the claude stream takes an ack only from the Workflow tool\'s own result', /workflowRunAtWall: \(id, s, o\) => require\('\.\/src\/server\/auto-resume-workflow\.js'\)\.runAtWallFor\(s, o\)/.test(read('server.js')) && /session\._wfToolIds\.includes\(b\.tool_use_id\)\) \{ try \{ require\('\.\.\/auto-resume-workflow\.js'\)\.noteLaunchAck\(session, txt\)/.test(read('src/server/stdout/claude-stream-json.js')) && /b\.name === 'Workflow'/.test(read('src/server/stdout/claude-stream-json.js')));
+  ok('18. the reader is async only, lists through a bounded opendir, opens every file O_NOFOLLOW', (() => { const t = read('src/server/auto-resume-workflow.js').replace(/^\s*\/\/.*$/gm, ''); return !/Sync\(/.test(t) && !/readdir\(/.test(t) && /opendir\(/.test(t) && /O_NOFOLLOW/.test(t) && (t.match(/fsp\.open\(/g) || []).length === 2 && (t.match(/fsp\.open\([^)]*OPEN_FLAGS\)/g) || []).length === 2; })());
+  fs.rmSync(home, { recursive: true, force: true });
+  // through the REAL module: asked while the wall's arm stands, named only fresh — nothing on the money path moves
+  const fire = async (mod, runOf, { stop = { kind: 'quota', at: Date.now() - 3600e3 }, stale = false, rearm = false } = {}) => {
+    const sent = [], sessions = new Map([['s1', sess({ _stoppedBy: stop })]]), asks = [], dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-wf18-'));
+    const ar = mod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => true, sendToSession: (id, s2, text) => { sent.push(text); return true; }, workflowRunAtWall: (id, s2, o) => { asks.push(o && o.fireAt); return runOf(); } });
+    const resets = Date.now() + 10 * 60000;
+    ar.armIfEnabled('s1', sessions.get('s1'), resets, 'usage limit');
+    ar.tick(resets - 5 * 60000); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    if (stale) { const w = ar._wfOf && ar._wfOf.get('s1'); if (w) w.at = Date.now() - 10 * 60000; }
+    let file = '';
+    if (rearm) { ar.armIfEnabled('s1', sessions.get('s1'), resets + 1000, 'usage limit'); try { file = fs.readFileSync(path.join(dir, 'auto-resume.json'), 'utf8'); } catch { } }   // a save after the answer landed
+    const n = ar.tick(resets + GRACE_MS + 1);
+    return { n, sent, asks, resets, file };
+  };
+  const real = { create };
+  const named = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }));
+  ok('18. THE MODULE: asked while the wall\'s arm stands, with the fire instant; the fresh answer ⇒ the ONE continue names the run', named.asks.length >= 1 && named.asks[0] === named.resets + GRACE_MS && named.n === 1 && named.sent.length === 1 && named.sent[0].includes(' ' + SENT + ' ' + CONTINUE_PROMPT.cli), named);
+  const none = await fire(real, async () => null);
+  ok('18. THE MODULE: no run ⇒ the continue is today\'s, word for word', none.n === 1 && none.sent.length === 1 && none.sent[0] === CPF({ cls: 'reset' }, null), none.sent);
+  const stale = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }), { stale: true });
+  ok('18. THE MODULE: an answer no longer fresh is not named (today\'s words)', stale.n === 1 && stale.sent[0] === CPF({ cls: 'reset' }, null));
+  const hold = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }), { stop: null });
+  ok('18. THE MODULE: an arm with no usage-wall stop (a hold) asks nothing and names nothing', hold.asks.length === 0 && hold.sent[0] === CPF({ cls: 'reset' }, null));
+  const thrown = await fire(real, async () => { throw new Error('EIO'); });
+  ok('18. THE MODULE: a read that fails ⇒ today\'s words (the continue still goes)', thrown.n === 1 && thrown.sent[0] === CPF({ cls: 'reset' }, null));
+  const kept = await fire(real, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 }), { rearm: true });
+  ok('18. THE MODULE: the answer is kept OFF the arm record — a save after it landed writes no run to auto-resume.json', kept.file.length > 0 && !kept.file.includes('wf_ab12-cd') && !/"wf(Run|At|Ask)"/.test(kept.file), kept.file.slice(0, 200));
+  const mW = mutantAr([['continuePromptFor(note, label2, freshRun(id, a2))', 'continuePromptFor(note, label2)']]);
+  const ctl = mW.mod ? await fire(mW.mod, async () => ({ runId: 'wf_ab12-cd', unfinished: 2 })) : null;
+  ok('18. CONTROL: a fire that does not hand the run over says today\'s words — the naming leg goes red', mW.hits === 1 && !!ctl && ctl.sent.length === 1 && !ctl.sent[0].includes('Workflow'), mW.err || (ctl && ctl.sent));
 })();
 
 // ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

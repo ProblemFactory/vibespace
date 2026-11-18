@@ -998,7 +998,7 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     ok(/if \(!verbFor\(session\)\) \{ log\(/.test(arSrc), 'WIRING: armIfEnabled refuses a harness with no resume verb (never a promise nobody can keep)');
     // lane auto-resume-bulk: the ONE `verb.deliver(` now lives in `deliverContinue`, which the single continue AND the
     // bulk resume both call — each under its own gate (test-spend-paths' census reads every `sendToSession(` site)
-    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}deliverContinue\(session, verb, continuePromptFor\(note, label2\), \(s2, text\) => \{ const sent = sendToSession\(/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
+    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}deliverContinue\(session, verb, continuePromptFor\(note, label2, freshRun\(id, a2\)\), \(s2, text\) => \{ const sent = sendToSession\(/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
     ok((arSrc.match(/verb\.deliver\(/g) || []).length === 1 && /function deliverContinue\(session, verb, prompt, sendChatInput\) \{ return !!verb\.deliver\(session, prompt, \{ sendChatInput \}\); \}/.test(arSrc), 'WIRING: …and there is exactly ONE of them (a second fire path is how the loop breaker — and the spend authorizer — get bypassed)');
     ok((arSrc.match(/\bdeliverContinue\(/g) || []).length === 3, 'WIRING: …called from exactly TWO gated places — attemptFire (one continue, spendOk) and resumeBatch (the bulk resume, ONE batch authorization) — never a third');
     // lg-recovery U1 cure: THE OVERLOAD LIST IS A CONFORMANCE ROW — every registered harness either DECLARES quota.overloadErrors

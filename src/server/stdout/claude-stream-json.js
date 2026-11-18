@@ -736,6 +736,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // verdict reads it (src/stopped-by.js); a later record without one clears it; a backlog's is not this turn's.
           if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain && !recordIsLate?.(session, msg)) {
             try { const tb = Array.isArray(msg.message?.content) ? msg.message.content.find((b) => b && b.type === 'text') : null; noteTurnError?.(session, typeof msg.error === 'string' ? msg.error : null, tb && typeof tb.text === 'string' ? tb.text : null); } catch { }
+            try { for (const b of (Array.isArray(msg.message?.content) ? msg.message.content : [])) if (b && b.type === 'tool_use' && b.name === 'Workflow' && typeof b.id === 'string') session._wfToolIds = [...(session._wfToolIds || []), b.id].slice(-16); } catch { }   // B-3437: whose results are a Workflow launch ack
           }
           // STEP 3 record REGISTRATION (first-writer-wins, parse-primary):
           // the parse marks every record it processes; the DEVICE feed runs
@@ -1404,6 +1405,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                   : Array.isArray(b.content) ? b.content.map((x) => x?.text || '').join('\n') : '';
                 const wm = /Run ID: (wf_[\w-]+)/.exec(txt);
                 if (wm) armWorkflowUsageWatcher(session, id, wm[1]);
+                if (!msg.parent_tool_use_id && !msg.isSidechain && b.tool_use_id && session._wfToolIds && session._wfToolIds.includes(b.tool_use_id)) { try { require('../auto-resume-workflow.js').noteLaunchAck(session, txt); } catch { } }   // B-3437: the Workflow TOOL's own result — THIS conversation's run
               }
             } catch { }
           }

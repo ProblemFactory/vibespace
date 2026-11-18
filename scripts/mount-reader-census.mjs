@@ -118,6 +118,7 @@ export const ROWS = [
   ['src/server/sealed-json.js', 'own-tree', 1, null, DATA], // lane vault-e2e-password-fix-r2: the sealed JSON file itself (data/dropline-oauth.json)
   ['src/server/static-public.js', 'own-tree', 1, null, DATA], // lane csp-mermaid-sites r2: the stat of the checkout's own public/ script a request names (its build stamp, as the index route writes it) — never a user path
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
+  ['src/server/auto-resume-workflow.js', 'own-tree', 6, null, `${CLI}; lg-recovery U3 (B-3437): ONE conversation's Workflow run folders (the run its launch ack named, the folder listed bounded), every file through one O_NOFOLLOW handle`],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
   ['src/server/boot-restore.js', 'own-tree', 16, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen); lane dead-socket-keeps-chat-meta +2: the read-back of the kept stopped metas — one async readdir of data/session-meta + a readFile per <sock>.json.stopped, once per boot
   ['src/server/bridge-watch.js', 'own-tree', 6, null, PROC],

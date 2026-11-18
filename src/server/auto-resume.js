@@ -62,16 +62,32 @@ const CONTINUE_PROMPT = Object.freeze({
   lifted: 'VibeSpace auto-resume: the usage limit on this conversation\'s account has lifted.',
   facts: 'The usage-limit message the CLI printed ("resets at …", weekly or 5-hour) named ONE account\'s reset time — that time is NOT when you may continue, and nothing is to be scheduled for it: THIS message is the continue. If you parked or deferred work "until the reset", un-park it now.',
   cli: 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.',
+  // B-3437 (the owner's ruling 2026-11-18, the words approved as written): a Workflow run the limit cut short — just before `cli`
+  run: 'That limit also cut short the Workflow run {run} ({n} of its agents unfinished). Resume THAT run — call the Workflow tool with resumeFromRunId "{run}" — instead of launching it again from the start.',
 });
 const CONTINUE_ACCOUNT_MAX = 80;   // an account label is ONE inline piece, bounded
+const { RUN_ID_RE: RUN_ID_FORM } = require('../workflow-disk.js');   // PURE: the run id's own form (one definition)
+const WF_REREAD_MS = 2 * 60 * 1000;     // B-3437: the run a usage wall cut short is asked about every two minutes…
+const WF_FRESH_MS = 5 * 60 * 1000;      // …and only an answer this fresh is named by the continue
+/** PURE (B-3437): the sentence for a Workflow run the limit cut short, or '' — only a run id of its own form that the peer-text
+ *  belt leaves unchanged, and a count of 1..9999; anything else (a hostile record) says nothing. */
+function workflowRunLine(run) {
+  if (!run || typeof run !== 'object') return '';
+  const id = typeof run.runId === 'string' ? run.runId : '';
+  const n = Number(run.unfinished);
+  if (!RUN_ID_FORM.test(id) || toAgentText(id, { kind: 'line', max: 80 }).trim() !== id || !Number.isInteger(n) || n < 1 || n > 9999) return '';
+  return CONTINUE_PROMPT.run.replace(/\{run\}/g, () => id).replace('{n}', () => String(n));
+}
 /** PURE: the continue this fire delivers — `note` = continueNoticeFor's verdict ({cls}), `account` = the label of the
- *  identity the continue lands on (null when unknown). */
-function continuePromptFor(note, account) {
+ *  identity the continue lands on (null when unknown), `run` = the Workflow run the limit cut short (B-3437; null = none —
+ *  the words are today's, exactly). */
+function continuePromptFor(note, account, run = null) {
   const name = account == null ? '' : toAgentText(account, { kind: 'line', max: CONTINUE_ACCOUNT_MAX }).trim();
   const head = note && note.cls === 'switched'
     ? CONTINUE_PROMPT.switched.replace('{account}', () => (name ? `the account "${name}"` : 'another account'))
     : CONTINUE_PROMPT.lifted;
-  return `${head} ${CONTINUE_PROMPT.facts} ${CONTINUE_PROMPT.cli}`;
+  const runLine = workflowRunLine(run);
+  return `${head} ${CONTINUE_PROMPT.facts}${runLine ? ' ' + runLine : ''} ${CONTINUE_PROMPT.cli}`;
 }
 // …and its twin for a turn the harness ended because the MODEL WAS OVERLOADED (lane auto-resume-bulk): the same ask in
 // the same shape, without claiming a usage limit the conversation never hit.
@@ -348,6 +364,9 @@ function writeJsonAtomic(file, obj) {
  *        THE BATCH GATE: one owner click that opens N billed continues is ONE authorization (spend-guard
  *        authorizeBatch, reason 'bulk-resume'). Absent = the batch is REFUSED (fail closed — there is no "absent means
  *        a test" here: a batch with no gate is a money road nobody wired).
+ * @param deps.workflowRunAtWall (id, session, {fireAt}) => Promise<{runId, unfinished}|null> — B-3437: the Workflow run this
+ *        conversation's usage wall cut short (src/server/auto-resume-workflow.js: off the main loop, bounded), asked every two
+ *        minutes while the wall's arm stands; the continue names only a fresh answer.
  * @param deps.renewSpend (holds:[holdId]) => void — the holds the batch has not reached yet are renewed on every pass (a
  *        batch can outlive one hold's lifetime; an expired hold would let another producer into the budget it charges).
  * @param deps.noteBatchSpend (id, session, identity, hold) => void — a DELIVERED batch continue is charged (reason
@@ -363,10 +382,12 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
+  const wfOf = new Map(); // B-3437: webuiId -> {rec, run, at, ask} — the Workflow run the wall cut short, kept OFF the arm record (never persisted)
+  const freshRun = (id, a) => { const w = wfOf.get(id); return w && w.rec === a && w.run && Date.now() - (w.at || 0) <= WF_FRESH_MS ? w.run : null; };
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     for (const [k, v] of Object.entries(raw && raw.armed ? raw.armed : {})) armed.set(k, v);
@@ -1281,7 +1302,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // notice survives only where no prompt reached the conversation (the
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
-      try { ok = deliverContinue(session, verb, continuePromptFor(note, label2), (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
+      try { ok = deliverContinue(session, verb, continuePromptFor(note, label2, freshRun(id, a2)), (s2, text) => { const sent = sendToSession(id, s2, text, carried); if (sent) require('./sent-record.js').note({ conv: require('./sent-record.js').convOf(s2), text, kind: 'auto-resume' }); return sent; }); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       if (session._stoppedBy && session._stoppedBy.at) session._stopContinuedAt = session._stoppedBy.at;   // this stop has had its continue (the switch never arms it again)
@@ -1416,6 +1437,22 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   /** One tick: fire everything due whose session is alive and idle. */
   function tick(now = Date.now()) {
     let fired = 0;
+    // B-3437: the Workflow run a usage wall cut short is judged NEAR THE FIRE, never once at the arm (the run goes on after
+    // the walled turn — its agents' retries, a hot switch); asked every two minutes for a wall's arm (a watch too), the
+    // answer kept beside the arm (wfOf, never persisted) and named by the fire only while it is fresh
+    if (workflowRunAtWall) {
+      for (const k of [...wfOf.keys()]) if (!armed.has(k)) wfOf.delete(k);
+      for (const [id, a] of armed) {
+        if (!a || a.fired) continue;
+        const w0 = wfOf.get(id);
+        if (w0 && w0.rec === a && now - (w0.ask || 0) < WF_REREAD_MS) continue;
+        const s1 = activeSessions.get(id);
+        if (!s1 || !s1._stoppedBy || s1._stoppedBy.kind !== 'quota') continue;   // a wall's arm only (never a hold's)
+        const w = { rec: a, run: w0 && w0.rec === a ? w0.run : null, at: w0 && w0.rec === a ? w0.at : 0, ask: now };
+        wfOf.set(id, w);
+        try { Promise.resolve(workflowRunAtWall(id, s1, { fireAt: (Number(a.resetsAt) || 0) + GRACE_MS })).then((r) => { if (wfOf.get(id) !== w || armed.get(id) !== a) return; const had = !!w.run; w.run = r ? { runId: r.runId, unfinished: r.unfinished } : null; w.at = Date.now(); if (r && !had) log(`[auto-resume] ${id}: the limit cut a Workflow run short (${r.unfinished} agent(s) unfinished) — its continue names it`); }, () => { }); } catch { }
+      }
+    }
     for (const [id, a] of due(now)) {
       const session = activeSessions.get(id);
       if (!session) { armed.delete(id); save(); continue; }          // gone: nothing to continue
@@ -1483,12 +1520,12 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
-    _armed: armed, _fires: fires,
+    _armed: armed, _fires: fires, _wfOf: wfOf,
   };
 }
 
 module.exports = {
-  create, CONTINUE_PROMPT, continuePromptFor, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
+  create, CONTINUE_PROMPT, continuePromptFor, workflowRunLine, WF_REREAD_MS, WF_FRESH_MS, BULK_GATE_HOLD_MS, CONTINUE_PROMPT_OVERLOAD, bulkPromptFor, BULK_PACE_MS, BULK_GATE_WAIT_MS, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
 };
