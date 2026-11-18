@@ -142,7 +142,7 @@ const reGh = (fx, calls) => (p) => {
   if (/\/jobs\?filter=latest/.test(p)) return { json: listOf(last) };
   const an = /\/check-runs\/(\d+)\/annotations\?/.exec(p);
   if (an) return fx.annotations[an[1]] === 'unreadable' ? { err: 'gh failed: HTTP 502' } : { json: fx.annotations[an[1]] || [] };
-  return { json: runOf({ head_sha: RE_TIP, id: fx.runId, run_attempt: Number(last) }) };
+  return { json: runOf({ head_sha: RE_TIP, id: fx.runId, run_attempt: Number(last), ...(fx.run || {}) }) };
 };
 const reWrite = (fx, calls, mod = { heavyVerdict }) => { const dir = scratch('re'); return { v: mod.heavyVerdict({ sha: RE_TIP, runId: String(fx.runId), repoRoot: RE_R, dir, hosted: HOSTED, ghJson: reGh(fx, calls), now: 1795030000000, by: 'gate' }), dir }; };
 const reClone = () => JSON.parse(JSON.stringify(RE_FX)), reJob = (fx, k, n) => fx.attempts[k].jobs.find((x) => x.name === n);
@@ -193,6 +193,24 @@ const reTwin = () => { const fx = reClone(), end = reJob(fx, '1', 'heavy 4/7').c
   const gone = reClone(); delete gone.attempts['1'];
   const vg = reWrite(gone);
   ok(!gone.attempts['1'] && !vg.v.ok && /attempt 1's jobs could not be read/.test(vg.v.why) && empty(vg.dir), `CONTROL: an earlier attempt's job list that cannot be read refuses, writing nothing (${vg.v.why})`);
+  const untold = reClone(); delete untold.attempts['1'].total_count;
+  const vt0 = reWrite(untold);
+  ok(!('total_count' in untold.attempts['1']) && untold.attempts['1'].jobs.length === RE_FX.attempts['1'].jobs.length && !vt0.v.ok && /attempt 1's job list carries no total count/.test(vt0.v.why) && empty(vt0.dir),
+    `CONTROL (主开发 21:55Z): an earlier attempt's job list with NO total count — every job still there — refuses by name, writing nothing (${vt0.v.why})`);
+  // GREEN IN ATTEMPT 1, RE-RUN BY HAND IN ATTEMPT 2 AND RED (主开发 21:55Z): attempt 1 all success; attempt 2 re-runs heavy 4/7 alone (a new
+  // start and end) and it FAILS. The latest attempt's job is the one judged: the original's success in attempt 1 vouches for nothing
+  const byHand = (runReads) => { const fx = reClone(), a1 = fx.attempts['1'];
+    for (const x of a1.jobs) x.conclusion = 'success';
+    fx.attempts['2'] = { total_count: a1.jobs.length, jobs: a1.jobs.map((x) => ({ ...x, id: x.id + 800000000, run_attempt: 2,
+      ...(x.name === 'heavy 4/7' ? { conclusion: 'failure', started_at: '2026-11-18T19:30:00Z', completed_at: '2026-11-18T19:58:00Z' } : {}),
+      ...(x.name === 'heavy' ? { conclusion: 'skipped', started_at: '2026-11-18T19:58:03Z', completed_at: '2026-11-18T19:58:03Z' } : {}) })) };
+    fx.run = runReads; return fx; };
+  const hand = byHand({ conclusion: 'failure' }), vh = reWrite(hand), handOk = byHand({ conclusion: 'success' }), vh2 = reWrite(handOk);
+  const byHandPlanted = (fx) => fx.attempts['1'].jobs.every((x) => x.conclusion === 'success') && reJob(fx, '2', 'heavy 4/7').conclusion === 'failure' && reJob(fx, '2', 'heavy 4/7').started_at !== reJob(fx, '1', 'heavy 4/7').started_at;
+  ok(byHandPlanted(hand) && !vh.v.ok && /conclusion is failure, not success/.test(vh.v.why) && empty(vh.dir),
+    `GREEN IN ATTEMPT 1, RED WHEN RE-RUN BY HAND IN ATTEMPT 2: the run as GitHub then reads it (conclusion failure) is refused by name, writing nothing (${vh.v.why})`);
+  ok(byHandPlanted(handOk) && !vh2.v.ok && /«heavy 4\/7» is failure, not success/.test(vh2.v.why) && empty(vh2.dir),
+    `…and with the run read as success, the latest attempt's job refuses by its own name — attempt 1's green original vouches for nothing (${vh2.v.why})`);
   const paged = reClone(); paged.attempts['1'].total_count = 101;
   const vp = reWrite(paged);
   ok(paged.attempts['1'].total_count > paged.attempts['1'].jobs.length && !vp.v.ok && /more than one page/.test(vp.v.why) && empty(vp.dir), `CONTROL: an earlier attempt that spans more than one page refuses, writing nothing (${vp.v.why})`);

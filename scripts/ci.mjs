@@ -3943,7 +3943,9 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
   for (let k = 1; k < attempt; k++) {
     const ja = ghJson(`repos/${slug}/actions/runs/${runId}/attempts/${k}/jobs?per_page=100`);
     if (!ja || ja.err || !ja.json || !Array.isArray(ja.json.jobs)) return no(`cannot verify: attempt ${k}'s jobs could not be read (${(ja && ja.err) || 'gh gave nothing'})`);
-    if (Number(ja.json.total_count) > ja.json.jobs.length) return no(`cannot verify: attempt ${k} lists ${ja.json.total_count} jobs, more than one page`);
+    const tc = ja.json.total_count;   // 主开发 21:55Z: an earlier list with no total count is refused by name — never read as whole
+    if (typeof tc !== 'number' || !Number.isInteger(tc) || tc < 0) return no(`cannot verify: attempt ${k}'s job list carries no total count (${JSON.stringify(tc)}), so it cannot be known whole`);
+    if (tc > ja.json.jobs.length) return no(`cannot verify: attempt ${k} lists ${tc} jobs, more than one page`);
     earlier.push({ k, jobs: ja.json.jobs });
   }
   const ranIn = (job) => {
@@ -3957,12 +3959,14 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
   for (const job of (j.json.jobs || []).filter((x) => x && /^heavy \d+\/\d+$/.test(x.name || ''))) {
     const { attempt: at, job: src } = ranIn(job);
     const cr = (/\/check-runs\/(\d+)$/.exec(String(src.check_run_url || '')) || [])[1] || src.id;   // an Actions job IS a check run
+    // ONE page of annotations (100): a note past them reads as «no note» — a refusal, never a green (it fails closed)
     const a = ghJson(`repos/${slug}/check-runs/${cr}/annotations?per_page=100`);
     const where = `read at attempt ${at}${at === attempt ? '' : ', where it ran'}`;
     if (!a || a.err || a.json === undefined) return no(`cannot verify ${job.name}'s suites (${where}): its annotations could not be read (${(a && a.err) || 'gh gave nothing'})`);
     const sk = selfSkippedInNotes(a.json, job.name);
     if (sk.err) return no(`cannot verify ${job.name}'s suites (${where}): ${sk.err}`);
     for (const n of sk.names) skipped.add(n);
+    // the marker's record is by JOB NAME: two jobs of one name (the judge passes them only when every one is a success) keep the last one read
     vouchedBy[job.name] = { attempt: at, job: Number(src.id) || null };
   }
   const list = names.filter((n) => !skipped.has(n)).sort();
