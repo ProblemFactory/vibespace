@@ -693,7 +693,7 @@ const CATALOG = {
   // the Task Groups' ctx sync (task-groups-wiring.js ctxSync — moved out of server.js by «make room»): two picks of ONE construction
   'server.js:scheduleCtxSync': { kind: 'eval', why: 'a pick of task-groups-wiring.js ctxSync(), real: the remote ctx-folder sync — no session runs on a machine, so it syncs nothing (its 60 s timer never fires in the suite\'s seconds)' },
   'server.js:remoteCtxBaseFor': { kind: 'eval', why: 'the same ctxSync()\'s other pick: a remote session\'s ctx-folder base — none is remote' },
-  'server.js:convOps': { kind: 'inert', why: 'a pick of task-groups-wiring.js mountRoutes() (a wiring function — never evaluated whole): the conversation ops\' group births; broadcastActiveSessions calls it inside a try, no group is born in the census' },
+  'server.js:convOps': { kind: 'make', why: 'a pick of task-groups-wiring.js mountRoutes() (a wiring function — never evaluated whole): the conversation-ops module itself, its seam provided as the boot provides it there (conversation-ops.provide({ tasks, spendGuard }) — the real Task Groups store and the census\'s spend ceiling), so a conversation verb answers from a ready module', make: (w) => { const m = R('src/server/conversation-ops.js'); m.provide({ tasks: w.value('server.js', 'tasks'), spendGuard: w.value('server.js', 'spendGuard') }); return m; } },
   'server.js:instanceUrl': { kind: 'make', why: 'the instance\'s public address: loopback', make: (w) => standIn(w, 'instanceUrl', { url: () => 'http://127.0.0.1', publicUrl: () => null, status: () => ({}) }) },
   'server.js:integrationsWiring': { kind: 'make', why: 'the integrations store, real (src/server/integration-store.js) on the scratch data dir, no cluster env', make: (w) => ({ store: R('src/server/integration-store.js').create({ dataDir: w.data, env: {}, broadcast: () => {}, log: () => {} }) }) },
   'server.js:unblocker': { kind: 'make', why: 'the /proxy/ unblocker: a pass-through (it serves /proxy/ only; the census asks no proxied page)', make: () => (req, res, next) => next() },
@@ -748,6 +748,7 @@ function metaStore(w) {
 
 const ROUTES_STATIC = C.routes;
 const WORLD = buildWorld({ catalog: CATALOG, routes: ROUTES_STATIC });
+WORLD.world.value('server.js', 'convOps');   // the boot provides conversation-ops' seam inside mountRoutes — at boot, before any request
 {
   const B = WORLD;
   console.log(`    ${B.sites.length} sites mounted in the boot's order; ${B.evaluated.size} wiring names evaluated from their own source`);
@@ -794,7 +795,8 @@ fs.writeFileSync(path.join(CWD_B, 'notes.md'), SENT.bPrompt + '\n');
 sessions.set('wA', { agentToken: TA, claudeSessionId: SID_A, backendSessionId: SID_A, backend: 'claude', _webuiId: 'wA', sockName: 'cw-census-a', clients: new Set(), name: 'census asker', cwd: CWD_A, createdAt: Date.now() - 60e3 });
 sessions.set('wB', { agentToken: TB, claudeSessionId: SID_B, backendSessionId: SID_B, backend: 'claude', _webuiId: 'wB', sockName: 'cw-census-b', clients: new Set(), name: SENT.bName, cwd: CWD_B, createdAt: Date.now() - 120e3 });
 const ROUTE_ERRORS = new Map();   // route → the first error a handler threw (express's own error path, quietly)
-WORLD.app.use((err, req, res, next) => { const k = `${req.method} ${req.route ? req.route.path : req.path}`; if (!ROUTE_ERRORS.has(k)) ROUTE_ERRORS.set(k, String((err && err.message) || err).slice(0, 160)); if (!res.headersSent) res.status(500).json({ error: 'census: the handler threw', code: 'census_threw' }); });
+let SWEEP_PASS = 'main';   // the census error path counts the main sweep's throws (the key and related passes are judged by their findings)
+WORLD.app.use((err, req, res, next) => { const k = `${req.method} ${req.route ? (req.baseUrl || '') + req.route.path : req.path}`; if (SWEEP_PASS === 'main' && !ROUTE_ERRORS.has(k)) ROUTE_ERRORS.set(k, String((err && err.message) || err).slice(0, 160)); if (!res.headersSent) res.status(500).json({ error: 'census: the handler threw', code: 'census_threw' }); });
 const SERVER = await new Promise((r) => { const sv = WORLD.app.listen(0, '127.0.0.1', () => r(sv)); });
 const PORT = SERVER.address().port;
 const REJECTED = [];
@@ -901,6 +903,7 @@ for (const [w] of BEARERS) { const s = {}; for (const x of by((y) => y.who === w
 // ── THE GRANTED KEY (the row's «automation key»): a key minted through the REAL engine, every verb, granted to A with the
 // default reach (what the key itself opened) — then every verb aimed at B. Each verb's arguments are its own: the door
 // names an unknown one and it is dropped (derived, never typed). Its answers join the findings as caller `A-key`.
+SWEEP_PASS = 'after';
 const AE = W0.made.get('src/server/mounts-plugins-wiring.js:automation');
 const AKEYS = require(path.join(REPO, 'src/automation-keys.js'));
 const reopened = await VAULT.unlock(VAULT_PW);   // the sweep's last write locked it (an agent may)
@@ -949,7 +952,7 @@ function sweepVerdicts(results, table) {
       count: Object.entries(T).filter(([k, v]) => per[k] && v && v.n !== per[k]).map(([k, v]) => `${k} n ${v && v.n} → ${per[k]}`),
     };
   };
-  // SHALLOW: a route a caller CRASHES in (a stand-in short of a member reads so), or A's token gets a 5xx from — the
+  // SHALLOW: a route a caller CRASHES in (a stand-in short of a member reads so), or a token-bearing caller (A, its job, the maintainer key) gets a 5xx from — the
   // world cannot take it past its door; SHAPE: A's 400 — the request's shape refused before any reach is judged
   const shallow = prefixRows('shallow', [...new Set(by((x) => CRASH_RE.test(x.text) || (x.who !== 'none' && x.who !== 'vsak' && x.status >= 500)).map((x) => x.route))]);   // any token-bearing caller's 5xx (a handler that throws for a job token or the maintainer key too)
   const shape = prefixRows('shape', [...new Set(by((x) => x.who === 'A' && x.status === 400 && !CRASH_RE.test(x.text)).map((x) => x.route))]);
@@ -987,8 +990,10 @@ SPAWNED.length = 0;   // the controls below count their own
 }
 const ALL_RESULTS = [...RESULTS, ...KEY_RESULTS, ...RELATED];
 const SV = sweepVerdicts(RESULTS, TABLE);
+/** the routes a handler threw on (the census error path) that are no shallow route — none may be */
+const strayErrors = (errors, shallowNow) => [...errors.keys()].filter((k) => !shallowNow.some((r) => r === k || r.startsWith(k + ' #')));
 {
-  const stray = [...ROUTE_ERRORS.keys()].filter((k) => !SV.shallow.now.some((r) => r === k || r.startsWith(k + ' #')));
+  const stray = strayErrors(ROUTE_ERRORS, SV.shallow.now);
   ok(!stray.length, `every route a handler threw on (the census error path, ${ROUTE_ERRORS.size}) is a shallow route — none throws unseen behind a 4xx-looking answer`, stray.map((k) => `${k} → ${ROUTE_ERRORS.get(k)}`).join(' | '));
 }
 const SVF = sweepVerdicts(ALL_RESULTS, TABLE).findings;   // the findings over every pass (the five callers, the granted key, the related reads)
@@ -1022,6 +1027,11 @@ ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a list
   ok(v.deep.lost.includes('GET /api/agent/planted-deep') && v.deep.gained.length === 1, 'CONTROL: the `deep` set pinned both ways — a route the table names that A no longer reaches, and one it reaches that the table does not name ⇒ each RED', v.deep);
   ok(v.open.dead.includes('GET /api/agent/planted-open') && v.anon.unrowed.includes(firstAnon), 'CONTROL: an `open` row no route answers ⇒ DEAD; an `anonymous` row with no why is no row ⇒ RED', [v.open.dead, v.anon.unrowed]);
   ok(v.findings.dead.includes('GET /api/agent/planted-finding · A · bName') && v.findings.unrowed.includes(firstFinding), 'CONTROL: a `findings` row no answer carries ⇒ DEAD; one with no why is no row (its hit ⇒ NEW) — a blank why never silences a hit', [v.findings.dead, v.findings.unrowed]);
+}
+// the two late asserts' RED controls (主开发 08:54Z: an assert never seen red is a comment)
+{
+  const st = strayErrors(new Map([['GET /api/agent/planted-throw', 'census: planted']]), SV.shallow.now);
+  ok(st.length === 1 && st[0] === 'GET /api/agent/planted-throw', 'CONTROL: a route the census error path caught that is no shallow route ⇒ RED (strayErrors names it)', st);
 }
 // ── the positive controls: the same scanner over the same real routes, where the fact MAY be read ──
 {
@@ -1084,6 +1094,14 @@ console.log('⑦ controls of the world (planted copies, each world on its own sc
     const x = express(); x.use('/api/agent', r); x.get(/^\/api\/agent\/planted-re$/, (req, res) => res.json({}));
     const vx = mountVerdict(x, [], TABLE);
     ok(vx.extra.includes('GET /api/agent/planted-sub') && vx.regex.length === 1, 'CONTROL: a router mounted under /api/agent serves GET /api/agent/planted-sub (⑥: a mounted route ③ did not read ⇒ RED), a regex route is said as such ⇒ RED', [vx.extra, vx.regex]);
+  }
+  // a wiring file whose evaluated code reads its own __dirname (the real tree's folder) ⇒ RED
+  {
+    const fb = mpw.indexOf("require('../routes/feedback.js').registerFeedbackRoutes(app, {");
+    ok(fb > 0, 'the feedback routes\' mount is found in the wiring (the control\'s anchor)');
+    const dirny = mpw.slice(0, fb) + mpw.slice(fb).replace("registerFeedbackRoutes(app, {", "registerFeedbackRoutes(app, { plantedDir: __dirname,");
+    const dd = again({ [MPW]: dirny });
+    ok(dd.B.dirnameReads.has(MPW) && !dd.B.threw.length, 'CONTROL: a wiring site that reads its own __dirname (mounts-plugins-wiring.js) ⇒ RED (dirnameReads names the file)', [...dd.B.dirnameReads]);
   }
   // (c) a construction with no catalog row ⇒ RED
   const { ['server.js:hosts']: _drop, ...lessCat } = CATALOG;
