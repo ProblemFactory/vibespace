@@ -831,6 +831,123 @@ console.log('\n§8g a version-only bump is no global input; --rules names the on
     && /tier: str\('tier'\) === 'fast' \? 'fast' : 'heavy', rules: !!arg\('rules'\)/.test(ciSrc) && /if \(l\.ruleLines\) \{[^\n]*console\.log\(l\.ruleLines\.join\('\\n'\)\); \} else console\.log\(l\.names\.join\(','\)\);/.test(ciSrc),
     'WIRING: --list-affected --tier=fast lists the FAST rows; --rules prints the report (the count on stderr); without it the comma-joined names as before');
 }
+
+// ── §8g A SKIP IS NOT A GREEN (B-4829) ──
+// 2026-11-18: on a test machine with no sshd two heavy suites skipped their real road and ended rc 0 — and the green row
+// kept only the LAST stdout line (80 characters), so a skip said mid-output read as a green and only a SKIP on the last
+// line could be named. Planted suites through the REAL runSuiteAsync + runFastLanes: one says two SKIPs in the MIDDLE and
+// ends ALL PASS; one says «<leg> SKIPPED: why» on stdout and its SKIP on stderr; one is red on its first try and green with
+// a SKIP on its retry; one is a plain green whose lines carry SKIP inside a word or a sentence. The shapes are the tree's:
+// a walk of every printed literal in scripts/ (a fixed-string scan of the tracked files) — every SKIP line counted, the
+// sentences ABOUT a skip a one-way fixture. The control is a copy of ci.mjs whose green row is today's last-line rule.
+console.log('\n§8g a green suite\'s SKIP lines are counted on its row and named at the close — a skip is never a green (B-4829)');
+{
+  const ci = await import('./ci.mjs');
+  const { anchored } = await import('./scratch.mjs');
+  const root = mktmp('skiplegs');
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  const plant = (name, body) => fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), body);
+  const once = path.join(root, 'flaky-seen');
+  plant('test-sk-mid', "console.log('§1 planted');\nconsole.log('  ✓ leg one');\nconsole.log('  ⊘ SKIP the real road — no sshd on this machine');\nconsole.log('  ✓ leg three');\nconsole.log('  · SKIP (leg four: no xpra here)');\nconsole.log('\\nALL PASS (2)');\n");
+  plant('test-sk-err', "console.log('  – corpus smoke SKIPPED: no rollouts on this machine');\nconsole.error('SKIP: no chrome binary on this machine');\nconsole.log('ALL PASS (0)');\n");
+  plant('test-sk-flaky', `import fs from 'node:fs';\nif (!fs.existsSync(${JSON.stringify(once)})) { fs.writeFileSync(${JSON.stringify(once)}, '1'); console.log('  ✗ planted flake (first try)'); console.log('1 FAILED'); process.exit(1); }\nconsole.log('  ○ SKIP the retry leg — no dtach here');\nconsole.log('ALL PASS (1)');\n`);
+  plant('test-sk-green', "console.log('  ✓ SKIP_AGENT_HOOKS is set in the child env');\nconsole.log('  ✓ a row the list scrolled away is SKIPPED by name, never sampled');\nconsole.log('  ✓ the wrapper record is SKIPPED (declared): no card');\nconsole.log('  ✓ a depth-1 read degrades to a named SKIP (the census)');\nconsole.log('ALL PASS (4)');\n");
+  const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
+  const SHA = '5c1b4829a0000000';
+  const drive = async (M, tag, names = ['test-sk-mid', 'test-sk-err', 'test-sk-flaky', 'test-sk-green']) => {
+    const failDir = path.join(root, `fail-${tag}`), said = [], rows = [], inflight = new Set();
+    fs.rmSync(once, { force: true });
+    const res = await M.runFastLanes({ parallel: names.map(row), serial: [] }, {
+      lanes: 1, keepGoing: true, inflight, failDir, sha: SHA, log: (l) => said.push(l), refusal: (s) => (s.name === 'test-sk-flaky' ? '' : 'no retry here (§8f\'s)'),
+      run: (s, { lane }) => M.runSuiteAsync(s, { root, sha: SHA, lane, inflight }),
+      after: async (r) => { rows.push(r.lines.join('\n')); },
+    });
+    return { ...res, failDir, said, rows, fails: fs.existsSync(failDir) ? fs.readdirSync(failDir).sort() : [] };
+  };
+  const rowOf = (x, n) => (x.rows.filter((l) => l.includes(`✓ ${n} (`)).pop() || '').trim();
+  const a = await drive(ci, 'now');
+  ok(/ — ALL PASS \(2\) · SKIP 2: the real road — no sshd on this machine$/.test(rowOf(a, 'test-sk-mid')),
+    `a SKIP said in the MIDDLE of a green suite's output is on its ✓ row: «… — ALL PASS (2) · SKIP 2: first reason» (${rowOf(a, 'test-sk-mid')})`);
+  const errOk = / — ALL PASS \(0\) · SKIP 2: corpus smoke SKIPPED: no rollouts on this machine$/.test(rowOf(a, 'test-sk-err')) && / — ALL PASS \(4\)$/.test(rowOf(a, 'test-sk-green'));
+  ok(errOk, `…and a leg «SKIPPED» with its reason after a colon counts, and so does a SKIP said on stderr; a green whose lines carry SKIP only inside a word or a sentence keeps its plain row${errOk ? '' : ` (${rowOf(a, 'test-sk-err')} | ${rowOf(a, 'test-sk-green')})`}`);
+  ok(a.flaky.join(',') === 'test-sk-flaky' && / — ALL PASS \(1\) · SKIP 1: the retry leg — no dtach here$/.test(rowOf(a, 'test-sk-flaky')),
+    `…and a suite green on its RETRY is judged by the retry's output (${rowOf(a, 'test-sk-flaky')})`);
+  ok(a.skippedLegs.map((x) => `${x.name}:${x.n}`).join(',') === 'test-sk-mid:2,test-sk-err:2,test-sk-flaky:1' && !a.reds.length && a.timings.length === 4,
+    `runFastLanes NAMES every green that skipped a leg, with its count (${a.skippedLegs.map((x) => `${x.name} (${x.n})`).join(', ')}) — still green (4 timings, no red), never folded into the plain greens`);
+  const midLog = path.join(a.failDir, '5c1b4829.test-sk-mid.skip.1.log'), errLog = path.join(a.failDir, '5c1b4829.test-sk-err.skip.1.log');
+  ok(a.fails.join(',') === '5c1b4829.test-sk-err.skip.1.log,5c1b4829.test-sk-flaky.1.log,5c1b4829.test-sk-flaky.skip.2.log,5c1b4829.test-sk-mid.skip.1.log'
+    && fs.readFileSync(midLog, 'utf-8').includes('  ✓ leg one\n  ⊘ SKIP the real road') && fs.readFileSync(errLog, 'utf-8').includes('── stderr ──\nSKIP: no chrome binary')
+    && a.said.includes(`  [ci] test-sk-mid skipped 2 leg(s) — its whole output (try 1): ${midLog}`) && a.skippedLegs[0].file === midLog,
+    `…and keeps each one's WHOLE output beside the red tries' (<sha8>.<suite>.skip.<try>.log — the retry's by its try: ${a.fails.join(', ')}), said on its own line; the plain green keeps none`);
+  // the closing lines' words, both tiers (one door each: skipCount on the verdict line, skippedLegsSaid after it)
+  ok(ci.skipCount(a.skippedLegs) === ' · SKIP 5 leg(s) in 3 suite(s): test-sk-mid (2), test-sk-err (2), test-sk-flaky (1)' && ci.skipCount([]) === ''
+    && ci.skippedLegsSaid('ci:heavy', a.skippedLegs)[0] === `[ci:heavy] SKIPPED LEG(S) test-sk-mid (2): the real road — no sshd on this machine — its whole output: ${midLog}`,
+    `the closing line carries the count BY SUITE («${ci.skipCount(a.skippedLegs).trim()}»), and one line per suite names its first reason and its kept output`);
+  // a skip log is bounded with its commit's other files (pruneFailLogs reads «<suite>.skip» as the suite part)
+  {
+    const pd = mktmp('skipprune'), T0 = Date.now() / 1000 - 3600, K = ci.FAIL_LOGS_KEEP;
+    for (let i = 0; i <= K; i++) { const n = path.join(pd, `${(0xb0000000 + i).toString(16)}.test-sk.skip.1.log`); fs.writeFileSync(n, 'x'); fs.utimesSync(n, T0 + i * 10, T0 + i * 10); }
+    const gone = ci.pruneFailLogs(pd).map((f) => path.basename(f));
+    ok(gone.join(',') === 'b0000000.test-sk.skip.1.log' && fs.readdirSync(pd).length === K, `a skip log is BOUNDED like a red's: ${K + 1} commits ⇒ the oldest one's file goes (${gone.join(', ')})`);
+  }
+  // THE TREE'S SHAPES (a walk, never a hand list): every printed literal in scripts/ that says SKIP / SKIPPED as a word —
+  // (i) one whose first word (after at most one token with no letter in it: a bullet, «§3», «④») is SKIP is COUNTED by the
+  // launcher; (ii) one the launcher does not count is a sentence ABOUT a skip and its file's row in
+  // scripts/fixtures/skip-sentences.json holds it (ONE-WAY: a file that adds one is red by name, a fall is said);
+  // (iii) a lowercase «— skipping …» line is the old shape of a skip: none may stay uncounted
+  {
+    const g = spawnSync('git', ['-c', 'grep.threads=2', 'grep', '-n', '-F', '-i', 'skip', '--', 'scripts/*.mjs'], { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 << 20 });
+    if (g.status !== 0) console.log(`  · SKIP the tree's SKIP shapes: git could not list this tree (${String(g.stderr || g.error || '').trim().slice(0, 120)})`);
+    else {
+      const WORD = /(?<![\w-])SKIP(?:PED)?(?![\w-])/, LOWER = /(?:^\s*\(?|[—–]\s*)skipping\b/, LIT = /([`'"])((?:\\.|(?!\1).)*)\1/g;
+      const firstWord = (x) => { const t = x.trim().split(/\s+/); const i = t.length > 1 && !/[A-Za-z]/.test(t[0]) ? 1 : 0; return /^SKIP(?:PED)?(?![\w-])/.test(t[i] || ''); };
+      const own = new Set(['scripts/ci.mjs', 'scripts/test-ci-gate-tiers.mjs']); // the rule's own file and this leg's planted near-misses
+      let lead = 0, counted = 0; const missed = [], lower = [], sentences = {}, sentenceAt = {};
+      for (const l of g.stdout.split('\n')) {
+        const m1 = /^([^:]+):(\d+):(.*)$/.exec(l);
+        if (!m1 || own.has(m1[1])) continue;
+        for (const m of m1[3].matchAll(LIT)) {
+          const okMsg = /\bok\w*\(\s*[^,]{0,40},\s*$/.test(m1[3].slice(0, m.index));
+          const all = m[2].replace(/\$\{[^}]*\}/g, 'x').split('\\n').map((x, i) => (okMsg && !i ? '  ✓ ' : '') + x);
+          for (const x of all) if (LOWER.test(x) && !ci.isSkipLine(x)) lower.push(`${m1[1]} line ${m1[2]} «${x.trim().slice(0, 70)}»`);
+          const printed = all.filter((x) => WORD.test(x));
+          if (!printed.length) continue;
+          const heads = printed.filter(firstWord);
+          if (heads.length) { lead++; for (const x of heads) if (!ci.isSkipLine(x)) missed.push(`${m1[1]} line ${m1[2]} «${x.trim().slice(0, 70)}»`); }
+          if (printed.some((x) => ci.isSkipLine(x))) counted++;
+          else { sentences[m1[1]] = (sentences[m1[1]] || 0) + 1; (sentenceAt[m1[1]] ||= []).push(`line ${m1[2]} «${printed[0].trim().slice(0, 70)}»`); }
+        }
+      }
+      let FIX = {}; try { FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'skip-sentences.json'), 'utf-8')).files || {}; } catch (e) { FIX = { '(unreadable)': e.message }; }
+      const over = Object.entries(sentences).filter(([f, n]) => n > (FIX[f] || 0)).map(([f, n]) => `${f}: ${n} (its row ${FIX[f] || 0}) — ${sentenceAt[f].join('; ')}`);
+      const fell = Object.entries(FIX).filter(([f, n]) => (sentences[f] || 0) < n).map(([f, n]) => `${f} ${n}→${sentences[f] || 0}`);
+      const total = Object.values(sentences).reduce((x, y) => x + y, 0);
+      console.log(`    the tree prints ${counted} SKIP literal(s) the launcher counts (${lead} with SKIP as the first word); ${total} sentence(s) about a skip in ${Object.keys(sentences).length} file(s)${fell.length ? `; FELL (only said — lower the rows): ${fell.join(', ')}` : ''}`);
+      ok(lead >= 300 && !missed.length, `every SKIP line the tree's suites print is COUNTED by the launcher's rule (${lead} with SKIP first, by a walk of scripts/)${missed.length ? ` — NOT COUNTED: ${missed.slice(0, 12).join(' | ')}` : ''}`);
+      ok(!over.length && typeof FIX['scripts/test-architecture.mjs'] === 'number', `…every literal it does NOT count is a sentence ABOUT a skip, held by its file's row of scripts/fixtures/skip-sentences.json — a new one is red by name (lead a skip with SKIP, or put its reason after «SKIPPED» and a colon)${over.length ? ` — NEW: ${over.join(' | ')} — live ${JSON.stringify(sentences)}` : ''}`);
+      ok(!lower.length, `…and no lowercase «— skipping …» line is left uncounted (a skip says «· SKIP <leg>: <why>»)${lower.length ? ` — ${lower.slice(0, 12).join(' | ')}` : ''}`);
+    }
+  }
+  // the CONTROL: ci.mjs with today's last-line rule — the mid-output SKIP vanishes from the row, nothing is named or kept
+  const M = mutantCopies('ci-skiplegs', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  let mutSrc = null, gone = '';
+  try {
+    mutSrc = anchored(src, /      if \(status === 0\) \{\n        const sk = skipsOf\(stdout, stderr\);[^\n]*\n[^\n]*\n        return;\n      \}\n/,
+      () => "      if (status === 0) { resolve({ ok: true, ms, load, selfSkip, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}`] }); return; }\n", 'the green row (B-4829)');   // the release's last-line rule (2.369.410: B-479e's selfSkip beside it)
+  } catch (e) { gone = e.message; }
+  const mut = mutSrc ? await import(pathToFileURL(M.write('scripts/ci.mjs', mutSrc, 'last-line-rule', { esm: true })).href) : null;
+  const b = mut ? await drive(mut, 'mut', ['test-sk-mid']) : null; // the control judges the mid-output skipper alone (one child, not five)
+  ok(!!b && !rowOf(b, 'test-sk-mid').includes('SKIP') && / — ALL PASS \(2\)$/.test(rowOf(b, 'test-sk-mid')) && !b.skippedLegs.length && !b.fails.some((f) => f.includes('.skip.')),
+    `CONTROL: a copy of ci.mjs on today's last-line rule prints the mid-output skipper as a plain green (${b ? rowOf(b, 'test-sk-mid') : gone}) and names and keeps nothing — the legs above are red without the change`);
+  // WIRING: both tiers' closing lines carry the count; the heavy tier records every green that skipped (try 1 or the retry)
+  ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src) && /if \(skippedLegs\.length\) console\.log\(`\\n\$\{skippedLegsSaid\('ci', skippedLegs\)/.test(src)
+    && /release gate is RED, do not push\$\{skipCount\(skippedLegs\)\}/.test(src)
+    && /failed: \$\{failed\.join\(', '\)\}\$\{skipCount\(skippedLegs\)\}`/.test(src) && /not present at that commit` : ''\}\)\$\{skipCount\(skippedLegs\)\}`;/.test(src)
+    && /if \(r\.ok && r\.skips\) skippedLegs\.push\(\{ name: s\.name, n: r\.skips\.n, first: r\.skips\.first, file: keepSkipLog\(s, r, tried\) \}\);/.test(src)
+    && /r = again; tried = 2;/.test(src) && /for \(const l of skippedLegsSaid\('ci:heavy', skippedLegs\)\) console\.log\(l\);/.test(src) && /skippedLegs: skippedLegs\.length \?/.test(src),
+    'WIRING: ALL GREEN, the fast RED line and the heavy GREEN / RED lines end with the count, a line per skipping suite follows, the heavy loop keeps the try that stood, the heavy marker carries skippedLegs');
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

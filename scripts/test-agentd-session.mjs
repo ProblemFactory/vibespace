@@ -107,7 +107,7 @@ console.log('— M1: dtach session SURVIVES a dropped connection (invariant #1) 
   // start a dtach session THROUGH the daemon; drop the whole connection; the
   // dtach session must still be alive to reattach (like restoreSessions).
   const hasDtach = (() => { try { execSync('command -v dtach', { stdio: 'ignore' }); return true; } catch { return false; } })();
-  if (!hasDtach) { console.log('  · dtach not installed — skipping (informational)'); }
+  if (!hasDtach) { console.log('  · SKIP (informational): dtach not installed'); }
   else {
     const sock = path.join(tmp, 'dtach.sock');
     // dtach -c creates+attaches; run a marker shell that stays alive

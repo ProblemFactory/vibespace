@@ -996,7 +996,7 @@ export const SUITES = [
   { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 16.8 s (B-a2c9, restated 2026-11-18 in the box\'s scale: 19.9 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 13.9–19.7 s); was 6.6 s) — the gate\'s own gate, part 1/7: §1 the census, §2 tier hygiene + THIS rule (§2b) + §2e the wall-clock census + §2f the apt installs + §2h every setup step bounded, the ONE fonts road + §2i a red names its legs + §2j a suite reads no history master does not have (B-4291) (the rest: test-ci-gate-push / -tiers / -shards / -reaper / -hang / -watchdog)', over: 'slow: it grew with the gate\'s own legs (the false-row judge in a scratch repository, the fast parts\' plans over the whole table, §2f\'s stub apt-gets with their bounded stalls) on a part that read 12.6 s already in 2.369.403\'s tiers — next-list item B-54a9: profile by section and cut it back under 10 s, or move it heavy' },
   { name: 'test-suite-files-parse', tier: 'fast', why: 'in-process · 5.9 s (B-0d3e, lane lg-leak-census: + §3, the unanchored control edits and the anchor helpers on §1\'s one parse — alone ×2: 5.63 / 5.70 s at load 7–8 before the helper walk; 5.53 / 5.92 s with it, measured at load 44 and scaled by that run\'s median 1.54 over 407 unchanged suites; was 4.1 s) — EVERY SUITE FILE PARSES (the coordinator\'s law, the train int402, 2026-11-14): every *.mjs / *.cjs / *.js under scripts/ (node_modules aside) is parsed ONCE in-process by acorn as the module kind Node gives it (.mjs a module, .cjs CommonJS as Node wraps it, .js by the nearest package.json or Node\'s detection); an unparseable file is red by its name and line. Born of a hosted-only heavy that had not parsed since a lane\'s first pick, which only the mirror would have met; the controls are a scratch tree with six planted reds' },
   { name: 'test-ci-gate-push', tier: 'fast', why: 'LAW architecture · 6.3 s — the gate\'s own gate, part 2/7: §3 the block rule over real commits, §4 the real pre-push hook end to end, §5 the detached child\'s git environment (a real git worktree add, the damage as the control)', allow: ['checkout'] },
-  { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 6.8 s (restated 2026-11-18 by arithmetic, the selector\'s restack on 2.369.410: the release\'s 6.0 s + §8g\'s 0.8 s, measured side by side at 5de10e38d — 7.46 s vs 8.22 s; before it, restated 2026-11-17, lane bl-tests-e: 5.50–5.97 s on the test machine with §7b) — the gate\'s own gate, part 3/7: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §7b a leg never passes by its name (B-1747: the swap census over every script, ~0.4 s), §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family', allow: ['checkout'] },
+  { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 9.5 s (int411 seam 2026-11-18, both restatements kept by arithmetic: 6.0 + 0.8 + 2.7 = 9.5 s — restated 2026-11-18 by arithmetic, the selector\'s restack on 2.369.410: the release\'s 6.0 s + §8g\'s 0.8 s, measured side by side at 5de10e38d — 7.46 s vs 8.22 s; before it, restated 2026-11-17, lane bl-tests-e: 5.50–5.97 s on the test machine with §7b; and B-4829 2026-11-18: + §8g — planted suites through the real runner + a walk of scripts/; measured 12.3 / 13.5 s in a test-machine run at load 44, scaled by that run\'s median 1.54 over 407 unchanged suites against the base\'s run; was 6.0 s) — the gate\'s own gate, part 3/7: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §7b a leg never passes by its name (B-1747: the swap census over every script, ~0.4 s), §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family, §8g a skip is never a green (a green suite\'s SKIP lines counted on its row and named at the close)', allow: ['checkout'] },
   { name: 'test-ci-gate-shards', tier: 'fast', why: 'LAW architecture · 5.5 s (B-a2c9, restated 2026-11-18 in the box\'s scale: 6.51 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 4.6–6.4 s); was 4.2 s) — the gate\'s own gate, part 4/7: §8b every heavy suite in exactly one shard, §8c the self-hosted batch + the hosted shards partition the tier' },
   { name: 'test-ci-gate-reaper', tier: 'fast', why: 'LAW architecture · 1.5 s — the gate\'s own gate, part 5/7: §9 the scratch-orphan reaper, §9b the singleton Desktop\'s X server, §9c a scratch root off the arguments, §9d the directory sweep, §10 the launcher once for real (a stub repository)' },
   { name: 'test-ci-gate-hang', tier: 'fast', why: 'LAW architecture · 5.2 s — the gate\'s own gate, part 6/7: §11 a hang leaves a report (five planted suites under a 3 s budget, at once)' },
@@ -2509,6 +2509,47 @@ export function pruneFailLogs(dir, keep = FAIL_LOGS_KEEP) {
   for (const [, g] of [...by.entries()].sort((a, b) => b[1].t - a[1].t).slice(keep)) for (const n of g.files) { try { fs.unlinkSync(path.join(dir, n)); gone.push(path.join(dir, n)); } catch { } }
   return gone;
 }
+// A SKIP IS NOT A GREEN (B-4829). A suite that ends rc 0 may have skipped its real road: the tree's suites say so on a
+// line of their own — «SKIP: …», «  ⊘ SKIP …», «  · SKIP (…)», «  ○ SKIP …», «  - SKIP …», «  ⚠ SKIP: …», «SKIPPED: …» —
+// when a program or a platform is missing. The green row kept only the LAST stdout line, so a skip said mid-output read
+// as a green (a test machine with no sshd: two heavy suites skipped their real road and ended rc 0). SKIP_LINE = a line
+// whose first word, after at most one bullet glyph and one section label («§3», «④b», «(e)»), is SKIP or SKIPPED; and
+// SKIP_PHRASE = SKIP / SKIPPED (optionally «BY NAME») as a word followed by its reason's colon or dash, or SKIPPED ending
+// the line («– curl live-drift census SKIPPED — curl not runnable here», «CONTROLS SKIPPED: …», «ALL PASS (0) — SKIPPED»).
+// Measured on the tree's printed SKIP literals (test-ci-gate-tiers §8g walks them): every SKIP line counts, and the
+// literals that say SKIP only inside a sentence ABOUT a skip are a one-way fixture (scripts/fixtures/skip-sentences.json).
+// skipsOf counts the lines over stdout and stderr and names the first one's reason → { n, first } | null; skipTail is the
+// green row's tail («· SKIP k: first reason»).
+export const SKIP_LINE = /^\s*(?:[⊘·○⚠…•✓*~+\-—–]\s*)?(?:(?:[^\sA-Za-z("'«`]\S{0,3}|\([a-z0-9]{1,3}\))\s+)?SKIP(?:PED)?(?![\w-])/;
+export const SKIP_PHRASE = /(?<![\w\-«"'`(])SKIP(?:PED)?(?:\s+(?:BY NAME|by name))?\s*[:—–]|(?<![\w\-«"'`(])SKIPPED\s*$/;
+export const isSkipLine = (line) => SKIP_LINE.test(line) || SKIP_PHRASE.test(line);
+export function skipsOf(...texts) {
+  let n = 0, first = '';
+  for (const t of texts) {
+    for (const line of String(t || '').split('\n')) {
+      if (!isSkipLine(line)) continue;
+      if (!n) first = (SKIP_LINE.test(line) ? line.replace(SKIP_LINE, '').replace(/^[\s:—–-]+/, '') : line.replace(/^\s*[⊘·○⚠…•✓*~+\-—–]?\s*/, '')).trim().slice(0, 100) || '(no reason said)';
+      n++;
+    }
+  }
+  return n ? { n, first } : null;
+}
+export const skipTail = (sk) => (sk ? ` · SKIP ${sk.n}: ${sk.first}` : '');
+// …and a green that skipped keeps its WHOLE output beside the red tries' (writeFailLog's dir): <sha8>.<suite>.skip.<try>.log
+// — pruneFailLogs bounds it with its commit's other files (FAIL_LOG_NAME reads «<suite>.skip» as the suite part)
+export function writeSkipLog(dir, sha, s, r, attempt, { tag = '[ci]', log = console.log } = {}) {
+  if (!r.ok || r.absent || !r.skips || !r.full) return null;
+  try {
+    const f = path.join(dir, `${shortSha(sha)}.${s.name}.skip.${attempt}.log`);
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, r.full);
+    log(`  ${tag} ${s.name} skipped ${r.skips.n} leg(s) — its whole output (try ${attempt}): ${f}`);
+    return f;
+  } catch (e) { log(`  · skip log not kept: ${e && e.message}`); return null; }
+}
+// THE CLOSING LINES OF BOTH TIERS (B-4829): the verdict line carries the count — «· SKIP k leg(s) in m suite(s): a (2), b (1)»,
+// never folded into the greens — and one line per suite that skipped follows it (its first reason, its kept output)
+export const skipCount = (legs) => (legs && legs.length ? ` · SKIP ${legs.reduce((a, x) => a + x.n, 0)} leg(s) in ${legs.length} suite(s): ${legs.map((x) => `${x.name} (${x.n})`).join(', ')}` : '');
+export const skippedLegsSaid = (tag, legs) => (legs || []).map((x) => `[${tag}] SKIPPED LEG(S) ${x.name} (${x.n}): ${x.first}${x.file ? ` — its whole output: ${x.file}` : ''}`);
 const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null } = {}) {
   return new Promise((resolve) => {
@@ -2548,7 +2589,11 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // a green suite whose LAST line begins «SKIP» skipped ITSELF (the tree's convention — `SKIP: no chrome …`): it ran nothing (B-479e (1))
       // (the tree's endings: «SKIP: …», «SKIPPED (…)», and «ALL PASS (0)» — zero legs ran — with or without a «— SKIPPED» after it)
       const last = (stdout.trim().split('\n').pop() || '').trim(), selfSkip = /^SKIP/.test(last) || /^ALL PASS \(0\)/.test(last) ? last.slice(0, 160) : undefined;
-      if (status === 0) { resolve({ ok: true, ms, load, selfSkip, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}`] }); return; }
+      if (status === 0) {
+        const sk = skipsOf(stdout, stderr); // B-4829: a SKIP said anywhere in the output is counted on the row, never only the last line (selfSkip: B-479e's whole-suite skip, beside it)
+        resolve({ ok: true, ms, load, selfSkip, ...(sk ? { skips: sk, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : '') } : {}), lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}${skipTail(sk)}`] });
+        return;
+      }
       const r = { status, signal, error };
       // the hang report rides INSIDE the ✗ line's entry, and so do its ✗ lines (failLegs): lines[1] / lines[2] stay the stdout tail / stderr the rerun ledger reads
       const hl = asked ? readHangReport(asked, { root, envExcluded: hr.envExcluded }) : null, digest = hl && hl.lines.length ? '\n' + hl.lines.join('\n') : '';
@@ -4170,8 +4215,10 @@ function falseRowsVerb() {
  * → { reds, flaky, absent, skipped, timings, parMs, serMs, stoppedBy }
  */
 export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, ledger = null, sha = '', log = console.log, refusal = fastRetryRefusal } = {}) {
-  const reds = [], flaky = [], absent = [], skipped = [], timings = [];
+  const reds = [], flaky = [], absent = [], skipped = [], timings = [], skippedLegs = [];
   let stoppedBy = null; // fail-fast only: the red that stopped the tier
+  // B-4829: a green that skipped a leg is named (its count, its first reason) and its whole output kept beside the reds'
+  const noteSkips = (s, r, attempt) => { if (r.skips) skippedLegs.push({ name: s.name, n: r.skips.n, first: r.skips.first, file: failDir ? writeSkipLog(failDir, sha, s, r, attempt, { log }) : null }); };
   const laneWorker = async (queue, lane) => {
     for (;;) {
       if (stoppedBy) break;
@@ -4186,7 +4233,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
       if (cut) break;
       // a row that ENDED on its own is judged, even when another lane's stop landed during its sweep (never dropped)
       if (r.absent) { absent.push(s.name); continue; }
-      if (r.ok) { timings.push({ name: s.name, ms: r.ms, lane: String(lane) }); continue; }
+      if (r.ok) { timings.push({ name: s.name, ms: r.ms, lane: String(lane) }); noteSkips(s, r, 1); continue; }
       if (failDir) writeFailLog(failDir, sha, s, r, 1); // its whole output — ci.yml's fast job uploads it (test-ci-gate §2i)
       const no = stoppedBy ? `${stoppedBy} is red — the tier is stopping` : refusal(s, r);
       if (no) log(`  · ${s.name} is not retried — ${no}`);
@@ -4201,7 +4248,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
         if (failDir) writeFailLog(failDir, sha, s, again, 2);
         if (ledger) { try { fs.mkdirSync(path.dirname(ledger), { recursive: true }); fs.appendFileSync(ledger, JSON.stringify(rerunRecord({ sha, suite: s.name, lane, first: r, again })) + '\n'); } catch (e) { log(`  · rerun ledger not written: ${e && e.message}`); } }
         log(rerunSaid('ci', s.name, r, again, ledger || '(no ledger)'));
-        if (again.ok) { flaky.push(s.name); timings.push({ name: s.name, ms: again.ms, lane: String(lane) }); continue; }
+        if (again.ok) { flaky.push(s.name); timings.push({ name: s.name, ms: again.ms, lane: String(lane) }); noteSkips(s, again, 2); continue; }
       }
       reds.push(s.name);
       if (!keepGoing && !stoppedBy) {
@@ -4217,7 +4264,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
   await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
   const parMs = Date.now() - tPar, tSer = Date.now();
   if (!stoppedBy && plan.serial.length) await laneWorker([...plan.serial], 'S');
-  return { reds, flaky, absent, skipped, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
+  return { reds, flaky, absent, skipped, skippedLegs, timings, parMs, serMs: Date.now() - tSer, stoppedBy };
 }
 
 /**
@@ -4264,7 +4311,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
     const pruned = pruneFailLogs(hangDir); // B-c327: the newest FAIL_LOGS_KEEP commits' logs stay, nothing else of ours
     if (pruned.length) console.log(`[ci] fail logs: ${pruned.length} file(s) of commits older than the newest ${FAIL_LOGS_KEEP} removed from ${hangDir}`);
-    const { reds, flaky, absent, skipped: skippedByName, timings, parMs, serMs } = await runFastLanes(plan, {
+    const { reds, flaky, absent, skipped: skippedByName, skippedLegs, timings, parMs, serMs } = await runFastLanes(plan, {
       lanes, keepGoing, inflight, failDir: hangDir, sha, ledger: path.join(repo, ...FAST_RERUNS.split('/')),
       // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
       // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
@@ -4283,7 +4330,8 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
     if (keepGoing && reds.length) console.error(`\n[ci] --keep-going: ${reds.length} red of ${fast.length - absent.length - skippedByName.length} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`);
     if (flaky.length) console.log(`\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`);
-    if (reds.length) { console.error(`\n✗ ${reds.join(', ')} — release gate is RED, do not push\n`); return 1; }
+    if (skippedLegs.length) console.log(`\n${skippedLegsSaid('ci', skippedLegs).join('\n')}`); // B-4829: a skip is never a green
+    if (reds.length) { console.error(`\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`); return 1; }
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
     // contains none of these suites (measured: v2.30.0 ⇒ 73 of 73 absent), and
     // "ALL GREEN" for a run of zero suites is the vacuous green the `--only`
@@ -4307,7 +4355,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     }
     const ran = fast.length - absent.length - skippedByName.length;
     const subject = isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)';
-    console.log(`\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}`);
+    console.log(`\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}${skipCount(skippedLegs)}`);
     if (absent.length) console.log(`[ci] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     // The marker's contract is "HEAD, clean, passed", so an isolated run at
     // some other commit must not write one — it proves nothing about the tree
@@ -4518,7 +4566,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // the round-2 supersede cost one step earlier.
     let abandonedWhy = abandoned();
     const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot, reuse: !isolate }));   // a built IN-PLACE tree is not rebuilt (THE BUILD STAMP); an --isolate checkout is fresh: no stamp asked, nothing hashed
-    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [];
+    const failed = [], flaky = [], timings = [], absent = [], selfSkipped = [], skippedLegs = []; // skippedLegs: B-4829, the greens that skipped a leg (selfSkipped: B-479e, the ones that ran nothing)
     let laneN = 0, serialNames = [];
     const dirPace = dirSweepPacer();
     // The build is the first thing a supersede kill lands on, so ask before
@@ -4544,6 +4592,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // read) — so every failed run is kept whole in <markers>/fail-logs/<sha8>.<suite>.<try>.log (writeFailLog, the fast
     // tier's door too), said on its own line
     const keepFailLog = (s, r, attempt) => { writeFailLog(path.join(d, 'fail-logs'), sha, s, r, attempt, { tag: '[ci:heavy]' }); };
+    const keepSkipLog = (s, r, attempt) => writeSkipLog(path.join(d, 'fail-logs'), sha, s, r, attempt, { tag: '[ci:heavy]' }); // B-4829: beside the reds'
     // the parallel lanes' in-flight count, for --serial-overlap (the serial lane may start beside the last ≤ n of them)
     let parInFlight = 0, parQueue = null, overlapGo = () => {};
     const overlapReady = new Promise((res) => { overlapGo = res; });
@@ -4559,6 +4608,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         let r = noteChildResult(await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: path.join(d, 'fail-logs'), attempt: 1 } }));
         console.log(r.lines.join('\n'));
         keepFailLog(s, r, 1);
+        let tried = 1; // the try whose green stands (B-4829: its skip log is named by it)
         // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
         // after every suite exactly as the sync runner does, without blocking
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
@@ -4595,13 +4645,14 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           const again = noteChildResult(await runSuiteAsync(s, { root: runRoot, sha, lane, inflight, hang: { dir: path.join(d, 'fail-logs'), attempt: 2 } }));
           console.log(again.lines.join('\n'));
           keepFailLog(s, again, 2);
-          if (again.ok) { flaky.push(s.name); r = again; } else { failed.push(s.name); }
+          if (again.ok) { flaky.push(s.name); r = again; tried = 2; } else { failed.push(s.name); }
           // THE RERUN LEDGER (q-038 ④): one rerun, ONE line per rerun in <markers>/reruns.jsonl — the suite, both
           // outcomes, both loads, the first run's last lines — so a flake is counted across runs, never laundered
           const line = rerunRecord({ sha, suite: s.name, lane, first, again });
           try { fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(path.join(d, 'reruns.jsonl'), JSON.stringify(line) + '\n'); } catch (e) { console.log(`  · rerun ledger not written: ${e && e.message}`); }
           console.log(rerunSaid('ci:heavy', s.name, first, again, path.join(d, 'reruns.jsonl')));
         }
+        if (r.ok && r.skips) skippedLegs.push({ name: s.name, n: r.skips.n, first: r.skips.first, file: keepSkipLog(s, r, tried) });
         timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane), load: r.load });
         if (r.ok && r.selfSkip) selfSkipped.push(s.name); // B-479e (1): green by its exit code, but it ran nothing
         if (par) { parInFlight--; overlapCheck(); }
@@ -4651,6 +4702,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
       flaky: flaky.length ? flaky : undefined,
+      skippedLegs: skippedLegs.length ? skippedLegs.map(({ name, n, first }) => ({ name, n, first })) : undefined, // B-4829: the greens that skipped a leg
       startedAt: t0, endedAt: Date.now(), ms: Date.now() - t0,
       suites: heavy.length, isolated: !!isolate, host: os.hostname(),
       // The suites this gate's table names that the gated COMMIT does not
@@ -4698,11 +4750,12 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     const verdict = abandonedWhy
       ? `HEAVY TIER ABORTED for ${shortSha(sha)} after ${Math.round(rec.ms / 1000)}s (${timings.length} of ${heavy.length} suites ran)`
       : failed.length
-        ? `HEAVY ${noVerdict ? 'TIER' : 'GATE'} RED for ${shortSha(sha)} in ${Math.round(rec.ms / 1000)}s — failed: ${failed.join(', ')}`
-        : `HEAVY ${noVerdict ? 'TIER' : 'GATE'} GREEN for ${shortSha(sha)} in ${Math.round(rec.ms / 1000)}s (${heavy.length - absent.length} of ${heavy.length} suites${absent.length ? ` ran; ${absent.length} not present at that commit` : ''})`;
+        ? `HEAVY ${noVerdict ? 'TIER' : 'GATE'} RED for ${shortSha(sha)} in ${Math.round(rec.ms / 1000)}s — failed: ${failed.join(', ')}${skipCount(skippedLegs)}`
+        : `HEAVY ${noVerdict ? 'TIER' : 'GATE'} GREEN for ${shortSha(sha)} in ${Math.round(rec.ms / 1000)}s (${heavy.length - absent.length} of ${heavy.length} suites${absent.length ? ` ran; ${absent.length} not present at that commit` : ''})${skipCount(skippedLegs)}`;
     console.log('\n' + verdict + (scope === 'affected' ? ` — AFFECTED scope: ${heavy.length} of ${all.length} heavy suites selected by ${range}; a FULL run is still owed once per 24 h` : '') + (shard ? ` — SHARD ${shard.i}/${shard.n} of the tier (${all.length} heavy suites over ${shard.n} shards)` : '') + (noVerdict ? ` — NO VERDICT WRITTEN (${noVerdict})` : ''));
     if (absent.length) console.log(`[ci:heavy] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     if (flaky.length) console.log(`[ci:heavy] FLAKY (failed, passed on retry — not blocking, but they did fail once): ${flaky.join(', ')}`);
+    for (const l of skippedLegsSaid('ci:heavy', skippedLegs)) console.log(l); // B-4829: every suite that skipped a leg, by name
     // AN ABORTED TIER MUST NEVER EXIT 0 (round 4 finding). `failed` is empty
     // for an abandoned run by construction — it stopped instead of judging —
     // so `failed.length ? 1 : 0` handed it the success code, and the Actions
