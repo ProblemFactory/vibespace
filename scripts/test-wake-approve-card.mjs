@@ -1173,6 +1173,7 @@ try {
 function grantItem14() { return { id: 'ut-grt0000002', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', status: 'open', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'd'.repeat(32) }, createdAt: NOW - 30e3 }; }
 
 // ── ⑮ ROUND 7 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+const REAL_DATE_NOW_15 = Date.now; // B-ba7b: ⑮ holds the clock for its row legs — restored in its finally, a throw included
 console.log('⑮ ROUND 7 — the run card reads as facts in the viewer\'s language; a card with a deadline shows it; a late run card stays answerable');
 try {
   const DICT = { zh: (await import(pathToFileURL(path.join(SRC, 'lib', 'i18n-zh.js')).href)).default, ja: (await import(pathToFileURL(path.join(SRC, 'lib', 'i18n-ja.js')).href)).default };   // the dictionaries the page loads
@@ -1253,6 +1254,11 @@ try {
   const DUE = '按服务器时间已到期 — 等服务器确认';
   ok(J(clock) === J([['live', false, '60 秒内有效 · 按服务器时间还剩 60 秒'], ['live', true, '60 秒内有效 · 按服务器时间还剩 10 秒'], ['due', true, DUE]]) && hub61 && hub61.state === 'due' && hub61.text === DUE && lateMark && lateMark.state === 'late' && lateMark.text === '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）' && wake === null && notice === null,
     'THE FAKE CLOCK (zh, the HUB\'s time — r8): +0 s «60 秒内有效 · 按服务器时间还剩 60 秒» · +50 s the warning accent «还剩 10 秒» · +61 s with no settle yet «按服务器时间已到期 — 等服务器确认» (the run card and a hub act alike — the client never infers «late» or «timed out» by its own clock); the server\'s `late` mark reads late whatever the clock; the 7-day wake ask keeps «expires in 7 d» (no ticker), a notice its own window', { clock, hub61, lateMark, wake, notice });
+  // B-ba7b («还剩 61 秒» at +0, 1 run in 5; red then green on the .390 master heavy job): the item's two stamps, the hub-clock note
+  // (its caller's Date.now() and its own default) and the render each READ THE CLOCK — a millisecond edge between them put the
+  // offset a millisecond off and the countdown rounded UP a second. The row legs and the ticker read ONE held clock (restored at (g))
+  const HELD_NOW = REAL_DATE_NOW_15();
+  Date.now = () => HELD_NOW;
   const at = (s, type = 'vault-run-ask', x = {}) => ask(type, { createdAt: Date.now() - s * 1000, expiresAt: Date.now() - s * 1000 + 60e3, ...x });
   const drawn = (it) => { const h = rowHtml(it, T.zh); return { deadline: ((/<div class="ut-deadline[^"]*"[^>]*>([^<]*)</.exec(h) || [])[1]) || null, warn: /class="ut-deadline ut-deadline-warn"/.test(h), timedOut: /ut-timed-out/.test(ROW3.renderRow({ item: it, resolved: false, band: 1 }, { ...rctx3, t: T.zh }).className), answers: answersOf(h) }; };
   // r9 (the acceptance's low: a snapshot with no `todos.now` — an older hub — counted by the DEVICE's clock while saying «按服务器
@@ -1286,6 +1292,7 @@ try {
   })() : null;
   ok(!!skew && /按服务器时间还剩 (60|59) 秒/.test(skew.fast.deadline || '') && skew.fast.answers.includes('once') && skew.slow === 0 && skew.slowState === 'due',
     'r8 A CLOCK IS THE HUB\'S: a device 61 s ahead of the hub still shows a live 60 s ask «按服务器时间还剩 60 秒» with its answers; a device 45 s behind reads the hub\'s end (the line stops counting) — the countdown is advisory and says «按服务器时间»', skew);
+  Date.now = REAL_DATE_NOW_15; // B-ba7b: the held clock ends with the row legs (and in ⑮'s finally, whatever throws)
   // (g) its END stays, in words: an ask nobody answered (the server's 'ask-expired') keeps its place «timed out — …»; a LATE
   // Allow records «let through once by you · waiting for it to run again · HH:MM»; the 24 h end of a late card «expired»
   const ended = { ...ask('vault-run-ask'), status: 'done', resolvedBy: 'ask-expired', resolvedAt: T0 + 60e3 };
@@ -1294,7 +1301,7 @@ try {
   const e3 = ['en', 'zh', 'ja'].map((l) => words(ended, l)), la = words(lateAllow, 'zh'), late24 = words({ ...lateAllow, resolvedBy: 'expired', resolvedFact: null }, 'zh');
   ok(e3[0].status === 'timed out — the agent\'s command was refused (it may ask again)' && e3[1].status === '已超时 — agent 的命令被拒绝（它可能会再问）' && /^タイムアウト/.test(e3[2].status) && e3.every((x) => x.by === '' && x.card === x.status) && /^你已放行 1 次 · 等它重跑 · \d\d:\d\d$/.test(la.card) && la.by === la.card && /^已过期/.test(late24.card),
     'ITS END STAYS IN WORDS — an ask nobody answered (\'ask-expired\') reads «已超时 — agent 的命令被拒绝（它可能会再问）» on the row, the window and the chat card (en / ja too; RED: the base said «expired (no answer in 60 s)» — the raw outcome\'s words); a late Allow «你已放行 1 次 · 等它重跑 · HH:MM» (the person mark); the late card\'s 24 h end «已过期»', { e3, la, late24 });
-} catch (e) { ok(false, '⑮ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+} catch (e) { ok(false, '⑮ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); } finally { Date.now = REAL_DATE_NOW_15; }
 
 // ── ⑯ ROUND 8 ──────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑯ ROUND 8 — a store clips and says, never throws; a late card offers what its door takes; an end this client cannot classify is said as one');
