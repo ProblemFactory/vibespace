@@ -9,7 +9,7 @@ import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, re
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { noteStoppedRows, stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
-import { resumePaced } from './resume-pacer.js'; // lane resume-all-paced (L1): a bulk resume never floods the hub — one create in flight
+import { resumePaced, unknownRowOf } from './resume-pacer.js'; // lane resume-all-paced (L1): a bulk resume never floods the hub — one create in flight
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -2063,7 +2063,11 @@ class LayoutManager {
   async _resumeAll(stopped) {
     // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout, LAW 1): each conversation in its own row — its window id, box, z
     // and group, on its own desktop, whatever this viewport can show; `stay`: a bulk resume switches nothing
-    const r = await resumePaced(this.app, stopped, { extra: { stay: true } });
+    // B-f64b cure: a row still being checked (it may run in another terminal) is never in a bulk resume — said, resumed by its own press
+    const rows = this.app.sidebar?._allSessions || [];
+    const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));
+    if (go.length < (stopped || []).length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: (stopped || []).length - go.length }), { type: 'info', duration: 6000 });
+    const r = await resumePaced(this.app, go, { extra: { stay: true } });
     const kept = r.rows;
     // NOTHING SILENT (LAW 3): the conversations re-opened in their own rows are said once
     if (kept) showToast(kept === 1 ? t('Resumed 1 conversation where it was') : t('Resumed {n} conversations where they were', { n: kept }), { type: 'info', duration: 5000 });
@@ -2231,7 +2235,7 @@ class LayoutManager {
             }
           } else if (backendSessionId) {
             // Check stopped sessions for resume
-            const stoppedMatch = allSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === backendSessionId && s.status === 'stopped');
+            const stoppedMatch = allSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === backendSessionId && s.status === 'stopped' && s.liveness !== 'unknown'); // B-f64b cure: a row still being checked is never resumed by a restore
             if (stoppedMatch) {
               const customName = this.app.sidebar?.getCustomName(backendSessionId);
               this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name, {

@@ -232,5 +232,54 @@ console.log('— ⑥ RED CONTROLS');
   }
 }
 
+console.log('— ⑦ B-f64b cure (主开发 11:47Z): NOTHING AUTOMATIC STARTS A ROW STILL BEING CHECKED (a codex that may run in another terminal)');
+{
+  const RP = await import(pathToFileURL(PACER).href);
+  const U = { status: 'stopped', liveness: 'unknown', backend: 'codex', backendSessionId: 'th-1', sessionId: 'th-1' };
+  ok(RP.livenessUnknown(U) && !RP.livenessUnknown({ ...U, liveness: undefined }) && !RP.livenessUnknown({ ...U, status: 'external' }) && RP.unknownRowOf([U], 'codex', 'th-1') === U && RP.unknownRowOf([U], 'claude', 'th-1') === null,
+    'the pure rule: a row is «still checking» when it is stopped AND its liveness is unknown — found by its backend and id');
+  const rowsOf = (unknownAt) => stoppedOf(3).map((d, k) => ({ status: 'stopped', sessionId: d.sessionId, backendSessionId: d.sessionId, backend: 'claude', cwd: d.cwd, name: d.name, ...(k === unknownAt ? { liveness: 'unknown' } : {}) }));
+  // the GROUP press (the sidebar's «Resume all»)
+  const groupUnknown = async (resumeGroup) => { const P = page(install, { delay: 30 }); P.app.attachSession = () => null; const t0 = made.length; await resumeGroup(P.app, rowsOf(1), { nameOf: (x) => x.name }); await tick(5); return { creates: P.creates.length, said: saidOf(t0) }; };
+  const g1 = await groupUnknown(RP.resumeGroup);
+  ok(g1.creates === 2 && g1.said.some((x) => /^1 not resumed: still checking/.test(x)), 'the GROUP press: the row still being checked is not resumed (2 creates of 3) and it is SAID', g1);
+  const PS2 = fs.readFileSync(PACER, 'utf8'), skip = "    if (livenessUnknown(s)) { checking.push(nameOf(s) || s.name); continue; }   // B-f64b cure: never started by a group press\n";
+  if (!PS2.includes(skip)) throw new Error('the anchor of the control «B-f64b cure: the group skip» is not in the source');
+  const g0 = await groupUnknown((await import(pathToFileURL(M.write('src/lib/resume-pacer.js', PS2.replace(skip, ''), 'rap-unknown-group', { esm: true })).href)).resumeGroup);
+  ok(g0.creates === 3, 'CONTROL: a group press without the skip starts the row still being checked (RED for the leg above)', g0);
+  // the BOOT's «resume all» (layout _resumeAll)
+  const bootUnknown = async (LMx) => { const P = page(install, { delay: 30, ...(LMx ? { LM: LMx } : {}) }); P.app.sidebar._allSessions = rowsOf(2); const t0 = made.length; await P.lm._resumeAll(stoppedOf(3)); await tick(5); return { creates: P.creates.length, said: saidOf(t0) }; };
+  const b1 = await bootUnknown();
+  ok(b1.creates === 2 && b1.said.some((x) => /^1 not resumed: still checking/.test(x)), 'the BOOT\'s «resume all»: the row still being checked is not resumed (2 creates of 3) and it is SAID', b1);
+  const LY2 = read('src/lib/layout.js'), fcut = "    const go = (stopped || []).filter((d) => !unknownRowOf(rows, d.opts?.backend, d.opts?.backendSessionId || d.sessionId));\n";
+  if (!LY2.includes(fcut)) throw new Error('the anchor of the control «B-f64b cure: the boot filter» is not in the source');
+  const b0 = await bootUnknown((await import(pathToFileURL(M.write('src/lib/layout.js', LY2.replace(fcut, '    const go = stopped || [];\n'), 'rap-unknown-boot', { esm: true })).href)).LayoutManager);
+  ok(b0.creates === 2 && !b0.said.some((x) => /still checking/.test(x)), 'CONTROL: a boot «resume all» without the filter — the backstop (resumeSession) still keeps the row from starting, but NOBODY IS TOLD it was skipped (RED for the leg above\'s «said»)', b0);
+  // THE BACKSTOP (resumeSession): unattended or bulk starts nothing; a person's own press asks first — a no starts nothing, a yes starts it
+  const lifeUnknown = async (inst) => {
+    const P = page(inst, { delay: 30 });
+    P.app.sidebar._allSessions = [{ status: 'stopped', liveness: 'unknown', backend: 'claude', sessionId: CID(1), backendSessionId: CID(1), cwd: '/srv/q1', name: 'Conv 1' }];
+    const o = { backend: 'claude', backendSessionId: CID(1) };
+    const asked = [];
+    const r1 = P.app.resumeSession(CID(1), '/srv/q1', 'Conv 1', { ...o, unattended: true });
+    const r2 = P.app.resumeSession(CID(1), '/srv/q1', 'Conv 1', { ...o, stay: true });
+    P.app._askStillChecking = async (n) => { asked.push(n); return false; };
+    const r3 = P.app.resumeSession(CID(1), '/srv/q1', 'Conv 1', { ...o });
+    await tick(10);
+    const before = P.creates.length;
+    P.app._askStillChecking = async (n) => { asked.push(n); return true; };
+    P.app.resumeSession(CID(1), '/srv/q1', 'Conv 1', { ...o });
+    await tick(30);
+    return { checking: [r1, r2, r3].map((r) => !!(r && r.checking)), before, after: P.creates.length, asked };
+  };
+  const l1 = await lifeUnknown(install);
+  ok(l1.checking.every(Boolean) && l1.before === 0 && l1.after === 1 && l1.asked.length === 2,
+    'resumeSession (the backstop): unattended or bulk starts nothing; a person\'s own press asks «still checking» first — a no starts nothing, a yes starts it (one create)', l1);
+  const LS = read('src/lib/session-lifecycle.js'), gcut = '    if (!unknownOk && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {';
+  if (!LS.includes(gcut)) throw new Error('the anchor of the control «B-f64b cure: the backstop» is not in the source');
+  const l0 = await lifeUnknown(await loadLifecycle(LS.replace(gcut, '    if (false && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {')));
+  ok(l0.before >= 1, 'CONTROL: a resumeSession without the backstop starts the row still being checked unattended (RED for the leg above)', l0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

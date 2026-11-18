@@ -1241,7 +1241,7 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
   const lay = read('src/lib/layout.js'), pacer = read('src/lib/resume-pacer.js');
   // lane resume-all-paced (L1): resume-all goes through the pacer (src/lib/resume-pacer.js) — layout.js hands it `extra: { stay: true }`,
   // resumeAndWait spreads the row's own opts, then `extra`, then its ONE addition: the create's end it waits on (onCreateEnd)
-  ok(/resumePaced\(this\.app, stopped, \{ extra: \{ stay: true \} \}\)/.test(lay)
+  ok(/resumePaced\(this\.app, go, \{ extra: \{ stay: true \} \}\)/.test(lay)   // B-f64b cure: `go` = the offer's rows less the ones still being checked
     && /const opts = d\.opts \|\| \{\};/.test(pacer)
     && /app\.resumeSession\(d\.sessionId, d\.cwd, d\.name, \{ \.\.\.opts, \.\.\.extra, onCreateEnd: \(how, msg\) => end\(how, msg, r && r\.row \? r\.row : null\) \}\)/.test(pacer),
     'resume-all replays the window\'s own opts and invents nothing (lane phone-resume-keeps-layout: + `stay` — each row re-opened where it is, no switch)');

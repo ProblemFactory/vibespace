@@ -521,8 +521,12 @@ function getJsonlLineIndex(fp) {
 // side where the work happens). Worker down/timeout ⇒ sync inline fallback,
 // identical behavior without the isolation.
 let _transcriptPool = null;
+// B-f64b cure (主开发 11:47Z): a pool whose construction failed is tried again — every POOL_RETRY_MS, POOL_RETRY_MAX times in all,
+// each failure said with its try — never «inline for good» after one failure (every codex row would read «still checking» until a restart)
+const POOL_RETRY_MS = 60000, POOL_RETRY_MAX = 5;
+let _poolFails = 0, _poolRetryAt = 0;
 function _transcriptPoolGet() {
-  if (_transcriptPool === null) {
+  if (_transcriptPool === null || (_transcriptPool === false && _poolFails < POOL_RETRY_MAX && Date.now() >= _poolRetryAt)) {
     try {
       const { SafeFs } = require('../safe-fs');
       const { runOp } = require('../transcript-worker');
@@ -532,9 +536,10 @@ function _transcriptPoolGet() {
         inlineRun: runOp,
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
+      if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);
     } catch (e) {
-      _transcriptPool = false; // construction failed once — stay inline forever
-      console.error('[transcript-worker] pool unavailable, staying inline:', e.message);
+      _transcriptPool = false; _poolFails++; _poolRetryAt = Date.now() + POOL_RETRY_MS;
+      console.error(`[transcript-worker] pool unavailable (try ${_poolFails} of ${POOL_RETRY_MAX}${_poolFails < POOL_RETRY_MAX ? `, tried again in ${POOL_RETRY_MS / 1000} s` : ', staying inline'}):`, e.message);
     }
   }
   return _transcriptPool || null;

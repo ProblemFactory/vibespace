@@ -91,7 +91,7 @@ function startToken(pid) {
   if (_procfs === null) { try { _procfs = process.platform === 'linux' && fs.statSync('/proc/self').isDirectory(); } catch { _procfs = false; } }
   if (_procfs) return '';   // B-f64b: on Linux's procfs its silence is the answer (gone) — ps reads the same /proc
   try {
-    const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' });
+    const r = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8', timeout: 3000 });   // B-f64b cure: never unbounded (macOS / BSD)
     const s = String(r.stdout || '').trim();
     if (s) return 'p' + s;
   } catch { }

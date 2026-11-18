@@ -4,6 +4,7 @@ import { namedModel } from '../model-providers.js'; // THE model door (lane fabl
 import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
+import { unknownRowOf } from './resume-pacer.js'; // B-f64b cure: a row still being checked is never started unasked
 import { stampAt as when, durationMark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
@@ -1102,7 +1103,14 @@ export function installSessionLifecycle(App, ctx = {}) {
     return win;
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false } = {}) {
+  /** B-f64b cure: the person's press on a row whose liveness is not known yet asks first (a method: a suite answers it) */
+  async _askStillChecking(name) {
+    const { showConfirmDialog } = await import('./utils.js');
+    return showConfirmDialog({ title: t('Still checking «{name}»', { name: String(name || '').slice(0, 60) }),
+      message: t('VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.'),
+      confirmText: t('Resume anyway') });
+  },
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false, unknownOk = false } = {}) {
     const shown = this.wm.activeWindowId; // the window the person is in, before anything here moves the focus (r4 N3)
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
@@ -1115,6 +1123,16 @@ export function installSessionLifecycle(App, ctx = {}) {
       this._markResume(pend.id);
       if (!stay && !unattended) { this.wm.revealWindow?.(pend.id, {}); showToast(t('Still resuming this conversation — its window is waiting for the session to start')); } // the join is SAID (r4 N2)
       return { row: pend.id, desk: pend._desktopId || null, pending: true };
+    }
+    // B-f64b cure (主开发 11:47Z, as if a must): A ROW WHOSE LIVENESS IS NOT KNOWN YET IS NEVER STARTED UNASKED — a codex the person
+    // runs in another terminal may be it (a second CLI on one transcript). Unattended or bulk (`stay`): nothing starts; a person's
+    // own press: «still checking» is said first, and only a yes starts it
+    if (!unknownOk && unknownRowOf(this.sidebar?._allSessions, backend, targetBackendId)) {
+      if (!stay && !unattended && typeof this._askStillChecking === 'function') {
+        const again = arguments[3] || {};
+        Promise.resolve(this._askStillChecking(sessionName)).then((yes) => { if (yes) this.resumeSession(sessionId, cwd, sessionName, { ...again, unknownOk: true }); }).catch(() => {});
+      }
+      return { row: null, desk: null, checking: true };
     }
     // THE WINDOW THE RESUME WAS PRESSED IN (r2 N1 — the Resume bar, the retry bar, the account bar, the terminal's exited overlay, a
     // permission restart, a placeholder tile): `fromWin` is the row it re-opens — closed HERE as its re-opening (_reopenWin), never by

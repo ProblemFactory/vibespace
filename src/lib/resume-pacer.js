@@ -14,6 +14,12 @@
 import { showToast } from './utils.js';
 import { t } from './i18n.js';
 
+/** B-f64b cure (主开发 11:47Z, as if a must): a row whose LIVENESS is not known yet (codex: the liveness walk has not answered —
+ *  a codex the person runs in another terminal may be it) is NEVER started by anything automatic (the paced resume, the boot's
+ *  «resume all», a layout restore): only a person's own press on that one row, after «still checking» was said. */
+export const livenessUnknown = (s) => !!s && s.status === 'stopped' && s.liveness === 'unknown';
+export const unknownRowOf = (rows, backend, id) => (rows || []).find((s) => livenessUnknown(s) && (s.backend || 'claude') === (backend || 'claude') && (s.backendSessionId || s.sessionId) === id) || null;
+
 const FOREVER_MS = 24 * 3600e3;   // the progress line stays until the bulk ends (a toast's timer must stay under 2^31 ms)
 const LIST_MAX = 3;               // the names a failure line lists before «and N more» (S3: one phone screen)
 
@@ -109,8 +115,9 @@ export async function resumePaced(app, items, { extra = { stay: true }, later = 
  *  (its window raised, its row's desktop shown, as one press of one member would); every later one QUIET (`stay`: drawn, never
  *  focused, no desktop switch — it starts seconds or minutes after the press, while the person works elsewhere). → resumePaced's answer */
 export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
-  const stopped = [];
+  const stopped = [], checking = [];
   for (const s of sessions || []) {
+    if (livenessUnknown(s)) { checking.push(nameOf(s) || s.name); continue; }   // B-f64b cure: never started by a group press
     const agentOpts = {
       backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId,
       agentKind: s.agentKind || 'primary', agentRole: s.agentRole || '',
@@ -122,6 +129,7 @@ export function resumeGroup(app, sessions, { nameOf = (s) => s.name } = {}) {
     else if (s.status === 'live' && s.webuiId) app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd, { mode: s.webuiMode, ...agentOpts });
     else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
   }
+  if (checking.length) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: checking.length }), { type: 'info', duration: 6000 });
   return resumePaced(app, stopped, { extra: {}, later: { stay: true } });
 }
 
