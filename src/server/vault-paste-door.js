@@ -54,6 +54,7 @@ const crypto = require('crypto');
 const P = require('../vault-paste.js');   // PURE: the ask's rules, the card's words, the receipt, a free entry's facts
 const VK = require('../vault-kinds.js');   // PURE (lane vault-entry-description): which kinds carry words (the `words` surface)
 const VI = require('../vault-inventory.js');   // PURE: an entry's row (the name the window shows, its description)
+const V = require('../vault.js');   // B-3fb5: AGENT_NS_RE — the whole name of an agent's own entry (agent:<scope>/<name>)
 const VB = require('../vault-blocked.js');   // PURE: a caller's name in words; THE words toward an agent on a locked refusal
 const URL_ = require('url');   // lane login-request-card: a site's Unicode form beside its punycode one (P.siteWords takes the function)
 
@@ -418,6 +419,29 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
     return { ok: true, entry };
   }
+  /** B-3fb5 (design q-047 §3.3: 显示 · 换新… · 删除 for an agent's entry): an AGENT's OWN entry's delete door — its row's 删除 in
+   *  the Vault window, a PERSON's door only (an agent stores through mint / put and deletes nothing). `entry` = the whole
+   *  `agent:<scope>/<name>`; any other name is refused by name and never reaches the drop. As for a free entry, WHO MAY USE
+   *  IT goes first (a vault-use grant row on it is removed, or the delete is refused by name — while locked too), so an
+   *  entry is never gone with its row dangling. The conversation that kept it reads «no such entry» at its next run (a
+   *  command, a job's --vault) and may store a new one under that name: what the hub REMEMBERS by the entry's id goes with
+   *  it (the run door's host passes and late allows — vaultRun.forgetEntry — and an open proposal of its words, settled
+   *  «gone»), so a value minted later under the name starts with none of it (the read: a pass the owner gave the old value
+   *  let the new one go to that host with no card). */
+  function dropAgentEntry(entry, { by = 'user', who = null, ip = null } = {}) {
+    const e = String(entry || '');
+    if (!V.AGENT_NS_RE.test(e)) return named('entry_unknown_id');
+    // an agent row's field is 'secret' too (src/vault-inventory.js secretRowOf) — the grant row's id is the row's id
+    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${e}#${P.ENTRY_FIELD}`, { by }); } catch (x) { log(`${e}: its vault-use grant row could not be removed — ${x.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
+    const r = vault.secretDrop(e);
+    if (!r || !r.ok) return named('store_failed');
+    if (r.already) return named('entry_unknown_id');
+    const id = `secrets:${e}#${P.ENTRY_FIELD}`;
+    if (vaultRun && typeof vaultRun.forgetEntry === 'function') { try { vaultRun.forgetEntry(id); } catch (x) { log(`${e}: the run door could not forget it — ${x.message}`); } }
+    index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');   // its words card answers nothing now
+    audit('vault-agent-secret-deleted', { who: who ? String(who).slice(0, 80) : null, ip, by: String(by).slice(0, 40), entry: e, why: e });   // the name and who — never a value (`why`: the engine's own line names it, as mint / put do)
+    return { ok: true, entry: e };
+  }
   // ── THE WORDS OF AN ENTRY (lane vault-entry-description) ──
   const wopen = new Map();   // proposalId → { proposalId, todoId, conv, scope, sessionKey, who, entry, ref, from, to }
   /** An entry's words NOW — its row's name and description (src/vault-inventory.js secretRowOf) — or null: no such entry, or
@@ -546,7 +570,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** The open requests of ONE conversation (`vibespace-vault uses` — words, places, times; never a value). */
   function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : q.target.kind === P.LOGIN_KIND ? `a website login on ${q.target.origin}` : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
 
-  return { request, answer, addEntry, dropEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
+  return { request, answer, addEntry, dropEntry, dropAgentEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
 }
 
 module.exports = { create, MORE_WORDS, STATUS, FROM_NAME };

@@ -76,12 +76,11 @@ const fam = (row) => Object.freeze({ ...row, surfaces: Object.freeze(row.surface
 
 /** THE KIND FAMILIES, in matching order. */
 const FAMILIES = Object.freeze([
-  fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample',
+  fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample', confirmKey: 'agent-secret',
     surfaces: { request: NONE('an agent puts its own (vibespace-vault mint / put) — it never asks the user for one'), list: true, row: 'base', add: NONE('an agent puts it in (vibespace-vault mint / put) — a person never adds one'), reveal: true,
       use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] }, cli: { bin: 'vibespace-vault', verbs: ['mint', 'put'] },   // lane vault-job-road: + a Background Work job (--vault, its own conversation's)
-      route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put'], words: WORDS(['mint', 'put']), doc: '**Agents put their OWN secrets in' },
-    // found by this registry's census; no lane holds it yet (the coordinator took the backlog item, 2026-10-26)
-    deferred: { delete: { lane: 'unscheduled', backlog: 'B-3fb5', why: 'design q-047 §3.3 lists 删除 for an agent\'s entry; no route drops one yet' } } }),
+      delete: { method: 'DELETE', path: '/api/vault/agent-secrets/' },   // B-3fb5 (found by this registry's census, deferred 2026-10-26): the person's 删除 — design q-047 §3.3
+      route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put', 'DELETE /api/vault/agent-secrets/:entry'], words: WORDS(['mint', 'put']), doc: '**Agents put their OWN secrets in' } }),
   fam({ id: 'account', label: 'An account\'s API key or long-lived token', category: 'accounts', stores: ['accounts'], entryRe: null, sample: 'acc-census', confirmKey: 'account',
     surfaces: { request: NONE('an account signs in on its own card (Accounts) — an agent asks for no account key'), list: true, row: 'base', add: { door: 'account', order: 10 }, reveal: true, use: SYSTEM('VibeSpace hands it to the CLI it starts — never to an agent'),
       delete: { method: 'DELETE', path: '/api/accounts/' }, cli: NONE('no agent verb — VibeSpace uses it itself'), route: ['POST /api/accounts', 'DELETE /api/accounts/:id'], words: NONE('its account card names it (the account\'s own name) — no words of the vault\'s'), doc: 'API keys and tokens (accounts)' } }),

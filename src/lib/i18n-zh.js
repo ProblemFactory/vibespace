@@ -11147,6 +11147,7 @@ export default {
   "The agent is told you refused, on its next turn": "agent 会在下一轮得知你拒绝了",
   "The name is at most 80 characters": "名称最多 80 个字符",
   "The value leaves the vault. A conversation that uses it in a command loses it at its next run.": "值会从保险库删除。在命令里用到它的会话，下次运行时就用不了了。",
+  "The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).": "值会从保险库删除。存放它的会话从此不能再用它：引用它的命令或后台任务下次运行时会失败（该会话可以再存一个新的）。",
   "The vault is locked (vault_locked) — unlock it, then save": "保险库已锁定（vault_locked）——先解锁，再保存",
   "The vault is not set up yet — set its second password, then save": "保险库还没有设置——先设置第二密码，再保存",
   "Value": "值",

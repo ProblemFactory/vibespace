@@ -11146,6 +11146,7 @@ export default {
   "The agent is told you refused, on its next turn": "拒否したことはエージェントに次のターンで伝わります",
   "The name is at most 80 characters": "名前は最大 80 文字です",
   "The value leaves the vault. A conversation that uses it in a command loses it at its next run.": "値は保管庫から削除されます。コマンドでこれを使う会話は、次の実行から使えなくなります。",
+  "The value leaves the vault. The conversation that stored it can no longer use it: a command or a job that names it fails at its next run (the conversation may store a new one).": "値は保管庫から削除されます。これを保存した会話はもう使えません：これを使うコマンドやジョブは次の実行で失敗します（会話は新しい値を保存し直せます）。",
   "The vault is locked (vault_locked) — unlock it, then save": "保管庫はロックされています（vault_locked）— ロックを解除してから保存してください",
   "The vault is not set up yet — set its second password, then save": "保管庫はまだ設定されていません — 第二パスワードを設定してから保存してください",
   "Value": "値",

@@ -215,6 +215,7 @@ function doorsOf({ store, entry, field }) {
   if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: cf }, rotate: null };
   if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: cf }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
   if (store === 'secrets' && /^provider:pv-[a-z0-9][a-z0-9-]{0,63}$/.test(e)) return { delete: { method: 'DELETE', path: `/api/providers/${enc(e.slice(9))}`, confirm: cf }, rotate: null };   // lane lg-providers: the provider's own remove (its record goes with it)
+  if (store === 'secrets' && AGENT_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/agent-secrets/${enc(e)}`, confirm: cf }, rotate: null };   // B-3fb5: an agent's own entry — its delete door (the person's; the whole name, encoded)
   if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: cf }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }

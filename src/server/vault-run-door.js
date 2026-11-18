@@ -1268,6 +1268,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     reshapeLate(lq.todoId, lq.askId, { lateAt: lq.lateAt, shapeId: lq.shapeId, until: lq.until });
   }
   function consumeLate(pair) { lateOnce.delete(pair); }
+  /** B-3fb5: an entry its person's door DELETED (an agent's own entry — its name may be minted again): what this door remembers
+   *  by its id goes with it — the host passes the owner gave its value, a late «allow once» over a run that named it, an open
+   *  late card naming it (settled «ask-over»: an Allow there would pass a value minted later under that name) and the ended-grant
+   *  words — so nothing of the old entry carries over to a new one. Memory only (a lock clears every one of them all the same). */
+  function forgetEntry(id) {
+    const key = String(id || '');
+    let dropped = 0;
+    for (const [k, p] of [...hostPasses]) if (p && p.id === key) { hostPasses.delete(k); dropped++; }
+    for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) { lateOnce.delete(pair); dropped++; }
+    for (const lq of [...lateAsks.values()]) if ((lq.entries || []).includes(key)) { removeLate(lq, 'ask-over', 'vault'); dropped++; }
+    for (const [p, e] of [...endedGrants]) if (e && e.id === key) endedGrants.delete(p);
+    return { ok: true, dropped };
+  }
   /** The owner answers a LATE card (src/routes/vault.js, people only). `once` writes a one-run pass the next identical run consumes (no reauth — «allow once» never needed it, and a late card offers no «always»); `deny` settles it; a locked vault is vault_locked as today. */
   function answerLate(lq, { answer: a, reauthed = false, by = 'user' }) {
     if (!['once', 'deny'].includes(a)) return { ok: false, code: a === 'always' ? 'always_not_offered' : a === 'window' ? 'window_not_offered' : 'bad_answer' };   // r7: a late card offers neither «Always» nor «Allow for 1 hour» (r5's law)
@@ -2423,9 +2436,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
-    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce };
+    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }
 
 const statusOf = (code) => STATUS[code] || 400;

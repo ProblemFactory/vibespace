@@ -20,6 +20,12 @@
 //   ⑦ LOCKED — a lock ACT withdraws the open requests (decision ③: the asker told WITHDRAWN); an ask while locked is filed;
 //      the owner's store ⇒ 423 vault_locked, the item stays, nothing written; unlocked ⇒ stored
 //   ⑧ 「其他密钥或密码…」 — the Vault window's free entry: add (people only, unlocked only, named refusals), delete, delete again
+//   ⑧b B-3fb5 — an agent's OWN entry (mint / put) has its 删除: the person's DELETE /api/vault/agent-secrets/<the whole name>
+//      (doorsOf's door, confirm «agent-secret»); a bearer ⇒ 403 and the entry stays; delete ⇒ gone + one audit line (name + who,
+//      no value); again ⇒ 404; another kind's name never reaches the drop; a re-mint after it carries nothing over; a vault-use
+//      grant row on it goes FIRST (locked ⇒ vault_locked, entry and row kept); what the hub remembers by its id goes with it (the
+//      run door's host passes and late allows, an open words proposal). MUTANTS (⑫): the door without its name check, the route
+//      without person(), the delete without forgetEntry, without settling its words — each RED
 //   ⑨ A RESTART — a NEW door over the same For-you store answers a request the old one filed (the item IS the record)
 //   ⑩ BOUNDS — 4 open per conversation (the 5th ⇒ 429 too_many_requests)
 //   ⑪ THE SWEEP — every answer, every broadcast frame (vault-state, integrations-updated, the For-you snapshots), every log
@@ -81,6 +87,7 @@ const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));   // lane login-request-card: the ONE grants store (in memory)
 const BLS = require(path.join(REPO, 'src/server/browser-logins.js'));   // lane login-request-card: THE web-login door (its writer)
 const GM = require(path.join(REPO, 'src/grant-model.js'));
+const VUG = require(path.join(REPO, 'src/server/vault-use-grants.js'));   // B-3fb5: a vault-use grant row on an agent's entry goes with it
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const ROOT = scratch('vault-paste');
@@ -404,6 +411,68 @@ console.log('⑧ 「其他密钥或密码…」 — a free entry the owner adds 
   ok(del.status === 200 && !W.vault.secretNames().some((x) => x.name === add.json.entry), 'delete ⇒ 200, the entry is gone', del.json);
   ok((await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE' })).status === 404, 'delete again ⇒ 404');
   ok((await S.hit('/api/vault/secrets/..%2Fhost%3Ax', { method: 'DELETE' })).status === 404 && (await S.hit(`/api/vault/secrets/${add.json.entry.slice(7)}`, { method: 'DELETE', headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN } })).status === 403, 'another entry\'s name never reaches the drop; a bearer ⇒ 403');
+}
+
+console.log('⑧b B-3fb5 — an agent\'s OWN entry has its 删除 (the person\'s door; who may use it goes first)');
+async function agentDrop(w, s, name) {
+  const m = w.vault.agentMint(name, { length: 24 });
+  const row = VI.secretRowOf((w.vault.secretNames() || []).find((x) => x.name === name) || {});
+  const door = row && VI.doorsOf({ store: 'secrets', entry: name, field: row.field }).delete;
+  const viaBearer = await s.hit(door.path, { method: 'DELETE', headers: { ...s.PAGE, authorization: 'Bearer ' + w.SESSION_TOKEN } });
+  const kept = (w.vault.secretNames() || []).some((x) => x.name === name);
+  const del = await s.hit(door.path, { method: 'DELETE' });
+  return { m, row, door, viaBearer, kept, del, gone: !(w.vault.secretNames() || []).some((x) => x.name === name) };
+}
+{
+  const name = ['agent:cid-asker-1', 'deploy-key'].join('/');
+  const a = await agentDrop(W, S, name);
+  ok(a.m.ok && a.row && a.row.field === 'secret' && a.door && a.door.method === 'DELETE' && a.door.path === `/api/vault/agent-secrets/${encodeURIComponent(name)}` && a.door.confirm === 'agent-secret',
+    'an agent mints its own entry; its row\'s 删除 is DELETE /api/vault/agent-secrets/<the whole name, encoded> with the confirm «agent-secret»', { m: a.m, door: a.door });
+  ok(a.viaBearer.status === 403 && a.viaBearer.json.code === 'human_only' && a.kept, 'a BEARER (the conversation itself) ⇒ 403 human_only — the entry stays (an agent deletes nothing through this door)', a.viaBearer.json);
+  ok(a.del.status === 200 && a.del.json.entry === name && a.gone, 'the person\'s delete ⇒ 200, the entry is gone from the vault', a.del.json);
+  const lines = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('vault-agent-secret-deleted'));
+  ok(lines.length === 1 && lines[0].includes(name) && lines[0].includes('"by":"user"') && lines[0].includes('"who":') && !lines[0].includes('"who":"sign-in-off"') && lines[0].includes(`"why":"${name}"`), 'ONE audit line — the entry\'s name, who pressed and from where (never a value)', lines);
+  ok((await S.hit(a.door.path, { method: 'DELETE' })).status === 404, 'delete again ⇒ 404 entry_unknown_id');
+  const free = await S.hit('/api/vault/secrets', { body: { label: 'a free one', value: ['v', 'b3fb5'].join('-') } });
+  const notAgent = [await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(free.json.entry)}`, { method: 'DELETE' }), await S.hit('/api/vault/agent-secrets/host%3Ax', { method: 'DELETE' }), await S.hit(`/api/vault/agent-secrets/${encodeURIComponent('agent:cid-asker-1/../x')}`, { method: 'DELETE' })];
+  ok(free.status === 200 && notAgent.every((r) => r.status === 404 && r.json.code === 'entry_unknown_id') && W.vault.secretNames().some((x) => x.name === free.json.entry),
+    'another kind\'s name (a free entry, a machine\'s link, a path) never reaches the drop through this door — 404 by name, the free entry stays', notAgent.map((r) => r.status));
+  // the read's should (r1): what the hub REMEMBERS by the entry's id goes with it — a host pass the owner gave the old value,
+  // a late «allow once» over a run that named it, an open proposal of its words — so a value minted later under the name
+  // meets its card again (another entry's pass stays)
+  const name2 = ['agent:cid-asker-1', 'passed-key'].join('/'), id2 = `secrets:${name2}#secret`, other = `cid-asker-1\nsecrets:agent:cid-asker-1/other#secret\nb.example.test`;
+  W.vault.agentMint(name2, { length: 24 });
+  W.vaultRun._hostPasses.set(`cid-asker-1\n${id2}\nb.example.test`, { scope: 'cid-asker-1', id: id2, host: 'b.example.test', at: Date.now() });
+  W.vaultRun._hostPasses.set(other, { scope: 'cid-asker-1', id: 'secrets:agent:cid-asker-1/other#secret', host: 'b.example.test', at: Date.now() });
+  W.vaultRun._lateOnce.set('pair-b3fb5', { until: Date.now() + 60e3, entries: [id2], askId: 'ask-b3fb5' });
+  const prop = W.paste.propose({ caller: { conversationId: 'cid-b3fb5', sessionKey: 'w1', name: 'Lane asker' }, entry: name2, ref: `vault://secrets/${name2}/secret`, seen: true, name: 'A better name' });
+  const del2 = await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(name2)}`, { method: 'DELETE' });
+  ok(prop.ok && del2.status === 200 && ![...W.vaultRun._hostPasses.values()].some((p) => p.id === id2) && !W.vaultRun._lateOnce.has('pair-b3fb5') && W.vaultRun._hostPasses.has(other)
+    && !W.paste.proposalsOpen().some((p) => p.entry === name2) && W.paste.answerWords(prop.proposalId, { answer: 'allow' }).code === 'ask_settled',
+    'the delete FORGETS what the hub remembered by its id: the host pass and the late allow over it are gone (another entry\'s pass stays), its open words proposal is settled (an Allow now answers ask_settled)', { prop: prop.code || prop.ok, del: del2.status, open: W.paste.proposalsOpen() });
+  W.vaultRun._hostPasses.delete(other);
+  const again = W.vault.agentMint(name, { length: 24 });
+  ok(again.ok && !again.rotated, 'a re-mint of the same name after the delete is a NEW entry (not a rotation: no words kept)', again);
+  W.vault.secretDrop(name); W.vault.secretDrop(free.json.entry);
+}
+{
+  // who may use it goes FIRST (the free entry's rule): a grant row on the agent's entry, a LOCKED vault ⇒ refused by name, both kept
+  const dataDir = path.join(ROOT, 'b3fb5-grants'); fs.mkdirSync(dataDir, { recursive: true });
+  const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, bcast: () => {} });
+  await vault.setup(PW);
+  const store = GS.create({ memory: true });
+  const useGrants = VUG.create({ grants: () => store, vault, dataDir, log: (m) => LOGS.push(String(m)) });
+  const paste = require(path.join(REPO, 'src/server/vault-paste-door.js')).create({ vault, useGrants, log: (m) => LOGS.push(String(m)) });
+  const name = ['agent:cid-asker-1', 'shared-key'].join('/'), id = `secrets:${name}#secret`;
+  vault.agentMint(name, { length: 24 });
+  const add = useGrants.addMember(id, { kind: 'conversation', key: 'cid-other-2' }, { hosts: ['192.168.1.1'] });
+  vault.lock('test');
+  const locked = paste.dropAgentEntry(name);
+  const keptLocked = { entry: (vault.secretNames() || []).some((x) => x.name === name), rows: useGrants.rowsOf(id).length };
+  await vault.unlock(PW);
+  const d = paste.dropAgentEntry(name);
+  ok(add && add.ok && !locked.ok && locked.code === 'vault_locked' && keptLocked.entry && keptLocked.rows === 1, 'a grant row on the agent\'s entry + a LOCKED vault ⇒ refused vault_locked by name — the entry AND its row stay (never an entry gone with its row dangling)', { add, locked, keptLocked });
+  ok(d.ok && !useGrants.rowsOf(id).length && !(vault.secretNames() || []).some((x) => x.name === name), 'unlocked ⇒ the row goes first, then the entry', { d, rows: useGrants.rowsOf(id).length });
 }
 
 console.log('⑨ A RESTART — the item is the record');
@@ -1094,6 +1163,37 @@ async function runRoad(name, { door, routes } = {}) {
   ok(m3.hits.length > 0 && m3.hits.some((h) => /answer/.test(h)), 'MUTANT the route keeps the value on the body and echoes it ⇒ the sweep is RED (an answer)', m3.hits.slice(0, 2));
   const m4 = await runRoad('m-bearer', { routes: mutant('src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer', person((req) => {", "app.post('/api/vault/secret-requests/:id/answer', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {") });
   ok(m4.bearerStored, 'MUTANT the answer door without person() ⇒ a BEARER stores (RED — the real door refuses it human_only)', m4);
+  // B-3fb5: the agent entry's delete door, each guard taken away
+  async function agentRoad(name, { door, routes } = {}) {
+    const w = makeWorld(name, { door, routes });
+    await w.vault.setup(PW);
+    const s = await serve(w);
+    const own = ['agent:cid-asker-1', 'mutant-key'].join('/');
+    w.vault.agentMint(own, { length: 24 });
+    const free = await s.hit('/api/vault/secrets', { body: { label: 'a free one', value: ['v', 'mutant'].join('-') } });
+    await s.hit(`/api/vault/agent-secrets/${encodeURIComponent(own)}`, { method: 'DELETE', headers: { ...s.PAGE, authorization: 'Bearer ' + w.SESSION_TOKEN } });
+    const bearerDropped = !w.vault.secretNames().some((x) => x.name === own);
+    await s.hit(`/api/vault/agent-secrets/${encodeURIComponent(free.json.entry)}`, { method: 'DELETE' });
+    const freeDropped = !w.vault.secretNames().some((x) => x.name === free.json.entry);
+    const kept = ['agent:cid-asker-1', 'kept-key'].join('/'), kid = `secrets:${kept}#secret`;
+    w.vault.agentMint(kept, { length: 24 });
+    w.vaultRun._hostPasses.set(`cid-asker-1\n${kid}\nb.example.test`, { scope: 'cid-asker-1', id: kid, host: 'b.example.test', at: Date.now() });
+    const prop = w.paste.propose({ caller: { conversationId: 'cid-b3fb5', sessionKey: 'w1', name: 'Lane asker' }, entry: kept, ref: `vault://secrets/${kept}/secret`, seen: true, name: 'A better name' });
+    await s.hit(`/api/vault/agent-secrets/${encodeURIComponent(kept)}`, { method: 'DELETE' });
+    const passKept = [...w.vaultRun._hostPasses.values()].some((p) => p.id === kid), wordsOpen = !!prop.ok && w.paste.proposalsOpen().some((p) => p.entry === kept);
+    s.srv.close();
+    return { bearerDropped, freeDropped, passKept, wordsOpen };
+  }
+  const aBase = await agentRoad('m-agent-base');
+  ok(!aBase.bearerDropped && !aBase.freeDropped && !aBase.passKept && !aBase.wordsOpen, 'B-3fb5 the real door: a bearer drops nothing, a free entry\'s name never drops through the agent door, a delete leaves no host pass and no open words card (the mutants\' baseline)', aBase);
+  const aName = await agentRoad('m-agent-name', { door: mutant('src/server/vault-paste-door.js', "    if (!V.AGENT_NS_RE.test(e)) return named('entry_unknown_id');\n", '') });
+  ok(aName.freeDropped, 'MUTANT B-3fb5 the agent door without its name check ⇒ a FREE entry dropped through it (RED — the real door refuses any name but agent:<scope>/<name>)', aName);
+  const aBearer = await agentRoad('m-agent-bearer', { routes: mutant('src/routes/vault.js', "app.delete('/api/vault/agent-secrets/:entry', person((req) =>", "app.delete('/api/vault/agent-secrets/:entry', ((fn) => async (req, res) => res.json(await fn(req)))((req) =>") });
+  ok(aBearer.bearerDropped, 'MUTANT B-3fb5 the agent door without person() ⇒ a BEARER drops its own entry (RED — the real door refuses it human_only)', aBearer);
+  const aForget = await agentRoad('m-agent-forget', { door: mutant('src/server/vault-paste-door.js', "    if (vaultRun && typeof vaultRun.forgetEntry === 'function') {", "    if (false) {") });
+  ok(aForget.passKept && !aForget.wordsOpen, 'MUTANT B-3fb5 the delete without the run door\'s forgetEntry ⇒ the owner\'s host pass outlives the entry (RED — a value minted later under the name would go there with no card)', aForget);
+  const aWords = await agentRoad('m-agent-words', { door: mutant('src/server/vault-paste-door.js', "    index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');", "    index();") });
+  ok(aWords.wordsOpen && !aWords.passKept, 'MUTANT B-3fb5 the delete without settling its words proposal ⇒ the card stays open over a gone entry (RED)', aWords);
   // lane login-request-card: the login road's own mutants
   const MPW = ['mutant', 'road', 'pw'].join('-');   // built, never a literal the secret scan reads as an assignment
   async function loginRoad(name, { door, loginsMod } = {}) {

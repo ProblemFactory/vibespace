@@ -338,8 +338,10 @@ ok(VK.categoryOf('secrets', 'weird:x') === 'other' && VK.familyOf('secrets', 'we
 ok(R.doorless.length >= 1 && R.doorless.every((d) => / — /.test(d)), 'every category with no 添加… door says why, in its families\' words (printed above)', R.doorless);
 {
   const a = R.cells.get('agent-secret');
-  ok(a && a.delete.mark === '⏳' && R.words.includes('agent-secret·delete ⏳ unscheduled · B-3fb5 — design q-047 §3.3 lists 删除 for an agent\'s entry; no route drops one yet'),
-    'the one deferral today: agent-secret · delete — PRINTED as unscheduled, with its backlog id B-3fb5 (no lane holds it yet)', R.words.filter((w) => w.includes('⏳')));
+  // B-3fb5: the one deferral there was (agent-secret · delete, unscheduled since 2026-10-26) is DECLARED now — its door in the tree
+  const ad = VI.doorsOf({ store: 'secrets', entry: 'agent:conv-census/sample', field: 'secret' }).delete;
+  ok(a && a.delete.mark === '✓' && !R.words.some((w) => w.startsWith('agent-secret·delete ')) && ad && ad.method === 'DELETE' && ad.path === '/api/vault/agent-secrets/agent%3Aconv-census%2Fsample' && ad.confirm === 'agent-secret',
+    'B-3fb5: agent-secret · delete is DECLARED and present (doorsOf\'s DELETE /api/vault/agent-secrets/<the whole name, encoded>, its confirm «agent-secret», the route mounted) — its deferral is gone', { mark: a && a.delete.mark, door: ad, deferred: R.words.filter((w) => w.includes('⏳')) });
   const fams = [...new Set(VK.FAMILIES.map((f) => f.confirmKey).filter(Boolean))].sort().join();
   ok(real.confirmKeys && [...real.confirmKeys].sort().join() === fams && VK.FAMILIES.every((f) => !(f.surfaces.delete && typeof f.surfaces.delete.method === 'string') || typeof f.confirmKey === 'string'),
     `删除's confirm words: every { method, path } delete names its confirmKey, and the window words exactly those keys (${fams})`, { window: real.confirmKeys && [...real.confirmKeys], registry: fams });
@@ -354,6 +356,13 @@ console.log('④ RED CONTROLS (in memory)');
   const line = win.split('\n').find((l) => /^registerVaultAdd\(\{ id: 'totp',/.test(l));
   const gap = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, '') })));
   ok(line && gap.problems.length === 1 && /^totp·add: the 添加… door «totp» is not registered/.test(gap.problems[0]) && gap.cells.get('totp').add.mark === '✗', 'TODAY\'S GAP — the window without the two-step door\'s registration ⇒ RED, naming totp·add (and only it)', gap.problems);
+  // B-3fb5's door, each half taken away: the route unmounted, the window's confirm words for it gone ⇒ RED by name
+  const routesSrc = realRead('src/routes/vault.js'), routeLine = routesSrc.split('\n').find((l) => l.includes("app.delete('/api/vault/agent-secrets/:entry'"));
+  const noAgentRoute = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routesSrc.replace(`${routeLine}\n`, '') })));
+  ok(routeLine && noAgentRoute.cells.get('agent-secret').delete.mark === '✗' && noAgentRoute.problems.some((p) => /^agent-secret·delete: no route DELETE \/api\/vault\/agent-secrets\/… is mounted/.test(p)), 'B-3fb5 RED: the agent entry\'s delete route unmounted ⇒ agent-secret·delete ✗ by name', noAgentRoute.problems);
+  const wordsLine = win.split('\n').find((l) => l.startsWith("  'agent-secret': (row) => ("));
+  const noAgentWords = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${wordsLine}\n`, '') })));
+  ok(wordsLine && noAgentWords.cells.get('agent-secret').delete.mark === '✗' && noAgentWords.problems.some((p) => /^agent-secret·delete: the window has no confirm words for «agent-secret»/.test(p)), 'B-3fb5 RED: the window without the agent entry\'s confirm words ⇒ agent-secret·delete ✗ by name (its 删除 would ask in no words of its own)', noAgentWords.problems);
   // a door outside the closure never runs
   const lost = census(VK.FAMILIES, factsOf(treeOf({ 'src/lib/vault-window.js': win.replace(`${line}\n`, ''), 'src/lib/vault-lost-door.js': `${line}\n` })));
   ok(lost.problems.some((p) => /^totp·add: .*never imports/.test(p)), 'a door registered in a module the window never imports ⇒ RED (it never runs)', lost.problems);
