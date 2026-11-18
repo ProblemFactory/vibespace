@@ -887,6 +887,11 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
   ok(mixed.fo.verdict === LH.V.js && mixed.line.includes(`node’s own code — undici, ${NO} ×2`) && mixed.fo.frame === '(node’s own code — undici)',
     `undici's load inside a hold: JavaScript for the verdict, and the hold says whose — ${mixed.line}`, mixed);
   ok(gz.fo.verdict === LH.V.js && gz.line.includes('node’s own code — zlib, driven by zlibHog (src/hogs.js:9) ×2') && gz.fo.frame === 'zlibHog (src/hogs.js:9)', `a zlib hold: ${gz.line}`, gz);
+  // an inspector frame ABOVE a frame of ours is never the delivery (the batch-78 readers' should): the thread's own session,
+  // and the dispatch's frames over our caller — both name the hold, driven by ours
+  const overOurs = A([...INSPECTOR_ONLY, ['askSelf', ROOT + '/src/x.js', 7]]), insp = holdOf([at(0, osn), at(1, overOurs)]);
+  ok(!overOurs.empty && overOurs.words === 'node\u2019s own code \u2014 inspector, driven by askSelf (src/x.js:7)' && insp.fo.verdict === LH.V.js && insp.fo.inside === 2
+    && insp.line.includes('node\u2019s own code \u2014 inspector, driven by askSelf (src/x.js:7) \u00d72'), `an inspector frame above a frame of ours names the hold, never «no hold»: ${insp.line}`, { overOurs, insp });
   ok(idle.fo.verdict !== LH.V.js && idle.fo.inside === 0 && idle.line.includes('not sampled (no sample landed inside it — asked 1 time: the answer came at its end, with no frame of it)'),
     `the ask's own delivery names no hold: ${idle.line}`, idle);
   { // the watchdog's answer IS this function (the worker's textAnswer)

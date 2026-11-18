@@ -654,6 +654,18 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     const fill = count(0.001, () => times(SW.ROOT_MEMO_MAX + 1, (i) => F.statSync(P(i))));
     const again = count(0.001, () => { F.statSync(P(SW.ROOT_MEMO_MAX)); F.statSync(P(0)); });
     ok(fill.rootOf === SW.ROOT_MEMO_MAX + 1 && again.rootOf === 1, `the kept answers are bounded at ${SW.ROOT_MEMO_MAX} paths: the newest is still kept, the oldest was dropped and is judged again (${again.rootOf})`, { fill: fill.rootOf, again: again.rootOf });
+    // …and in bytes: a path longer than ROOT_MEMO_PATH_MAX is judged every time, never kept (the batch-78 readers' should)
+    const LONG = `${NFS}/${'d/'.repeat(SW.ROOT_MEMO_PATH_MAX)}f`, AT = `${NFS}/${'e'.repeat(SW.ROOT_MEMO_PATH_MAX - NFS.length - 1)}`;
+    const long = count(0.001, () => times(3, () => F.statSync(LONG))), edge = count(0.001, () => times(3, () => F.statSync(AT)));
+    ok(LONG.length > SW.ROOT_MEMO_PATH_MAX && AT.length === SW.ROOT_MEMO_PATH_MAX && long.rootOf === 3 && edge.rootOf === 1, `a path past ${SW.ROOT_MEMO_PATH_MAX} characters is judged at every call, never kept (3 of 3); one of exactly ${SW.ROOT_MEMO_PATH_MAX} is kept (1 of 3)`, { long: long.rootOf, edge: edge.rootOf });
+  }
+  { // a refresh that THROWS leaves no verdict standing behind a context that still matches (the batch-78 readers' should)
+    const MPCm = MPC, realRoots = MPCm.rootsOf;
+    count(0.001, () => times(2, () => F.statSync(IN)));   // kept: the own-tree verdict
+    MPCm.rootsOf = () => { throw new Error('a planted roots fault'); };
+    let threw = false; try { w.refresh(); } catch { threw = true; } finally { MPCm.rootsOf = realRoots; }
+    const after = count(0.001, () => times(2, () => F.statSync(IN)));
+    ok(threw && after.own === 1, `a refresh that throws (the planted fault) clears the kept verdicts first — the own-tree path is judged once more, then kept (${after.own} of 2)`, after);
   }
   { // a call of AT_MS or longer is dated on the wall clock: its end less its length (the fake wall clock reads 5e12)
     const slow = count(60, () => times(5, () => F.statSync(OUT)));
@@ -674,7 +686,7 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
   // THE RED CONTROLS — each cut put back alone (scripts/mutant-copy.mjs, never src/): its own count is red
   const LSRC = fs.readFileSync(path.join(REPO, 'src/server/loop-blame.js'), 'utf8'), WSRC = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8');
   const cut = (src, from, to) => (src.split(from).length === 2 ? src.replace(from, to) : null);
-  const noKept = cut(WSRC, "if (typeof p !== 'string') return MPC.rootOf(p, CTX);", 'return judged(p);');
+  const noKept = cut(WSRC, "if (typeof p !== 'string' || p.length > ROOT_MEMO_PATH_MAX) return judged(p);", 'return judged(p);');
   const muts = {
     'every call dated': [cut(LSRC, 'const at = ms >= datedFrom ? Math.round(now() - ms) : NaN;', 'const at = now();'), null, 'date', OUT],
     'the slot reads its own clock': [null, cut(WSRC, 'T[0] = typeof t0 === \'number\' && now === mono ? t0 + PERF_TO_MONO : now();', 'T[0] = now();'), 'hrtime', OUT],
@@ -691,6 +703,19 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     r.w.stop();
     return [tag, n[key] >= K && n[key] > over ? n[key] : null];
   });
+  { // RED CONTROL of the throwing refresh: the verdicts cleared only AFTER the roots are rebuilt (as at a70fdfef0)
+    const ws = cut(WSRC, '    rootMemo.clear(); memoCtx = null;\n', '');
+    const r = ws ? rig(M.load('src/server/sync-fs-witness.js', ws, 'clear-after-rebuild')) : null;
+    let stale = null;
+    if (r) {
+      count(0.001, () => times(2, () => r.F.statSync(IN)));
+      const realRoots = MPC.rootsOf; MPC.rootsOf = () => { throw new Error('a planted roots fault'); };
+      try { r.w.refresh(); } catch { } finally { MPC.rootsOf = realRoots; }
+      stale = count(0.001, () => times(2, () => r.F.statSync(IN))).own;
+      r.w.stop();
+    }
+    ok(stale === 0, `RED CONTROL: with the clear after the rebuild, a throwing refresh leaves the old own-tree verdict standing (${stale} own-tree tests after it)`, stale);
+  }
   ok(reds.every(([, v]) => v !== null), `RED CONTROLS: each cut put back alone reads its count per call again — ${reds.map(([t, v]) => `${t}: ${v === null ? 'NOT RED' : v + ' over ' + K}`).join('; ')}`, reds);
   LB.setHook(null);
   fs.rmSync(ROOT, { recursive: true, force: true });

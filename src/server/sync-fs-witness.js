@@ -53,6 +53,7 @@ const LIVE_MS = 10000;
 const ROOTS_EVERY_MS = 30000;
 const FD_PATHS_MAX = 4096;
 const ROOT_MEMO_MAX = 4096;   // B-9169: the paths whose class is kept until the roots refresh (the oldest leaves first)
+const ROOT_MEMO_PATH_MAX = 4096;   // …and only a path this long or shorter (the count bounds the entries, this their bytes)
 const STACK_FRAMES = 6;
 const SETTING = 'mounts.mainThreadSyncGuard';
 const TWO_PATH = new Set(['renameSync', 'copyFileSync', 'cpSync', 'linkSync', 'symlinkSync']);
@@ -129,12 +130,12 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   // B-9169: A PATH'S VERDICT IS KEPT per path string until the roots refresh (a new CTX), bounded — both parts are PURE
   // over the path and what the refresh set: outside the instance's own tree, MPC.rootOf's root row (or null); inside it,
   // the data dir's own network / FUSE mount (ownHit) for a path under the data dir, else null (never refused). A path
-  // that is not a string (a Buffer, a URL) is judged every time.
+  // that is not a string (a Buffer, a URL), or is longer than ROOT_MEMO_PATH_MAX, is judged every time.
   const rootMemo = new Map();
   let memoCtx = null;
   const judged = (p) => (ownPath(p) ? (ownHit && p.startsWith(DATA_SLASH) ? ownHit : null) : MPC.rootOf(p, CTX));
   const verdictOf = (p) => {
-    if (typeof p !== 'string') return MPC.rootOf(p, CTX);
+    if (typeof p !== 'string' || p.length > ROOT_MEMO_PATH_MAX) return judged(p);
     if (memoCtx !== CTX) { rootMemo.clear(); memoCtx = CTX; }
     let r = rootMemo.get(p);
     if (r === undefined) {
@@ -150,10 +151,13 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     try { mi = readMountinfo(); mounts = MPC.parseMountinfo(mi); } catch { }
     try { ownMount = dataDir ? require('../local-index.js').netMountOf(path.resolve(dataDir), mi) : null; } catch { ownMount = null; }
     ownHit = ownMount ? { kind: 'home', root: ownMount.target, fstype: ownMount.fstype } : null;   // the data dir's own mount, as a hit
+    // the kept verdicts go with the facts they were judged by — BEFORE anything below may throw (a throw keeps the old
+    // CTX, and a memo still matching it would keep the old own-mount verdict standing)
+    rootMemo.clear(); memoCtx = null;
     try { reg = registry() || []; } catch { }
     roots = MPC.rootsOf({ mounts, registry: reg, rootDir, dataDir });
     CTX = { mountRoots: roots, rootDir, dataDir, home, cwd };
-    rootMemo.clear(); memoCtx = CTX;
+    memoCtx = CTX;
     SP.setRoots(roots, { rootDir, dataDir, home, cwd });   // every module's answer (src/storage-path.js)
     counts.rootsRead++;
     return roots;
@@ -454,4 +458,4 @@ function bootSetting(dataDir, readFile = (p) => fs.readFileSync(p, 'utf8')) {
   try { const v = JSON.parse(text)[SAMPLING_SETTING]; return v === false ? false : true; } catch { return null; }
 }
 
-module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, ROOT_MEMO_MAX, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
+module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, ROOT_MEMO_MAX, ROOT_MEMO_PATH_MAX, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
