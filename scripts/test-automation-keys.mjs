@@ -1953,9 +1953,9 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   const listedAfterBoot = (Mod) => !!Mod.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs }).keysFor(C6()).find((k) => k.id === m4.key.id);
   const after4 = listedAfterBoot(ENG);
   ok(!!(g4.ok && before4 && !after4), 'follow-up (3): keysFor reads the LIVE grants — a once-grant from before a restart (boot is a lock; the pick and the verdict skip it) is no longer listed', { before4, after4 });
-  const KLIVE = '      const gs = liveGrants().filter((g) => g.keyId === k.id';
+  const KLIVE = '      const gs = lg.filter((g) => g.keyId === k.id';   // cure 2: the listing reads ONE liveGrants() per call
   ok(ENGS.split(KLIVE).length === 2, 'ANCHOR: keysFor reads liveGrants(), spelled once');
-  ok(listedAfterBoot(M.load('src/server/automation-engine.js', ENGS.replace(KLIVE, '      const gs = db.grants.filter((g) => g.keyId === k.id'), 'b3190-keys-store')) === true,
+  ok(listedAfterBoot(M.load('src/server/automation-engine.js', ENGS.replace(KLIVE, '      const gs = db.grants.filter((g) => g.keyId === k.id'), 'b3190-keys-store')) === true,   // stale-pins: kept — a deliberate mutant planting the pre-cure listing
     'MUTANT RED: keysFor over the store\'s rows ⇒ the dead once-grant is listed after a restart (a key the pick then refuses)');
   // (4) one law, one place: the rank is the grant model's
   ok(/const viaRank = \(via\) => GM\.specificityOf\(via\);/.test(SRC) && GM.specificityOf('conversation') > GM.specificityOf('group') && GM.specificityOf('group') > GM.specificityOf('everyone') && GM.specificityOf('x') < GM.specificityOf('everyone')
@@ -1966,8 +1966,8 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   ok(spentEx.ok === false && spentEx.code === 'not_granted', 'follow-up (5): a SPENT once-grant that would except the caller decides nothing (not_granted, the first-use road) — as a spent undecided one', spentEx);
   ok(/const v = A\.reachVerdict\(\{ keyId: key\.id, caller: caller\.conversationId, target, opened: db\.opened, reach: verdict\.reach, reachRows: verdict\.reachRows \}\)/.test(ENGS)
     && /call again in a moment\$\{pick\.works \? `, or call with --key \$\{pick\.works\.id\} \(«\$\{pick\.works\.name\}», granted to this conversation now\)` : ''\}` : null/.test(ENGS)
-    && (fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8').match(/code: 'not_granted', reach: 'member', why: 'the calling conversation is not in that Task Group'/g) || []).length === 2
-    && /const gs = liveGrants\(\)\.filter\(\(g\) => g\.keyId === k\.id/.test(ENGS)
+    && (fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8').match(/code: 'not_granted', reach: 'member', callerMistake: true, why: 'the calling conversation is not in that Task Group'/g) || []).length === 2
+    && /const lg = liveGrants\(\);/.test(ENGS) && /const gs = lg\.filter\(\(g\) => g\.keyId === k\.id/.test(ENGS)
     && /const pick = A\.pickKey\(\{ keys: db\.keys, grants: liveGrants\(\), want,/.test(ENGS)
     && /pick\.code === 'groups_unreadable' \? `this conversation's Task Groups could not be read just now, so which key it may use for \$\{verb\} could not be judged/.test(ENGS),
     'the engine: reachVerdict without the grant list · a pick refused groups_unreadable says why and «call again in a moment»');

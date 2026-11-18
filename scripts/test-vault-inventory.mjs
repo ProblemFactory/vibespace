@@ -469,7 +469,7 @@ console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q
   ok(Object.keys(VI.USE_FAIL_REACH_LINES).sort().join() === 'groups,opened' && Object.values(VI.USE_FAIL_REACH_LINES).every((l) => /\{target\}/.test(l) && / — .+/.test(l) && /Vault window/.test(l)), 'USE_FAIL_REACH_LINES: one cause per reach kind a refusal can name (opened / groups), the target in it, each with its door');
   // B-3190 follow-up r3: a Task Group the CALLER is not in (reach 'member') files NO card — the caller's own mistake, answered by name
   const ENGI = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf8');
-  ok(/if \(!r\.ok && r\.reach !== 'member' && attention && typeof attention\.useFailed === 'function'\) \{/.test(ENGI), 'r3: open --task / bind naming a Task Group the caller is not in file no For-you card (no grant or reach cures it; the caller is told by name)');
+  ok(/if \(!r\.ok && r\.callerMistake !== true && attention && typeof attention\.useFailed === 'function'\) \{/.test(ENGI), 'r3: open --task / bind naming a Task Group the caller is not in file no For-you card (no grant or reach cures it; the caller is told by name)');
   ok(!/\{target\}/.test(VI.USE_FAIL_NAMELESS.not_granted) && !/\{target\}/.test(VI.USE_FAIL_NAMELESS.verb_not_in_scope) && /the calling conversation/.test(VI.USE_FAIL_NAMELESS.not_granted), 'r2: the nameless lines name the CALLER pickKey judged, never the target', VI.USE_FAIL_NAMELESS);
   const cr = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'not_granted', reach: 'opened', next: { n: 1 } });
   const cg = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'not_granted', reach: 'groups', next: { n: 1 } });

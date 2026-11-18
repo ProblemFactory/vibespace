@@ -310,7 +310,7 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   // the engine's reach (ONE PURE rule — src/automation-keys.js reachVerdict): the caller itself, or what the key OPENED (the engine's
   // store rows stand in here as `opened`; test-automation-keys ⑰ proves the real store across a restart)
   const opened = new Set();
-  const reachSelf = (t) => (t.conversationId === 'c0ffee' || opened.has(t.webuiId) || opened.has(t.conversationId) ? { ok: true, by: t.conversationId === 'c0ffee' ? 'self' : 'opener' } : { ok: false, code: 'not_granted', why: 'the key is not granted to that conversation (nor to one of its Task Groups), and did not open it' });
+  const reachSelf = (t) => (t.conversationId === 'c0ffee' || opened.has(t.webuiId) || opened.has(t.conversationId) ? { ok: true, by: t.conversationId === 'c0ffee' ? 'self' : 'opener' } : { ok: false, code: 'not_granted', why: 'the key did not open that conversation and its grant reaches only what it opened' });
   const ctx = { caller, keyId: 'ak-000000000001', reach: reachSelf, identity: 'automation:ak-000000000001' };
   const o = await V['conversations.open']({ cwd: '/var/tmp/vibespace-lanes', name: 'worker', model: 'opus', effort: 'xhigh', permission: 'bypassPermissions', task: 'T-1-x', pool: 'pool-a' }, ctx);
   ok(o.ok && o.claudeSessionId === 'ee55' && o.sessionKey === 'claude:ee55' && o.pending === false && ticks === 3 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.taskId === 'T-1-x' && W.lastFrame.accountId === 'pool-a' && W.log[0][2] === 'automation:ak-000000000001',
