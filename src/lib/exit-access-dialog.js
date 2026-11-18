@@ -347,7 +347,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       showToast(t('Could not change who can use it') + (j.code ? ` — ${w}` : ''), { type: 'error' });
     };
     // what the person changed, against what this draw showed (a fresh draw — the list moved — starts a new base)
-    const drawn = () => JSON.stringify({ sec: ['use', 'run'].map((g) => { const s = sections[g]; return [s.mode, s.picker && typeof s.picker.selected === 'function' ? s.picker.selected().slice().sort() : null, !!(s.askBox && s.askBox.checked)]; }), hub: hubTouched ? hubMode : null });
+    const drawn = () => JSON.stringify({ sec: ['use', 'run'].map((g) => { const s = sections[g]; return [s.mode, s.picker && typeof s.picker.selected === 'function' ? s.picker.selected().slice().sort() : null, !!(s.askBox && s.askBox.checked), s.picker && typeof s.picker.onlyKeys === 'function' ? (s.picker.onlyKeys() || []).slice().sort() : null]; }), hub: hubTouched ? hubMode : null });   // the chain's cure (C, its read): a switch press is a change
     const base = drawn();
     dirtyNow = () => drawn() !== base;
     saveNow = async () => { await save.onclick(); return body.querySelector('.exit-access-refuse')?.textContent || undefined; };

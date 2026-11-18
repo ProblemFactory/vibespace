@@ -490,7 +490,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const vl = VU2.standingLines([vOut, vOnly], { nameOf: nm }), vlOwn = VU2.standingLines([vOwn], { nameOf: nm });
     ok(vOut.code === 'outside_hosts' && vOut.member && vOut.member.inherited === true && vOnly.code === 'not_granted' && vOnly.only === 'group:tg-p' && vl.some((l) => /through its parent Task Group "Parent"/i.test(l)) && vl.some((l) => l.includes('as "this group only"') && l.includes('Vault window')) && vlOwn.length === 1 && !/parent/i.test(vlOwn[0]), 'vault-use: the card\'s standing line says a standing approval held through the parent, and names the «仅本组» entry that holds the child out with its door — nothing of a parent for the parent\'s own member', [vl, vlOwn]);
     const xpSrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf-8'), weSrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8'), srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), vrSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf-8');
-    ok((xpSrc.match(/lineage: E\.lineageOfVerdict\(j\.verdict, this\.groupNameOf\)/g) || []).length === 2 && /\.map\(\(x\) => E\.lineageOfVerdict\(x, this\.groupNameOf\)\)/.test(xpSrc) && (weSrc.match(/R\.lineageOfReach\((?:v|rv), groupNameOf\)/g) || []).length === 3 && (srvSrc.match(/groupNameOf: \(id\) => tasks\.lineageNameOf\(id\)/g) || []).length === 2 && /VUG\.standingLines\(\[\.\.\.standing\.values\(\)\], \{ always: !!shape\.always, nameOf: groupNameOf \}\)/.test(vrSrc), 'the doors hand the words: exit\'s two refusals and its list, window\'s two refusals and its list, the vault card\'s standing lines — wired to the store\'s ONE name door');
+    ok((xpSrc.match(/lineage: E\.lineageOfVerdict\(j\.verdict, this\.groupNameOf\)/g) || []).length === 2 && /\.map\(\(x\) => \(x && x\.ok \? E\.lineageOfVerdict\(x, this\.groupNameOf\) : ''\)\)/.test(xpSrc) && (weSrc.match(/R\.lineageOfReach\((?:v|rv), groupNameOf\)/g) || []).length === 3 && (srvSrc.match(/groupNameOf: \(id\) => tasks\.lineageNameOf\(id\)/g) || []).length === 2 && /VUG\.standingLines\(\[\.\.\.standing\.values\(\)\], \{ always: !!shape\.always, nameOf: groupNameOf \}\)/.test(vrSrc), 'the doors hand the words: exit\'s two refusals and its list, window\'s two refusals and its list, the vault card\'s standing lines — wired to the store\'s ONE name door');
   }
   // rule ④: the group-visibility door never inherits
   const st = GS.create({ memory: true });
@@ -510,6 +510,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'the legacy subject list (session:<cid> + group:<gid>) — exported for GM.LEGACY\'s migration probes, no door calls it'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
     ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
+    ['src/channel-filter.js', "to: fromKeys, except: ex }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }", 'the via judge\'s KEY-only groups (no access row: no «仅本组» to read) judge OWN groups only, as the release did — the rows are judged with the lineage (the chain\'s cure (D))'],
     ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'the «via» shortcut (memberStill) judges OWN groups only, as memberVia'],
   ];
   const PENDING = [];   // lane lg-group-parents U3d: every door is wired (the automation doors last, on B-3190's tip)
@@ -641,7 +642,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const kidW = { sessionKeys: ['claude:k1'], conversationKeys: ['k1'], groupIds: ['tg-c'], inheritedGroupIds: ['tg-p'] };
     ok(on.ok && on.changed && WRR.reachFor(on.record, kidW).level === 'hidden' && off.ok && off.changed && WRR.reachFor(off.record, kidW).level === 'exposed' && !WRR.setOnly(rec0, { kind: 'group', id: 'tg-z' }, true).ok && !WRR.setOnly(rec0, { kind: 'everyone', id: '*' }, true).ok && JSON.stringify(WRR.pickerModel({ record: on.record }).onlyKeys) === '["group:tg-p"]', 'window (the cure (C)): setOnly on narrows the shared group to itself (the child is hidden), off includes its child groups again; a group not shared / not a group refuses; the picker model answers the switch\'s stored state');
     const exD = fs.readFileSync(path.join(REPO, 'src/lib/exit-access-dialog.js'), 'utf-8'), wsD = fs.readFileSync(path.join(REPO, 'src/lib/window-share.js'), 'utf-8'), wte = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf-8'), dar = fs.readFileSync(path.join(REPO, 'src/routes/desktop-apps.js'), 'utf-8');
-    ok(/only: \{ keys: pick\.only \|\| \[\] \} \}\);/.test(exD) && /\.\.\.\(on \? \{ only: true \} : s\.onlyWas\.includes\(k\) \? \{ only: false \} : \{\}\)/.test(exD) && /return w && w\.kind === 'group' \? \{ kind: 'group', id: w\.id \} : w;/.test(exD)
+    ok(/only: \{ keys: pick\.only \|\| \[\] \} \}\);/.test(exD) && /sw\.includes\(k\) \? \{ only: true \} : s\.onlyWas\.includes\(k\) \? \{ only: false \} : \{\}\)/.test(exD) && /return w && w\.kind === 'group' \? \{ kind: 'group', id: w\.id \} : w;/.test(exD)
       && /only: onOnly \? \{ keys: \(model\.onlyKeys \|\| \[\]\)\.slice\(\) \} : null,/.test(wsD) && /fetchJson\(`\$\{base\}\/only`, \{ method: 'PUT'/.test(wsD)
       && /const to = widenGroup \? row\.to\.map\(\(e\) => \(e\.kind === 'group' && e\.id === widenGroup \? \{ \.\.\.e, only: false \} : e\)\) : row\.to;/.test(wte) && /putReach\(rec\.id, s\.record, 'user', \[\], on === true \? null : p\.id\);/.test(wte)
       && /router\.put\('\/api\/desktop\/apps\/:id\/reach\/only'/.test(dar), 'the exit and window dialogs offer the switch and carry it: exit\'s Save (only:true / only:false, never on an exception), window\'s ONE verb (off said explicitly to the writer)');
@@ -657,7 +658,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const fc = [GM.fromChannelPrincipal({ kind: 'group', id: 'tg-p', only: true }), GM.fromChannelPrincipal({ kind: 'group', id: 'tg-p', only: false }), GM.fromChannelPrincipal({ kind: 'group', id: 'tg-p' })];
     ok(vg[0].ok && vg[0].grant.principal.only === true && vg[1].grant.principal.only === false && !('only' in vg[2].grant.principal) && fc[0].only === true && fc[1].only === false && !('only' in fc[2]) && typeof CF3.validateWatchers === 'function', 'channels (the cure (C)): validateGrant and the channel spelling keep a group\'s «仅本组» (true, or false = switched off — the ONE writer widens only then); never on an agent');
     const vRow = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf-8'), reE = fs.readFileSync(path.join(REPO, 'src/lib/channel-reach-editor.js'), 'utf-8'), apD = fs.readFileSync(path.join(REPO, 'src/lib/channel-api-dialog.js'), 'utf-8'), feE = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8'), caS = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8'), cfS = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-    ok(/only: \{ keys: \(stored\.only \|\| \[\]\)\.slice\(\) \}/.test(vRow) && /\{ held: exNow, only: picker\.onlyKeys\(\) \|\| \[\], onlyWas: stored\.only \|\| \[\] \}/.test(vRow)
+    ok(/only: \{ keys: \(stored\.only \|\| \[\]\)\.slice\(\) \}/.test(vRow) && /\{ held: exNow, only: typeof picker\.onlyKeys === 'function' \? picker\.onlyKeys\(\) : null, onlyWas: stored\.only \|\| \[\] \}/.test(vRow)
       && /api\(`\$\{base\}\/reach`, \{ principal: \{ \.\.\.g\.principal, only: !on \}, level: g\.level \}\)/.test(reE)
       && /only: \{ keys: rows\.filter\(\(r\) => r\.onlyWas\)\.map\(\(r\) => r\.key\) \}/.test(apD) && /principal: onlyWire\(r\)/.test(apD)
       && /only: \{ keys: \[\.\.\.onlyWas\] \}/.test(feE) && /only: \{ keys: whoOnlyWas \? \[key\] : \[\] \}/.test(feE) && /principal: \{ kind: p\.kind, id: p\.id, name: p\.name, \.\.\.wOnly \}/.test(feE)
@@ -682,18 +683,44 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ok(okKid.ok && okKid.watchers[0].via === 'tg-p' && !noOnly.ok && noOnly.code === 'watcher-needs-access' && /as "this group only"/.test(noOnly.error) && /"Parent"/.test(noOnly.error) && !noStranger.ok && !/parent/i.test(noStranger.error), 'channels (the cure (D)): a child of the access-holding parent is a watcher «via» the parent; a «仅本组» access refuses it and SAYS so (the parent named); a stranger is refused as before', [okKid.ok && okKid.watchers[0].via, noOnly.error, noStranger.error]);
     const viaRow = { principal: { kind: 'agent', id: 'k1' }, via: 'tg-p' };
     ok(CFD.memberStill(viaRow, membersD, { rows: accP }) === true && CFD.memberStill(viaRow, membersD, { rows: accPO }) === false && CFD.memberStill(viaRow, [{ cid: 'k1', groups: ['tg-c'], inherited: [] }], { rows: accP }) === false, 'channels (the cure (D)): the wake re-judges the via watcher with the access rows and the lineage — a parent switched to «仅本组», or a lineage gone, stops it');
+    // after the cure's read: the WAKE hands effectiveGrants' wrapped rows ({row, source}); the grain's «除了» on the parent leaves the
+    // child out at the save (rule ③), said so; a group known only as a KEY (a hand-written reach grant) stays a via group beside rows
+    const wrapped = accP.map((row) => ({ row, source: 'conversation', patternId: null, why: [] }));
+    const exP = CFD.validateWatchers([wD('k1')], accP, { members: membersD, except: [{ kind: 'group', id: 'tg-p' }] });
+    const keyOnly = CFD.validateWatchers([wD('k3')], accP, { inherited: ['group:tg-q'], members: [...membersD, { cid: 'k3', groups: ['tg-q'], inherited: [] }] });
+    ok(CFD.memberStill(viaRow, membersD, { rows: wrapped }) === true && !exP.ok && /left out through its parent Task Group "Parent"/.test(exP.error) && keyOnly.ok && keyOnly.watchers[0].via === 'tg-q', 'channels (the cure (D), its read): the wake\'s wrapped rows are read through; a parent left out of the access list leaves the child out (said so); a key-only group stays a via group beside the rows', [exP.error, keyOnly.ok && keyOnly.watchers[0].via]);
     const caD = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
     ok(/F\.memberStill\(it\.watcher, members, \{ rows: e0\.access \}\)/.test(caD), 'channels (the cure (D)): the wake hands the grain\'s access rows to the re-judge');
     // CONTROL: the release's via judge (own groups only, from key strings) refuses the child — the leg above would be red
     const MD = mutantCopies('cure-d-via', REPO);
     try {
       const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-      const CUTD = '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows }) : null;';
+      const CUTD = '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows, except }) : null;';
       ok(fsrc.split(CUTD).length === 2, 'CONTROL setup: the via line hands the access rows, exactly once');
       const CFx = MD.load('src/channel-filter.js', fsrc.replace(CUTD, '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members) : null;'), 'via-own-only');   // stale-pins: kept (the mutant restores the release's own-only via line)
       const cx = CFx.validateWatchers([wD('k1')], accP, { members: membersD });
       ok(!cx.ok && cx.code === 'watcher-needs-access', 'CONTROL: a via judge without the access rows (own groups only) refuses the child — the leg above would be red', cx);
     } finally { try { fs.rmSync(MD.dir, { recursive: true, force: true }); } catch { } }
+  }
+  // the cure's own read: a group leaving the pick forgets its switch; only a still-picked group fires the window switch; the switch
+  // routes refuse a missing flag (never «off»); the unsaved guards count a press; exit's list words come from an ADMIT only; a
+  // parents change names the old and new ancestors
+  {
+    const R = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
+    const pp = R('src/lib/principal-picker.js'), ws = R('src/lib/window-share.js'), wte2 = R('src/server/window-targets-engine.js'), ae2 = R('src/server/automation-engine.js'), ex2 = R('src/lib/exit-access-dialog.js'), va2 = R('src/lib/vault-automation.js'), xp2 = R('src/exit-proxy.js'), tg2 = R('src/task-groups.js');
+    ok(/const keepOnlyPicked = \(\) => \{ for \(const k of \[\.\.\.onlySet\]\) if \(!sel\.includes\(k\)\) onlySet\.delete\(k\); \};/.test(pp) && (pp.match(/keepOnlyPicked\(\);/g) || []).length === 3
+      && /stillPicked\.has\(k\) && byKeyO\.get\(k\)\) st\.onOnly\(byKeyO\.get\(k\)\.ref\.row, false\)/.test(ws)
+      && /if \(typeof on !== 'boolean'\) throw namedError\('bad_principal'/.test(wte2) && /if \(typeof on !== 'boolean'\) return named\('bad_args'/.test(ae2)
+      && /s\.picker && typeof s\.picker\.onlyKeys === 'function' \? \(s\.picker\.onlyKeys\(\) \|\| \[\]\)\.slice\(\)\.sort\(\) : null\]; \}\)/.test(ex2) && /plan\(v\.fresh, 'subject'\), picker && typeof picker\.onlyKeys === 'function'/.test(va2)
+      && /\.map\(\(x\) => \(x && x\.ok \? E\.lineageOfVerdict\(x, this\.groupNameOf\) : ''\)\)/.test(xp2)
+      && /const ancMoved = parents !== undefined \? \[\.\.\.new Set\(\[\.\.\.ancBefore, \.\.\.this\.ancestorsOf\(\[t\.id\]\)\]\)\] : \[\];/.test(tg2), 'the cure\'s own read: each of its taken findings is in the tree (the picker, the window switch, the routes, the unsaved guards, the exit list, the change notice)');
+    // a parents change names the old and the new ancestor
+    const dA = dirOf(`anc-${++worldN}`); fs.mkdirSync(dA, { recursive: true });
+    const { TaskGroupManager: TGM } = require('../src/task-groups.js');
+    const seenA = []; const sA = new TGM({ dataDir: dA, onChange: (e) => seenA.push(...((e && e.ids) || [])) });
+    const PA = sA.create({ title: 'PA' }), QA = sA.create({ title: 'QA' }), CA = sA.create({ title: 'CA', parents: [PA.id] });
+    seenA.length = 0; sA.update(CA.id, { parents: [QA.id] });
+    ok(seenA.includes(CA.id) && seenA.includes(PA.id) && seenA.includes(QA.id), 'the change notice of a parents move names the old parent and the new one (their derived descendants moved)', seenA);
   }
   // CONTROL: a planted file through the SAME census — each spelling the read found blind is caught; a carrying line is not
   const planted = [['src/planted.js', [

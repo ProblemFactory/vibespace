@@ -532,7 +532,7 @@ class ExitProxyManager {
       const v = E.agentView(this.accessOf(this._raw(h.id) || h), ctx);
       if (!v.use.you && !v.run.you) continue;
       const acc = this.accessOf(this._raw(h.id) || h);
-      const through = [E.exitVerdict(acc, 'use', ctx), E.exitVerdict(acc, 'run', ctx)].map((x) => E.lineageOfVerdict(x, this.groupNameOf)).find(Boolean) || null;   // the chain's cure (B): «through its parent Task Group X»
+      const through = [E.exitVerdict(acc, 'use', ctx), E.exitVerdict(acc, 'run', ctx)].map((x) => (x && x.ok ? E.lineageOfVerdict(x, this.groupNameOf) : '')).find(Boolean) || null;   // the chain's cure (B): «through its parent Task Group X» — an ADMIT's words only (its read)
       out.push({ id: h.id, name: h.name || h.id, transport: h.transport || 'ssh', online: this._online(h), active: this._live.has(h.id), localPort: this._live.get(h.id)?.localPort || null, grants: { use: v.use.you, run: v.run.you, runAsk: v.run.ask }, ...(through ? { through } : {}) });
     }
     return out;

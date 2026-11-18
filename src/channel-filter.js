@@ -1226,39 +1226,47 @@ function eligibleFor(keys, principal, row = null) {
  *  group round-robin wakes over; the dialog: the sidebar roster). → the first such group id, or null. */
 /** the chain's cure (D): the access-holding groups as the model reads them — from the access ROWS (each keeps its «仅本组»), else
  *  from the key strings (bare: an older caller's) — and the member's facts WITH its lineage when the rows are there. */
-const viaRowOf = (rows) => (Array.isArray(rows) ? rows : []).map((r) => (r && r.principal ? r.principal : r)).filter((p) => p && p.kind === 'group' && str(p.id)).map((p) => ({ kind: 'group', id: str(p.id), ...(p.only === true ? { only: true } : {}) }));
-function memberVia(keys, cid, members = [], { rows = null } = {}) {
+const principalOfRow = (r) => (r && r.row && r.row.principal ? r.row.principal : r && r.principal ? r.principal : r);   // a row, or effectiveGrants' {row, source} (the wake's)
+const viaRowOf = (rows) => (Array.isArray(rows) ? rows : []).map(principalOfRow).filter((p) => p && p.kind === 'group' && str(p.id)).map((p) => ({ kind: 'group', id: str(p.id), ...(p.only === true ? { only: true } : {}) }));
+// the grain's «除了» as the model's entries (channels-grants' spelling: an agent / everyone by the channel spelling, a group bare — rule ③)
+const viaExceptOf = (except) => (Array.isArray(except) ? except : []).map((x) => (x && (x.kind === 'agent' || x.kind === 'everyone') ? GM.fromChannelPrincipal(x) : GM.bareOf(x))).filter(Boolean);
+// the via judge's two steps: the ROWS (each with its «仅本组») with the lineage; then the groups known only as KEYS (no flag to read)
+// by the member's own groups, as before — the first group that admits; the grain's «除了» applies to both
+function viaJudge(keys, s, cid, rows, except) {
+  const ex = viaExceptOf(except);
+  const keyIds = new Set([...keys].filter((k) => /^group:/.test(k) && !k.includes(FAN_SEP)).map((k) => k.slice(6)));   // the access-holding groups' ids (one read of the key set)
+  const fromRows = viaRowOf(rows).filter((e) => keyIds.has(e.id)), rowIds = new Set(fromRows.map((e) => e.id));
+  const fromKeys = [...keyIds].filter((id) => !rowIds.has(id)).map((id) => ({ kind: 'group', id }));
+  const v1 = fromRows.length ? GM.admits([{ door: 'channel-reach', resource: '-', to: fromRows, except: ex }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }) : null;
+  if (v1 && (v1.ok || v1.code === 'excepted')) return v1;
+  const v2 = fromKeys.length ? GM.admits([{ door: 'channel-reach', resource: '-', to: fromKeys, except: ex }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }) : null;
+  return v2 && v2.ok ? v2 : v1 || v2;
+}
+function memberVia(keys, cid, members = [], { rows = null, except = [] } = {}) {
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(cid));
   if (!s || !keys) return null;
-  // lane grants-unify: the access-holding groups as ONE row, judged by THE model with the member's facts
-  const fromRows = viaRowOf(rows).filter((e) => keys.has(`group:${e.id}`));
-  const to = fromRows.length ? fromRows : [...keys].filter((k) => /^group:/.test(k) && !k.includes(FAN_SEP)).map((k) => ({ kind: 'group', id: k.slice(6) }));
-  // lane lg-group-parents (the U3c read, MAJOR 4): the via shortcut judges OWN groups only (the release's answer) — its group entries
-  // are rebuilt from key strings and cannot carry «仅本组», so a lineage here would read a «仅本组» access as «含子组»; a child's
-  // conversation is a watcher by its own name or through its own group's access
-  // the chain's cure (D): with the access ROWS (each keeps its «仅本组») the member is judged WITH its lineage — a child of an
-  // access-holding parent reads there, so it may be notified there; with key strings only, its own groups (as before)
-  const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: fromRows.length && Array.isArray(s.inherited) ? s.inherited.map(str) : [] }) : null;
+  // the chain's cure (D, after its read): the access ROWS (each keeps its «仅本组») judged WITH the lineage, the key-only groups by
+  // own groups, the grain's «除了» on both — a child of an access-holding parent reads there, so it may be notified there
+  const v = viaJudge(keys, s, cid, rows, except);
   return v && v.ok && v.entry.kind === 'group' ? v.entry.id : null;
 }
 /** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
  *  this rule's to judge (true). */
-function memberStill(row, members = [], { rows = null } = {}) {   // the chain's cure (D): + the grain's access rows (the wake's re-judge reads the via row's «仅本组» and the lineage)
+function memberStill(row, members = [], { rows = null, except = [] } = {}) {   // the chain's cure (D): + the grain's access rows (the wake's re-judge reads the via row's «仅本组» and the lineage)
   if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
   const viaRow = viaRowOf(rows).find((e) => e.id === str(row.via));
-  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }).ok;
+  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(except) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] }).ok;
   return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }).ok;   // lane lg-group-parents (the U3c read, MAJOR 4): own groups only, as memberVia
 }
 /** the chain's cure (D): why a member the via judge refused is refused, in the model's words (a parent's «仅本组» access) — '' when
  *  the lineage decided nothing; a group's name is the access row's own (the owner's words). */
-function viaWordsOf(rows, keys, cid, members = []) {
+function viaWordsOf(rows, keys, cid, members = [], except = []) {
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(cid));
-  const to = viaRowOf(rows).filter((e) => keys && keys.has(`group:${e.id}`));
-  if (!s || !to.length) return '';
-  const v = GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [] });
-  const names = new Map((Array.isArray(rows) ? rows : []).map((r) => (r && r.principal ? r.principal : r)).filter((p) => p && p.kind === 'group').map((p) => [str(p.id), p.name || null]));
-  return GM.lineageWords(v, (id) => names.get(str(id)) || null);
+  if (!s || !keys) return '';
+  const v = viaJudge(keys, s, cid, rows, except);
+  const names = new Map((Array.isArray(rows) ? rows : []).map(principalOfRow).filter((p) => p && p.kind === 'group').map((p) => [str(p.id), p.name || null]));
+  return v ? GM.lineageWords(v, (id) => names.get(str(id)) || null) : '';
 }
 /**
  * A grain's whole WATCHERS list against ITS OWN access list: one row per
@@ -1266,7 +1274,7 @@ function viaWordsOf(rows, keys, cid, members = []) {
  * a watcher without access is refused BY NAME (`watcher-needs-access`):
  * notification is the second operation, access is its prerequisite.
  */
-function validateWatchers(list, access = [], { inherited = [], members = [], allNotify = null } = {}) {
+function validateWatchers(list, access = [], { inherited = [], members = [], allNotify = null, except = [] } = {}) {   // the chain's cure (D): + the access list's «除了»
   if (!Array.isArray(list)) return refuse('bad-watcher', 'watchers must be a list', { why: 'not-an-object' });
   if (list.length > MAX_WATCHER_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_WATCHER_ROWS} watchers`, { max: MAX_WATCHER_ROWS });
   // lane channel-agent-watch W3: access at THIS grain or ABOVE it (the account, a matching rule, a visible grant here)
@@ -1281,10 +1289,10 @@ function validateWatchers(list, access = [], { inherited = [], members = [], all
     const k = principalKey(v.watcher.principal);
     if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.watcher.principal)} is listed twice — one notification per agent or group`, { index: i, principal: v.watcher.principal });
     // a session in an access-holding group is eligible AS ITSELF (its own row, cap and ledger), `via` that group
-    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows }) : null;
+    const via = !keys.has(k) && v.watcher.principal.kind === 'agent' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows, except }) : null;
     if (via) v.watcher.via = via; else delete v.watcher.via;   // `via` is the server's finding, never the writer's claim
     // the chain's cure (D): a refusal the lineage decided says THAT (a parent's «仅本组» access, a parent left out) — never a bare «no access»
-    const lw = !eligibleFor(keys, v.watcher.principal, v.watcher) && v.watcher.principal.kind === 'agent' ? viaWordsOf(accessRows, keys, v.watcher.principal.id, members) : '';
+    const lw = !eligibleFor(keys, v.watcher.principal, v.watcher) && v.watcher.principal.kind === 'agent' ? viaWordsOf(accessRows, keys, v.watcher.principal.id, members, except) : '';
     if (!eligibleFor(keys, v.watcher.principal, v.watcher)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here${lw ? ` (${lw})` : ''} — grant access first (a notification needs access here or on the whole account)`, { index: i, principal: v.watcher.principal });
     seen.add(k);
     rows.push(v.watcher);

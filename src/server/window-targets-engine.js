@@ -1585,6 +1585,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** the chain's cure (C, U5c): the «仅本组» switch of a shared Task Group (the Share dialog's chip) — on narrows at once (a child
    *  conversation's lease goes), off includes the child groups again. */
   function setReachOnly(handle, principal, on) {
+    if (typeof on !== 'boolean') throw namedError('bad_principal', '«this group only» is true or false — nothing was changed');   // its read: never a missing flag read as «off»
     const rec = requireWindow(handle);
     const p = resolvePrincipal(principal);
     const s = R.setOnly(reachRecord(rec.id), p, on === true);

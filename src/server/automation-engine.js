@@ -302,6 +302,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** the chain's cure (C, U5c): the «仅本组» switch of a Task Group grant (the key's «Grant … to» dialog) — on narrows it to the group
    *  itself, off includes its child groups again (said explicitly, only:false — the ONE writer widens only then). */
   function setOnly(grantId, on, { by = 'user' } = {}) {
+    if (typeof on !== 'boolean') return named('bad_args', '«this group only» is true or false — nothing was changed');   // its read: never a missing flag read as «off»
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
     const k = keyById(g.keyId);

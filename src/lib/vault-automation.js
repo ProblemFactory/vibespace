@@ -725,7 +725,7 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   // r7 / r8: what the dialog would save — the picks, the reach and each grant's «除了» after the Save (kept and added), never in
   // order: a sequence that cancels out (an un-pick and its re-pick, a pick of a subject and its un-pick, a chip added and ✕-ed)
   // is no change, and neither is an add no grant would carry
-  const drawn = () => { const v = view(); const plan = (gs, id) => gs.map((g) => [g[id], g.next.map(xKeyOf).sort()]).sort((p, q) => (p[0] < q[0] ? -1 : 1)); return JSON.stringify([v.sel.slice().sort(), rows.value(), plan(v.kept, 'id'), plan(v.fresh, 'subject')]); };
+  const drawn = () => { const v = view(); const plan = (gs, id) => gs.map((g) => [g[id], g.next.map(xKeyOf).sort()]).sort((p, q) => (p[0] < q[0] ? -1 : 1)); return JSON.stringify([v.sel.slice().sort(), rows.value(), plan(v.kept, 'id'), plan(v.fresh, 'subject'), picker && typeof picker.onlyKeys === 'function' ? (picker.onlyKeys() || []).slice().sort() : null]); };   // the chain's cure (C, its read): a switch press is a change
   const base = drawn();
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));

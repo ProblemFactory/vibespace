@@ -729,7 +729,8 @@ const q = (s) => `"${String(s == null ? '' : s).slice(0, 60)}"`;
 const head = (cmd, n = 80) => { const c = cleanCmd(cmd, 100000).replace(/`/g, "'"); return c.length > n ? c.slice(0, n - 1) + '…' : c; };
 /**
  * THE agent-facing sentence of a refusal. Carries the MACHINE name and (for an ask) the caller's own command —
- * never another conversation's name, a Task Group title or a key (the words census poisons all three).
+ * never another conversation's name, a Task Group title or a key (the words census poisons all three) — save the lineage words a
+ * door hands in `lineage` (the chain's cure (B): a parent group's name through the store's belt door, tasks.lineageNameOf).
  * `has` = the other grant this caller DOES hold (`{use}` / `{run}`) — the sentence offers it.
  */
 function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', error = '', where = '', same = false, lineage = '', hidden = null, encoded = null, spawnError = null, interpreter = null, platform = null, agentVersion = null, verb = 'run', path: tp = '', side = 'remote', why = '', size = 0, max = 0 } = {}) {

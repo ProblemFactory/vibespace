@@ -1034,7 +1034,7 @@ router.put('/api/desktop/apps/:id/reach/except', (req, res) => {
 // the chain's cure (C, U5c): the «仅本组» switch of one shared Task Group (the Share dialog's chip)
 router.put('/api/desktop/apps/:id/reach/only', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
-  try { res.json(engine.setReachOnly(req.params.id, req.body && req.body.principal, !!(req.body && req.body.only === true))); } catch (e) { fail(res, e); }
+  try { res.json(engine.setReachOnly(req.params.id, req.body && req.body.principal, req.body ? req.body.only : undefined)); } catch (e) { fail(res, e); }   // its read: no flag in the body is no switch (refused), never «off»
 });
 router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;

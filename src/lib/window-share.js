@@ -120,9 +120,10 @@ export function renderPicker(container, { model, onToggle, onMode, onExcept = nu
       only: onOnly ? { keys: (model.onlyKeys || []).slice() } : null,
       onChange: (keys) => {
         if (st.onOnly && typeof st.picker.onlyKeys === 'function') {   // the chain's cure (C): a switch press is ONE call
-          const nowOnly = new Set(st.picker.onlyKeys() || []), byKeyO = new Map(st.items.map((r) => [r.key, r]));
-          for (const k of nowOnly) if (!st.onlyNow.has(k) && byKeyO.get(k)) st.onOnly(byKeyO.get(k).ref.row, true);
-          for (const k of st.onlyNow) if (!nowOnly.has(k) && byKeyO.get(k)) st.onOnly(byKeyO.get(k).ref.row, false);
+          const nowOnly = new Set(st.picker.onlyKeys() || []), byKeyO = new Map(st.items.map((r) => [r.key, r])), stillPicked = new Set(keys);
+          // its read: only a group STILL picked fires the switch — a removal is the DELETE alone (never a widening PUT beside it)
+          for (const k of nowOnly) if (!st.onlyNow.has(k) && stillPicked.has(k) && byKeyO.get(k)) st.onOnly(byKeyO.get(k).ref.row, true);
+          for (const k of st.onlyNow) if (!nowOnly.has(k) && stillPicked.has(k) && byKeyO.get(k)) st.onOnly(byKeyO.get(k).ref.row, false);
           st.onlyNow = nowOnly;
         }
         const before = new Set(st.sel), after = new Set(keys);

@@ -238,7 +238,7 @@ export async function showReachDialog(app, conv0) {
         // the chain's cure (B1 + C): a Task Group row says what it admits; the owner's own row switches «仅本组» (one PUT, level kept)
         if (g.principal.kind === 'group') {
           const on = g.principal.only === true;
-          if (g.origin === 'user') {
+          if (g.origin === 'user' && !(g.scope && g.scope.kind === 'adapter')) {   // its read: the switch narrows the conversation's own row only (an account row is the account's)
             const sw = document.createElement('button'); sw.type = 'button'; sw.className = 'pp-chip-only chan-reach-only' + (on ? ' on' : '');
             sw.textContent = on ? t('this group only') : t('and its child groups'); sw.setAttribute('aria-label', t('this group only')); sw.setAttribute('aria-pressed', on ? 'true' : 'false');
             sw.title = on ? t('Only conversations in this group itself — its child groups are not included (press to include them)') : t('This group and every child group under it (press for this group only)');

@@ -1153,7 +1153,7 @@ export async function showNotifyDialog(app, target) {
     let clamped = false;
     for (const r of rows) { const v = r.read(); if (v.error) { showToast(v.error, { type: 'error' }); return; } watchers.push(v.watcher); clamped = clamped || v.clamped; }
     const members = principals.filter((p) => p.via).map((p) => ({ cid: p.id, groups: [p.via] }));
-    const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access, { inherited: st.eligibleAbove || [], members });
+    const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access, { inherited: st.eligibleAbove || [], members, except: st.except || [] });   // the chain's cure (D): + the access list's «除了»
     if (!vw.ok) { showToast(routeErrorText({ code: vw.code, error: vw.error, why: vw.why, principal: vw.principal }), { type: 'error' }); return; }
     save.disabled = true;
     try {

@@ -312,16 +312,19 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     reconcile(list, out);   // the same nodes; only the ones that MOVED are touched (round 4) — never re-created
     if (active) box.setAttribute('aria-activedescendant', nodes.get(active).id); else box.removeAttribute('aria-activedescendant');
   }
+  // the chain's cure (C, its read): a group that leaves the pick forgets its «仅本组» — a re-pick starts with child groups, as the store will
+  const keepOnlyPicked = () => { for (const k of [...onlySet]) if (!sel.includes(k)) onlySet.delete(k); };
   function pick(r) {
     const k = String(r.key);
     if (lockedNow().has(k)) return;   // a wider grant holds it: never picked or unpicked here
     if (multi) { if (sel.includes(k)) sel = sel.filter((x) => x !== k); else { sel = [...sel, k]; remember(r); } }
     else { sel = [k]; remember(r); }
+    keepOnlyPicked();
     query = ''; box.value = '';
     drawChips(); drawList(); syncExcept(); fire(r);
     if (compact) closePop();
   }
-  function unpick(k) { sel = sel.filter((x) => x !== k); drawChips(); drawList(); syncExcept(); fire(null); }
+  function unpick(k) { sel = sel.filter((x) => x !== k); keepOnlyPicked(); drawChips(); drawList(); syncExcept(); fire(null); }
   box.addEventListener('input', () => { query = box.value; active = null; drawList(); });
   box.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -476,7 +479,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     /** lane lg-group-parents U5b: the picked group keys switched to «仅本组» (null when the door does not offer it) */
     onlyKeys: () => (onlyOffered ? sel.filter((k) => onlySet.has(k)) : null),
     selectedRows: () => { const m = byKey(); return sel.map((k) => m.get(k)).filter(Boolean); },
-    setSelected: (keys) => { sel = (keys || []).map(String); drawChips(); drawList({ byPerson: false }); syncExcept(); },
+    setSelected: (keys) => { sel = (keys || []).map(String); keepOnlyPicked(); drawChips(); drawList({ byPerson: false }); syncExcept(); },
     // the roster's broadcast: rows patched in place, the highlight kept by KEY (gone ⇒ nothing highlighted)
     refresh: () => { rows = source() || []; noteRows(); drawChips(); drawList({ byPerson: false }); syncExcept(); },
     /** «除了»: the exceptions a save writes — PURE `exceptSaved`; while no Task Group / All agents is picked, `held` (the stored

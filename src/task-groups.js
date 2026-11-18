@@ -2945,7 +2945,9 @@ class TaskGroupManager {
         : null;
     }
     // lane lg-group-parents (the U2 read, MAJOR 2): the lineage moves only after every check above that can throw has passed
+    const ancBefore = parents !== undefined ? this.ancestorsOf([t.id]) : [];   // the chain's cure (E, its read): the ancestors before the move
     if (parents !== undefined) { if (parents.length) t.parents = parents; else delete t.parents; }
+    const ancMoved = parents !== undefined ? [...new Set([...ancBefore, ...this.ancestorsOf([t.id])])] : [];   // … and after: their derived descendants moved
     t.updatedAt = Date.now();
     // contentUpdatedAt gates AGENT re-injection: only what the injected context
     // actually renders (title/objective/backlog/the Context table) counts.
@@ -2962,7 +2964,8 @@ class TaskGroupManager {
     const touched = (parents !== undefined || patch.archived !== undefined || patch.objective !== undefined || patch.title !== undefined || ctxChanged) ? this._touchDescendants(t.id, t.updatedAt) : [];
     if (ctxChanged) t.ctxUpdatedAt = t.updatedAt;
     this._save();
-    this._notify(touched.length ? [id, ...touched] : id);   // the chain's cure (E, the U4 should): every descendant touched is named in the notice
+    const noticeIds = [...new Set([...touched, ...ancMoved])];
+    this._notify(noticeIds.length ? [id, ...noticeIds] : id);   // the chain's cure (E, the U4 should + its read): every descendant touched, and the old and new ancestors, named in the notice
     return this._out(t);
   }
 

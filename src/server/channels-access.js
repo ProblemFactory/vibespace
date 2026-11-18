@@ -2364,7 +2364,7 @@ function create(engineCtx) {
       });
       // lane webhook-l1-server: a conversation with a per-path wake budget defaults an 'all' row to a digest
       const allNotify = site.kind === 'conversation' && site.holder && site.holder.options && Number(site.holder.options.wakesPerHour) > 0 ? 'digest' : null;
-      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site), members: membersNow(), allNotify });   // lane channel-agent-watch W3: access here OR above; notify-rules-r2: or a member of a group that holds it
+      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site), members: membersNow(), allNotify, except: Array.isArray(p.except) ? p.except : cur.except });   // the chain's cure (D): + the access list's «除了»   // lane channel-agent-watch W3: access here OR above; notify-rules-r2: or a member of a group that holds it
       if (!vw.ok) return { ok: false, code: vw.code, error: vw.error, ...(vw.why ? { why: vw.why } : {}), ...(vw.principal ? { principal: vw.principal } : {}), ...(vw.index !== undefined ? { index: vw.index } : {}) };
       watchers = [];
       for (let i = 0; i < vw.watchers.length; i++) {
