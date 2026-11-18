@@ -5,7 +5,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.411 — 2026-11-18
 
 ### Changed
-- Conversations and background jobs now start at a lower CPU priority than VibeSpace, so a busy build gives way to the page; see Session Properties.
+- Conversations and background jobs now start below VibeSpace's CPU priority, so a busy build yields to the page; see Session Properties, turn off in Settings.
 
 ## 2.369.410 — 2026-11-18
 

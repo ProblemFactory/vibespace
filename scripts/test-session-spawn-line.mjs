@@ -19,7 +19,8 @@
 //     of the real ws-create (dtach and the daemon pipe) and the real JobManager's wrapper spawn carry `nice -n 5`; the
 //     setting off = the release's spawn byte for byte (the RED control: a copy with the priority cut); REAL processes —
 //     the line started, its child and the child's child report the suite's niceness + 5; the fact rides the session and
-//     its meta, and its words are Session Properties' row.
+//     its meta, and its words are Session Properties' row; the job wrapper's 'error' listener runs (a late exec failure is
+//     ONE journal line, never a throw — RED: a copy without the listener throws).
 // Run: node scripts/test-session-spawn-line.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -167,8 +168,10 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
     'a stored fact reads back only in its own shapes');
   // THE REAL ws-create: BOTH local roads
   const X = await drive(wsCreate, { backend: 'claude' });
-  const dt = X.spawned[0] ? X.spawned[0].args : [], at = dt.indexOf('/n/node');
-  ok(dt[0] === '-c' && at === 8 && JSON.stringify(dt.slice(5, 8)) === JSON.stringify([NICE, '-n', '5']) && X.session && X.session._cpuNice && X.session._cpuNice.by === 5 && X.metas.some((m) => m.cpuNice && m.cpuNice.by === 5),
+  const dt = X.spawned[0] ? X.spawned[0].args : [];
+  // the dtach road's judgement, ONE function (the red control below re-runs it on the release's copy)
+  const dtachNice = (x) => { const a = x && x.spawned[0] ? x.spawned[0].args : []; return a[0] === '-c' && a.indexOf('/n/node') === 8 && JSON.stringify(a.slice(5, 8)) === JSON.stringify([NICE, '-n', '5']); };
+  ok(dtachNice(X) && X.session && X.session._cpuNice && X.session._cpuNice.by === 5 && X.metas.some((m) => m.cpuNice && m.cpuNice.by === 5),
     `the dtach road: dtach -c <sock> -E -r none ${NICE} -n 5 /n/node <wrapper> …; the session's fact {by: 5} and its meta's cpuNice (a restart keeps it)`, dt.slice(0, 10));
   const pipes = [];
   const hosts = { device: async () => ({ openPipeSession: async (o) => { pipes.push(o); return { pid: 77, ready: Promise.resolve({ pid: 77 }), write() { }, kill() { }, resize() { }, onData: null, onExit: null }; } }) };
@@ -185,7 +188,7 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   const scrub = (x) => JSON.stringify(x.spawned[0] && x.spawned[0].args.map((w) => String(w).replace(/sess-\d+-\d+|cw-\d+-\d+/g, 'ID')));
   ok(XO.spawned[0] && XR && XR.spawned[0] && scrub(XO) === scrub(XR) && !XO.spawned[0].args.includes(NICE) && XO.session._cpuNice.why === 'off',
     'the setting OFF = the release\'s spawn, word for word (a copy with the priority cut out of the line) — and the fact says why', { off: scrub(XO), release: XR && scrub(XR) });
-  ok(XR && XR.spawned[0] && !XR.spawned[0].args.includes(NICE), 'RED CONTROL: that copy (the release) starts the conversation at the hub\'s priority — the dtach-road leg above is red on it', XR && XR.spawned[0] && XR.spawned[0].args.slice(0, 8));
+  ok(XR && XR.spawned[0] && !XR.spawned[0].args.includes(NICE) && !dtachNice(XR), 'RED CONTROL: that copy (the release) starts the conversation at the hub\'s priority — the dtach-road judgement above, re-run on it, is red', XR && XR.spawned[0] && XR.spawned[0].args.slice(0, 8));
   SPRI._reset(); SPRI.niceProgram({ dirs: [path.join(os.tmpdir(), 'vs-no-nice-here')] });   // this process: a machine with no nice program
   const XN = await drive(wsCreate, { backend: 'claude' });
   ok(XN.spawned[0] && XN.spawned[0].args[5] === '/n/node' && XN.session._cpuNice.why === 'no-nice', 'a machine without the nice program still starts the conversation — at the hub\'s priority, the fact says why', XN.spawned[0] && XN.spawned[0].args.slice(0, 7));
@@ -207,6 +210,29 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   ok(JON && JON.argv && JSON.stringify(JON.argv.slice(0, 4)) === JSON.stringify([NICE, '-n', '5', process.execPath]) && /job-wrapper\.js$/.test(JON.argv[4])
     && JOFF && JOFF.argv && JOFF.argv[0] === process.execPath && JSON.stringify(JOFF.argv.slice(1).map((w) => w.replace(/\/[^ ]*sline-jobs[^/]*/, 'D').replace(/jb-[0-9a-f]+/g, 'J').replace(/\d{10,}/g, 'T'))) === JSON.stringify(JON.argv.slice(4).map((w) => w.replace(/\/[^ ]*sline-jobs[^/]*/, 'D').replace(/jb-[0-9a-f]+/g, 'J').replace(/\d{10,}/g, 'T'))),
     'the jobs road (the real JobManager): its wrapper starts as `nice -n 5 node job-wrapper.js …`; the setting off = `node job-wrapper.js …`, the same words after it', { on: JON && (JON.argv || JON.err), off: JOFF && (JOFF.argv || JOFF.err) });
+  // (its verdict's LENS THREE should) THE WRAPPER'S 'error' LISTENER RUNS: the stub child is a real EventEmitter; an exec that
+  // fails late (the nice program gone since the one look) is ONE journal line, never a throw out of the child's emitter
+  const { EventEmitter } = require('events');
+  const errRun = async (mod, tag) => {
+    const logs = []; let kid = null;
+    globalThis.__vsJobSpawn = () => { kid = Object.assign(new EventEmitter(), { pid: 4344, unref() { }, stdio: [], kill() { } }); return kid; };
+    const dir = scratchDir(`sline-jobs-${tag}`);
+    const jm = new mod.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log: (l) => logs.push(String(l)), spawnPriority: () => SPRI.priorityFor({ serverSetting: () => undefined, log: quiet }) });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+    jm.create({ kind: 'task', name: 'nice-err', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-E', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
+    let threw = null;
+    try { if (kid) kid.emit('error', Object.assign(new Error(`spawn ${NICE} ENOENT`), { code: 'ENOENT' })); } catch (e) { threw = e; }
+    try { for (const j of jm.jobs.values()) j.desiredUp = false; jm.shutdown(); } catch { }
+    return { spawned: !!kid, threw: threw ? (threw.code || threw.message) : null, said: logs.filter((l) => l.includes(`its wrapper did not start (${NICE}): spawn ${NICE} ENOENT`)).length };
+  };
+  const ERR = jobsMod ? await errRun(jobsMod, 'err') : null;
+  const LIS = "      child.once('error', (e) => {";
+  const SEAM = JSRC.split(SP0).length === 2 ? JSRC.replace(SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);").split('\n') : [];
+  const noLis = SEAM.filter((l) => !l.startsWith(LIS));
+  const jobsNoLis = SEAM.length && noLis.length === SEAM.length - 1 ? M.load('src/jobs.js', noLis.join('\n'), 'jobs-no-error-listener') : null;
+  const NOL = jobsNoLis ? await errRun(jobsNoLis, 'err-red') : null;
+  ok(ERR && ERR.spawned && ERR.threw === null && ERR.said === 1 && NOL && NOL.spawned && NOL.threw === 'ENOENT' && NOL.said === 0,
+    `a job wrapper whose exec fails late is ONE journal line («its wrapper did not start (${NICE}): …»), never a throw out of the child; RED CONTROL: without the listener the same 'error' throws (${NOL && NOL.threw})`, { ERR, NOL });
   delete globalThis.__vsJobSpawn;
   // REAL PROCESSES: the line started as the roads start it — the wrapper, its child and the child's child each report their niceness
   const { spawnSync } = require('child_process');
