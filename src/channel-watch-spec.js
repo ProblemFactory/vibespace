@@ -15,7 +15,7 @@ const split = (v) => String(v === null || v === undefined ? '' : v).split(',').m
 /** B-5740 (fb-1a174fe34a: `--keyword 4,995` became the keywords «4» and «995» and matched almost every message): A WORD
  *  LIST — a comma BETWEEN TWO DIGITS stays inside its word (a number's thousands), `\,` is a literal comma, every other
  *  comma separates («1, 2» is two words, «4,995» one). */
-function splitWords(v) {
+function splitWordList(v) {
   const s = String(v === null || v === undefined ? '' : v);
   const out = [];
   let cur = '';
@@ -53,13 +53,13 @@ const refuse = (code, error, extra) => ({ ok: false, code, error, ...(extra || {
  *  makes (the validator judges them). `since` = a kind that may not be on this server yet (refused by name until it is). */
 const RULE_FLAGS = Object.freeze([
   { kind: 'mention', flag: '--mention', value: 'name[,name]', rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'mention', value })) },
-  { kind: 'keyword', flag: '--keyword', value: 'word[,word]', rules: (v) => (splitWords(v).length ? splitWords(v) : ['']).map((value) => ({ kind: 'keyword', value })) },   // B-5740: 4,995 is one word
+  { kind: 'keyword', flag: '--keyword', value: 'word[,word]', rules: (v) => (splitWordList(v).length ? splitWordList(v) : ['']).map((value) => ({ kind: 'keyword', value })) },   // B-5740: 4,995 is one word
   { kind: 'regex', flag: '--regex', value: 'pattern', rules: (v) => [{ kind: 'regex', value: String(v === null || v === undefined ? '' : v) }] },
   { kind: 'sender-in-group', flag: '--sender-in-group', value: 'id[,id]', rules: (v) => [{ kind: 'sender-in-group', members: split(v) }] },
   { kind: 'from-address', flag: '--from', value: 'address[,address]', rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'from-address', value })) },
   { kind: 'subject', flag: '--subject', value: 'words', rules: (v) => [{ kind: 'subject', value: String(v === null || v === undefined ? '' : v) }] },
   { kind: 'has-attachment', flag: '--has-attachment', value: null, rules: () => [{ kind: 'has-attachment' }] },
-  { kind: 'not-contains', flag: '--not-contains', value: 'word[,word]', rules: (v) => (splitWords(v).length ? splitWords(v) : ['']).map((value) => ({ kind: 'not-contains', value })) },
+  { kind: 'not-contains', flag: '--not-contains', value: 'word[,word]', rules: (v) => (splitWordList(v).length ? splitWordList(v) : ['']).map((value) => ({ kind: 'not-contains', value })) },
   { kind: 'time-window', flag: '--time-window', value: 'HH:MM-HH:MM', rules: (v) => { const [from, to] = String(v || '').split('-'); return [{ kind: 'time-window', from: from || '', to: to || '' }]; } },
   { kind: 'reply-to-mine', flag: '--reply-to-mine', value: null, rules: () => [{ kind: 'reply-to-mine' }] },
   { kind: 'in-thread-with-me', flag: '--in-thread-with-me', value: null, rules: () => [{ kind: 'in-thread-with-me' }] },
@@ -200,4 +200,4 @@ function watchWhatWords(w, filter = null) {
   return (f.match === 'every' ? 'messages matching all of: ' : 'messages matching any of: ') + f.rules.map((r) => F.ruleWhy(r)).join(f.match === 'every' ? ' and ' : ', ');
 }
 
-module.exports = { splitWords, keywordWarnings, KEYWORD_SHORT, RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, BOOL_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };
+module.exports = { splitWordList, keywordWarnings, KEYWORD_SHORT, RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, BOOL_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };

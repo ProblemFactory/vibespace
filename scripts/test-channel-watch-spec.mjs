@@ -139,8 +139,8 @@ console.log('⑦ the manual names every flag');
 console.log('⑧ B-5740: a word list keeps a number whole (4,995 is ONE keyword); a near-everything keyword is said');
 {
   const T = [['4,995', ['4,995']], ['1, 2', ['1', '2']], ['deploy,incident', ['deploy', 'incident']], ['a\\,b', ['a,b']], ['4,995,ops', ['4,995', 'ops']], [',,x,', ['x']], ['1,2', ['1,2']], ['v1.2,v1.3', ['v1.2', 'v1.3']]];
-  const bad = T.filter(([v, want]) => J(WS.splitWords(v)) !== J(want)).map(([v]) => `${v} → ${J(WS.splitWords(v))}`);
-  ok(!bad.length, `splitWords: ${T.length} shapes — a comma between two digits stays in its word, «\\,» is a comma, every other comma separates`, bad.join('; '));
+  const bad = T.filter(([v, want]) => J(WS.splitWordList(v)) !== J(want)).map(([v]) => `${v} → ${J(WS.splitWordList(v))}`);
+  ok(!bad.length, `splitWordList: ${T.length} shapes — a comma between two digits stays in its word, «\\,» is a comma, every other comma separates`, bad.join('; '));
   const kw = WS.watchSpecFromArgs(['--keyword', '4,995']);
   ok(kw.ok && J(kw.spec.filter.rules) === J([{ kind: 'keyword', value: '4,995' }]) && kw.warnings && kw.warnings.length === 1 && /digits only/.test(kw.warnings[0]), 'the incident: `--keyword 4,995` is ONE keyword «4,995», and the answer says it is digits only', J(kw));
   const sh = WS.watchSpecFromArgs(['--keyword', 'ok,deploy']), plain = WS.watchSpecFromArgs(['--keyword', 'deploy']), nc = WS.watchSpecFromArgs(['--not-contains', '1,000']);
@@ -154,7 +154,7 @@ console.log('⑧ B-5740: a word list keeps a number whole (4,995 is ONE keyword)
   ok(viaSpec.ok && (viaSpec.warnings || []).length === 1 && oldCli.ok && (oldCli.warnings || []).length === 2 && /«4» is 1 character/.test(oldCli.warnings[0]), 'EVERY road of the server door says it: a --spec row, and an OLDER CLI\'s keywords[] (which still split «4,995» itself — the incident, now said)', J({ spec: viaSpec.warnings, old: oldCli.warnings }));
   // CONTROL: the release's splitter (every comma) — 4,995 became «4» and «995»
   const SRC = fs.readFileSync(path.join(REPO, 'src/channel-watch-spec.js'), 'utf8');
-  const KW = "rules: (v) => (splitWords(v).length ? splitWords(v) : ['']).map((value) => ({ kind: 'keyword', value })) },";
+  const KW = "rules: (v) => (splitWordList(v).length ? splitWordList(v) : ['']).map((value) => ({ kind: 'keyword', value })) },";
   ok(SRC.split(KW).length === 2, 'control setup: the keyword flag line is present once');
   const Pre = MUT.load('src/channel-watch-spec.js', SRC.replace(KW, "rules: (v) => (split(v).length ? split(v) : ['']).map((value) => ({ kind: 'keyword', value })) },"), 'b5740-pre');   // stale-pins: kept (the release's line, restored by the red control)
   const pre = Pre.watchSpecFromArgs(['--keyword', '4,995']);

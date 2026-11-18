@@ -991,6 +991,12 @@ console.log('\n㉓ lane judged-watch-state (B-f42e): a judged rule\'s `watch` an
   ok(w3.code === 0 && !/judged rules/.test(w3.out) && !/judged rules/.test((await run(['watch', '--show', KEY])).out), 'a rule nobody judges (a keyword) carries no road line', w3.out);
   const w4 = await run(['watch', KEY, '--kind', 'decision']);
   ok(w4.code === 1 && /\[[a-z-]+\]/.test(w4.err) && !/judged rules/.test(w4.out), 'a malformed judged rule is refused as today (exit 1, the validator\'s words + [code]) — never a road line', w4.err);
+  // B-5740 cure (the verdict: the watch door's warnings had no leg on its roads): a keyword that matches nearly everything
+  // is SAID on both roads — the server's answer carries `warnings`, the CLI prints each as a «note:» line (the same
+  // --keyword again REPLACES the watch — filed again, said again)
+  const ww = await run(['watch', KEY, '--keyword', '4,995']);
+  const direct = await eng.agentWatch(AG, KEY, { spec: { mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'keyword', value: 'ok' }] } } });
+  ok(ww.code === 0 && /note: .*one keyword — the comma between digits keeps it whole/.test(ww.out) && Array.isArray(direct.warnings) && /«ok» is 2 characters/.test(direct.warnings[0] || ''), 'B-5740: a keyword warning rides the server\'s answer (warnings) and the CLI prints it as «note:»', JSON.stringify({ out: ww.out, direct: direct.warnings }));
   ok(vendor === 0, `zero vendor calls (${vendor})`);
   eng.stop();
   // RED CONTROL = the base: an answer without the road — the agent armed a rule that cannot run and is told nothing
@@ -1003,6 +1009,13 @@ console.log('\n㉓ lane judged-watch-state (B-f42e): a judged rule\'s `watch` an
     const c1 = await run(['watch', KEY, '--kind', 'decision', '--condition', 'the sender asks me to pay an invoice']);
     ok(c1.code === 0 && !/judged rules/.test(c1.out), 'RED CONTROL (the base): without the road the switch-off answer is a plain «watching …» — the door leg above is RED on it', c1.out);
     e2.stop();
+    // B-5740 cure's control: the server's answer WITHOUT its warnings — the CLI has no «note:» to print
+    const NOWARN = ANCH.replace("...(Array.isArray(sp.warnings) && sp.warnings.length ? { warnings: sp.warnings } : {}), ", '');
+    ok(NOWARN !== ANCH, 'control setup: the answer\'s warnings clause is found in withRoad');
+    const e3 = await mk(MUTE.load(ENGP, esrc.replace(ANCH, NOWARN), 'nowarn'), 'nowarn');
+    const c3 = await run(['watch', KEY, '--keyword', '4,995']);
+    ok(c3.code === 0 && !/note: /.test(c3.out), 'RED CONTROL: an answer without its warnings — the CLI says nothing of the comma (the leg above is red on it)', c3.out);
+    e3.stop();
   }
   watchAnswer = null; watchesAnswer = null;
   for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 1, label: '㉓ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
