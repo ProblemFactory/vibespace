@@ -298,8 +298,9 @@ console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a 
     ok(B.segmentText(own).filter((g) => g.t === 'link').length === 0 && lk(own, { whole: true }).length === 1, 'B-3f50 RED control: the release b06f36e90\'s tray drew the writer\'s own line-end «…» link as words (the row\'s complaint) — the whole-field road now keeps it');
   } else console.log('  · SKIP: the release b06f36e90 is not in this clone');
   const ROWB = read('src/lib/user-todos-row.js');
-  ok(/const wordsWhole = !card && !run && !\(i\.i18n && i\.i18n\.text\) && words === i\.text;/.test(ROWB) && /const detailWhole = !\(i\.i18n && Array\.isArray\(i\.i18n\.detail\) && i\.i18n\.detail\.length\) && detail === i\.detail;/.test(ROWB),
-    'B-3f50 (a): the row reads a field WHOLE only when it draws the agent\'s own stored text / detail — never a template the page filled (a takeover request\'s «{words}» cut at 300), a card, a run headline or a line list');
+  ok(/const own = isAsk\(i\);\s*const wordsWhole = own && !card && !run && !\(i\.i18n && i\.i18n\.text\) && words === i\.text;/.test(ROWB) && /const detailWhole = own && !\(i\.i18n && Array\.isArray\(i\.i18n\.detail\) && i\.i18n\.detail\.length\) && detail === i\.detail;/.test(ROWB)
+    && /^import \{ isAsk \} from '\.\.\/inbox-origin\.js';/m.test(ROWB),
+    'B-3f50 (a): the row reads a field WHOLE only when it draws the agent\'s own stored text / detail — never a template the page filled (a takeover request\'s «{words}» cut at 300), a card, a run headline or a line list; and (batch 47\'s cure) only an AGENT\'S OWN ASK (isAsk: via \'ask\') — a producer\'s item keeps the conservative reading');
   const FY = read('src/lib/foryou-links.js');
   const CM = "const cutMade = (a, z) => !still.has(a) && ends.some((e) => e >= z && !/\\s/.test(src.slice(z, e)));";
   const MASKED = "if (g.t !== 'link' && g.t !== 'masked') continue;";
@@ -310,6 +311,61 @@ console.log('\nB-3f50 a line-end «…» of the writer\'s own keeps its link; a 
   const vcut = 'open https://h.example/x?k=[vault:…';
   ok(A.segmentText(vcut).filter((g) => g.t === 'link').length === 0, 'B-3f50 (b): the MASKED clause on its own (a copy without cutMade): a cut inside a [vault: mark — the probe\'s closed mark is a MASKED segment over the cut ⇒ the URL before it is drawn as words', A.segmentText(vcut));
   ok(J(M.segmentText(vcut).filter((g) => g.t === 'link').map((g) => g.s)) === J(['https://h.example/x?k=[vault']), 'B-3f50 (b) RED control: the same copy with the masked clause skipped (the verifier\'s M3d) links «https://h.example/x?k=[vault» — the leg above can go red', M.segmentText(vcut));
+}
+
+// batch 47's cure (主开发 09:09Z, «as if a must»): A FIELD A PRODUCER CUT ITSELF IS NOT THE AGENT'S WHOLE WORDS. The browser hand-back
+// filed a confirmation's target cut at 119 with its own «…» — and the card's target line it starts from is cut at 300 by
+// src/browser-takeover.js confirmationTarget (a script at 200) — so B-3f50's whole-field rule drew a truncated address as a link that
+// opens a wrong page. THE CURE: only the AGENT's own ask (isAsk — via 'ask') is read as whole words; a producer's item keeps the
+// conservative reading (a «…» ending a line or the text is a cut); the hand-back no longer cuts again, its category rides before the
+// target and the detail's target ends its line. Driven through the REAL chain: the upstream record → the card's target → the item.
+console.log('\nbatch 47 cure: a producer\'s cut is a cut — only an agent\'s own ask is whole words');
+{
+  const RT = require(path.join(REPO, 'src/inbox-reply-text.js')), UT = require(path.join(REPO, 'src/user-todos.js')), OR = require(path.join(REPO, 'src/inbox-origin.js'));
+  const BT = require(path.join(REPO, 'src/browser-takeover.js')), HB = require(path.join(REPO, 'src/server/browser-handback.js'));
+  const lk = (x, o) => F.segmentText(x, o).filter((g) => g.t === 'link').map((g) => g.s);
+  const URL400 = 'https://shop.example.com/checkout/confirm?order=' + 'a1b2c3d4'.repeat(42) + '&step=final';   // 395 chars
+  const URL158 = 'https://shop.example.com/checkout/confirm?order=' + 'a1b2c3d4'.repeat(12) + '&step=final';
+  /** the card the bridge reads off the stream (the REAL confirmationFromUpstream: its target line is cut at TARGET_MAX) */
+  const cardOf = (params, category = null) => BT.confirmationFromUpstream({ type: 'result', id: 'cmd-9', confirmation_required: true, confirmation_id: 'c_9', action: 'navigate', ...(category ? { data: { category } } : {}), params }, 1000);
+  /** the item the REAL hand-back files for that card (its fileInbox → a store stand-in keeping what it was handed) */
+  const fileFrom = (mod, card) => {
+    const got = [];
+    const a = mod.create({ userTodos: { add: (key, item) => { got.push(item); return { id: 'ut-0000000c09', ...item }; } }, activeSessions: new Map([['sess-1', { name: 'Shop run' }]]), sessionKeyFor: (s, id) => 'key:' + id, log: { log() { }, warn() { } } });
+    a.noteConfirmation({ kind: 'pending', sessionId: 'sess-1', browserKey: 'bk-1', confirmation: card });
+    return got[0] || null;
+  };
+  const kept = (item) => RT.clip(String(item.text).trim(), UT.TEXT_MAX);   // the store's own cut (src/user-todos.js add)
+  /** THE ROW's reading (src/lib/user-todos-row.js partsOf): whole only for the agent's own ask */
+  const tray = (item, field) => lk(field === 'detail' ? item.detail : kept(item), { whole: OR.isAsk(item) });
+  ok(/text = clip\(rawText, TEXT_MAX\);/.test(read('src/user-todos.js')) && BT.confirmationTarget({ params: { url: URL400 } }).length === 300, 'setup: the store keeps a field to TEXT_MAX through clip; the card\'s target line is cut at 300 with its mark (the producer chain this leg drives)');
+  // (1) THE MUST'S SCENE through the real chain: a confirmed navigate to a 395-char URL
+  const c400 = cardOf({ url: URL400 }), long = c400 && fileFrom(HB, c400), cutTok = URL400.slice(0, 299);
+  ok(!!long && OR.isAsk(long) === false && kept(long).endsWith(cutTok + '…') && kept(long).length < UT.TEXT_MAX && tray(long, 'text').length === 0 && tray(long, 'detail').length === 0,
+    'MUST: a confirmed navigate to a 395-char URL: the card cut it at 300 — the item\'s words and its detail draw the cut address as PLAIN WORDS (a producer\'s item: a «…» ending the text / a line is a cut), never a link to a wrong page', { text: long && kept(long), links: long && [tray(long, 'text'), tray(long, 'detail')] });
+  const c158 = cardOf({ url: URL158 }, 'payment'), whole = c158 && fileFrom(HB, c158);
+  ok(!!whole && whole.text === `The agent's browser is waiting for you to confirm "navigate" [payment] on ${URL158}` && J(tray(whole, 'text')) === J([URL158]) && J(tray(whole, 'detail')) === J([URL158]),
+    '…a 158-char URL the card kept whole: the item carries it whole (the hand-back no longer cuts at 119), its category before it — the WHOLE address is the link, in the words and the detail', whole && whole.text);
+  const cScript = cardOf({ script: 'fetch("' + URL400 + '")' }), scr = cScript && fileFrom(HB, cScript);
+  ok(!!scr && kept(scr).endsWith('…') && tray(scr, 'text').every((l) => URL400.startsWith(l) === false || l === URL400), '…a script cut at 200 through a URL: no truncated address is a link', scr && tray(scr, 'text'));
+  // (2) THE AGENT'S OWN ASK keeps B-3f50: its whole field's line-end «…» of its own stays its link
+  const ask = { origin: 'agent', via: 'ask', text: 'see https://docs.example.com/wiki/Setup…', detail: null };
+  ok(OR.isAsk(ask) && J(tray(ask, 'text')) === J(['https://docs.example.com/wiki/Setup']), 'an AGENT\'S OWN ASK (via \'ask\'): its whole stored field is still read as its words — a «…» it wrote at the end keeps its link (B-3f50)');
+  // RED CONTROLS: the tip before the cure (2f241bf12) — the producer's own 119 cut AND the row reading any plain-words item whole
+  const { mutantCopies, copiesCensus } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
+  const SRC_HB = read('src/server/browser-handback.js');
+  const NOW_T = "${c.category ? ` [${c.category}]` : ''}${tgt ? ` on ${tgt}` : ''}", OLD_T = "${tgt ? ` on ${tgt.length > 120 ? tgt.slice(0, 119) + '…' : tgt}` : ''}${c.category ? ` [${c.category}]` : ''}";   // stale-pins: kept — the RED control re-plants the producer's old 119 cut on purpose
+  const NOW_D = "${tgt ? `What it acts on: ${tgt}\\n` : ''}", OLD_D = "${tgt ? `What it acts on: ${tgt}. ` : ''}";   // stale-pins: kept — the RED control re-plants the old detail on purpose
+  ok(SRC_HB.split(NOW_T).length === 2 && SRC_HB.split(NOW_D).length === 2, 'setup: the producer\'s words and detail are ONE template each (the controls edit one place)');
+  const MH = mutantCopies('foryou-links-handback', REPO);
+  const old = fileFrom(MH.load('src/server/browser-handback.js', SRC_HB.replace(NOW_T, OLD_T).replace(NOW_D, OLD_D), 'own-cut'), cardOf({ url: URL158 })), oldWords = old && kept(old);   // no category: the must's scene
+  const oldLinks = oldWords ? lk(oldWords, { whole: true }) : [];
+  ok(!!oldWords && oldWords.endsWith(URL158.slice(0, 119) + '…') && J(oldLinks) === J([URL158.slice(0, 119)]),
+    'RED CONTROL (the must\'s exact text): the producer\'s own cut at 119 read by the B-3f50 row (whole) — «…on https://shop.example.com/checkout/confirm?order=a1b2…» draws the TRUNCATED address as a link', { text: oldWords, links: oldLinks });
+  ok(J(lk(kept(long), { whole: true })) === J([cutTok]), 'RED CONTROL: the cure\'s own producer read by the B-3f50 row (whole for every plain-words item) — the 300-cut address IS a link: the row\'s isAsk gate is what the MUST leg needs', lk(kept(long), { whole: true }));
+  const oldDetail = fileFrom(MH.load('src/server/browser-handback.js', SRC_HB.replace(NOW_D, OLD_D), 'old-detail'), c400);
+  ok(!!oldDetail && J(lk(oldDetail.detail, { whole: false })) === J([cutTok]), 'RED CONTROL: the old detail («What it acts on: <target>. Open…») — the cut mark sits before «.», no reading counts it, the cut address is linked on every road', oldDetail && lk(oldDetail.detail, { whole: false }));
+  for (const row of copiesCensus(MH.files, MH.dir, REPO, { label: 'batch 47 cure ' })) ok(row.pass, row.name, row.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

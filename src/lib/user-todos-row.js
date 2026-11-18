@@ -40,6 +40,7 @@ import { cardWords, progressWords } from './app-card-model.js'; // design 009: T
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
+import { isAsk } from '../inbox-origin.js'; // PURE: the AGENT's own ask (via 'ask', vibespace-ask) — batch 47's cure: only its fields are its whole words
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -473,8 +474,13 @@ function partsOf(entry, ctx) {
   const words = card ? cardWords(card, t, lang).title : run ? run.headline : ctx.wordsOf(i);
   const detail = ctx.detailOf(i);
   // B-3f50: a field drawn WHOLE and as the agent stored it (never a template the page filled, never a line list) — the cut rule's caps judge it
-  const wordsWhole = !card && !run && !(i.i18n && i.i18n.text) && words === i.text;
-  const detailWhole = !(i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length) && detail === i.detail;
+  // batch 47's cure (主开发 09:09Z + its reader): ONLY THE AGENT'S OWN ASK (isAsk — via 'ask', the vibespace-ask route) is its whole words. A
+  // PRODUCER's plain-words item (the browser hand-back, a helper's ask, a desktop app's notice…) may cut a field itself — its own «…»
+  // below the store's cap (a confirmation's target at 300, a script at 200) — so it keeps the conservative reading: a «…» ending a
+  // line or the text is a cut, and the address it went through is plain words, never a link to a wrong page
+  const own = isAsk(i);
+  const wordsWhole = own && !card && !run && !(i.i18n && i.i18n.text) && words === i.text;
+  const detailWhole = own && !(i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length) && detail === i.detail;
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
   const dot = resolved
     ? '<span class="ut-dot" data-urgency=""></span>'

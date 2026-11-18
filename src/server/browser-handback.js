@@ -365,10 +365,15 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     const c = ev.confirmation || {};
     // r6 A-F8: the item names what the action acts ON (the card's own target line — the keeper's first write, never a
     // later record's) so the owner judges the upload / the url / the script, not just a verb
+    // batch 47's cure (主开发 09:09Z, «as if a must»): the target rides as the card's target line (src/browser-takeover.js
+    // confirmationTarget — cut at 300 with its mark), its category BEFORE it, so a cut mark ENDS the text; this producer no longer cuts
+    // it again at 119. A producer's item keeps the tray's conservative reading (src/lib/user-todos-row.js: only an agent's own ask is
+    // whole words), so a «…» ending the text or a line is a cut — the address it went through is plain words, never a link to a wrong
+    // page. In the detail the target ENDS ITS LINE for the same reason (a «…» before «. Open…» was read as no cut, on every road).
     const tgt = c.target ? String(c.target) : '';
     return fileInbox(sess, {
-      text: `The agent's browser${label ? ` (${label})` : ''} is waiting for you to confirm "${c.action || 'an action'}"${tgt ? ` on ${tgt.length > 120 ? tgt.slice(0, 119) + '…' : tgt}` : ''}${c.category ? ` [${c.category}]` : ''}`,
-      detail: `${tgt ? `What it acts on: ${tgt}. ` : ''}Open the live view (Browser (live)) and press Confirm or Deny. The browser auto-denies after ${Math.round(T.CONFIRM_TTL_MS / 1000)} s; the agent sees the outcome as the command's result. Confirmation id ${c.id}.`,
+      text: `The agent's browser${label ? ` (${label})` : ''} is waiting for you to confirm "${c.action || 'an action'}"${c.category ? ` [${c.category}]` : ''}${tgt ? ` on ${tgt}` : ''}`,
+      detail: `${tgt ? `What it acts on: ${tgt}\n` : ''}Open the live view (Browser (live)) and press Confirm or Deny. The browser auto-denies after ${Math.round(T.CONFIRM_TTL_MS / 1000)} s; the agent sees the outcome as the command's result. Confirmation id ${c.id}.`,
       urgency: 'normal',
     });
   }
