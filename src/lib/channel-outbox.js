@@ -294,9 +294,10 @@ function appendAlso(app, card, p) {
   }
 }
 /** The first Approve press on a card with another reply still open (or sent) only SAYS it (once per card); → true = the press stops here. */
+const ALSO_ASKED = new Set();   // the cure of batch 10 (a should): the warning is asked once per PROPOSAL — a partner's redraw draws a fresh card
 export function alsoHolds(card, p) {
-  if (!alsoOpen(p).length || card.dataset.alsoAsked === '1') return false;
-  card.dataset.alsoAsked = '1';
+  if (!alsoOpen(p).length || ALSO_ASKED.has(p.id)) return false;
+  ALSO_ASKED.add(p.id);
   const w = el('div', 'chan-prop-also-ask', t('Another reply to this same message is still open or already sent — press Approve again to send this one too'));
   w.setAttribute('role', 'alert');
   card.appendChild(w);

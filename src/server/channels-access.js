@@ -1481,6 +1481,7 @@ function create(engineCtx) {
         const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
         if (!r2 || r2.status !== 'approved' || !r2.held) return;
         back = reholdLeft(r2, released, !(dl && (dl.ok || dl.stashed)));
+        if (dl && dl.ok && r2.held.inDoubt) delete r2.held.inDoubt;   // the cure of batch 10: the doubt leaves the record only when the delivery answered ok
         delete r2.held.inFlight;
         still = heldCountOf(r2);
         stillConvs = heldConvsOf(r2).filter((c) => !heldSpent(c) && heldCountOf({ held: { convs: [c] } }) > 0).length;
@@ -1494,7 +1495,7 @@ function create(engineCtx) {
     const sending = async () => {
       await store.index.update((ix) => {
         const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
-        if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) { r2.held.inFlight.sendingAt = now(); delete r2.held.inDoubt; }   // r2: the doubt ends where this send starts
+        if (r2 && r2.held && r2.held.inFlight && !r2.held.inFlight.sendingAt) r2.held.inFlight.sendingAt = now();   // the cure of batch 10: the doubt stays until a delivery ANSWERED ok (the settle)
       }, { durable: true });
     };
     let delivery = null;
@@ -1505,7 +1506,7 @@ function create(engineCtx) {
       try { store.audit({ kind: 'watch', op: 'held-deliver', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: went, ...(reopened ? { stillHeld: still } : {}), at: t, by }); } catch {}
       if (!reopened) resolve({ n: went });
       else if (req0.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-        const rq = reqNow(), who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), line = heldLine(still, who, day, drop), key = heldKey(still, who, day, drop);
+        const rq = reqNow(), who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), dbt = heldDoubtOf(rq), line = heldLine(still, who, day, drop, dbt), key = heldKey(still, who, day, drop, dbt);   // the cure of batch 10: a press refused before its send reopens the card WITH its doubt
         try { userTodos.reshapeItems((it) => { if (it.id !== rq.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
       }
     }
