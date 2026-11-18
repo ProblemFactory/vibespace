@@ -7748,7 +7748,7 @@ export default {
   "Handled proposals ({n})": "已处理的提案（{n}）",
   "The sent message has not reached this window yet": "发出的消息还没出现在这个窗口里",
   // lane exit-card-margin (2026-10-18): a machine run card says who did what to what; the command under 技术细节
-  "Ran a command on {machine} — exit {code} · {secs}": "在 {machine} 上运行了一条命令 — 退出 {code} · {secs}",
+  "Ran a command on {machine} — exit {code} · {secs}": "在 {machine} 上运行了一条命令 — 退出码 {code} · {secs}",
   "Ran a command on {machine} — timed out after {secs}": "在 {machine} 上运行了一条命令 — {secs} 后超时",
   "Could not start a command on {machine} — {why}": "无法在 {machine} 上启动命令 — {why}",
   "(access was removed while it ran)": "（运行期间访问权限被移除）",

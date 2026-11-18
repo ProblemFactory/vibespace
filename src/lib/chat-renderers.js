@@ -587,6 +587,19 @@ function machineRunWords(msg) {
   return nostart ? t('Could not start a command on {machine} — {why}', { machine, why: nostart[1] }) : null;
 }
 
+/** lane phone-run-box (主开发's look, 2026-11-18 02:34Z: «退出码 0» in the group's head, «退出 0» on the card, an English «exit 0» on
+ *  each row — one word for one thing): a RUN's compact line says its outcome in the page's words, through the keys the head
+ *  and the Commands list already use («exit {code}», «timed out after {s} s»); the hub's sentence stays the record. null =
+ *  not a run that ran (a copy, a call that never started): its line keeps the words as said. */
+function runOutcomeWords(msg) {
+  const x = msg && msg.exitRun, mc = machineCardOf(msg);
+  if (!x || typeof x !== 'object' || !mc || mc.verb !== 'run' || mc.outcome === 'failed') return null;
+  const s = (Math.max(0, Number(x.ms) || 0) / 1000).toFixed(1);
+  const b0 = Array.isArray(msg.content) ? msg.content.find((b) => b && b.type === 'text') : null;
+  const revoked = String((b0 && b0.text) || '').trim().endsWith(' (access was removed while it ran)') ? ' ' + t('(access was removed while it ran)') : '';
+  return (mc.outcome === 'timed_out' ? t('timed out after {s} s', { s }) : `${t('exit {code}', { code: mc.code == null ? '?' : mc.code })} · ${s} s`) + revoked;
+}
+
 /** lane machine-card-fold (the owner's phone: 700 characters of `-EncodedCommand WwBDAG8A…` nobody can read): a PowerShell
  *  `-EncodedCommand` line is drawn as the SCRIPT it runs (src/encoded-command.js — a strict shape, bounded, UTF-16LE): a dim
  *  line naming what it is, the script in the command box (folded like any command; each hidden character a visible
@@ -1168,7 +1181,8 @@ class ChatRenderers {
     const arrow = document.createElement('span'); arrow.className = 'chat-mline-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '▸';
     const what = document.createElement('span'); what.className = 'chat-mline-what'; what.textContent = ml.what;
     line.append(arrow, what);
-    if (ml.outcome) { const out = document.createElement('span'); out.className = 'chat-mline-out'; out.textContent = '· ' + ml.outcome; line.appendChild(out); }
+    const outcome = runOutcomeWords(msg) ?? ml.outcome;   // + lane phone-run-box: a run's outcome in the page's words
+    if (outcome) { const out = document.createElement('span'); out.className = 'chat-mline-out'; out.textContent = '· ' + outcome; line.appendChild(out); }
     const head = el.querySelector(':scope > .chat-vs-notice-head');
     el.insertBefore(line, head ? head.nextSibling : el.firstChild);
     if (ml.error) { const err = document.createElement('div'); err.className = 'chat-mline-err'; err.textContent = ml.error; line.after(err); }

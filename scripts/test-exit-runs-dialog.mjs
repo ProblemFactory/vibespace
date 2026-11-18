@@ -67,6 +67,8 @@ class FakeEl {
   querySelectorAll(sel) { const m = /^:scope\s*>\s*(.+)$/.exec(sel); return m ? this.children.filter((c) => c._match(m[1].trim())) : this.all.filter((c) => c._match(sel.trim())); }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   remove() { if (this.parentElement) this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1); this.parentElement = null; }
+  insertBefore(n, ref) { if (n.parentElement) n.remove(); const i = ref ? this.children.indexOf(ref) : -1; n.parentElement = this; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); return n; }   // _machineLine's own moves (§5)
+  after(n) { const p = this.parentElement; if (!p) return; const i = p.children.indexOf(this); if (n.parentElement) n.remove(); n.parentElement = p; p.children.splice(i + 1, 0, n); }
   replaceWith(n) { const p = this.parentElement; if (!p) return; if (n.parentElement) n.remove(); p.children.splice(p.children.indexOf(this), 1, n); n.parentElement = p; this.parentElement = null; }   // chat-view _swapMessageEl's own move (§5)
 }
 const titled = (root) => [root, ...root.all].filter((n) => typeof n.title === 'string' && n.title !== '' || 'title' in n.attrs);
@@ -248,8 +250,25 @@ ok(/display: none/.test(rule(CSS, '.chat-exit-margin')), 'law 4: chat.css draws 
 const ph = patched('src/lib/chat-renderers.js', "  if (!det || !fold || !id) return;\n  const key = `${id}#${which}`;", "  return; // CONTROL: no keeper (the release)\n  const key = `${id}#${which}`;");
 const pi = patched('src/lib/chat-renderers.js', '  drawPreview(pre, pv.lines);', "  pre.textContent = pv.lines.join('\\n'); // CONTROL: the release's drawing");
 ok(ph.applies && pi.applies, '§5 patches apply');
+// ONE WORD FOR ONE THING (主开发's look, 2026-11-18 02:34Z: «退出码 0» in the head, «退出 0» on the card, an English «exit 0» on each
+// row): the REAL _machineLine draws a run's compact line; its outcome is said in the page's words through the head's keys
+const ZH = await langBundle('zh');
+const mlCard = (outcome) => ({ id: 'ml1', role: 'user', content: [{ type: 'text', text: outcome === 'timed_out' ? 'ran `sleep 9` on Mac — timed out after 0.2 s' : 'ran `wc -l` on Mac — exit 0 · 0.2 s' }], originKind: 'peer-message', peerFrom: 'Machines · Mac', peerVia: 'notification', exitRun: { cmd: 'wc -l', code: 0, ms: 200, stdout: '1\n', stderr: '', cut: {}, ...(outcome === 'timed_out' ? { timedOut: true, code: null } : {}) } });
+const rowOut = (Rm, outcome) => {
+  const el = document.createElement('div'), card = mlCard(outcome);
+  Rm.ChatRenderers.prototype._machineLine.call({ _peerFold: null }, el, card, { what: 'wc -l', outcome: outcome === 'timed_out' ? 'timed out after 0.2 s' : 'exit 0 · 0.2 s', error: '', failed: outcome === 'timed_out' });
+  return el.querySelector('.chat-mline-out')?.textContent ?? null;
+};
+const rz = [rowOut(ZH, 'ok'), rowOut(ZH, 'timed_out')], re = rowOut(R, 'ok');
+const zhD = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
+ok(rz[0] === '· 退出码 0 · 0.2 s' && rz[1] === '· 0.2 秒后超时' && re === '· exit 0 · 0.2 s', 'ONE WORD: a run\'s compact line says its outcome in the page\'s words — zh «· 退出码 0 · 0.2 s» / «· 0.2 秒后超时», en as before', { zh: rz, en: re });
+ok(['Ran a command on {machine} — exit {code} · {secs}', 'last: exit {code}', 'exit {code}'].every((k) => typeof zhD[k] === 'string' && zhD[k].includes('退出码 {code}')), 'ONE WORD: the card\'s sentence, the group\'s head and the row say 退出码 in zh — never a bare 退出', ['Ran a command on {machine} — exit {code} · {secs}', 'last: exit {code}', 'exit {code}'].map((k) => zhD[k]));
 const PH = await bundle('src/lib/chat-renderers.js', ph);
 ok(!keepCase(PH).kept, 'CONTROL (h): no keeper (the release) — the redraw closes every fold: §5\'s law 3 leg goes red');
+const pj = patched('src/lib/chat-renderers.js', '    const outcome = runOutcomeWords(msg) ?? ml.outcome;', '    const outcome = ml.outcome; // CONTROL: the hub\'s English sentence on the row');
+const zhPatched = async (patch) => { const g = globalThis.localStorage.getItem; globalThis.localStorage.getItem = (k) => (k === 'vibespace.lang' ? 'zh' : null); try { return await bundle('src/lib/chat-renderers.js', patch); } finally { globalThis.localStorage.getItem = g; } };
+const rj = pj.applies ? rowOut(await zhPatched(pj), 'ok') : null;
+ok(pj.applies && rj === '· exit 0 · 0.2 s', 'CONTROL (j): the row with the hub\'s English words (the release), bundled in zh — the zh page says «· exit 0 · 0.2 s»: §5\'s one-word leg goes red', rj);
 ok(swapCase(PH).swapped && !swapCase(PH).open, 'CONTROL (h2): no keeper (the release) through the view\'s own swap — the swapped card\'s folds are CLOSED: §5\'s swap leg goes red');
 ok(marginCase(await bundle('src/lib/chat-renderers.js', pi), '      42\n').drawn !== '42', 'CONTROL (i): the release\'s drawing — «      42» drawn with its margin: §5\'s law 4 leg goes red');
 
