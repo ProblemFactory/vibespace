@@ -629,6 +629,7 @@ const BACKEND_CAPS = {
     toolAllowlist: null, // agy has no per-session tool flag
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
     subagents: 'cards', // lane agy-subagent-cards: the wrapper reads agy's store — a card per sub + its timeline
+    accountBound: true, // B-a5a4 follow-up: a conversation lives in ITS account root's store (the descriptor's store.accountBound — the page reads it here)
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
 };

@@ -74,10 +74,10 @@ function sessionForItem(item, activeSessions, sessionStatusKey) {
 }
 
 function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen = null, now = () => Date.now() }) {
-  const fail = (res, code, error) => res.status(STATUS[code] || 400).json({ error, code });
+  const fail = (res, code, error, extra = null) => res.status(STATUS[code] || 400).json({ error, code, ...(extra || {}) });
   // THE REOPEN (lane inbox-reply-dead-session): the conversation ended ⇒ resume it, then the reply is its first input
   const reopenAndSend = (req, res, item, text) => Promise.resolve(reopen(item, { by: byOf(req) })).then((o) => {
-    if (!o || !o.ok) return fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened');
+    if (!o || !o.ok) return fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened', o && o.i18n ? { i18n: o.i18n } : null);
     // NOT AN UNATTENDED SPEND: this first turn is the PERSON's — the reply they typed and pressed Send on (owner-only,
     // agent tokens refused above), exactly the turn the composer would send after a hand Resume; the resume itself
     // sends nothing. So it rides THE typing path (no authorizer, no ladder — src/server/user-input.js says why) and

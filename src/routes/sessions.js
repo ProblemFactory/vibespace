@@ -662,12 +662,14 @@ function setup(ctx) {
         sessions.push(withSessionKey(entry));
       }
     }
-    try { mergeKeptStopped(sessions, typeof ctx.stoppedSessions === 'function' ? await ctx.stoppedSessions() : []); } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
+    let keptNow = [];
+    try { keptNow = typeof ctx.stoppedSessions === 'function' ? await ctx.stoppedSessions() : []; } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
+    try { sweepMerge(sessions, keptNow); } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }   // B-a5a4 follow-up r2/r3: the seam's rows, then the merge
 
     sessions.sort((a, b) => b.startedAt - a.startedAt);
     _sessionsCache = { sessions };
     _sessionsCacheAt = Date.now();
-    _heldRows = sessions; // heldAccountOf's rows (ws-create's resume seam)
+    _heldRows = sessions; // heldAccountOf's rows (ws-create's resume seam: its fallback when the kept copies cannot be read in time)
     return _sessionsCache;
   };
 
@@ -776,6 +778,15 @@ function warmthDiff(activeSessions, factsOf, now = Date.now()) {
 
 let _warmSweep = null;
 let _heldRows = null;
+let _sweptStopped = null;   // B-a5a4 follow-up r2: the last sweep's stopped rows AS DISCOVERED (heldAccountOfNow merges the kept copies into them)
+/** B-a5a4 follow-up r3: the sweep's merge AND what it hands the seam — the stopped rows AS DISCOVERED (copies), then the kept
+ *  copies merged into `rows` in place (the page's rows). One function, so the order is a fact a leg drives. */
+function sweepMerge(rows, kept) {
+  const discovered = rows.filter((r) => r && r.status === 'stopped').map((r) => ({ ...r }));
+  mergeKeptStopped(rows, kept);
+  _heldRows = rows; _sweptStopped = discovered;
+  return rows;
+}
 let _stoppedOf = null;   // B-a5a4: boot-restore's stoppedSessions (set at setup)
 const { NO_TRANSCRIPT_HERE } = require('../inbox-reopen.js');   // B-a5a4 (6): ONE sentence (it was spelled twice)
 // B-a5a4 (1): a RESUME whose billing account was deleted degrades to the default login (ws-create) — never for a harness that
@@ -799,26 +810,52 @@ function heldAccountOf(backend, id, rows = _heldRows) {
 }
 /** B-a5a4 (3): the seam's question before the first /api/sessions sweep (an automation's create at boot): the kept copies
  *  themselves (boot-restore stoppedSessions) — never «no row» because no page asked yet. */
-async function heldAccountOfNow(backend, id, { rows = _heldRows, stopped = _stoppedOf, boundMs = 2000 } = {}) {
+async function heldAccountOfNow(backend, id, { rows, merged, stopped = _stoppedOf, boundMs = 2000 } = {}) {
   // r1 (the lane's read): ALWAYS the kept copies as they stand now, over the last sweep's rows — a hub no page asks keeps its
   // boot sweep's rows for hours (a copy the re-probe kept later, a conversation stopped since, unseen); bounded, never a hang
-  let kept = [];
+  const swept = rows === undefined ? _sweptStopped : rows;
+  // r3 (a delta read): a read-back that hangs past its bound falls back to the sweep's MERGED rows (its copies as of the sweep) —
+  // never the discovered rows alone (a claude row's account lives only in its copy)
+  const fallback = merged !== undefined ? merged : rows === undefined ? _heldRows : rows;
+  let kept = [], late = false;
   if (typeof stopped === 'function') {
     let timer = null;
-    try { kept = await Promise.race([Promise.resolve().then(() => stopped()), new Promise((r) => { timer = setTimeout(() => r([]), boundMs); timer.unref?.(); })]); } catch { kept = []; } finally { clearTimeout(timer); }
+    const LATE = Symbol('late');
+    try { kept = await Promise.race([Promise.resolve().then(() => stopped()), new Promise((r) => { timer = setTimeout(() => r(LATE), boundMs); timer.unref?.(); })]); } catch { kept = []; } finally { clearTimeout(timer); }
+    if (kept === LATE) { late = true; kept = []; }
   }
-  return heldAccountOf(backend, id, [...(Array.isArray(kept) ? kept : []), ...(rows || [])]);
+  if (late) return heldAccountOf(backend, id, fallback);
+  // B-a5a4 follow-up (主开发's reading of b4e2af305): ONE PRECEDENCE FOR ONE QUESTION — the page's own merge rule
+  // (mergeKeptStopped: a stopped row's own account stays, the kept copy fills what it lacks) over a COPY of the sweep's
+  // STOPPED rows; a stale snapshot's live row is no fact about now (a live conversation is the keeper check's, above the seam)
+  const stoppedRows = (swept || []).filter((r) => r && r.status === 'stopped').map((r) => ({ ...r }));
+  return heldAccountOf(backend, id, mergeKeptStopped(stoppedRows, Array.isArray(kept) ? kept : []));
 }
 // B-a5a4 r1 (1): an account-bound harness's conversation lives in ONE account's store — an account the door STATES that is not
 // the one its row names is refused by name (the Resume bar's switch door offered every other account: agy started on a store
 // that does not hold the conversation)
-const BOUND_ELSEWHERE = 'this conversation lives in another account\'s own store — it can be resumed only on that account';
+// B-a5a4 follow-up: the refusal NAMES the account that holds it ({name} — its row's name; the machine's own login in the
+// harness's billing word) — a stale on-resume account was refused on every press with nothing to pick by
+const BOUND_ELSEWHERE = 'this conversation lives in the store of the account «{name}» — it can be resumed only on that account';
+const heldNameOf = (backend, accountId, accounts) => {
+  if (accountId === 'subscription') { try { return require('../harnesses').get(backend)?.ui?.billing?.globalLogin || accountId; } catch { return accountId; } }
+  let a = null; try { a = accounts && typeof accounts.get === 'function' ? accounts.get(accountId) : null; } catch { a = null; }
+  return (a && a.name) || accountId;
+};
+const fillWords = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
 async function boundElsewhereOf(backend, id, accountId, opts = {}) {
   if (!accountBoundOf(backend) || !accountId) return null;
   const held = await heldAccountOfNow(backend, id, opts);
-  return held && held.accountId && held.accountId !== accountId ? { refuse: BOUND_ELSEWHERE } : null;
+  if (!(held && held.accountId && held.accountId !== accountId)) return null;
+  // r2: the account that holds it was DELETED — the deleted-account sentence, never «resume it on» an account that is gone
+  if (held.accountId !== 'subscription' && opts.accounts && typeof opts.accounts.get === 'function') {
+    let a = null, threw = false; try { a = opts.accounts.get(held.accountId); } catch { threw = true; }   // r3: a get that throws says nothing (never «deleted»)
+    if (!threw && !a) return { refuse: ACCT_GONE_BOUND, code: 'resume-account-gone', accountId: held.accountId, message: ACCT_GONE_BOUND };
+  }
+  const params = { name: heldNameOf(backend, held.accountId, opts.accounts) };
+  return { refuse: BOUND_ELSEWHERE, params, accountId: held.accountId, message: fillWords(BOUND_ELSEWHERE, params) };
 }
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { router, setup, mergeKeptStopped, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { router, setup, mergeKeptStopped, sweepMerge, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

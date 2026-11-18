@@ -26,7 +26,11 @@
 //   §9 THE HELD ACCOUNT (r2) — a resume that states no account goes to its row's, server-side, from every door (B-a5a4: a
 //      kept agy meta naming none ran on the machine's own login — resumed there)
 //   §10 B-a5a4 (the r2 reviewer's nine follow-ups): a deleted account on an account-bound harness refused; the seam before
-//      the first sweep; the copy consumed at the resume; ONE refusal sentence; a pending fork's copy swept by the next boot
+//      the first sweep; ONE refusal sentence; a pending fork's copy swept by the next boot (item (2), the copy consumed at
+//      the resume, was reverted — not built, nothing here pins it)
+//   §11 B-a5a4 follow-up: ONE precedence for «which account holds it» (the page's merge rule, on a copy); the refusal names
+//      that account; the Resume switch offers no account the server refuses; the rescue reads the server's message; the
+//      deleted-account refusal DRIVEN through the real create (the error arrives, nothing spawns); the seam's wiring
 // RED on 43d0f8d2d (2.369.364) and on d5b99bade (the 2.369.365 cut): every section by name (no hook, no reason, no
 // read-back, no facts line, no agy discover, no words). No count is pinned here — the suite prints its own.
 import fs from 'node:fs';
@@ -35,6 +39,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { scratchDir, scratchHome } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -269,9 +274,9 @@ await section('§7 THE DOORS — every surface says why, and a resume goes to th
   ok(/stoppedWhyFor\(spec\.backend, spec\.backendSessionId, this\.app\?\.sidebar\?\._allSessions\)/.test(body(cv, '  _showResumeBar() {')), '§7 WIRING: the read-only window\'s resume bar says it before «Session is read-only.»');
   ok(/stoppedWhyFor\(/.test(body(lay, '  _paintPlaceholder(win) {')) && /t\('\{n\} of them stopped because their process ended while the server was down\.'/.test(body(lay, '  async _offerResumeAll(stopped) {')) && /noteStoppedRows\(allSessions\)/.test(lay),
     '§7 WIRING: the window\'s stopped tile and the resume-all offer say it (the boot\'s list noted first)');
-  ok(/accountId: accountId !== undefined \? accountId : resumeAccountOf\(savedCfg\.account, this\.sidebar\?\._allSessions, backend, targetBackendId\)/.test(body(lc, '  resumeSession(')),
+  ok(/accountId: accountId !== undefined \? accountId : resumeAccountOf\(savedCfg\.account, this\.sidebar\?\._allSessions, backend, targetBackendId(?:, \{ bound: accountBound\(backend\) && !hostId \})?\)/.test(body(lc, '  resumeSession(')),
     '§7 WIRING: resumeSession — ONE place for every door (the card, its click, the resume bar, the tile, resume-all) — falls back to the row\'s account, never the harness default');
-  ok(/pinned: \{ account: resumeAccountOf\(saved\.account, this\.sidebar\?\._allSessions, backend, backendSessionId\) \|\| ''/.test(body(lc, '  _resumeAccountVerdict(')),
+  ok(/pinned: \{ account: resumeAccountOf\(saved\.account, this\.sidebar\?\._allSessions, backend, backendSessionId(?:, \{ bound: accountBound\(backend\) && !hostId \})?\) \|\| ''/.test(body(lc, '  _resumeAccountVerdict(')),
     '§7 WIRING (r2, minor 1): the Resume press\'s verdict — and the create-failure re-check, which asks the same verdict — judges THAT account, not the default');
   const RA = require(path.join(REPO, 'src/resume-account.js'));
   const kRow = { backend: 'claude', backendSessionId: CID(3), sessionId: CID(3), status: 'stopped', stopReason: 'dead-socket-at-boot', accountId: 'sub-aaaaaaaaaaaa' };
@@ -337,7 +342,8 @@ await section('§9 THE HELD ACCOUNT (r2, major 2) — a resume that states no ac
   const { createAdapterRegistry } = require(path.join(REPO, 'src/adapters/index.js'));
   const registry = createAdapterRegistry({ chatWrapper: '/nonexistent/c.js', codexChatWrapper: '/nonexistent/x.js', acpWrapper: '/nonexistent/a.js', acpCommands: { antigravity: '/nonexistent/agy' }, ptyWrapper: '/nonexistent/p.js', buffersDir: d });
   const asked = [], noop = () => undefined;
-  const accounts = new Proxy({ resolveForSpawn: (id, b) => { asked.push([id, b]); throw new Error('probe-stop'); } }, { get: (t, k) => (k in t ? t[k] : noop) });
+  let throwWith = 'probe-stop';
+  const accounts = new Proxy({ resolveForSpawn: (id, b) => { asked.push([id, b]); throw new Error(throwWith); }, get: (id) => ({ id, name: id }) }, { get: (t, k) => (k in t ? t[k] : noop) });   // r2: every account this world names exists (named by its id)
   const ctx = new Proxy({ adapterRegistry: registry, activeSessions: new Map(), WS_OPEN: 1, sessionCounterRef: { value: 1 }, hosts: null, accounts, os: require('os'), fs, path,
     SOCKETS_DIR: d, BUFFERS_DIR: d, NODE_CMD: process.execPath, cliCmds: { forSpawn: async (b, c) => c }, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
     integrationEnabled: () => true, harnessDeclares: () => false, harnessSpawnSettings: () => ({}) }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && /^[a-z]/.test(k) ? noop : undefined)) });
@@ -362,11 +368,21 @@ await section('§9 THE HELD ACCOUNT (r2, major 2) — a resume that states no ac
   asked.length = 0;
   const sentPick = [];
   await quiet(async () => { await handleCreate({ readyState: 1, send: (t) => sentPick.push(JSON.parse(t)) }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), accountId: 'agy-ffffffffffff', reqId: 'r-pick' }, new Set()); });
-  ok(asked.length === 0 && sentPick.some((m) => m.type === 'error' && m.code === 'resume-account-bound' && m.message === RS0.BOUND_ELSEWHERE),
+  ok(asked.length === 0 && sentPick.some((m) => m.type === 'error' && m.code === 'resume-account-bound' && m.i18n && m.i18n.key === RS0.BOUND_ELSEWHERE && m.accountId === 'agy-e0e0e0e0e0e0' && m.message === RS0.BOUND_ELSEWHERE.replace('{name}', 'agy-e0e0e0e0e0e0')),
     '§9 B-a5a4 r1 (1): an account the door STATES that is not the one the agy row names is REFUSED by name (the store of agy-ffff… does not hold it; the Resume bar\'s switch offered it) — nothing spawned', { asked, sentPick });
   asked.length = 0;
   await quiet(async () => { await handleCreate({ readyState: 1, send: () => { } }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), accountId: 'agy-e0e0e0e0e0e0', reqId: 'r-same' }, new Set()); });
   ok(J(asked) === J([['agy-e0e0e0e0e0e0', 'antigravity']]), '§9 …the account its row names, stated, goes as stated', asked);
+  // §11 (4) THE DELETED ACCOUNT, DRIVEN (the follow-up — it had a source pin alone): the row names agy-dddd…, the accounts store
+  // no longer knows it ⇒ the REAL create answers resume-account-gone by name and spawns nothing (never the default's store)
+  asked.length = 0; throwWith = 'unknown account: agy-dddddddddddd';
+  const sentGone = [], live = ctx.activeSessions.size;
+  RS._noteSweptRows(rowsOf(withCwd(kept('agy-dddddddddddd'))));
+  await quiet(async () => { await handleCreate({ readyState: 1, send: (t) => sentGone.push(JSON.parse(t)) }, { type: 'create', backend: 'antigravity', mode: 'chat', cwd: d, resume: true, resumeId: UUID(1), accountId: 'agy-dddddddddddd', reqId: 'r-gone' }, new Set()); });
+  const errsGone = sentGone.filter((m) => m.type === 'error');
+  ok(J(asked) === J([['agy-dddddddddddd', 'antigravity']]) && errsGone.length === 1 && errsGone[0].code === 'resume-account-gone' && errsGone[0].message === RS0.ACCT_GONE_BOUND && !sentGone.some((m) => m.type === 'created') && ctx.activeSessions.size === live,
+    '§11 (4) a resume whose row\'s account was DELETED (agy) is refused resume-account-gone through the real create — the one error, nothing spawned, no degrade to the default login', { asked, sentGone, live: ctx.activeSessions.size });
+  throwWith = 'probe-stop';
   RS._noteSweptRows(null);
   try { fs.rmSync(d, { recursive: true, force: true }); } catch { }
 });
@@ -390,14 +406,14 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
   const h3b = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: [], stopped: async () => [keptRow] });
   const h3c = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: [{ ...keptRow, accountId: 'agy-0123456789ab' }], stopped: async () => [keptRow] });
   const h3d = await RS.heldAccountOfNow('antigravity', UUID(5), { rows: [keptRow], stopped: () => new Promise(() => { }), boundMs: 30 });
-  ok(J(h3) === J({ accountId: 'agy-e0e0e0e0e0e0' }) && J(h3b) === J(h3) && J(h3c) === J(h3) && J(h3d) === J(h3) && /held = await require\('\.\/routes\/sessions'\)\.heldAccountOfNow\(backend, data\.resumeId\);/.test(WSRC),
-    '§10 (3) the seam reads the kept copies AS THEY STAND first, over the last sweep\'s rows (none yet, an empty one, a stale one); a read-back that hangs is bounded — the sweep\'s rows then', { h3, h3b, h3c, h3d });
-  ok(!/consumeKeptSoon/.test(WSRC + RSRC), '§10 (2) NOT built: a resume never consumes its kept copy before it is proven (r1: at registration it lost a failed resume\'s copy)');
+  ok(J(h3) === J({ accountId: 'agy-e0e0e0e0e0e0' }) && J(h3b) === J(h3) && J(h3d) === J(h3) && /held = await require\('\.\/routes\/sessions'\)\.heldAccountOfNow\(backend, data\.resumeId\);/.test(WSRC),
+    '§10 (3) the seam reads the kept copies AS THEY STAND, over the last sweep\'s rows (none yet, an empty one); a read-back that hangs is bounded — the sweep\'s rows then', { h3, h3b, h3d });
+  ok(J(h3c) === J({ accountId: 'agy-0123456789ab' }), '§10 (3) …a sweep\'s STOPPED row naming its own account keeps it (the page\'s merge rule — §11 (1))', h3c);
   // (1) r1: an account the door STATES on an account-bound harness, not the row's, is refused (the seam's helper)
   const be = await RS.boundElsewhereOf('antigravity', UUID(5), 'agy-ffffffffffff', { rows: [], stopped: async () => [keptRow] });
   const be2 = await RS.boundElsewhereOf('antigravity', UUID(5), 'agy-e0e0e0e0e0e0', { rows: [], stopped: async () => [keptRow] });
   const be3 = await RS.boundElsewhereOf('claude', CID(5), 'sub-ffffffffffff', { rows: [{ ...keptRow, backend: 'claude', sessionId: CID(5), backendSessionId: CID(5), accountId: 'sub-aaaaaaaaaaaa' }], stopped: async () => [] });
-  ok(be && be.refuse === RS.BOUND_ELSEWHERE && be2 === null && be3 === null, '§10 (1) boundElsewhereOf: agy, another account stated ⇒ refused; the row\'s own ⇒ goes; claude (not account-bound) ⇒ never overridden', { be, be2, be3 });
+  ok(be && be.refuse === RS.BOUND_ELSEWHERE && be.accountId === 'agy-e0e0e0e0e0e0' && be2 === null && be3 === null, '§10 (1) boundElsewhereOf: agy, another account stated ⇒ refused; the row\'s own ⇒ goes; claude (not account-bound) ⇒ never overridden', { be, be2, be3 });
   // (4) r1: the KEPT row of an agy meta that named no account says 'subscription' (one account for the seam AND the page's verdict)
   {
     const W4 = world('acct4');
@@ -428,6 +444,109 @@ await section('§10 B-a5a4 — the r2 reviewer\'s follow-ups: a deleted account 
   const SWEEP = "      if (restoredForkPending(m)) { fs.promises.unlink(path.join(META_DIR, f)).catch(() => { }); say(`kept copies: a pending fork's copy swept (nothing to resume: ${sockFile})`); continue; }\n";
   ok(BSRC.split(SWEEP).length === 2, '§10 (9) ANCHOR: the sweep, spelled once');
   try { fs.rmSync(W.d, { recursive: true, force: true }); } catch { }
+});
+
+await section('§11 B-a5a4 follow-up (主开发\'s reading of b4e2af305): one precedence, the account named, no door that always refuses, the rescue on the server\'s message', async () => {
+  const RS = require(path.join(REPO, 'src/routes/sessions.js'));
+  const RSRC = read('src/routes/sessions.js');
+  const M = mutantCopies('dead-socket-keeps-chat-meta', REPO);
+  // (1) ONE PRECEDENCE FOR ONE QUESTION: the seam answers what the page's merge (mergeKeptStopped) answers for the same rows,
+  // over the sweep's rows AS DISCOVERED (r2: a merged row's account may be an older copy's). agy: the row names the account root
+  // that lists it (B), the kept copy an older A ⇒ B, as the page says
+  const ka = (accountId, o = {}) => ({ backend: 'antigravity', sessionId: UUID(7), backendSessionId: UUID(7), status: 'stopped', stopReason: 'dead-socket-at-boot', accountId, kept: 'cw-7-x', ...o });
+  const sweep = [ka('agy-bbbbbbbbbbbb', { kept: undefined, stopReason: undefined })], keptA = [ka('agy-aaaaaaaaaaaa')];
+  const pageSays = (rows, k, id) => { const m = RS.mergeKeptStopped(rows.map((r) => ({ ...r })), k).find((r) => r.backendSessionId === id); return m && m.status === 'stopped' ? m.accountId : null; };
+  const seamOf = (Mod, rows, k = keptA, backend = 'antigravity', id = UUID(7)) => Mod.heldAccountOfNow(backend, id, { rows, stopped: async () => k });
+  const s1 = await seamOf(RS, sweep);
+  ok(s1 && s1.accountId === 'agy-bbbbbbbbbbbb' && s1.accountId === pageSays(sweep, keptA, UUID(7)) && sweep[0].kept === undefined && sweep[0].stopReason === undefined,
+    '§11 (1) ONE PRECEDENCE: the seam bills the account the page\'s merge names (the agy row\'s own root, B) — never the kept copy\'s A; the sweep\'s rows are merged on a COPY (untouched)', { s1, page: pageSays(sweep, keptA, UUID(7)), sweep0: sweep[0] });
+  // the readers' claude scene (r2): a claude row carries no account of its own; a sweep merged an older copy (B) into it, the copy
+  // kept since names A — over the DISCOVERED row the seam says A, as the page's next merge does; over the merged row B would win
+  const kr = (accountId, o = {}) => ({ backend: 'claude', sessionId: CID(7), backendSessionId: CID(7), status: 'stopped', stopReason: 'dead-socket-at-boot', accountId, kept: 'cw-7-x', ...o });
+  const discovered = [kr(null, { kept: undefined, stopReason: undefined })], keptNow = [kr('sub-aaaaaaaaaaaa')];
+  const mergedOld = RS.mergeKeptStopped(discovered.map((r) => ({ ...r })), [kr('sub-bbbbbbbbbbbb')]);
+  const s3 = await seamOf(RS, discovered, keptNow, 'claude', CID(7)), s3m = await seamOf(RS, mergedOld, keptNow, 'claude', CID(7));
+  ok(s3 && s3.accountId === 'sub-aaaaaaaaaaaa' && s3.accountId === pageSays(discovered, keptNow, CID(7)) && s3m && s3m.accountId === 'sub-bbbbbbbbbbbb',
+    '§11 (1) r2: over the DISCOVERED claude row the seam takes the copy kept now (A, the page\'s next merge); over an already merged row the older copy (B) would win — so the sweep hands the seam its rows BEFORE the merge', { s3, s3m });
+  ok(RSRC.split('    try { sweepMerge(sessions, keptNow); }').length === 2 && RSRC.includes('  const swept = rows === undefined ? _sweptStopped : rows;'), 'WIRING (§11 (1) r2/r3): the sweep goes through sweepMerge, and the seam reads its rows by default');
+  // r3: the SWEEP's own order, driven — sweepMerge hands the seam the rows AS DISCOVERED, then merges the copies in
+  RS.sweepMerge(discovered.map((r) => ({ ...r })), [kr('sub-bbbbbbbbbbbb')]);
+  const s4 = await RS.heldAccountOfNow('claude', CID(7), { stopped: async () => keptNow });
+  const SWM = '  _heldRows = rows; _sweptStopped = discovered;';
+  ok(RSRC.split(SWM).length === 2, 'ANCHOR: what the sweep hands the seam, spelled once');
+  const Mw = M.load('src/routes/sessions.js', RSRC.replace(SWM, '  _heldRows = rows; _sweptStopped = rows;'), 'swept-merged');
+  Mw.sweepMerge(discovered.map((r) => ({ ...r })), [kr('sub-bbbbbbbbbbbb')]);
+  const s4m = await Mw.heldAccountOfNow('claude', CID(7), { stopped: async () => keptNow });
+  ok(s4 && s4.accountId === 'sub-aaaaaaaaaaaa' && s4m && s4m.accountId === 'sub-bbbbbbbbbbbb', '§11 (1) r3: THE SWEEP DRIVEN — after a sweep that merged an older copy (B), the seam takes the copy kept now (A); MUTANT RED: the sweep handing its MERGED rows ⇒ B (the delta read\'s scene)', { s4, s4m });
+  // r3: a read-back that hangs past its bound ⇒ the sweep's MERGED rows answer, never the discovered row alone
+  const s5 = await RS.heldAccountOfNow('claude', CID(7), { stopped: () => new Promise(() => { }), boundMs: 30 });
+  ok(s5 && s5.accountId === 'sub-bbbbbbbbbbbb', '§11 (1) r3: the kept copies cannot be read in time ⇒ the sweep\'s merged rows (the copy as of the sweep) — never the discovered claude row alone (no account: the default login)', s5);
+  RS._noteSweptRows(null);
+  const s2 = await seamOf(RS, [ka('agy-bbbbbbbbbbbb', { status: 'live', kept: undefined })]);
+  ok(s2 && s2.accountId === 'agy-aaaaaaaaaaaa', '§11 (1) …a stale snapshot\'s LIVE row is no fact about now: the kept copy answers (the page shows the conversation live — no Resume there)', s2);
+  const MERGE = '  return heldAccountOf(backend, id, mergeKeptStopped(stoppedRows, Array.isArray(kept) ? kept : []));';
+  ok(RSRC.split(MERGE).length === 2, 'ANCHOR: the seam\'s merge, spelled once');
+  const m1 = await seamOf(M.load('src/routes/sessions.js', RSRC.replace(MERGE, '  return heldAccountOf(backend, id, [...(Array.isArray(kept) ? kept : []), ...(rows || [])]);'), 'kept-first'), sweep);
+  ok(m1 && m1.accountId === 'agy-aaaaaaaaaaaa', 'MUTANT RED: the kept rows first (the tip\'s) ⇒ the seam bills A while the page names B', m1);
+  // (2) the refusal NAMES the account that holds it — its row's name; the machine's own login in the harness's billing word
+  const kg = { backend: 'antigravity', sessionId: UUID(8), backendSessionId: UUID(8), status: 'stopped', accountId: 'agy-e0e0e0e0e0e0', kept: 'cw-8-x' };
+  const accts = { get: (id) => (id === 'agy-e0e0e0e0e0e0' ? { id, name: 'Kiln notes' } : null) };
+  const n1 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [kg], accounts: accts });
+  const n2 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [{ ...kg, accountId: 'subscription' }], accounts: accts });
+  ok(n1 && n1.params.name === 'Kiln notes' && n1.message === 'this conversation lives in the store of the account «Kiln notes» — it can be resumed only on that account' && n2 && n2.params.name === 'Google login' && /\{name\}/.test(RS.BOUND_ELSEWHERE),
+    '§11 (2) the refusal names the account that holds the conversation ({name}: its row\'s name; the machine\'s login in agy\'s billing word)', { n1, n2 });
+  const n3 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [{ ...kg, accountId: 'agy-dddddddddddd' }], accounts: accts });
+  const n4 = await RS.boundElsewhereOf('antigravity', UUID(8), 'agy-ffffffffffff', { rows: [], stopped: async () => [kg], accounts: { get: () => { throw new Error('the store is busy'); } } });
+  ok(n4 && n4.code === undefined && n4.refuse === RS.BOUND_ELSEWHERE, 'r3: an accounts store that THROWS says nothing about the holder (never «deleted») — the refusal names it as it can', n4);
+  ok(n3 && n3.code === 'resume-account-gone' && n3.message === RS.ACCT_GONE_BOUND && !n3.params, '§11 (2) r2: the account that holds it was DELETED ⇒ the deleted-account sentence (resume-account-gone), never «resume it on» an account that is gone', n3);
+  // r2: the ONE account a resume goes to — an account-bound harness resumes on the account that HOLDS it, whatever the saved pick says
+  const SWm = await import(pathToFileURL(path.join(REPO, 'src/lib/stopped-why.js')).href);
+  const hrow = { backend: 'antigravity', backendSessionId: UUID(8), sessionId: UUID(8), status: 'stopped', accountId: 'agy-e0e0e0e0e0e0' };
+  ok(SWm.resumeAccountOf('agy-ffffffffffff', [hrow], 'antigravity', UUID(8), { bound: true }) === 'agy-e0e0e0e0e0e0' && SWm.resumeAccountOf('agy-ffffffffffff', [hrow], 'antigravity', UUID(8)) === 'agy-ffffffffffff'
+    && SWm.resumeAccountOf('agy-ffffffffffff', [], 'antigravity', UUID(8), { bound: true }) === 'agy-ffffffffffff' && SWm.resumeAccountOf(undefined, [{ ...hrow, accountId: 'subscription' }], 'antigravity', UUID(8), { bound: true }) === 'subscription',
+    '§11 (2) r2: bound ⇒ the row\'s account over a stale saved pick (a logged-in stale pick had no bar and no door — refused on every press); no row ⇒ the saved pick; not bound ⇒ as before; the machine\'s own login held ⇒ it', '');
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+  ok(ZH.includes(`  "${RS.BOUND_ELSEWHERE}": "这个对话在账号「{name}」自己的存储里 — 只能在那个账号上恢复",`) && JA.includes(`  "${RS.BOUND_ELSEWHERE}": "この会話はアカウント「{name}」自身の保存先にあります — そのアカウントでのみ再開できます",`),
+    '§11 (2) …in zh and ja, the name kept as {name}');
+  // (2) the Resume bar's switch offers no account the server refuses: a conversation held by ONE account's own store
+  const RA = require(path.join(REPO, 'src/resume-account.js'));
+  const sub = (id, name, o = {}) => ({ id, name, backend: 'antigravity', type: 'subscription', loggedIn: true, ...o });
+  const roster = [sub('agy-aaaaaaaaaaaa', 'A', { loggedIn: false, loginState: { state: 'logged-out' } }), sub('agy-bbbbbbbbbbbb', 'B'), sub('agy-cccccccccccc', 'C')];
+  const sw = (Mod, heldBy, account = 'agy-aaaaaaaaaaaa') => { const v = Mod.resumeAccountVerdict({ pinned: { account, backend: 'antigravity', heldBy }, accounts: roster, loginStates: null, defaults: { machineLogin: { loggedIn: true } } }); const d = (v.doors || []).find((x) => x.kind === 'switch'); return v.ok ? 'ok' : (d ? d.to.map((x) => x.id).join() : '(none)'); };
+  const free = sw(RA, undefined), held = sw(RA, 'agy-aaaaaaaaaaaa'), stale = sw(RA, 'agy-bbbbbbbbbbbb');
+  ok(free.includes('agy-bbbbbbbbbbbb') && free.includes('subscription') && held === '' && stale === 'agy-bbbbbbbbbbbb',
+    '§11 (2) the switch: a harness that is not account-bound offers the others (as before); held by the pinned account ⇒ nothing to switch to (its re-login door stays); a stale on-resume account ⇒ ONLY the account that holds it', { free, held, stale });
+  const RASRC = read('src/resume-account.js'), HB = '(heldBy && a.id !== heldBy) || ';
+  ok(RASRC.split(HB).length === 2, 'ANCHOR: the switch\'s held-by filter, spelled once');
+  const mh = sw(M.load('src/resume-account.js', RASRC.replace(HB, ''), 'switch-any'), 'agy-aaaaaaaaaaaa');
+  ok(mh.includes('agy-bbbbbbbbbbbb'), 'MUTANT RED: no held-by filter ⇒ the switch offers B to a conversation A holds (a door the server always refuses)', mh);
+  // the page passes heldBy for an account-bound harness alone — the caps row the page reads IS the descriptor's fact
+  const CAPS = require(path.join(REPO, 'src/backend-caps.js'));
+  ok(HARN.list().every((h) => !!(h.store && h.store.accountBound === true) === (CAPS.capsOf(h.id).accountBound === true)) && CAPS.capsOf('antigravity').accountBound === true,   // !!: a harness with no store (shell) is «not bound»
+    '§11 (2) backend-caps accountBound (the page\'s) agrees with every descriptor\'s store.accountBound (the server\'s) — one fact, two tiers');
+  const LSRC = read('src/lib/session-lifecycle.js');
+  ok(/heldBy: accountBound\(backend\) && !hostId \? keptAccountOf\(this\.sidebar\?\._allSessions, backend, backendSessionId\) : undefined \}/.test(LSRC)
+    && (LSRC.match(/\{ bound: accountBound\(backend\) && !hostId \}\)/g) || []).length === 2
+    && /\(msg\.i18n && msg\.i18n\.key \? t\(msg\.i18n\.key, msg\.i18n\.params \|\| \{\}\) : ''\) \|\| \(msg\.message \? t\(msg\.message\) : ''\)/.test(LSRC),
+    'WIRING (§11 (2)): the Resume verdict and the create both resume an account-bound harness on the held account (a host\'s resume aside); a sentence with a name is said from its key + params');
+  ok(read('src/server/inbox-reopen.js').includes("return { ok: false, why, ...(err && err.i18n && err.i18n.key ? { i18n: err.i18n } : {}) };")
+    && read('src/routes/user-todos-reply.js').includes("fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened', o && o.i18n ? { i18n: o.i18n } : null)")
+    && read('src/lib/user-todos-actions.js').includes("const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, r.i18n.params || {}) : r && r.error ? t(r.error) : t('server unreachable');"),
+    'WIRING (§11 (2) r2): a For-you reply\'s refusal keeps its key + params from the create to the page (a zh / ja page says it in the reader\'s words)');
+  ok(read('src/server/inbox-reopen.js').includes("try { held = await require('../routes/sessions').heldAccountOfNow(conv.backend, conv.id); } catch { held = null; }")
+    && read('src/server/inbox-reopen.js').includes('if (held && held.accountId) spec.data.accountId = held.accountId;'),
+    'WIRING (§11 (2) r3): the For-you reopen of an account-bound conversation goes to the account that holds it, over a stale saved pick (as the page does)');
+  // (3) the rescue tests the SERVER's message — a zh/ja row for an «Account error: …» sentence never silences the bar
+  ok(/if \(\/\^Account error: \/\.test\(String\(msg\.message \|\| ''\)\) && this\.resumeAccountCheck\) \{/.test(LSRC) && !/\/\^Account error: \/\.test\(text\)/.test(LSRC),
+    '§11 (3) the failed-resume rescue\'s account re-check reads msg.message, never its translation');
+  // the seam's wiring: setup hands stoppedSessions to the seam — a create before the first sweep reads the copies with no opts
+  let wired = null;
+  try {
+    RS.setup({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => { }, createSessionMessages: () => [], BUFFERS_DIR: '/nonexistent', PERMISSION_MODES: [], hosts: null, serverSetting: () => null, stoppedSessions: async () => [kg] });
+    RS._noteSweptRows(null);
+    wired = await RS.heldAccountOfNow('antigravity', UUID(8));
+  } catch (e) { wired = { threw: String(e && e.message) }; }
+  ok(J(wired) === J({ accountId: 'agy-e0e0e0e0e0e0' }), '§11 WIRING: setup({ stoppedSessions }) is what the seam reads with no opts (the line dropped ⇒ null)', wired);
 });
 
 for (const p of [W2 && W2.d]) if (p) try { fs.rmSync(p, { recursive: true, force: true }); } catch {}

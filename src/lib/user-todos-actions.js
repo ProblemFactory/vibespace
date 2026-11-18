@@ -304,7 +304,7 @@ export function inboxModel(app) {
       else showToast(sentToast || t('Reply sent'));
       return true;
     }
-    const why = r && r.error ? t(r.error) : t('server unreachable');
+    const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, r.i18n.params || {}) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
     if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
     showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : t('Could not reply: {why}', { why }), { type: 'error' });

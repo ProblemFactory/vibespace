@@ -92,14 +92,17 @@ function resumeAccountVerdict({ pinned = {}, accounts = [], loginStates = null, 
     return r.ok && (!r.unjudged || (!isPool(a) && rowServes(a, { ...facts, host: null }).ok));
   };
   const to = [];
+  // B-a5a4 follow-up: a conversation that lives in ONE account's own store (`pinned.heldBy`, an account-bound harness's row) is
+  // offered only that account — the server refuses every other (resume-account-bound): a door that always refuses is no door
+  const heldBy = typeof pinned.heldBy === 'string' && pinned.heldBy ? pinned.heldBy : null;
   const add = (a, kind) => {
-    if (!a || a.id === id || to.some((x) => x.id === a.id) || (isPool(a) && !pools) || !canTake(a)) return;
+    if (!a || a.id === id || (heldBy && a.id !== heldBy) || to.some((x) => x.id === a.id) || (isPool(a) && !pools) || !canTake(a)) return;
     to.push({ id: a.id, name: a.name || a.id, kind });
   };
   for (const a of rows.filter(isPool).sort(byRoster)) add(a, 'pool');
   add(rows.find((a) => a.id === defaults.defaultAccountId), 'default');
   for (const a of rows.filter((x) => !isPool(x)).sort(byRoster)) add(a, 'account');
-  if (!host && defaults.machineLogin && defaults.machineLogin.loggedIn) to.push({ id: MACHINE_LOGIN, name: null, kind: 'machine' });
+  if (!host && defaults.machineLogin && defaults.machineLogin.loggedIn && (!heldBy || heldBy === MACHINE_LOGIN)) to.push({ id: MACHINE_LOGIN, name: null, kind: 'machine' });
   const doors = [];
   if (row) doors.push({ kind: 'relogin', accountId: row.id, via: isPool(row) || judged.why === 'remote-cannot-ship' ? 'manage' : 'login' });
   doors.push({ kind: 'switch', to });

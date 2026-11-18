@@ -68,6 +68,13 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
     const reqId = `reopen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const spec = reopenCreate({ key, entry, item, cfg: stateOf(us.sessionConfigs, key), defaults, name, taskId, reqId });
     if (!spec.ok) return spec;
+    // B-a5a4 follow-up r3: an account-bound harness reopens on the account that HOLDS the conversation, over a stale saved pick
+    // (as the page's resumeAccountOf { bound }) — the seam's own answer; no held account known ⇒ the saved pick, as before
+    if (spec.data && spec.data.accountId && !(spec.conversation && spec.conversation.hostId) && (() => { try { return require('../harnesses').get(conv.backend)?.store?.accountBound === true; } catch { return false; } })()) {
+      let held = null;
+      try { held = await require('../routes/sessions').heldAccountOfNow(conv.backend, conv.id); } catch { held = null; }
+      if (held && held.accountId) spec.data.accountId = held.accountId;
+    }
     const sock = headlessCreator(by);
     // THE SEAM (src/server/conversation-ops.js openConversation): with a socket it runs the ws create case itself,
     // byte-identical — a person's reopen, so no spend gate and no spec judging (those are an automation's)
@@ -87,7 +94,7 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
     }
     const why = err ? String(err.message || err.code || 'the create was refused') : 'the conversation did not start (no answer from the create)';
     log(`[inbox-reopen] ${key}: the resume failed — ${why.slice(0, 300)}`);
-    return { ok: false, why };
+    return { ok: false, why, ...(err && err.i18n && err.i18n.key ? { i18n: err.i18n } : {}) };   // B-a5a4 follow-up r2: a sentence with a name keeps its key + params
   }
 
   function reopen(item, { by = null } = {}) {

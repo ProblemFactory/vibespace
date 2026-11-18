@@ -352,8 +352,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           } else if (data.resume && data.resumeId && !data.hostId && data.accountId && !data.fork) {
             // B-a5a4 r1 (1): an account-bound harness resumes ONLY on the account its conversation's row names
             let wrong = null;
-            try { wrong = await require('./routes/sessions').boundElsewhereOf(backend, data.resumeId, data.accountId); } catch { wrong = null; }
-            if (wrong && wrong.refuse) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'resume-account-bound', resumeId: data.resumeId, message: wrong.refuse })); break; }
+            try { wrong = await require('./routes/sessions').boundElsewhereOf(backend, data.resumeId, data.accountId, { accounts }); } catch { wrong = null; }
+            // B-a5a4 follow-up: the account that holds it, named (the sentence filled; its key + params for the page's words)
+            if (wrong && wrong.refuse) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: wrong.code || 'resume-account-bound', resumeId: data.resumeId, accountId: wrong.accountId, message: wrong.message || wrong.refuse, ...(wrong.params ? { i18n: { key: wrong.refuse, params: wrong.params } } : {}) })); break; }
           }
           // ONE counter value for BOTH the id and the socket name (a fleet user's
           // 2026-08-11 incident, proven in production data): sockName re-read

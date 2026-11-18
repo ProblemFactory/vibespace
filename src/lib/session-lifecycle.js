@@ -1,7 +1,7 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
 import { namedModel } from '../model-providers.js'; // THE model door (lane fable-52-cli-321 r6) — the hub refuses what it refuses
-import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
+import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { stampAt as when, durationMark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -25,7 +25,7 @@ import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority
 import { deviceLocale } from './i18n.js';
 import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE «did the person open a dialog?» selector
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
-import { resumeAccountOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
+import { resumeAccountOf, keptAccountOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
 import { openCliMissingDialog, cliMissingWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: a CLI the person's login shell cannot find is refused by name — a dialog
 
@@ -270,7 +270,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           return true;
         }
         if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
-        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
+        const text = (msg.code === 'cli-missing' && cliMissingWords(msg).what) || (msg.i18n && msg.i18n.key ? t(msg.i18n.key, msg.i18n.params || {}) : '') || (msg.message ? t(msg.message) : '') || t('Session create failed');   // B-a5a4 follow-up: a sentence with a name rides its key + params   // B-a5a4 r1: a server sentence in the reader's words (t() answers an unknown one as it is)
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which
@@ -373,7 +373,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           rescueViewOnly();
           // an account the create refused (a resume that never asked — the sidebar card, resume-all; lane
           // resume-account-door): the rescued window's bar says it with its doors, on fresh facts
-          if (/^Account error: /.test(text) && this.resumeAccountCheck) {
+          if (/^Account error: /.test(String(msg.message || '')) && this.resumeAccountCheck) {   // B-a5a4 follow-up: the server's message, never its translation
             const q = { backend, backendSessionId: resumeId, hostId: hostId || undefined };
             this.resumeAccountCheck(q).then((v) => { if (v && !v.ok && this._winIs(winInfo)) this.sessions.get(winInfo.id)?._showAccountRefusalBar?.(v, q); }).catch(() => {});
           }
@@ -1219,7 +1219,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       autoResume: savedCfg.autoResume,     // tri-state: undefined = follow the instance default
       // …and, when neither the caller nor the saved config names one, the account its ROW names (a kept stopped meta's — the
       // session's own; the agy index's account root — the store that holds it): never the harness's default by accident
-      accountId: accountId !== undefined ? accountId : resumeAccountOf(savedCfg.account, this.sidebar?._allSessions, backend, targetBackendId),
+      accountId: accountId !== undefined ? accountId : resumeAccountOf(savedCfg.account, this.sidebar?._allSessions, backend, targetBackendId, { bound: accountBound(backend) && !hostId }),
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
       lockModel: savedCfg.lockModel,
       poolPin: savedCfg.poolPin, // 2026-09-28: the conversation's pool pin rides a resume (never a fork)
@@ -1260,7 +1260,10 @@ export function installSessionLifecycle(App, ctx = {}) {
     const bill = billingRow(backend);
     return resumeAccountVerdict({
       // the account the create WILL use (resumeAccountOf — r2: the row's own account is judged, not the default it never runs on)
-      pinned: { account: resumeAccountOf(saved.account, this.sidebar?._allSessions, backend, backendSessionId) || '', backend, host: hostId || null },
+      pinned: { account: resumeAccountOf(saved.account, this.sidebar?._allSessions, backend, backendSessionId, { bound: accountBound(backend) && !hostId }) || '', backend, host: hostId || null,
+        // B-a5a4 follow-up: a conversation that lives in ONE account's own store is offered that account alone (the server refuses
+        // every other; a host's resume is not judged there — ws-create's seam skips it)
+        heldBy: accountBound(backend) && !hostId ? keptAccountOf(this.sidebar?._allSessions, backend, backendSessionId) : undefined },
       accounts: acc.accounts,
       loginStates: this._usageLogins || null,
       defaults: {

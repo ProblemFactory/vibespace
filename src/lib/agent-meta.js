@@ -472,6 +472,11 @@ const NO_BILLING = Object.freeze({ globalLogin: 'Subscription', cliLogin: 'CLI l
 export function terminalOnly(backend) {
   return serverCapsOf(backend).terminalOnly === true;
 }
+/** Does a conversation of this harness live in ONE account's own store (backend-caps `accountBound` — the descriptor's
+ *  store.accountBound, bound by test-dead-socket-keeps-chat-meta §10)? Its Resume offers that account alone (B-a5a4 follow-up). */
+export function accountBound(backend) {
+  return serverCapsOf(backend).accountBound === true;
+}
 /** Does this harness's server STATE the model facts (and re-pin a lock at the turn's end)? Its capability row (backend-caps
  *  `modelFacts`, lane fable-52-cli-321) — never whether a frame of facts has arrived yet (a bar before its first frame). */
 export function declaresModelFacts(backend) {

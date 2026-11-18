@@ -41,6 +41,9 @@ export function keptAccountOf(rows, backend, id) {
 /** THE ONE ACCOUNT A RESUME GOES TO (r2 — the Resume press's verdict, the create, the create-failure re-check all read
  *  THIS): the conversation's saved config names one ⇒ it; else its row's (keptAccountOf); undefined ⇒ the harness default
  *  (the server's seam then asks the same row, src/routes/sessions.js heldAccountOf). */
-export function resumeAccountOf(savedAccount, rows, backend, id) {
+export function resumeAccountOf(savedAccount, rows, backend, id, { bound = false } = {}) {
+  // B-a5a4 follow-up r2: a harness whose conversation lives in ONE account's own store (`bound`) resumes on the account that holds
+  // it — a stale saved pick (logged in or not) was refused by the server on every press with nothing to pick
+  if (bound) { const held = keptAccountOf(rows, backend, id); if (held) return held; }
   return savedAccount !== undefined && savedAccount !== null && savedAccount !== '' ? savedAccount : keptAccountOf(rows, backend, id);
 }
