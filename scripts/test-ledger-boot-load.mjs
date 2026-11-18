@@ -188,7 +188,8 @@ async function during(UH, tag) {
   ok(r.between.length === 2 && r.between.every((b) => b.rows === 0 && b.loading && b.knows.every((k) => k === false)), `③ a reader between the append and the swap sees NONE of them (the «loading» cache): ${JSON.stringify(r.between.map((b) => [b.rows, b.knows]))}`);
   ok(r.between[0].first && r.between[0].first.appended === 1 && r.between[1].again && r.between[1].again.appended === 0 && r.between[1].again.duplicates === 1, `③ the device's batch appended once, its re-send costs zero bytes (${JSON.stringify(r.between[0].first)} · ${JSON.stringify(r.between[1].again)})`);
   ok(r.n.before === 1 && r.n.after === 1 && r.n.dev === 1 && r.n.rewritten === 1 && r.total === fx.rows + 3, `③ after the swap each is in the cache ONCE: before the worker's read ${r.n.before}, after it ${r.n.after}, the device's ${r.n.dev}, the re-written line's rid ${r.n.rewritten}; ${r.total} rows = ${fx.rows} + 3`);
-  const kept = uhSrc.replace('_swapCache(next) { next.checkedAt = 0;', '_swapCache(next) { next.checkedAt = Date.now();');
+  // usage-cpu U5: the swap's absorb re-checks the files too — the planted bug keeps the re-check time AND takes nothing appended
+  const kept = uhSrc.replace('_swapCache(next) { next.checkedAt = 0; this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; this._absorbStepped(); }', '_swapCache(next) { next.checkedAt = Date.now(); this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; }');
   const R = await during(M.load(UH_REL, kept, 'kept').UsageHistory, 'b');
   ok(kept !== uhSrc && R.n.after === 0, `control (a swap that keeps a re-check time): the row appended during the hand-over is in the cache ${R.n.after}× ⇒ RED`);
 }

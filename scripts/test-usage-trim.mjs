@@ -34,6 +34,10 @@
 //   §5 the cut over the sorted view = ledgerCutoff over the rows (300 random windows: ties at the edge, the ceiling, prev)
 //   §6 a row the columns cannot hold, below the cut: the trim after the one that kept it makes no pass for it (and a coldable
 //      one that comes below the cut is still moved); an index's old-shape parts; 65 late rows (the linear merge) = the sort
+//   §7 (usage-cpu U5) THE BYTES THE HUB APPENDED ARE TAKEN A SLICE A TURN — a scan's new shard bytes were taken by the next
+//      sync reader's pass, every slice in its one turn (1.5 s held): 12 000 appended rows (~3 MB) taken in steps of one 1 MiB
+//      slice, the cache then = a synchronous load's; a reader mid-way takes over only within TAKEOVER_MAX_BYTES; the scan and
+//      a host batch both ask for it. CONTROL the release's road (the next reader) takes all 12 000 in one call
 // Run: node scripts/test-usage-trim.mjs (no network, no worker)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -335,6 +339,56 @@ try {
     const L = mk(10000, { hub: false }); L.uh._sortedEvents(); const f0 = L.c.fullSorts;
     take(L.uh, L.c, Array.from({ length: 65 }, () => mkRow(T - Math.floor(rnd() * 30 * DAY))), L.st); L.uh._sortedEvents();
     ok(sameView(L.c) && L.c.fullSorts === f0, '65 late rows (past the binary placement\'s 64: the linear merge) = the full stable sort, no full sort');
+  }
+
+  console.log('§7 the bytes the hub appended, a slice a turn');
+  {
+    const base = path.join(tmp, 'absorb', 'usage-history'); fs.mkdirSync(base, { recursive: true });
+    const writeRows = (evs) => { const by = new Map(); for (const ev of evs) { const f = shardOf(ev.ts); if (!by.has(f)) by.set(f, []); by.get(f).push(JSON.stringify(ev)); } for (const [f, ls] of by) fs.appendFileSync(path.join(base, f), ls.join('\n') + '\n'); };
+    writeRows(Array.from({ length: 2000 }, () => mkRow(T - 2 * DAY - Math.floor(rnd() * 8 * DAY))));
+    const mkA = () => { const u = new UsageHistory({ dataDir: path.dirname(base), homeDir: tmp }); u.ledgerWindowMs = 40 * DAY; u.ledgerHotMaxBytes = 1e9; u.warm(); return u; };
+    const counted = (u) => { const o = { n: 0 }, tk = u._take.bind(u); u._take = (...a) => { o.n++; return tk(...a); }; return o; };
+    const hub = mkA(), rel = mkA(); hub.firstLoadInWorker = true; // the hub's ledger, its first load landed
+    const more = Array.from({ length: 12000 }, () => mkRow(T - Math.floor(rnd() * DAY))), minLine = Math.min(...more.map((e) => JSON.stringify(e).length + 1));
+    writeRows(more); hub._evCache.checkedAt = 0; rel._evCache.checkedAt = 0;
+    const relN = counted(rel); rel._loadEvents();
+    const hubN = counted(hub); const p1 = hub._absorbStepped(), steps = hub._evCache.absorbed, firstTick = hubN.n;
+    await p1;
+    const perSlice = Math.ceil((1 << 20) / minLine) + 1, maxStep = Math.max(...steps);
+    const sigA = (u) => { const c = u._evCache; return JSON.stringify([c.events.length + c.cold.n, [...c.rids].sort().slice(0, 50), c.hotBytes]); };
+    ok(steps.length >= 3 && maxStep <= perSlice && firstTick <= perSlice && hub._evCache.events.length + hub._evCache.cold.n === 14000 && sigA(hub) === sigA(rel), `the hub took the 12 000 appended rows in ${steps.length} steps of ≤ ${maxStep} rows (one 1 MiB slice ≤ ${perSlice}), its cache = a synchronous load's`);
+    ok(relN.n === 12000, `control (the release's road — the next sync reader): ${relN.n} rows taken in ONE call ⇒ RED`);
+    writeRows(Array.from({ length: 12000 }, () => mkRow(T - Math.floor(rnd() * DAY)))); hub._evCache.checkedAt = 0;
+    const p2 = hub._absorbStepped(); const before = hubN.n; hub._loadEvents(); const tookOver = hubN.n - before;
+    await p2;
+    ok(tookOver > 0 && tookOver * minLine <= 8 * (1 << 20) && hub._evCache.events.length + hub._evCache.cold.n === 26000 && !hub._evCache.pending, `a sync reader mid-way takes over ${tookOver} rows — within TAKEOVER_MAX_BYTES (8 slices), the rest of the pass with it`);
+    // MORE THAN THE TAKEOVER BOUND LEFT (the adversarial read's must): an async reader WAITS for the absorb — never a promise
+    // already settled (the boot's warm), which a reader that asks again turned into a microtask loop; a stale small reading of
+    // what is left never lets a sync reader take it all; bytes that come mid-absorb are taken by the pass it chains
+    const big = mkA(); big.firstLoadInWorker = true; big.takeoverMaxBytes = 64 * 1024;
+    const nBig = big._evCache.events.length + big._evCache.cold.n;
+    writeRows(Array.from({ length: 12000 }, () => mkRow(T - Math.floor(rnd() * DAY)))); big._evCache.checkedAt = 0;
+    big._evCache.loading = { bytesLeft: 1, at: T }; // a stale reading from before
+    const bigN = counted(big), pb = big._absorbStepped(), w = big._waitBigWarm(), before2 = bigN.n; big._loadEvents(); const tookBig = bigN.n - before2;
+    const raceOf = (p0) => Promise.race([p0.then(() => 'settled'), new Promise((r) => setImmediate(() => r('waiting')))]);
+    const firstLook = await raceOf(w);
+    const stillRunning = !!big._evCache.absorbing;
+    const rel5 = Object.create(big); rel5._waitBigWarm = function () { if (this._booting()) return this._bootWait(); return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }; // the release's body
+    const relLook = await raceOf(rel5._waitBigWarm() || Promise.resolve());
+    writeRows(Array.from({ length: 500 }, () => mkRow(T - Math.floor(rnd() * DAY)))); const chained = big._absorbStepped(); // bytes that come mid-absorb
+    const agg = await big.aggregateAsync({ from: T - 20 * DAY, to: T + DAY }); await pb; await chained;
+    ok(w === big._evCache.absorbing || firstLook === 'waiting', 'an async reader mid-absorb (more than the takeover bound left) gets the absorb to wait for');
+    ok(firstLook === 'waiting' && tookBig === 0 && agg && agg.totals && agg.totals.requests === nBig + 12500 && big._evCache.events.length + big._evCache.cold.n === nBig + 12500 && !big._evCache.absorbing,
+      `…it waits (${firstLook}), a sync reader takes over nothing past the bound (${tookBig} rows — a stale small reading reset), the bytes that came mid-absorb are taken by the pass it chains: ${agg && agg.totals && agg.totals.requests} rows answered`);
+    ok(stillRunning && relLook === 'settled', `control (the release's _waitBigWarm — the boot's warm, ended): «${relLook}» before one loop turn while the absorb still ran (${stillRunning}) ⇒ RED (a reader that asks again loops in microtasks); a reverted cure hangs this suite, and the suite watchdog names it`);
+    // a pass that ends inside its first step (nothing new) never leaves a settled promise behind: the next append is still taken stepped
+    const none = big._absorbStepped(); await none;
+    const leftAfter = big._evCache.absorbing;
+    writeRows(Array.from({ length: 12000 }, () => mkRow(T - Math.floor(rnd() * DAY))));
+    const again = big._absorbStepped(), stepsAgain = big._evCache.absorbed; await again;
+    ok(leftAfter == null && stepsAgain && stepsAgain.length >= 3 && big._evCache.events.length + big._evCache.cold.n === nBig + 24500, `an absorb that found nothing ends with no promise left on the cache (${leftAfter}); the next append is taken in ${stepsAgain && stepsAgain.length} steps`);
+    const srcA = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
+    ok(/if \(appendedNow\) await this\._absorbStepped\(\);/.test(srcA) && /if \(appended\) this\._absorbStepped\(\);/.test(srcA), 'the scan awaits it before it settles; a host batch asks for it');
   }
 } finally { Date.now = realNow; }
 fs.rmSync(tmp, { recursive: true, force: true });

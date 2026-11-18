@@ -802,6 +802,7 @@ class UsageHistory {
       this._cursors = walk.cursors;
       this._partialRids = null; // a commit completed: what an earlier one left half-done is in the shards and behind the cursors
       if (this._writeCursors(deadFacts) && appendedNow) { try { require('./store-writer.js').storeWriter().durable(this.cursorsFile).catch(() => { }); } catch { } }
+      if (appendedNow) await this._absorbStepped(); // usage-cpu U5: the rows it appended are in the cache, taken a slice a turn, before the scan settles
       this._lastScan = Date.now();
     } catch (e) {
       if (e && e.paused) return { added: 0, filesTouched: 0, paused: true }; // the mount-health gate stopped it mid-walk (the cursors as it found them)
@@ -905,7 +906,42 @@ class UsageHistory {
       try { const st = fs.statSync(shard); if (!ix.ino) ix.ino = st.ino; if (st.ino === ix.ino) ix.size = st.size; } catch { }
       appended += keep.length;
     }
+    if (appended) this._absorbStepped(); // usage-cpu U5: the host's rows taken a slice a turn (a reader before the end takes over within the bound)
     return { appended, duplicates, lastTs, lastRid };
+  }
+  /** usage-cpu U5 — THE BYTES THE HUB APPENDED ARE TAKEN STEPPED: a scan's (or a host batch's) new shard bytes were taken by the
+   *  NEXT sync reader's pass, every slice in its one turn (1.5 s held). The hub's ledger (`firstLoadInWorker`) now takes them in
+   *  a pass of WARM_SLICE_BYTES a loop turn — the boot warm's `pending` road: a reader that comes meanwhile takes over only
+   *  while ≤ TAKEOVER_MAX_BYTES are left (past it the async readers wait and a sync one answers from the rows loaded so far,
+   *  named), and the pass's trim is its own steps (_trimOwed). Elsewhere the next reader takes them, as before. → a promise
+   *  that resolves when they are in the cache. `c.absorbed` = the rows each step took (test-usage-trim §7). An async reader that must wait (more than the takeover bound
+   *  left) waits for THIS pass (_waitBigWarm), never for a boot warm that already ended. */
+  _absorbStepped() {
+    const c = this._evCache;
+    if (!this.firstLoadInWorker || !c || c.booting || this._pinDepth > 0) return Promise.resolve();
+    if (c.absorbing) { c.absorbAgain = true; c.loading = null; return c.absorbing; } // bytes that came after its shards were read: taken by the next pass, which this promise waits for (what is left read again)
+    c.checkedAt = 0; c.loading = null; // the reading of what is left belongs to THIS pass (a stale small one would let a reader take it all in one tick)
+    const gen = this._loadSteps(WARM_SLICE_BYTES, TRIM_BATCH_ROWS), steps = c.absorbed = [];
+    // THE PROMISE IS THE CACHE'S BEFORE THE FIRST STEP RUNS (the second read's must): a pass that ends inside its first step
+    // (no new bytes, a throw) clears it — never a settled promise left there that every later ask would return
+    let resolve; const p = c.absorbing = new Promise((r) => { resolve = r; });
+    {
+      const end = () => { if (c.pending === gen) c.pending = null; if (c.absorbing === p) c.absorbing = null; if (c.absorbAgain && this._evCache === c) { c.absorbAgain = false; this._absorbStepped().then(resolve); } else resolve(); };
+      const step = () => {
+        try {
+          if (this._evCache !== c) { try { gen.return(); } catch { } return end(); }
+          if (c.pending === gen) c.pending = null;
+          const n0 = c.events.length + c.cold.n, r = gen.next();
+          steps.push(c.events.length + c.cold.n - n0);
+          if (r.done) return end();
+          c.pending = gen; setImmediate(step);
+        } catch (e) { try { console.warn(`[usage] the ledger's new rows could not be taken stepped (${(e && e.message) || e}) — the next reader takes them`); } catch { } end(); }
+      };
+      if (c.pending) { // a warm already holds a pass: the rows come with it
+        const left = c.pending; const wait = () => { if (c.pending !== left || this._evCache !== c) return step(); setImmediate(wait); }; setImmediate(wait);
+      } else step();
+    }
+    return p;
   }
 
   setIndex(index) { this._index = index || null; }
@@ -1276,7 +1312,7 @@ class UsageHistory {
         if (stepped) yield;
       }
     }
-    if (pass.grew && c.hotBytes > this._ledgerHotMaxBytes()) { if (stepped) { yield; yield* this._trimSteps(trimBatch); } else this._trimOwed(c); }
+    if (pass.grew && c.hotBytes > this._ledgerHotMaxBytes()) { if (stepped && !this.firstLoadInWorker) { yield; yield* this._trimSteps(trimBatch); } else this._trimOwed(c); } // the hub: its own steps (U5 — a reader's takeover never drives a trim)
     // a pass that loaded many cold rows (a boot, a rebuild after a rewrite) orders them NOW, inside the same
     // long load, not in the next query's walk planning (r3: a 13 M-row settle measured 5 s in a 30-day query)
     if (pass.cooled && c.cold.n - c.cold.sortedN > Math.max(65536, c.cold.n >> 2)) { if (stepped) yield; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) { if (stepped) yield; c.cold.idx[k].settle(); } }
@@ -1839,7 +1875,7 @@ class UsageHistory {
   }
   /** THE SWAP: ONE assignment — a reader sees the previous cache or the rebuilt one, each whole — and a new generation for
    *  the cost memos (usage-anchors keys on ledgerGen). The appends since the worker read come in the next pass (checkedAt 0). */
-  _swapCache(next) { next.checkedAt = 0; this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; }
+  _swapCache(next) { next.checkedAt = 0; this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; this._absorbStepped(); } // usage-cpu U5: the bytes appended while the worker built it are taken a slice a turn (the hub's ledger; elsewhere a no-op)
 
   /** B2 (hotfix usage-ledger-walk): the accounts a remote host in `hosts` spent on (a resolved row: an account, not the
    *  host's own bucket) with a ts in [since, to] — by binary search over the (host, account) index kept in _take; the same

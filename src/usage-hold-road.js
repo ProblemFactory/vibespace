@@ -1612,7 +1612,7 @@ class UsageHoldRoad {
    *  when the stepped warm ends — a warm that a reload restarted is the same warm. Never rejects. */
   whenWarm() { return (this._booting() ? (this._loadEvents(), this.bootLoadSettled()) : null) || this._waitBigWarm() || (this._primeHolds && this._primeHolds.size && this._primeAll ? this._primeAll.p : null) || Promise.resolve(); }
   /** An async reader's wait: the warm has more left than a takeover may parse ⇒ wait for it, else nothing. */
-  _waitBigWarm() { if (this._booting()) return this._bootWait(); return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }
+  _waitBigWarm() { if (this._booting()) return this._bootWait(); return this._pendingLeft() > this._takeoverMax() ? ((this._evCache && this._evCache.absorbing) || this.warmSettled()) : null; } // usage-cpu U5: the hub's stepped absorb is the pass to wait for (the boot's warm ended long ago — a wait on it settled at once, and a reader that asks again looped in microtasks)
 }
 
 module.exports = { UsageHoldRoad, setRecordCut, setReadClass, readClassOf, SET_ASIDE_DIR, SET_ASIDE_MAX, SET_READ_PASSES, SET_READ_REFUSED };
