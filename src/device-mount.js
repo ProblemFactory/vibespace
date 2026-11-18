@@ -82,7 +82,11 @@ function isMountDaemonOf(argv, mountpoint) {
 /** B-1ea6: the rclone daemons still serving `mountpoint` — a FRESH /proc pass OFF the loop (fs.promises, one process at a
  *  time as scanProc: the shared threadpool is never flooded), each with the identity read in the same pass ({pid,
  *  starttime}: /proc/<pid>/stat field 22, counted from the last ')'). Never this process. [] where there is no /proc. */
-async function mountDaemonsOf(mountpoint, { procRoot = '/proc' } = {}) {
+// cure 2 (the readers' should): a process LEFT because it sleeps in the kernel is SAID once (per mount point and pid) —
+// never read further (its command line is the hazard), so the walk names it by /proc/<pid>/comm (no memory-map lock)
+const asleepSaid = new Set();
+const sayAsleep = (say, mountpoint, pid, line) => { const k = mountpoint + '\0' + pid; if (!say || asleepSaid.has(k)) return; asleepSaid.add(k); try { say(line); } catch { } };
+async function mountDaemonsOf(mountpoint, { procRoot = '/proc', say = null } = {}) {
   const out = [];
   let pids = [];
   try { pids = (await fs.promises.readdir(procRoot)).filter((n) => /^\d+$/.test(n) && Number(n) !== process.pid); } catch { return out; }
@@ -90,7 +94,11 @@ async function mountDaemonsOf(mountpoint, { procRoot = '/proc' } = {}) {
     // the cure (the readers' 2): the STATE first — a process in uninterruptible sleep (D) is never read further: its command
     // line takes its memory map's lock and can hold a pool thread for as long as it sleeps (proc-identity membersOf's rule)
     const st = await statOf(procRoot, pid);
-    if (!st || st.state === 'D') continue;
+    if (!st) continue;
+    if (st.state === 'D') {
+      if (/rclone/.test(st.comm)) sayAsleep(say, mountpoint, pid, `pull mount ${mountpoint}: rclone process ${pid} is asleep in the kernel — not read, not signalled (it may be a stale daemon of this folder); tried again at the next release`);
+      continue;
+    }
     let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
     if (!isMountDaemonOf(argv, mountpoint)) continue;
     if (Number.isFinite(st.start)) out.push({ pid: Number(pid), starttime: st.start });
@@ -101,16 +109,20 @@ async function mountDaemonsOf(mountpoint, { procRoot = '/proc' } = {}) {
 async function statOf(procRoot, pid) {
   let st; try { st = await fs.promises.readFile(`${procRoot}/${pid}/stat`, 'utf8'); } catch { return null; }
   const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
-  return { state: rest[0], start: Number(rest[19]) };
+  return { state: rest[0], start: Number(rest[19]), comm: st.slice(st.indexOf('(') + 1, st.lastIndexOf(')')) };   // comm: field 2, the kernel's own name
 }
 /** B-1ea6: the pre-clean's kill — each daemon the scan proved, RE-CHECKED at the signal: its command line read again (still
  *  a mount daemon of exactly this mount point) and then PI.signalIdentity (the start time judged in the same tick as the
  *  kill: a pid that now names another process is never signalled). → the pids signalled. */
 async function killMountDaemons(mountpoint, { procRoot = '/proc', kill = null, say = null } = {}) {
   const hit = [];
-  for (const id of await mountDaemonsOf(mountpoint, { procRoot })) {
+  for (const id of await mountDaemonsOf(mountpoint, { procRoot, say })) {
     const st = await statOf(procRoot, id.pid);
-    if (!st || st.state === 'D') continue;   // asleep in the kernel now: never read further (a SIGKILL would wait for it anyway)
+    if (!st) continue;
+    if (st.state === 'D') {   // asleep in the kernel now: never read further (a SIGKILL would wait for it anyway) — said once
+      sayAsleep(say, mountpoint, id.pid, `pull mount ${mountpoint}: its stale daemon ${id.pid} is asleep in the kernel — left; tried again at the next release`);
+      continue;
+    }
     let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${id.pid}/cmdline`, 'utf8')).split('\0'); } catch { continue; }
     if (!isMountDaemonOf(argv, mountpoint)) continue;
     const r = PI.signalIdentity(id, 'SIGKILL', { procRoot, what: 'the stale daemon of a pull mount point', ...(kill ? { kill } : {}), ...(say ? { say } : {}) });

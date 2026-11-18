@@ -327,6 +327,20 @@ try {
     let foundD, sigD = [];
     try { foundD = await mountDaemonsOf(mac, { procRoot: P }); await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigD.push([p, s]), say: () => {} }); } finally { fs.promises.readFile = rpD; }
     check('a process asleep in the kernel (D) is skipped — its command line is never read, it is never signalled', JSON.stringify(foundD) === JSON.stringify([{ pid: 301, starttime: 1000 }]) && dRead === 0 && sigD.every(([p]) => p !== 306), JSON.stringify({ foundD, dRead, sigD }));
+    { // cure 2: a process LEFT asleep is SAID once — at the walk (named by its comm, never its command line) and at the re-check
+      fake(307, ['/usr/bin/rclone', ...pullMountArgs(mac)], 7000, 'D');   // a fresh pid (306 was said by the leg above)
+      const saidD = [];
+      await killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidD.push(l) });
+      await killMountDaemons(mac, { procRoot: P, kill: () => {}, say: (l) => saidD.push(l) });
+      const walkSaid = saidD.filter((l) => /rclone process 307 is asleep in the kernel — not read, not signalled/.test(l)).length;
+      fs.rmSync(path.join(P, '307'), { recursive: true, force: true });
+      let st2 = 0;
+      fs.promises.readFile = async function (q, ...a) { if (q === path.join(P, '301', 'stat') && ++st2 === 2) return `301 (rclone) D 1 301 301 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0`; return rpD.call(this, q, ...a); };
+      const sigR = [], saidR = [];
+      try { await killMountDaemons(mac, { procRoot: P, kill: (p, s) => sigR.push(p), say: (l) => saidR.push(l) }); } finally { fs.promises.readFile = rpD; }
+      check('cure 2: a process left asleep in the kernel is SAID once — at the walk by its comm (twice walked, once said), and the stale daemon found asleep at the re-check is said and left (never signalled)',
+        walkSaid === 1 && sigR.length === 0 && saidR.some((l) => /its stale daemon 301 is asleep in the kernel — left/.test(l)), JSON.stringify({ walkSaid, saidD, sigR, saidR }));
+    }
     {
       const dsrc0 = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
       const noSkip = "    if (!st || st.state === 'D') continue;\n    let argv; try { argv = (await fs.promises.readFile(`${procRoot}/${pid}/cmdline`";
