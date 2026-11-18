@@ -731,7 +731,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // still forming around it forms with it in front (desktop-manager keepInFront)
         if (!replay) this.desktopManager?.keepInFront?.(winId);
         this.wm.revealWindow(winId, { replay });
-        const off = replay && !!this.wm.windows.get(winId)?._hiddenByDesktop; // a replay never raises nor types into a window its desktop hides (B-2dbe)
+        const off = replay && !!this.wm.windows.get(winId)?._hiddenByDesktop && !this.stage?.isActive; // a replay never raises nor types into a window its desktop hides (B-2dbe) — the Stage keeps its own rules, as revealWindow's replay does (its materialize IS the raise)
         if (replay && !off && this.wm.windows.get(winId)?.isMinimized) this.wm.restore(winId);
         if (!off) term.focus();
         return true;

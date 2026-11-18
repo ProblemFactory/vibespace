@@ -131,7 +131,10 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
   s = scene(real); await s.dm.switchTo('D2');
   ok(s.wm.activeWindowId === 'b2', 'a SWITCH hands the focus to the shown desktop\'s front window (b2, the higher z) — the release left it on a1, now hidden', s.wm.activeWindowId);
   s = scene(real); s.wins.get('b2').element.classList.add('window-arrived'); await s.dm.switchTo('D2');
-  ok(s.wm.activeWindowId === null && s.wins.get('b2').element.classList.contains('window-arrived'), '…its front window an AGENT\'s that arrived unasked ⇒ no window is active and the mark stays (only the person\'s act focuses it)', s.wm.activeWindowId);
+  ok(s.wm.activeWindowId === null && s.wins.get('b2').element.classList.contains('window-arrived') && !s.wins.get('a1').element.classList.contains('window-active'), '…its front window an AGENT\'s that arrived unasked ⇒ no window is active, the mark stays (only the person\'s act focuses it), and the window that WAS active is no longer drawn so (batch 60\'s reader)', { active: s.wm.activeWindowId, a1Active: s.wins.get('a1').element.classList.contains('window-active') });
+  { const keep = mkRefocus(slice(DMJ, '_refocusShown').replace(/\n    for \(const \[, w\] of wm\.windows\) w\?\.element\?\.classList\?\.remove\?\.\('window-active'[^\n]*\n/, '\n'));
+    const s0 = scene(real, { refocus: keep }); s0.wins.get('b2').element.classList.add('window-arrived'); await s0.dm.switchTo('D2');
+    ok(s0.wins.get('a1').element.classList.contains('window-active'), 'CONTROL: the null branch without the clear leaves the hidden window drawn active (the leg above goes RED)'); }
   s = scene(real); s.app.isMobile = true; await s.dm.switchTo('D2');
   ok(s.wm.activeWindowId === 'a1', '…a phone keeps its own view state (mobile-nav picks the window it shows on that desktop)');
   s = scene(real); s.wins.get('a1')._hiddenByStage = true; mkRefocus().call(s.dm);
@@ -146,6 +149,13 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
     fes(src).call(ctx, 'S', { replay: true }); return { restored, typed, active: t.wm.activeWindowId }; };
   const fr = fesScene(sliceObj(SLJ, '_focusExistingSession'));
   ok(fr.restored === 0 && fr.typed === 0 && fr.active === 'a1', '_focusExistingSession\'s REPLAY of a window its desktop hides: not raised, not restored, no keyboard focus into it', fr);
+  const fesStage = (src) => { const t = scene(real, { stage: true }); const w = t.wins.get('b1'); w.isMinimized = true; let restored = 0, typed = 0;
+    t.wm.restore = () => { restored++; }; const ctx = { sessions: new Map([['b1', { sessionId: 'S', focus() { typed++; } }]]), wm: t.wm, stage: { isActive: true }, desktopManager: { keepInFront() {} } };
+    fes(src).call(ctx, 'S', { replay: true }); return { restored, typed }; };
+  const fs1 = fesStage(sliceObj(SLJ, '_focusExistingSession'));
+  ok(fs1.restored === 1 && fs1.typed === 1, '…under the STAGE the replay keeps its own rules (as revealWindow\'s replay): a minimized window is restored and typed into — batch 60\'s reader', fs1);
+  const fs0 = fesStage(sliceObj(SLJ, '_focusExistingSession').replace(' && !this.stage?.isActive;', ';'));
+  ok(fs0.restored === 0 && fs0.typed === 0, 'CONTROL: the guard without the Stage\'s exemption skips the Stage\'s restore (the leg above goes RED)', fs0);
   // the roads that may hide the active window call the refocus
   ok(/\n      if \(targetState\?\.windows\) \{\n        if \(this\._replayMissing\(desktopId, targetState\)\) hasWindows = true;\n      \}\n\s*this\._refocusShown\(\);/.test(DMJ) && /this\._hideWin\(win\);\n\s*this\._refocusShown\(\);/.test(DMJ) && /this\._hideWin\(w\); this\._refocusShown\(\);/.test(DMJ) && /dm\._refocusShown\?\.\(\);/.test(fs.readFileSync(path.join(repo, 'src/lib/stage-manager.js'), 'utf8')),
     'the refocus is called by every road that may hide the active window: switchTo (step 6), a move to a desktop not on show, the late retag, the Stage leaving');
@@ -162,7 +172,7 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
   ok(noArrived !== slice(DMJ, '_refocusShown') && s.wm.activeWindowId === 'b2' && !s.wins.get('b2').element.classList.contains('window-arrived'), 'CONTROL: the refocus without the arrived check focuses the agent\'s window and wipes its mark (the arrived leg goes RED)', s.wm.activeWindowId);
   s = scene(real, { refocus: () => {} }); await s.dm.switchTo('D2');
   ok(s.wm.activeWindowId === 'a1', 'CONTROL: a switch with no refocus leaves the focus on the left desktop\'s window (the switch leg goes RED)', s.wm.activeWindowId);
-  const fr0 = fesScene(sliceObj(SLJ, '_focusExistingSession').replace("        const off = replay && !!this.wm.windows.get(winId)?._hiddenByDesktop; // a replay never raises nor types into a window its desktop hides (B-2dbe)\n", '').replace('if (replay && !off && ', 'if (replay && ').replace('if (!off) term.focus();', 'term.focus();'));
+  const fr0 = fesScene(sliceObj(SLJ, '_focusExistingSession').replace(/\n        const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop[^\n]*/, '').replace('if (replay && !off && ', 'if (replay && ').replace('if (!off) term.focus();', 'term.focus();'));
   ok(fr0.restored === 1 && fr0.typed === 1, 'CONTROL: the release\'s _focusExistingSession restores the hidden window and types into it (the replay leg goes RED)', fr0);
 }
 

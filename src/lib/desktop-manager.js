@@ -975,6 +975,7 @@ export class DesktopManager {
       if (wz > z) { top = w; z = wz; }
     }
     if (top && !top.element?.classList?.contains?.('window-arrived') && typeof wm._focusMostRecent === 'function') { wm._focusMostRecent(); return; }
+    for (const [, w] of wm.windows) w?.element?.classList?.remove?.('window-active', 'highlight-subtle', 'highlight-strong'); // no window active: none drawn so (the hidden one came back highlighted — batch 60's reader)
     wm.activeWindowId = null; wm._notify?.();
   }
 
