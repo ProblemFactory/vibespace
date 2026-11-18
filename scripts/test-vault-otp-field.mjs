@@ -25,7 +25,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MODEL = 'src/lib/vault-otp-field-model.js';
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let passed = 0, failed = 0;
-const ok = (c, name, detail) => { if (c) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.error(`  ✗ ${name}${detail !== undefined ? '\n    ' + JSON.stringify(detail).slice(0, 700) : ''}`); } };
+const ok = (c, name, detail) => { if (typeof name !== 'string') throw new TypeError('a leg\'s name is not a string — its arguments are swapped (test-ci-gate-tiers §7b)'); if (c) { passed++; console.log(`  ✓ ${name}`); } else { failed++; console.error(`  ✗ ${name}${detail !== undefined ? '\n    ' + JSON.stringify(detail).slice(0, 700) : ''}`); } };
 const M = await import(pathToFileURL(path.join(REPO, MODEL)).href);
 
 const VAULT = { ok: true, state: 'unlocked', entries: [
