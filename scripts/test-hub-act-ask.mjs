@@ -302,15 +302,38 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
     const fold = w.lines.find((l) => l.repeats);
     ok(went === 'sent' && fold && fold.repeats === 1 && fold.summary === w.lines[2].summary, `the act goes (the list says Always): its fold is said first — ONE line, ${fold && fold.repeats} repeat`);
   }
-  // the hourly line (here 40 ms), the cap of open folds (the oldest said when evicted), and a stopped client folds nothing
+  // the hourly line, the cap of open folds (the oldest said when evicted), and a stopped client folds nothing. The hour runs on
+  // an INJECTED clock (dm._clock — batch 71's reader: a loaded runner's gaps between the refusals decided the old 40 ms leg)
   {
     const w = world({ hub: 'nobody' });
-    w.dm._foldSayMs = 40;
+    const T0 = Date.parse('2026-11-18T00:00:00Z'), HOUR = 3600000; let now = T0;
+    w.dm._clock = () => now; w.dm._foldSayMs = HOUR;
     const by = { by: 'agent:claude:c2' };
-    for (let k = 0; k < 3; k++) await codeOf(w.dm.runCmd('ls', [], by));
-    await new Promise((r) => setTimeout(r, 120));
+    for (let k = 0; k < 3; k++) { await codeOf(w.dm.runCmd('ls', [], by)); now += 1000; }   // one said, two counted
+    const before = w.lines.length;
+    now = T0 + HOUR + 5000; await codeOf(w.dm.runCmd('ls', [], by));   // a repeat past the hour: the fold is said with it
     const hourly = w.lines.find((l) => l.repeats);
-    ok(w.lines.length === 2 && hourly && hourly.repeats === 2, `while repeats keep coming the fold is said on its own clock (one line per _foldSayMs): ${hourly && hourly.repeats} repeats, ${w.lines.length} lines in all`);
+    ok(before === 1 && w.lines.length === 2 && hourly && hourly.repeats === 3 && hourly.since === T0,
+      `while repeats keep coming the fold is said once an hour (an injected clock): ${hourly && hourly.repeats} repeats since the first line, ${w.lines.length} lines in all`);
+    now += 2 * HOUR; await codeOf(w.dm.runCmd('ls', [], by));   // nothing owed, the last refusal two hours old: STALE
+    const stale = w.lines[w.lines.length - 1];
+    ok(w.lines.length === 3 && !stale.repeats && stale.at === now, 'the same refusal two hours after its last (nothing owed): said AT ONCE as a first — never folded into a count said within the hour');
+    // the timer's say (here 40 ms real): the next line counts from WHEN that line was said, not from a repeat it covered
+    const wt = world({ hub: 'nobody' }); let t = T0;
+    wt.dm._clock = () => t; wt.dm._foldSayMs = 40;
+    await codeOf(wt.dm.runCmd('ls', [], by)); t = T0 + 5; await codeOf(wt.dm.runCmd('ls', [], by));   // said + one counted: its timer armed
+    t = T0 + 20;
+    for (let k = 0; k < 300 && wt.lines.length < 2; k++) await new Promise((r) => setTimeout(r, 10));   // its timer says it (a count, no wall-clock bound)
+    t = T0 + 25; await codeOf(wt.dm.runCmd('ls', [], by)); wt.dm._foldEndAll();
+    const [byTimer, next] = wt.lines.filter((l) => l.repeats);
+    ok(wt.lines.length === 3 && byTimer && byTimer.repeats === 1 && byTimer.since === T0 && next && next.repeats === 1 && next.since === T0 + 20,
+      `a fold said by its own timer, then one more repeat: «since» = when the line before was SAID (${next && next.since - T0} ms), never the repeat it already covered (5 ms)`);
+    // two long commands alike in their first SUMMARY_MAX characters are TWO acts (the fold key carries a hash of the whole argv)
+    const wl = world({ hub: 'nobody' }), long = 'x'.repeat(300);
+    await codeOf(wl.dm.runCmd('echo', [long + 'A'], by)); await codeOf(wl.dm.runCmd('echo', [long + 'B'], by)); await codeOf(wl.dm.runCmd('echo', [long + 'A'], by));
+    wl.dm._foldEndAll();
+    ok(wl.lines.length === 3 && wl.lines[0].summary === wl.lines[1].summary && !wl.lines[1].repeats && wl.lines[2].repeats === 1,
+      `two commands whose summaries (cut at 240) are equal but whose argv differ: two lines; the first one's repeat folds (${wl.lines.map((l) => l.repeats || 0).join(',')})`);
     const w2 = world({ hub: 'nobody' });
     await codeOf(w2.dm.runCmd('ls', [], by)); await codeOf(w2.dm.runCmd('ls', [], by));   // a fold with one repeat
     for (let k = 0; k < 256; k++) await codeOf(w2.dm.runCmd('echo', [String(k)], by));       // 256 other acts: the oldest fold is evicted

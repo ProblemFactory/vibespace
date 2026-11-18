@@ -17,6 +17,9 @@ const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv, serviceEnv, SSH_ENV_KEEP } = require('../agent-env.js');
 const DA = require('../device-acts.js'); // lane device-act-audit: the op layers + `by` + THE audit line (PURE)
+// B-c632 cure (batch 71's reader): the act's WHOLE argv — the summary is cut at SUMMARY_MAX, so two long commands alike in their
+// first 240 characters were one subject; a hash of the whole argv (cmd + args, or the shell line, + cwd) tells them apart
+const argvIdOf = (p) => (p && (p.cmd != null || p.shell != null) ? crypto.createHash('sha256').update(JSON.stringify([p.shell == null ? null : String(p.shell), p.cmd == null ? null : String(p.cmd), Array.isArray(p.args) ? p.args.map(String) : null, p.cwd == null ? null : String(p.cwd)])).digest('hex').slice(0, 16) : '');
 const FOLD_SAY_MS = 60 * 60e3, FOLDS_MAX = 256;   // B-c632: a fold of repeated refusals is said at least hourly; open folds kept
 // B-c632 (r1): the clients holding an open fold — said at the process's exit (a restart inside the hour keeps its count)
 const _OPEN_FOLDS = new Set();
@@ -105,8 +108,9 @@ class DeviceManager {
     // lineOf), handed to the construction site's writer (src/device-audit.js through hosts.deviceAudit; every `new DeviceManager`
     // passes one — scripts/test-device-acts.mjs census)
     this._onAct = typeof onAct === 'function' ? onAct : null;
-    // B-c632: REPEATED REFUSALS FOLD (`_foldCount`) — `${op}\0${by}\0${summary}` → the open fold of one act's refusals
-    this._folds = new Map(); this._foldSayMs = FOLD_SAY_MS;
+    // B-c632: REPEATED REFUSALS FOLD (`_foldCount`) — `${op}\0${by}\0${summary}\0${argv hash}` → the open fold of one act's
+    // refusals; `_clock` = the folds' time (a test injects one: the hour is never a loaded runner's gaps)
+    this._folds = new Map(); this._foldSayMs = FOLD_SAY_MS; this._clock = Date.now;
     // lane device-bundle-signing (design q-042 D2): an upgrade this hub WILL NOT push (its build is not the signed release)
     // or one the DEVICE refused (its signature did not check) — the same door (device-upgrade-watch `refused`)
     this._onUpgradeRefused = typeof onUpgradeRefused === 'function' ? onUpgradeRefused : null;
@@ -761,9 +765,9 @@ class DeviceManager {
     let g = null;
     try { g = await this._actGate.check(payload, { consent }); }
     catch (e) { g = { ok: false, code: 'hub_act_denied', error: `this act could not be judged (${String(e && e.message).slice(0, 120)}) — nothing was done`, ask: 'error' }; }
-    if (!g || g.ok) { if (this._folds.size) this._foldEnd(this._foldKey(DA.keyOf(payload), DA.validBy(payload.by) ? payload.by : null, DA.summaryOf(payload))); return g || null; }
-    const l = DA.lineOf({ at: Date.now(), payload, by: payload.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy });
-    if (!this._foldCount(l, g)) {   // B-c632: a repeat of the open fold's refusal is counted, not said
+    if (!g || g.ok) { if (this._folds.size) this._foldEnd(this._foldKey(DA.keyOf(payload), DA.validBy(payload.by) ? payload.by : null, DA.summaryOf(payload), argvIdOf(payload))); return g || null; }
+    const l = DA.lineOf({ at: this._clock(), payload, by: payload.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy });
+    if (!this._foldCount(l, g, argvIdOf(payload))) {   // B-c632: a repeat of the open fold's refusal is counted, not said
       try { this._log(`[device-acts] NOT SENT ${l.op} by ${l.by} — ${g.code}: ${l.summary}`); } catch { }
       if (this._onAct) { try { this._onAct(l); } catch { } }
     }
@@ -772,17 +776,18 @@ class DeviceManager {
   /** B-c632: REPEATED REFUSALS FOLD. Under a hub-own hold every stream start (1/min) was refused `ask_standing` with a journal
    *  line AND an audit line each — 1 440 of each a day, nothing tried. A refusal of an act (op, by, summary) whose verdict
    *  (code, ask, who answered) equals its open fold's is a REPEAT: counted, nothing said. The fold is said — ONE journal line and ONE audit line
-   *  (`repeats`: how many, `since`: the line said before them) — when the subject's verdict changes, when one of its acts goes,
+   *  (`repeats`: how many, `since`: WHEN the line before them was said) — when the subject's verdict changes, when one of its acts goes,
    *  every `_foldSayMs` while repeats keep coming (one line an hour, a timer of its own), at stop() and at the process's exit.
    *  The first refusal is said at once, as before. ONLY IDENTICAL ACTS FOLD (r1's must): the subject is the act itself —
-   *  op, by AND its summary (another command of the same agent is its own line, never hidden in a count); the verdict
-   *  carries who answered (a person's Deny is its own line; the stored Deny's repeats fold). A stopped client folds nothing.
-   *  → true when `l` was a repeat. */
-  _foldKey(op, by, summary = '') { return `${op}\0${by || ''}\0${summary || ''}`; }
-  _foldCount(l, g) {
+   *  op, by, its summary AND a hash of its whole argv (another command of the same agent is its own line, never hidden in a
+   *  count — however long); the verdict carries who answered (a person's Deny is its own line; the stored Deny's repeats fold).
+   *  A fold with nothing owed whose last refusal is older than `_foldSayMs` is STALE: the next one is said at once, as a first.
+   *  A stopped client folds nothing. → true when `l` was a repeat. */
+  _foldKey(op, by, summary = '', argv = '') { return `${op}\0${by || ''}\0${summary || ''}\0${argv || ''}`; }
+  _foldCount(l, g, argv = '') {
     if (this._stopped) return false;
-    const k = this._foldKey(l.op, l.by, l.summary), v = `${g.code}\0${g.ask || ''}\0${g.answeredBy || ''}`, f = this._folds.get(k);
-    if (f && f.v === v) {
+    const k = this._foldKey(l.op, l.by, l.summary, argv), v = `${g.code}\0${g.ask || ''}\0${g.answeredBy || ''}`, f = this._folds.get(k);
+    if (f && f.v === v && !(f.more === 0 && l.at - f.lastAt >= this._foldSayMs)) {
       f.more++; f.lastAt = l.at; f.last = l;
       this._folds.delete(k); this._folds.set(k, f);   // the oldest fold out is the least recently refused (FOLDS_MAX)
       _OPEN_FOLDS.add(this);   // a count to say at exit — only while one is owed
@@ -804,7 +809,7 @@ class DeviceManager {
       try { this._log(`[device-acts] NOT SENT ${l.op} by ${l.by} — ${f.code}: ${f.more} more time(s) since ${new Date(f.saidAt).toISOString()} (the last ${new Date(f.lastAt).toISOString()}) — one line for the repeats: ${l.summary}`); } catch { }
       if (this._onAct) { try { this._onAct({ ...l, at: f.lastAt, repeats: f.more, since: f.saidAt }); } catch { } }
     }
-    f.more = 0; f.saidAt = f.lastAt;
+    f.more = 0; f.saidAt = this._clock();   // the next line counts from THIS line's time (never from a repeat it covered)
     if (![...this._folds.values()].some((x) => x.more > 0)) _OPEN_FOLDS.delete(this);
   }
   _foldEnd(k) { if (!this._folds.has(k)) return; this._foldSay(k); this._folds.delete(k); }
