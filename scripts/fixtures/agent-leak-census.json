@@ -103,9 +103,6 @@
       "why": "opening a window needs a live desktop (the inert desktop keeper): the open crashes past its door; the other window routes answer by the real engine"
     }
   },
-  "depth": {
-    "A": 29
-  },
   "open": {},
   "findings": {
     "POST /api/agent/automation/:verb · maintainer · bName": "LISTED for the coordinator (B-1fe9 U3): feedback.list (src/server/feedback-store.js — it judges no caller) answers EVERY conversation's open feedback report with the filing conversation's name and its words, to whoever may run the verb: the maintainer key (vsmk_, the fleet-feedback-marks design) and any conversation an automation key carrying feedback.list is granted to (its own session token + the key, the default reach — the verb has no target to reach). A's granted key also MARKS B's report handled (feedback.handled: an act on another conversation's report). Judged by the owner, not fixed here",

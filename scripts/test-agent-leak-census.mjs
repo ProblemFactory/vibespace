@@ -547,7 +547,7 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
         if (!init) v = undefined;
         else {
           const c = constructsIn(d.file, init, WM.text);
-          if (c && !has(catalog, key)) { demanded.set(key, 'constructs ' + squash(c).slice(0, 90)); v = undefined; }
+          if (c && !has(catalog, key)) { demanded.set(key, `constructs ${squash(c).slice(0, 90)} (declared at ${d.file} line ${WM.lineOfAt(d.file, init.start)})`); v = undefined; }
           else {
             if (c) used.add(key);
             // one construction per declaration: every pick of `const { a, b } = create(…)` reads the same value
@@ -755,7 +755,7 @@ const WORLD = buildWorld({ catalog: CATALOG, routes: ROUTES_STATIC });
   const registering = B.broken.filter((b) => b.what === 'route' || /^(register|setup|create|router)/.test(b.what));
   ok(!registering.length, 'no bearer route, and no registering export of a bearer module, is used at a place the boot does not run', registering.map((b) => `${b.tag} — ${b.why}`).join(' | '));
   ok(!B.threw.length, 'every site evaluates without throwing', B.threw.join(' | '));
-  ok(!B.demanded.size, 'every construction a site touches is a CATALOG row (eval / make / inert, each with its why)', [...B.demanded].map(([k, v]) => `${k} — ${v}`).join(' | '));
+  ok(!B.demanded.size, 'every construction a site touches is a CATALOG row (eval / make / inert, each with its why)', B.demanded.size ? 'ADD A CATALOG ROW (eval / make / inert, with its why) in scripts/test-agent-leak-census.mjs for each — `git log -L <line>,<line>:<file>` names the commit that made the construction: ' + [...B.demanded].map(([k, v]) => `${k} — ${v}`).join(' | ') : '');
   ok(!SPAWNED.length, 'no program started while the wiring mounted', SPAWNED.slice(0, 8).join(' | '));
   ok(!B.gaps.size, 'no stand-in member read that its row did not give', [...B.gaps].join(' | '));
   ok(!B.dirnameReads.size, 'no evaluated wiring code outside server.js reads its own __dirname (the real tree\'s folder — only server.js\'s is the scratch root; a data path built from another would land in the checkout)', [...B.dirnameReads].join(' | '));
@@ -951,7 +951,7 @@ function sweepVerdicts(results, table) {
   };
   // SHALLOW: a route a caller CRASHES in (a stand-in short of a member reads so), or A's token gets a 5xx from — the
   // world cannot take it past its door; SHAPE: A's 400 — the request's shape refused before any reach is judged
-  const shallow = prefixRows('shallow', [...new Set(by((x) => CRASH_RE.test(x.text) || (x.who === 'A' && x.status >= 500)).map((x) => x.route))]);
+  const shallow = prefixRows('shallow', [...new Set(by((x) => CRASH_RE.test(x.text) || (x.who !== 'none' && x.who !== 'vsak' && x.status >= 500)).map((x) => x.route))]);   // any token-bearing caller's 5xx (a handler that throws for a job token or the maintainer key too)
   const shape = prefixRows('shape', [...new Set(by((x) => x.who === 'A' && x.status === 400 && !CRASH_RE.test(x.text)).map((x) => x.route))]);
   // DEEP: the routes A's token takes past their door (2xx), pinned both ways — a lost one and a new one are each said
   const deepNow = [...new Set(by((x) => x.who === 'A' && x.status >= 200 && x.status < 300).map((x) => x.route))].sort();
@@ -979,7 +979,7 @@ ok(RESULTS.length === expected && !by((x) => x.timedOut || x.status <= 0).length
   const progs = [...new Set(SPAWNED.map((x) => x.split(' ')[1]))];
   ok(progs.every((p) => has(RF, p)) && Object.keys(RF).every((p) => progs.includes(p)) && Object.values(RF).every((w) => String(w || '').trim().length >= 20), `every program a handler would start is refused and is a \`refused\` row with its why (${progs.join(', ') || 'none'})`, [...progs.filter((p) => !has(RF, p)).map((p) => 'NEW ' + p), ...Object.keys(RF).filter((p) => !progs.includes(p)).map((p) => 'DEAD ' + p)].join(' | '));
 }
-ok(!WORLD.demanded.size && !WORLD.gaps.size && !REJECTED.length, 'after the sweep: no construction without a row, no stand-in member missing, no unhandled rejection (a handler\'s own names are rows too)', [...[...WORLD.demanded].map(([k, v]) => `${k} — ${v}`), ...[...WORLD.gaps], ...REJECTED].slice(0, 12).join(' | '));
+ok(!WORLD.demanded.size && !WORLD.gaps.size && !REJECTED.length, 'after the sweep: no construction without a row, no stand-in member missing, no unhandled rejection (a handler\'s own names are rows too)', (WORLD.demanded.size ? 'ADD A CATALOG ROW (eval / make / inert, with its why) in scripts/test-agent-leak-census.mjs for each — `git log -L <line>,<line>:<file>` names the commit that made the construction: ' : '') + [...[...WORLD.demanded].map(([k, v]) => `${k} — ${v}`), ...[...WORLD.gaps].map((g) => `${g} (give the stand-in that member)`), ...REJECTED].slice(0, 12).join(' | '));
 SPAWNED.length = 0;   // the controls below count their own
 {
   const dead = Object.keys(CATALOG).filter((k) => !WORLD.used.has(k));
@@ -987,10 +987,14 @@ SPAWNED.length = 0;   // the controls below count their own
 }
 const ALL_RESULTS = [...RESULTS, ...KEY_RESULTS, ...RELATED];
 const SV = sweepVerdicts(RESULTS, TABLE);
+{
+  const stray = [...ROUTE_ERRORS.keys()].filter((k) => !SV.shallow.now.some((r) => r === k || r.startsWith(k + ' #')));
+  ok(!stray.length, `every route a handler threw on (the census error path, ${ROUTE_ERRORS.size}) is a shallow route — none throws unseen behind a 4xx-looking answer`, stray.map((k) => `${k} → ${ROUTE_ERRORS.get(k)}`).join(' | '));
+}
 const SVF = sweepVerdicts(ALL_RESULTS, TABLE).findings;   // the findings over every pass (the five callers, the granted key, the related reads)
 const textOf = (r) => ((RESULTS.find((x) => x.route === r && x.who === 'A') || {}).text || '').slice(0, 110);
 const said = (v) => [...v.unrowed.map((r) => 'NEW ' + r + ' → ' + textOf(r)), ...v.dead.map((k) => 'DEAD ' + k), ...(v.blank || []).map((k) => 'NO WHY ' + k), ...(v.count || []).map((k) => 'COUNT ' + k)].join(' | ');
-ok(!SV.shallow.unrowed.length && !SV.shallow.dead.length && !SV.shallow.blank.length && !SV.shallow.count.length, `every route the world cannot take past its door (a crash, or a 5xx to A) is a \`shallow\` row with its why and its count (${SV.shallow.now.length}: ${Object.entries(SV.shallow.per).map(([k, n]) => `${k}* ${n}`).join(', ')})`, said(SV.shallow));
+ok(!SV.shallow.unrowed.length && !SV.shallow.dead.length && !SV.shallow.blank.length && !SV.shallow.count.length, `every route the world cannot take past its door (a crash, or a 5xx to a token-bearing caller) is a \`shallow\` row with its why and its count (${SV.shallow.now.length}: ${Object.entries(SV.shallow.per).map(([k, n]) => `${k}* ${n}`).join(', ')})`, said(SV.shallow));
 ok(!SV.shape.unrowed.length && !SV.shape.dead.length && !SV.shape.blank.length && !SV.shape.count.length, `every route whose request SHAPE A's token is refused on (a 400 — the reach never judged) is a \`shape\` row with its why and its count (${SV.shape.now.length})`, said(SV.shape));
 ok(!SV.deep.lost.length && !SV.deep.gained.length, `the routes A's token takes past their door are the table's \`deep\` set, both ways (${SV.deep.now.length})`, [...SV.deep.lost.map((r) => 'LOST ' + r), ...SV.deep.gained.map((r) => 'NEW ' + r)].join(' | '));
 ok(!SV.open.unrowed.length && !SV.open.dead.length, `no bearer route answers 2xx with no bearer or a value no door knows, unless it is an \`open\` row with its why (${SV.open.now.length})`, said(SV.open));
