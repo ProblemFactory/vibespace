@@ -118,10 +118,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In your own browsing window, a refused sign-in now says why: the request has closed, Chrome shows its own sheet, or the browser is not watched.
 - When the browser answers late while an agent's download folder is being put back, a next download no longer lands in your own folder untold.
 - If a browser never confirms that your download folder was put back after a conversation borrowed it, For you now says so, with a Restart button.
+- A custom kernel's notice that it runs as standard Chrome now closes once it answers as the kernel again, and a stopped profile no longer shows the warning.
+- When «Open the session list» from a window that lost its conversation finds hidden matches, the list says how many; archived ones get a «Show archived» button.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
 - Once you hand the browser to an agent, a passkey registration of yours that you then refused is refused, never completed in the agent's place.
+- When an engine plugin's probe fails, an agent is no longer told a file path on your machine.
 
 ## 2.369.409 — 2026-11-17
 
