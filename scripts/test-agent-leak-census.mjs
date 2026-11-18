@@ -759,6 +759,10 @@ const CATALOG = {
   // the manager design's piece 4 (conversations.resume) — its ONE line and its kept-record reader, met when the stack was restacked onto the train
   'src/server/mounts-plugins-wiring.js:resumeLine': { kind: 'make', why: 'THE resume line (resume-line.js createResumeLine) starts real resumes — a stand-in that starts nothing: every submit refuses by name (the census resumes no conversation), the line is empty', make: (w) => standIn(w, 'resumeLine', { submit: () => ({ ok: false, code: 'census_no_resume' }), state: () => ({ running: 0, waiting: 0, open: true }) }) },
   'src/server/mounts-plugins-wiring.js:resumeFactsOf': { kind: 'make', why: 'the kept-record READER (resume-line.js factsReaderOver), real, over no road: the census world keeps no ended conversation, so every key reads the reader\'s own «nothing kept» (goal unknown)', make: (w) => R('src/server/resume-line.js').factsReaderOver({ buffersDir: path.join(w.data, 'buffers'), road: null, readJson: async () => null }) },
+  // the proposal card (lane login-request-card, majordomo piece 3b): the list's ONE builder hoisted so the card's rows come from it, and
+  // the card's store — both start nothing when built (no timer, no spawn); a press reaches only the stand-in doors of the census world
+  'src/server/mounts-plugins-wiring.js:listFacts': { kind: 'eval', why: 'conversations.list\'s ONE builder (conversation-facts.js), real, over the census world\'s sessions and stores' },
+  'src/server/mounts-plugins-wiring.js:endProposals': { kind: 'eval', why: 'THE proposal card\'s store (end-proposals.js), real over THE For-you store: one card per proposer, nothing pressed in the census' },
   // ── src/server/apps-wiring.js / window-live-wiring.js ──
   'src/server/apps-wiring.js:engine': { kind: 'eval', why: 'THE apps engine, real (apps-engine.js) on the scratch data dir — its access stand-in installs nothing' },
   'src/server/window-live-wiring.js:engine': { kind: 'eval', why: 'THE window targets engine, real (window-targets-engine.js) on the scratch data dir — no window is open' },

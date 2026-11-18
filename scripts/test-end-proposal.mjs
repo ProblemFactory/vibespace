@@ -14,10 +14,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let pass = 0, fail = 0;
-const ok = (c, name, info) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}`); if (info !== undefined) console.log('    ', typeof info === 'string' ? info.slice(0, 900) : JSON.stringify(info).slice(0, 900)); } };
+const CK = checker();   // THE ONE assertion helper (scripts/lib/check.mjs, B-1747); its counts and its report
+const ok = (c, name, info) => { if (typeof name !== 'string' || !name) throw new TypeError(`ok(cond, name): the name is ${typeof name} — the arguments are swapped`); return CK.ok(!!c, name, info); };   // the condition made boolean here, the swap refused
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const EP = require(path.join(REPO, 'src/end-proposal.js'));
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
@@ -850,5 +851,4 @@ console.log('⑥ THE WORDS — three languages, and never «sleep»');
   ok(FA.ROW_OF['end-proposal'] && FA.ROW_OF['end-proposal'].answer === 'buttons' && FA.ROW_OF['end-proposal'].card === 'row' && FA.ROW_OF['end-proposal'].chat === true, 'the For-you registry row: its own buttons, drawn by the row, answerable in the chat too');
 }
 
-console.log(fail ? `✗ test-end-proposal: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+CK.report();

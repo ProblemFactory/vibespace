@@ -215,7 +215,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
         const before = new Map((Array.isArray(given) ? given : []).map((r) => [r && r.id, r && r.grant === true]));
         const grantedNow = again.filter((r) => r && r.grant === true && before.get(r.id) !== true).map((r) => r.id);
         rows = again.filter((r) => !grantedNow.includes(r.id));
-        if (!rows.length) return { ok: true, already: true, why: `${grantedNow.join(', ')} may already wake ${grantedNow.length === 1 ? 'its conversation' : 'their conversations'} — the person granted it just now; nothing was filed` };
+        if (!rows.length && grantedNow.length) return { ok: true, already: true, why: `${grantedNow.join(', ')} may already wake ${grantedNow.length === 1 ? 'its conversation' : 'their conversations'} — the person granted it just now; nothing was filed` };
       }
     }
     const names = new Map(), keyById = new Map();   // the list's rows by key AND by id: an owner not live is named (and keyed) by its id
