@@ -2376,7 +2376,7 @@ class App {
         schedule: (ms) => { clearTimeout(this._staleTimer); this._staleTimer = setTimeout(() => this._checkBundleFreshness(), ms); },
         say: (v, why) => this._staleSay(v, why),
         notice: (v) => showToast(t('This tab still runs VibeSpace {old} after its one reload for {new} — reload it yourself to update', { old: BUILD_VERSION, new: v }), { type: 'warn', duration: 12000 }),
-        note: (d2, extra = {}) => navNote({ k: 'stale', b: BUILD_VERSION, s: memo.srv, d2, ...extra }),
+        note: (d2, extra = {}) => navNote({ k: 'stale', b: BUILD_VERSION, s: memo.srv, d2, n: extra.n, why: extra.why }),   // the look's two extras by name (the diary's privacy census: a literal row, no spread)
         // the reload is PENDING, and the once-per-version stamp waits for the moment it fires (acceptance round 2: stamped
         // 800 ms early, a reconnect inside that window read «already reloaded» and burned the one notice — no reload yet)
         reload: (v) => {
