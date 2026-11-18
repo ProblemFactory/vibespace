@@ -30,7 +30,9 @@
 //      module (server.js and src/server/*-wiring.js, piece by piece; route modules natively), server.js's own
 //      middleware and app.locals in the boot's order, every free name what the wiring makes it (a `let` the boot fills in
 //      later takes that assignment), every construction touched at MOUNT a CATALOG row (eval / make / inert, each with
-//      its why, none untouched); no program starts. A name a handler touches only when a request comes is the sweep's.
+//      its why, none untouched); no program starts (child_process is patched on its CJS module object: every require of
+//      it is caught; an ESM named import keeps its own binding — only the suite's own helpers import so). A name a
+//      handler touches only when a request comes is the sweep's.
 //   ⑥ THE MOUNT: within the modules ③ found, the bearer routes the real wiring serves (a router's mount prefix joined)
 //      = ③'s static list, both ways — a route gated off by a dep, one only a prefix or a computed path makes, a regex
 //      path = RED. A router module (browser, apps, window-targets) registers when it loads: its gating is in its
@@ -508,7 +510,7 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
     r.resolve = real.resolve; r.cache = real.cache;
     return r;
   };
-  const demanded = new Map(), gaps = new Set(), used = new Set(), threw = [], evaluated = new Set();
+  const demanded = new Map(), gaps = new Set(), used = new Set(), threw = [], evaluated = new Set(), dirnameReads = new Set();
   const GLOBALS = new Set([...Object.getOwnPropertyNames(globalThis), 'undefined', 'NaN', 'Infinity']);
   const memo = new Map(), scopes = new Map();
   const made = new Map();
@@ -529,6 +531,7 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
     const fixed = { require: requireIn(f), module: { exports: {} }, exports: {}, __filename: path.join(REPO, f), __dirname: f === 'server.js' ? root : path.dirname(path.join(REPO, f)), app };
     const resolve = (name) => {
       if (local.has(name)) return local.get(name);
+      if (name === '__dirname' && f !== 'server.js') dirnameReads.add(f);   // the real tree's folder: never a data path (⑤ says so)
       if (has(fixed, name)) return fixed[name];
       const key = `${f}:${name}`;
       const d = decls.get(name);
@@ -626,7 +629,7 @@ function buildWorld({ read = readRepo, catalog, routes, root = ROOT, modules = {
     try { evalIn(s.u.file, s.u.anc, s.ch.slice(1), WM.text(s.u.file, s.u.node)); }
     catch (e) { threw.push(`${s.tag} — ${String((e && e.message) || e).slice(0, 200)}`); }
   }
-  return { world, app, sites, broken, threw, demanded, gaps, used, evaluated };
+  return { world, app, sites, broken, threw, demanded, gaps, used, evaluated, dirnameReads };
 }
 /** a stand-in whose every member is a no-op returning undefined (an engine whose part on the touched roads is a side effect) */
 function inert(key) {
@@ -748,13 +751,14 @@ const WORLD = buildWorld({ catalog: CATALOG, routes: ROUTES_STATIC });
 {
   const B = WORLD;
   console.log(`    ${B.sites.length} sites mounted in the boot's order; ${B.evaluated.size} wiring names evaluated from their own source`);
-  ok(B.sites.length >= 15, `every wiring-time use of a bearer module is a site whose chain reaches server.js (${B.sites.length}: ${[...new Set(B.sites.map((s) => s.u.file))].join(', ')})`);
+  ok(B.sites.length >= 31, `every wiring-time use of a bearer module is a site whose chain reaches server.js (${B.sites.length}: ${[...new Set(B.sites.map((s) => s.u.file))].join(', ')})`);
   const registering = B.broken.filter((b) => b.what === 'route' || /^(register|setup|create|router)/.test(b.what));
   ok(!registering.length, 'no bearer route, and no registering export of a bearer module, is used at a place the boot does not run', registering.map((b) => `${b.tag} — ${b.why}`).join(' | '));
   ok(!B.threw.length, 'every site evaluates without throwing', B.threw.join(' | '));
   ok(!B.demanded.size, 'every construction a site touches is a CATALOG row (eval / make / inert, each with its why)', [...B.demanded].map(([k, v]) => `${k} — ${v}`).join(' | '));
   ok(!SPAWNED.length, 'no program started while the wiring mounted', SPAWNED.slice(0, 8).join(' | '));
   ok(!B.gaps.size, 'no stand-in member read that its row did not give', [...B.gaps].join(' | '));
+  ok(!B.dirnameReads.size, 'no evaluated wiring code outside server.js reads its own __dirname (the real tree\'s folder — only server.js\'s is the scratch root; a data path built from another would land in the checkout)', [...B.dirnameReads].join(' | '));
 }
 console.log('⑥ the mount (the bearer routes the real wiring registers, against ③\'s static list)');
 {
