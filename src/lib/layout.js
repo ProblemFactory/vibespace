@@ -1978,7 +1978,7 @@ class LayoutManager {
   /** The offer's question (showConfirmDialog — a method, so a suite answers it the way confirmRemovePlaceholder is answered). */
   async askResumeAll(q) {
     const { showConfirmDialog } = await import('./utils.js');
-    return showConfirmDialog(q);
+    return showConfirmDialog({ title: q.title, message: q.message, confirmText: q.confirmText }); // ONE options object (test-approval-census §1b — the blank «Confirm / OK» dialog)
   }
 
   /** THE OFFER HAS A WAY BACK (B-6352 — userW 2026-11-16 closed the boot offer by mistake after a restart, and only a reload brought
