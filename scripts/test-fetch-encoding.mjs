@@ -116,6 +116,43 @@ const pi = fs.readFileSync(path.join(REPO, 'src/server/plugin-install.js'), 'utf
 const planted = pi.replace('try { return await safeFetch(url, {', 'try { return await fetch(url, {');
 const red = census((f) => (f === 'src/server/plugin-install.js' ? planted : fs.readFileSync(path.join(REPO, f), 'utf8')));
 ok(planted !== pi && red.some((l) => /plugin-install\.js: 1 fetch\(\) site/.test(l)) && red.some((l) => /never calls safeFetch/.test(l)), 'RED: plugin-install back on the raw fetch ⇒ the census names it (a site its row does not allow, no safeFetch)', red);
+// B-9dd0 (lane bl-scratch, 2026-11-17): THE UPDATE CHECK NEVER REACHES GITHUB UNDER VS_NO_REAL_CLI — the REAL route, a fetch that
+// records instead of dialling; RED control: the flag unset, the same route asks raw.githubusercontent.com once
+{
+  const os = require('node:os');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-fetchenc-ops-'));
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+  const routes = {}, app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; } };
+  const prev = { fetch: globalThis.fetch, flag: process.env.VS_NO_REAL_CLI, fix: process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR };
+  const asked = [];
+  try {
+    delete process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR;
+    globalThis.fetch = async (u) => { asked.push(String(u)); return { ok: true, status: 200, text: async () => JSON.stringify({ version: '9.9.9' }) }; };
+    const OPS = require(path.join(REPO, 'src/server/ops-routes.js'));
+    const ops = OPS.create({ app, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, tmpRoots: [] });   // the flag alone decides here
+    ops.versionInfo.commit = '';   // the scratch root is no checkout: no git asked
+    const version = async () => { let out = null; await routes['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out = o; } }); return out; };
+    process.env.VS_NO_REAL_CLI = '1';
+    const off = await version();
+    const offAsked = asked.length;
+    delete process.env.VS_NO_REAL_CLI; ops.versionInfo.fetchedAt = 0;
+    const on = await version();
+    ok(offAsked === 0 && off && off.version === '1.0.0' && off.latest === null, `B-9dd0: under VS_NO_REAL_CLI=1 the update check answers offline and asks nothing (${offAsked} request(s), latest ${off && off.latest})`);
+    ok(asked.length === 1 && /^https:\/\/raw\.githubusercontent\.com\//.test(asked[0]) && on && on.latest === '9.9.9', `CONTROL B-9dd0: the flag unset, the same route asks the canonical repo once (red without the guard): ${JSON.stringify(asked)}`);
+    // …and a hub whose ROOT lies under a temp root (every suite's scratch hub, the flag set or not) asks nothing either
+    const routes2 = {}; const app2 = { get: (p, h) => { routes2['GET ' + p] = h; }, post: () => {} };
+    const ops2 = OPS.create({ app: app2, rootDir: root, wss: { clients: new Set() }, WS_OPEN: 1, tmpRoots: [path.dirname(root)] });
+    ops2.versionInfo.commit = '';
+    const before = asked.length; let out2 = null;
+    await routes2['GET /api/version']({ query: { fresh: '1' } }, { json: (o) => { out2 = o; } });
+    ok(asked.length === before && out2 && out2.latest === null, `B-9dd0: a hub rooted under a temp root answers offline without the flag (${asked.length - before} request(s))`);
+  } finally {
+    globalThis.fetch = prev.fetch;
+    if (prev.flag === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = prev.flag;
+    if (prev.fix !== undefined) process.env.VIBESPACE_CHANGELOG_FIXTURE_DIR = prev.fix;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
 const NR = fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf8');
 ok(/'accept-encoding': 'identity'/.test(NR) && /content-encoding/.test(NR), 'the node release download (src/node-runtime.js, a fixed mirror — nodejs.org by default) asks identity and refuses an encoded answer; its archive is sha256-checked before anything unpacks it');
 

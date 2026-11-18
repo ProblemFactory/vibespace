@@ -4,8 +4,9 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
+const { isUnder } = require('../server-root.js');   // B-9dd0: the one «under a root» (segment boundary)
 
-function create({ app, rootDir, wss, WS_OPEN, bootPhase = null }) {
+function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, tmpRoots = [require('os').tmpdir(), '/tmp', '/var/tmp'] }) {
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
 // Latest = the canonical repo's master package.json — fetched LAZILY on
 // request only (never a background timer), cached 6h, best-effort: offline
@@ -24,6 +25,13 @@ async function canonicalFile(name, timeoutMs) {
     try { return { ok: true, status: 200, text: await fs.promises.readFile(path.join(fixtureDir, name), 'utf8') }; }
     catch (e) { return { ok: false, status: e && e.code === 'ENOENT' ? 404 : 0, text: null }; }
   }
+  // B-9dd0 (lane bl-scratch, 2026-11-17): A GATE NEVER ASKS GITHUB. A scratch hub under a suite answered /api/version by
+  // fetching this file (an acceptance's socket sampler saw raw.githubusercontent.com during a chrome suite) — an egress a test
+  // must never make. A hub whose root lies under a temp root (src/server-root.js rule 3: never the person's instance — every
+  // suite's scratch hub, flag or not, the push gate and the mirror too) or that runs under VS_NO_REAL_CLI=1 (every lane env,
+  // acceptance run, the test machine) answers offline (status 0: the menu shows the local version only); a suite that needs
+  // the files hands the fixture dir above.
+  if (process.env.VS_NO_REAL_CLI === '1' || tmpRoots.some((t) => isUnder(rootDir, t))) return { ok: false, status: 0, text: null };
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
