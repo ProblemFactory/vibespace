@@ -175,8 +175,11 @@ wNext.shutdown();
   const W0 = 'VibeSpace restarted before it was answered';
   const zhD = (await import('../src/lib/i18n-zh.js')).default, jaD = (await import('../src/lib/i18n-ja.js')).default;
   ok(resolvedByText('hub-restart', (k) => k) === W0 && typeof zhD[W0] === 'string' && zhD[W0] !== W0 && typeof jaD[W0] === 'string' && jaD[W0] !== W0, 'the tray\'s closer words: «VibeSpace restarted before it was answered» (zh / ja in the dictionaries)');
+  // its verdict's should: the For-you window's second closer table (foryou-actions settledWords) says it too, never «dismissed»
+  const FA = require('../src/foryou-actions.js');
+  ok(FA.settledWords({ status: 'dismissed', resolvedBy: 'hub-restart' }, (k) => k) === W0, 'the For-you window\'s own closer words (settledWords) say «VibeSpace restarted before it was answered» for the sweep\'s close, never a bare «dismissed»');
   const wiring = read('src/server/mounts-plugins-wiring.js'), dsrcW = read('src/server/browser-dialogs.js');
-  ok(/sweepAs: \(prefix, status, by\) => \{[^\n]*userTodos\.setStatus\(id, status, by\); return ids\.length; \}/.test(wiring) && /sweep: \(prefix\) => \{[^\n]*userTodos\.setStatus\(id, 'done', 'browser'\); return ids\.length; \}/.test(wiring) && dsrcW.includes("forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart')") && dsrcW.includes("forYou.sweep('pk-left:')"),
+  ok(/sweepAs: \(prefix, status, by\) => \{[^\n]*userTodos\.setStatus\(id, status, by\); return ids\.length; \}/.test(wiring) && /sweep: \(prefix\) => \{[^\n]*userTodos\.setStatus\(id, 'done', 'browser'\); return ids\.length; \}/.test(wiring) && (wiring.match(/userTodos\.idsWhere\(\(i\) => i\.status === 'open' && i\.sessionKey === 'browser'/g) || []).length === 1 && (wiring.match(/const ids = browserItemIds\(prefix\);/g) || []).length === 2 && dsrcW.includes("forYou.sweepAs(PROMPT_FY_KEY, 'dismissed', 'hub-restart')") && dsrcW.includes("forYou.sweep('pk-left:')"),
     'the hub\'s wiring: sweepAs names the close (status, closer) BESIDE the release\'s sweep, which the passkey sweep keeps (its «done»; the wiring block test-browser-passkey ⑨r10 reads is untouched)');
 }
 { // CONTROL: a watch copy WITHOUT the sweep leaves a past life's sign-in item open for good

@@ -487,7 +487,7 @@ function arrivalWords(item, { t = fmt } = {}) {
  *  decision row: its own words). */
 const OUTCOME_ENDS = Object.freeze({ allowed: 'allowed', 'late-allowed': 'allowed', denied: 'denied', expired: 'expired', vault_locked: 'vault_locked' });
 /** The ends these words name beyond a row's own (a record from before the decision law: «withdrawn by the agent», …). */
-const WORDED_ENDS = Object.freeze(['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked', 'granted', 'stored', 'delivered', 'discarded', 'agent', 'conversation-gone', 'handed-back']);
+const WORDED_ENDS = Object.freeze(['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked', 'granted', 'stored', 'delivered', 'discarded', 'agent', 'conversation-gone', 'handed-back', 'hub-restart']);
 function endOf(item) {
   if (!item || item.status === 'open' || !isDecisionRow(item)) return null;
   const by = item.resolvedBy, f = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : {};
@@ -542,6 +542,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'agent') return t('withdrawn by the agent');
   if (by === 'handed-back') return t('handed back');
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
+  if (by === 'hub-restart') return t('VibeSpace restarted before it was answered');   // B-ebb7 (its verdict's should): the second closer table says it too
   return item && item.status === 'dismissed' ? t('dismissed') : t('done');
 }
 

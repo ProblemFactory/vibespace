@@ -485,6 +485,8 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       }
       try { sendClient(raw != null && ev === evIn ? raw : JSON.stringify(ev)); } catch { /* gone */ }
     };
+    // (its verdict's should) a replay that the live-fill fence drops here is gone for this connection for good — replayOnAdmit
+    // has consumed its withheld entry — exactly as the event road drops the same event; nothing waits to send it later
     conn.deliver = (ev) => deliverEvent(ev);
     up.on('message', (data) => {
       let msg = null;
