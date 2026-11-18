@@ -3740,7 +3740,7 @@ async function chatReadLegs(ENGmod, name) {
           }
           for (const d of DOORS) if (!fs.readFileSync(path.join(REPO, d[0]), 'utf-8').includes(d[1])) bad.push({ gone: d[3] });
           const insideRows = DOORS.filter((d) => d[2] === 'inside').every((d) => /inside: true|filter:/.test(d[1]));
-          return [!bad.length && insideRows && DOORS.length === 11, bad];
+          return [!bad.length && insideRows && DOORS.length === 12, bad];   // lane bl-msg B-9b9c: + «Show it» (another reply to the same message)
         });
         await legOSC('OCD the filter bar stays on screen: sticky over an opaque background; EVERYTHING the window scrolls to clears it — one selector list, one variable for the bar\'s height, no bar no margin (the geometry: chrome ㉕)', () => {
           const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');
@@ -4426,7 +4426,7 @@ console.log('§bl-msg B-9b9c two replies to ONE message — both cards name the 
   ok(!ids(g.v2after).length, '…and once the other is rejected, the card no longer names it (resolved now, never a frozen copy)', JSON.stringify(g.v2after.also || null));
   // RED CONTROL: the cross-link removed at propose ⇒ nothing names the other — the legs above go red
   const src = engineSource(REPO);
-  const LINK = "const alsoIds = v.proposal.replyTo ?";
+  const LINK = "const alsoIds = target ?";
   ok(src.split(LINK).length === 2, 'the control finds its line');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MUTO = mutantCopies('blm-9b9c', REPO);
