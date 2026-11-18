@@ -101,6 +101,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An Antigravity helper agent's card now shows its result even when the result is written a moment after the helper finishes.
 - In For you, a link that an agent ended with «…» at the end of a line is a link again, not plain words.
 - Diagnostics no longer says Claude Code 2.1.322 is newer than VibeSpace's record table: the table now includes that version.
+- The Remote panel no longer redraws for every command run on a machine: only that machine's last-run line changes, and a slow server keeps the list, with Retry.
+- Reading back in a chat no longer jumps when the agent starts a new turn and the previous run of steps folds away.
+- A row in a chat that opens another conversation no longer opens its neighbour when a new reply scrolls it under your pointer; press again once it stops.
+- A chat's «waiting for you» strip and cards no longer count a message hidden by a chat setting (empty thinking, hook cards) as shown.
+- Diagnostics → Main loop held names the code that made a slow file call or started a program, not VibeSpace's own measuring; short holds get a sample too.
+- The Restart buttons in the Agent browser panel, its live view and For you now say why a restart was refused in your language, for every reason.
+- A browser engine plugin that fails its check now shows its own error on its Custom kernel row, such as a path it may not use, instead of a protocol message.
+- When a custom kernel's running browser answers otherwise than its plugin says, its Agent browser and Custom kernel rows say so; For you tells once per version.
 
 ### Security
 - A private plugin repository reached over ssh can pin its host's keys (Integrations → Plugin Git repository → Host keys); another key is refused.
