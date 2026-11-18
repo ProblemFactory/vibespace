@@ -170,5 +170,44 @@ console.log('⑤ negative controls');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
 }
 
+// ── THE PROVIDER REMOVE CONFIRM, DRIVEN WITH A STAND-IN APP (lane lg-providers, B-d578; the coordinator's 21:50Z: the Vault
+// window's Remove sentence, the sidebar's rename winning over the raw name and the «and N more» join were pinned by source
+// text only). The REAL provider-roster.js over a stand-in sidebar: namedLiveRows (the names the sidebar shows) → the ONE words
+// function both doors call (the roster's Remove… with the provider's row, the Vault window's with ITS row shape)
+{
+  const PR = await import(path.join(REPO, 'src/lib/provider-roster.js'));
+  const live = [{ id: 'w1', accountId: 'pv-ds1', name: 'Session 7' }, { id: 'w2', accountId: 'pv-ds1', name: 'Session 8' }, { id: 'w3', accountId: 'sub-x', name: 'Elsewhere' },
+    ...Array.from({ length: 9 }, (_, i) => ({ id: 'n' + i, accountId: 'pv-ds1', name: 'run ' + i }))];
+  const standIn = { sidebar: { _webuiSessions: live,
+    _allSessions: [{ webuiId: 'w1', name: 'Session 7', cwd: '/home/u/proj' }, { webuiId: 'w2', name: 'Refactor the parser', cwd: '/home/u/p2' }],
+    getCustomName: (row) => (row && row.webuiId === 'w1' ? 'Fix the build' : '') } };
+  const WANT = ' Running on it now: Fix the build, Refactor the parser, run 0, run 1, run 2, run 3, run 4, run 5 and 3 more';
+  const drive = (Mod) => {
+    const rows = Mod.namedLiveRows(standIn);
+    return { rows, vault: Mod.providerRemoveWords({ entry: 'provider:pv-ds1', field: 'key', kind: 'api-key', label: 'Model provider key · DeepSeek' }, rows),
+      roster: Mod.providerRemoveWords({ id: 'pv-ds1', label: 'DeepSeek' }, rows), none: Mod.providerRemoveWords({ id: 'pv-ds2', label: 'Kimi' }, rows) };
+  };
+  const real = drive(PR);
+  ok('the provider Remove confirm, driven: the rename wins over the raw name («Fix the build», never «Session 7»), the sidebar row\'s name over the live payload\'s, eight named then «and 3 more»; the Vault window\'s row names the provider by its name (never «Model provider key · …»); both doors say the same words; none on it ⇒ no sentence',
+    real.vault.message.endsWith(WANT) && real.vault.title === 'Remove the model provider "DeepSeek"?' && real.vault.confirm === 'Remove'
+    && real.roster.title === real.vault.title && real.roster.message === real.vault.message && !real.none.message.includes('Running on it now') && real.none.title === 'Remove the model provider "Kimi"?',
+    JSON.stringify({ vault: real.vault, none: real.none.message.slice(-60) }).slice(0, 400));
+  const VW = read('src/lib/vault-window.js');
+  const RS0 = read('src/lib/provider-roster.js');
+  ok('the Vault window\'s provider Remove IS that function over the page\'s named rows (its one line), its confirm asked with the app and handed on to the words (every hop), and the roster\'s dialog shows the words it was given',
+    VW.includes('  provider: (row, app) => providerRemoveWords(row, namedLiveRows(app)),') && VW.includes('const w = confirmWords(d.confirm, row, app);') && VW.includes('  return w ? w(row, app) : {')
+    && RS0.includes('const yes = await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true });'));
+  const PM = mutantCopies('manage-agents-pv', REPO);
+  const RS = read('src/lib/provider-roster.js');
+  const NAME = "(names && (() => { try { return names.nameOfLive(s); } catch { return ''; } })()) || (s && s.name) || ''";
+  const MORE = " + (on.more ? ' ' + t('and {n} more', { n: on.more }) : '')";
+  ok('controls: each anchor is in provider-roster.js once', RS.split(NAME).length === 2 && RS.split(MORE).length === 2);
+  const raw = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', RS.replace(NAME, "(s && s.name) || ''"), 'raw-name')).href));
+  ok('CONTROL: the live payload\'s raw name in place of the sidebar\'s («Session 7») ⇒ the leg goes RED', !raw.vault.message.endsWith(WANT) && raw.vault.message.includes('Session 7'), raw.vault.message.slice(-120));
+  const cut = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', RS.replace(MORE, ''), 'no-more')).href));
+  ok('CONTROL: the join without «and N more» (three conversations go unsaid) ⇒ the leg goes RED', !cut.vault.message.endsWith(WANT) && !cut.vault.message.includes('more'), cut.vault.message.slice(-80));
+  for (const r of copiesCensus(PM.files, PM.dir, REPO, { minCopies: 2 })) ok(r.name, r.pass, r.detail);
+}
+
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
 process.exit(fail ? 1 : 0);

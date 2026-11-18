@@ -21,6 +21,20 @@ export function runningOnWords(rows, providerId) {
   const on = conversationsOn(rows, providerId);
   return on.n ? ' ' + t('Running on it now: {names}', { names: on.names.join(', ') + (on.more ? ' ' + t('and {n} more', { n: on.more }) : '') }) : '';
 }
+/** THE REMOVE CONFIRM — ONE for both doors: the roster's Remove… (`p` = the provider's row, { id, label }) and the Vault window's
+ *  Remove of «Model provider key · <name>» (`p` = its row, { entry: 'provider:<id>', label }: the provider is named by the part
+ *  after the kind, never «Model provider key · …» as a name); `rows` = namedLiveRows(app) → { title, message, confirm } */
+export function providerRemoveWords(p, rows) {
+  const vaultRow = !!p && typeof p.entry === 'string' && p.entry.startsWith('provider:');
+  const id = vaultRow ? p.entry.slice('provider:'.length) : String((p && p.id) || '');
+  const raw = String((p && p.label) || '');
+  const name = vaultRow && raw.includes(' · ') ? raw.slice(raw.indexOf(' · ') + 3) : raw;
+  return {
+    title: t('Remove the model provider "{name}"?', { name: name || id }),
+    message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.') + runningOnWords(rows, id),
+    confirm: t('Remove'),
+  };
+}
 
 // the roster's own ⋯ (manage-agents ROSTER_ICONS.DOTS, the same marks — not imported: manage-agents imports this file)
 const DOTS = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>';
@@ -81,8 +95,9 @@ export async function renderProviderRows(body, backend, { refresh = () => { }, s
         { label: t('New key…'), action: async () => { const k = await askKey(p.id, p.label); if (!k) return; const x = await send(`/api/providers/${encodeURIComponent(p.id)}/key`, 'POST', { key: k }); showToast(x && x.ok ? t('The new key is kept in the vault') : words(x), { type: x && x.ok ? 'info' : 'error' }); refresh(); } },
         { separator: true },
         { label: t('Remove…'), action: async () => {
-          const running = runningOnWords((() => { try { return sessions(); } catch { return []; } })(), p.id);   // the conversations it would leave without a provider at their next start — named as the sidebar names them
-          const yes = await showConfirmDialog({ title: t('Remove the model provider "{name}"?', { name: p.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.') + running, confirmText: t('Remove'), danger: true });
+          // the conversations it would leave without a provider at their next start — named as the sidebar names them (one wording with the Vault window's Remove)
+          const w = providerRemoveWords(p, (() => { try { return sessions(); } catch { return []; } })());
+          const yes = await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true });
           if (!yes) return;
           const x = await send(`/api/providers/${encodeURIComponent(p.id)}`, 'DELETE');
           if (!x || !x.ok) showToast(words(x), { type: 'error' });

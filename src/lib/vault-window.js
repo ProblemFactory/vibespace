@@ -32,7 +32,7 @@ import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVau
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords, askRevealPassword } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
-import { namedLiveRows, runningOnWords } from './provider-roster.js';   // the Vault window's provider Remove says which conversations run on it (one wording with the roster)
+import { namedLiveRows, providerRemoveWords } from './provider-roster.js';   // the Vault window's provider Remove says which conversations run on it (one wording with the roster)
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf, SEARCHED_FIELDS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-grants: «Who may use it» — the members (hosts, end, uses) + 「Who may use it…」
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
@@ -119,7 +119,7 @@ const CONFIRM_WORDS = {
   'web-login': (row) => ({ title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') }),   // lane browser-login
   'proxy-login': (row) => ({ title: t('Delete the proxy login "{name}"?', { name: row.label }), message: t('Its password leaves the vault. A browser profile whose proxy uses it is refused at its next start until you choose a login again.'), confirm: t('Delete') }),   // B-8b87
   totp: (row) => ({ title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') }),
-  provider: (row, app) => ({ title: t('Remove the model provider "{name}"?', { name: row.label }), message: t('Its key leaves the vault and the provider leaves every agent\'s account list. Conversations already running on it keep working until they restart.') + runningOnWords(namedLiveRows(app), String((row && row.entry) || '').replace(/^provider:/, '')), confirm: t('Remove') }),   // lane lg-providers (B-d578); the conversations on it named as the roster's Remove… names them (the remainders' read, F3)
+  provider: (row, app) => providerRemoveWords(row, namedLiveRows(app)),   // lane lg-providers (B-d578): ONE wording with the roster's Remove… — the provider by its name, the conversations on it as the sidebar names them
 };
 function confirmWords(key, row, app = null) {
   const w = Object.prototype.hasOwnProperty.call(CONFIRM_WORDS, key) ? CONFIRM_WORDS[key] : null;

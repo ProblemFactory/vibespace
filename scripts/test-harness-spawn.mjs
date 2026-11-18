@@ -498,6 +498,32 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const hl = nl.notes.filter((n) => n.key.startsWith('billing-pick-helper-'));
   ok(hl.length === 1 && hl[0].i18n.params.account === ds.id, 'CONTROL: the notice without the record\'s name names the conversation\'s provider by its pv- id ⇒ the leg above goes RED', hl.map((n) => n.i18n && n.i18n.params));
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const d = fs.readFileSync(path.join(REPO, f), 'utf8'); ok([BP.HELPER_SET_ASIDE.provider, ...Object.values(SFW.PROVIDER_BILLING_WORDS)].every((w) => d.includes(JSON.stringify(w) + ':')), `${path.basename(f)}: a provider's three helper sentences have their rows`); }
+  // THE POOL QUESTION (the coordinator's 21:50Z, for the remove confirm that names the conversations on a provider): can a
+  // provider be a MEMBER of a pool — would a conversation billed through a pool run on it and go unnamed? NO, and this leg keeps
+  // it so: a pool's members are the ACCOUNTS store's same-harness subscriptions (poolMembership / poolMembers / poolRoster /
+  // setPoolTarget / a priority list); a provider record lives in the provider store, never in the accounts store, and no door
+  // writes a provider onto an account (accountProviderId reads an account's `providerId`; nothing writes one). Even a member
+  // list that NAMES the provider (updatePool keeps the ids it is given) never routes to it. Should this ever go red, the
+  // remove confirm must name the pool-billed conversations too
+  const poolOf = (AM, tag) => {
+    const a = new AM({ dataDir: scratchDir('hspawn-pool-' + tag) });
+    a.setProviderLookup((x) => store.forAccount(x));
+    const sub = a.createSubscription({ name: 'Team Max' }).id;
+    a._state.accounts.push({ id: 'pool-t1', name: 'Team', type: 'pooled', backend: 'claude', members: [sub, ds.id], auto: true, priority: [], hot: false });
+    return { a, sub };
+  };
+  const tried = (fn) => { try { fn(); return 'taken'; } catch (e) { return String(e && e.message); } };
+  const pq = poolOf(AccountManager, 'real');
+  const pqTarget = tried(() => pq.a.setPoolTarget('pool-t1', ds.id)), pqPri = tried(() => pq.a.updatePool('pool-t1', { priority: [ds.id] })), pqLink = tried(() => pq.a.ensureSessionPoolLink('pool-t1', 'claude:sess-1', ds.id));
+  ok(eq(pq.a.poolMembership('pool-t1'), [pq.sub]) && !pq.a.poolRoster('pool-t1').some((r) => r.id === ds.id)
+    && /not a claude subscription/.test(pqTarget) && /not a member of this pool/.test(pqPri) && /not a subscription/.test(pqLink) && pq.a.get(ds.id) == null,
+    'a third-party provider is never a pool member: a pool whose member list NAMES it lists, offers, targets and links a conversation to only its subscriptions (the provider is no account of the accounts store) — no conversation billed through a pool runs on a provider',
+    { membership: pq.a.poolMembership('pool-t1'), pqTarget, pqPri, pqLink });
+  const ACC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const TRUST = '    const wanted = Array.isArray(a.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;\n    return wanted.map((x) => x.id);';
+  if (ACC.split(TRUST).length !== 2) throw new Error('the anchor of the control «a pool trusts its member list» is not in the source once');
+  const px = poolOf(M.load('src/accounts.js', ACC.replace(TRUST, '    return Array.isArray(a.members) && a.members.length ? a.members.slice() : all.map((x) => x.id);'), 'pool-trusts-list').AccountManager, 'mut');
+  ok(px.a.poolMembership('pool-t1').includes(ds.id), 'CONTROL: a pool that trusts its member list as given counts the provider a member ⇒ the leg above goes RED', px.a.poolMembership('pool-t1'));
   // (MAJOR 3) the badge names the provider, billed by use — never «API key» / «ChatGPT»
   const badgeC = H.get('claude').billingIdentity({ _accountId: ds.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
   const badgeX = H.get('codex').billingIdentity({ _accountId: lab.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });

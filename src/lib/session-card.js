@@ -955,7 +955,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           o.value = opt.value || opt.id || '';
           // the default row (no value) is the page's own «Default» — never the server's English label (the walk's sidebar-sessions-2)
           o.textContent = !(opt.value || opt.id) ? tr('Default') : (opt.label || opt.value);
-          if (opt.disabled) o.disabled = true;   // a row that cannot run here (a provider on another machine) is shown, not offered
           if (String(o.value) === String(isDefault ? defaultVal : curVal)) o.selected = true;
           sel.appendChild(o);
         }
@@ -1003,15 +1002,22 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       // API billing.
       const acctList = (app._accounts?.accounts || []).filter(a => (a.backend || 'claude') === backend);
       if (backendFeatureCaps(backend).accounts && acctList.length) {
+        // the ONE exception to «left out» below: the conversation's OWN saved pick is that provider — its row stays, by its name
+        // (never the raw pv- id in «Custom…»), and one line under it says why a resume there is refused (the resume path refuses
+        // it in the same words, session-lifecycle); the person can pick another account here
+        const savedPv = s.host ? acctList.find((a) => a.type === 'provider' && a.id === overrides.account) || null : null;
         pop.appendChild(makeRow(tr('Account'), [
           { value: 'subscription', label: tr(billingRow(backend).switchLogin) },
           // Pooled pseudo-account (either backend): names its CURRENT target —
           // the old else-branch labeled it "— API …undefined" (2.369.18, same
           // class as the New Session dialog's fix)
-          ...acctList.map(a => ({ value: a.id, disabled: a.type === 'provider' && !!s.host, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
-            : a.type === 'provider' ? tr('{name} (third party)', { name: a.name }) + (s.host ? ' — ' + tr('this machine only') : '')   // lane lg-providers chain cure: as New Session / Session Properties name it
+          // a third-party provider runs on this machine only: a card that carries another machine LEAVES ITS ROW OUT (the create
+          // refuses it there by name, provider-remote) — never a grey row with a hint (the coordinator, 21:50Z)
+          ...acctList.filter((a) => !(a.type === 'provider' && s.host) || a === savedPv).map(a => ({ value: a.id, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
+            : a.type === 'provider' ? tr('{name} (third party)', { name: a.name })   // lane lg-providers chain cure: as New Session / Session Properties name it
             : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : (a.tail ? `${a.name} — API …${a.tail}` : a.name) })),
         ], 'account'));
+        if (savedPv) { const note = document.createElement('div'); note.className = 'session-config-note chat-status-dim'; note.textContent = tr('A third-party model runs on this machine only for now — start the conversation here'); pop.appendChild(note); }
       }
     };
 
