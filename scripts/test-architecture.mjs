@@ -2840,7 +2840,7 @@ await section(async () => {
   // bundle — test-restore-liveness's §4 orphan grew to 45.7 GB (src/agentd/worker-pool.js is bounded since). DEBT: the suites
   // that predate the rule, by name; the list only SHRINKS (an entry that complies now, or is gone, is red until removed).
   const ENDS_DEBT = new Set([
-    'test-agents-overview.mjs', 'test-attach-ack.mjs', 'test-attach-rescue.mjs', 'test-ax-budget.mjs', 'test-browser-continuity.mjs', 'test-browser-identity.mjs',
+    'test-attach-ack.mjs', 'test-attach-rescue.mjs', 'test-ax-budget.mjs', 'test-browser-continuity.mjs', 'test-browser-identity.mjs',
     'test-browser-live-ui.mjs', 'test-browser-live.mjs', 'test-browser-multiview.mjs', 'test-browser-propose-chrome.mjs', 'test-browser-resume-ui.mjs', 'test-channel-jump.mjs',
     'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
     'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
@@ -2853,7 +2853,7 @@ await section(async () => {
     'test-roster-reset-eta.mjs', 'test-run-collapse-fold.mjs', 'test-sidebar-empty-remote.mjs', 'test-sidebar-rail.mjs', 'test-sidebar-scroll.mjs', 'test-split-close-resurrect.mjs',
     'test-split-ux.mjs', 'test-stage-overlap.mjs', 'test-sys-panel.mjs', 'test-taskbar-group-ui.mjs', 'test-tasks-mirror-race.mjs',
     'test-title-chips-ui.mjs', 'test-toolbar-resize.mjs', 'test-turn-truth-ui.mjs', 'test-ui-scale.mjs', 'test-update-dialog.mjs', 'test-window-binding.mjs',
-    'test-window-menu.mjs', 'test-worktree-userchan-ui.mjs',
+    'test-worktree-userchan-ui.mjs',
     // the 2.369.202 integration: server-booting suites the OTHER lanes of this release (and .200) added beside lane
     // runaway-daemon's rule — the same debt, named; each leaves this list when it calls endRootedProcesses
     'test-apps-ui.mjs', 'test-channel-lark-threads-ui.mjs', 'test-channel-names-ui.mjs', 'test-chat-send-landing.mjs', 'test-desktop-keepalive-chrome.mjs',

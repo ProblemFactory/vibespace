@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -31,21 +31,27 @@ for (const f of ['src', 'public', 'server.js', 'scripts']) {
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT) }, stdio: 'ignore' });
-const chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--disable-background-timer-throttling', `--user-data-dir=${scratch('menu-smoke-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+// the EXCLUDED package's verdict (主开发 2026-11-18, the kill law): the throwaway hub runs under a SCRATCH HOME with the hooks switch —
+// never the machine user's own home, whose default device-agent root (src/agentd/client.js) is a production one on the hub box —
+// its Chrome asks no keyring and keeps its files under its profile, and everything it started ends BY IDENTITY at any exit (as its siblings test-stage-preview and
+// test-desktop-reorder): no pattern kill
+const home = scratch('menu-smoke-home'), chromeDir = scratch('menu-smoke-chrome'); fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(chromeDir, { recursive: true });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', PORT: String(PORT) }, stdio: 'ignore' });
+const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;   // its crash handler too lives under the profile
+const chrome = spawn(CHROME, [...CHROME_STORE, `--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+  '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 
+let cleaned = false;
 const cleanup = () => {
+  if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv.kill('SIGKILL'); } catch {}
-  try {
-    const socks = fs.readdirSync(path.join(wt, 'data', 'sockets'));
-    for (const s of socks) { try { execSync(`pkill -f ${JSON.stringify(path.join(wt, 'data', 'sockets', s))}`); } catch {} }
-  } catch {}
+  for (const r of [wt, home, chromeDir]) { try { endRootedProcesses(r); } catch {} }   // the dtach sessions and every child, BY IDENTITY
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  try { fs.rmSync(scratch('menu-smoke-chrome'), { recursive: true, force: true }); } catch {}
+  for (const d of [chromeDir, home]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 

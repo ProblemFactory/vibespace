@@ -20,13 +20,13 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
-const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home');
+const wt = scratch('agentsov-test'), fakeHome = scratch('agentsov-home'), chromeDir = scratch('agentsov-chrome');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + e : ''}`); } };   // + the detail (the EXCLUDED package: a red names what it saw)
@@ -51,8 +51,21 @@ const mkSnap = (o = {}) => ({ fiveHour: { utilization: 0.42, status: 'allowed', 
 fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify(mkSnap()));
 fs.writeFileSync(path.join(cacheDir, 'host-host-deadbeef-sub-abcdefabcdef.json'), JSON.stringify({ ...mkSnap(), name: 'HeldAcct' }));
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1280,1000', `--user-data-dir=${scratch('agentsov-chrome')}`, 'about:blank'], { stdio: 'ignore' });
-process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync(scratch('agentsov-chrome'), { recursive: true, force: true }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {} });
+// (the EXCLUDED package's verdict, the kill law — as test-window-menu: its Chrome asks no keyring and keeps its files under its
+// profile; the login terminal the add-subscription leg opens and every other process it started end BY IDENTITY at any exit)
+fs.mkdirSync(chromeDir, { recursive: true });
+const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1280,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
+let cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  try { chrome.kill('SIGKILL'); } catch {}; try { srv.kill('SIGKILL'); } catch {}
+  for (const r of [wt, fakeHome, chromeDir]) { try { endRootedProcesses(r); } catch {} }
+  try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}
+  for (const d of [chromeDir, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });   // a gate's timeout ends it too
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
 // ── server-side asserts ──
