@@ -236,7 +236,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const lab = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3-coder', label: 'Lab', wire: 'openai-responses' })).provider;   // the person said it speaks Responses (a self-hosted one fits by that)
   const am = new AccountManager({ dataDir: DATA });
   am.setProviderLookup((a) => store.forAccount(a));
-  const wire = (harnessOf) => am.setProviderSpawn(PSP.create({ providers: store, dataDir: DATA, ...(harnessOf ? { harnessOf } : {}) }), (id, be, model) => PSP.modelFor(store, id, model));
+  const wire = (harnessOf) => am.setProviderSpawn(PSP.create({ providers: store, dataDir: DATA, ...(harnessOf ? { harnessOf } : {}) }), (id, be, model) => PSP.modelFor(store, id, model, be));
   wire();
   // the ambient values are BUILT AT RUNTIME by joining pieces (the tree's law for a value standing where a credential would — never a
   // literal, never an allow row; the push hook's scan read the literals as assigned tokens)
@@ -262,6 +262,79 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const plain = await drive(wsCreate, { backend: 'claude' }, { accounts: am }, () => ({}));
   ok(plain.spawned.length === 1 && !('ANTHROPIC_BASE_URL' in plain.spawned[0].env) && !('ANTHROPIC_AUTH_TOKEN' in plain.spawned[0].env), 'the other direction: a conversation on the machine\'s own login carries no provider address and no provider key');
 
+  // THE COORDINATOR'S MUST (U2 cure): A HUB STARTED FROM INSIDE A PROVIDER CONVERSATION never carries that provider into a later
+  // start. The hub's environment SEEDED with a real plan (claude on DeepSeek; codex on Lab) — what a hub restarted from that
+  // conversation's own shell inherits — and starts that did not pick the provider: none of the plan's names reach them.
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const PLAN_C = H.get('claude').creds.providerSpawn({ provider: store.get(ds.id), key: KEY, home: homeC }).localEnv;
+  const PLAN_X = H.get('codex').creds.providerSpawn({ provider: store.get(lab.id), key: KEY, home: PSP.homeOf(DATA, lab.id, 'codex') }).localEnv;
+  const SEEDED = () => ({ ...PLAN_C, ...PLAN_X, PATH: '/usr/bin', LANG: 'C.UTF-8' });
+  const carried = (x, plan) => { const e = (x.spawned[0] || {}).env || {}; return Object.keys(plan).filter((n) => plan[n] !== '' && e[n] === plan[n]); };
+  const m1 = await drive(wsCreate, { backend: 'claude' }, { accounts: am }, SEEDED);
+  const m2 = await drive(wsCreate, { backend: 'codex', mode: 'chat' }, { accounts: am }, SEEDED);
+  const m3 = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am }, () => ({ ...PLAN_X, ANTHROPIC_BASE_URL: 'https://elsewhere.example.test/anthropic', ANTHROPIC_MODEL: 'other-model' }));
+  const e3 = (m3.spawned[0] || {}).env || {};
+  ok(m1.spawned.length === 1 && carried(m1, PLAN_C).length === 0 && !('ANTHROPIC_BASE_URL' in m1.spawned[0].env) && !('ANTHROPIC_AUTH_TOKEN' in m1.spawned[0].env) && !('ANTHROPIC_MODEL' in m1.spawned[0].env),
+    'THE MUST — a claude start on the machine\'s own login, in a hub whose environment holds a provider conversation\'s plan: NONE of the plan\'s names (address, key, model names, its secret store) reach it', carried(m1, PLAN_C));
+  ok(m2.spawned.length === 1 && carried(m2, PLAN_X).length === 0 && m2.spawned[0].env.CODEX_HOME !== PLAN_X.CODEX_HOME, 'THE MUST — a codex start the same: no provider key, not the provider\'s home', carried(m2, PLAN_X));
+  ok(m3.spawned.length === 1 && e3.ANTHROPIC_BASE_URL === 'https://api.deepseek.com/anthropic' && e3.ANTHROPIC_MODEL === 'deepseek-chat' && e3.ANTHROPIC_AUTH_TOKEN === KEY, 'a provider start in such a hub: ITS OWN plan, laid after — never another\'s address or model names', { base: e3.ANTHROPIC_BASE_URL, model: e3.ANTHROPIC_MODEL });
+  const stripLine = src.split('\n').find((l) => l.includes("require('./server/provider-spawn.js').ambientPlanNames(backend, env)"));
+  if (!stripLine) throw new Error('the anchor of the control «the spawn line\'s plan strip» is not in the source');
+  const kM = await drive(M.load('src/ws-create.js', src.replace(stripLine + '\n', ''), 'pv-nostrip'), { backend: 'claude' }, { accounts: am }, SEEDED);
+  const kMx = await drive(M.load('src/ws-create.js', src.replace(stripLine + '\n', ''), 'pv-nostrip-codex'), { backend: 'codex', mode: 'chat' }, { accounts: am }, SEEDED);
+  ok(kMx.spawned.length === 1 && carried(kMx, PLAN_X).includes('VIBESPACE_PROVIDER_KEY') && carried(kMx, PLAN_X).includes('CODEX_HOME'), 'CONTROL (the must, codex): without the strip a machine-login codex start gets the provider\'s key and home ⇒ the codex leg goes RED', carried(kMx, PLAN_X));
+  ok(kM.spawned.length === 1 && carried(kM, PLAN_C).includes('ANTHROPIC_BASE_URL') && carried(kM, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN'), 'CONTROL (the must): the spawn line without its plan strip hands the machine-login conversation the THIRD PARTY\'S ADDRESS AND KEY ⇒ the must\'s leg goes RED', carried(kM, PLAN_C));
+  // …and the hub's own start sanitiser (server.js — inside a Claude Code conversation): run ITS OWN lines over that environment
+  const SJ = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const SAN = 'if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION';
+  const at = SJ.indexOf(SAN);
+  if (at < 0 || SJ.indexOf(SAN, at + 1) >= 0) throw new Error('the anchor of the sanitiser leg (server.js\'s start sanitiser) is not in the source once');
+  const block = SJ.slice(at, SJ.indexOf('\n}\n', at) + 2);
+  const sreq = createRequire(path.join(REPO, 'server.js'));
+  const sanitise = (code, env) => { const proc = { env: { ...env } }; new Function('process', 'require', 'console', code)(proc, sreq, { warn() { } }); return proc.env; };
+  const INSIDE = { CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ...PLAN_C, CODEX_HOME: path.join(DATA, 'machine-codex-home'), PATH: '/usr/bin' };
+  const after = sanitise(block, INSIDE);
+  const left = Object.keys(PLAN_C).filter((n) => PLAN_C[n] !== '' && n in after);
+  ok(left.length === 0 && !('CLAUDECODE' in after) && after.CODEX_HOME === INSIDE.CODEX_HOME && after.PATH === '/usr/bin', 'THE MUST — server.js\'s start sanitiser (its own lines, run): a hub started inside a provider conversation drops every name the plan wrote (its secret store too — it points into a provider\'s home); the machine\'s own CODEX_HOME and the rest stay', left);
+  const PLANCALL = ' || plan.includes(k)) {';
+  if (!block.includes(PLANCALL)) throw new Error('the anchor of the control «the sanitiser\'s plan names» is not in the source');
+  const after0 = sanitise(block.replace(PLANCALL, ') {'), INSIDE);
+  ok(after0.ANTHROPIC_BASE_URL === PLAN_C.ANTHROPIC_BASE_URL && after0.ANTHROPIC_AUTH_TOKEN === KEY, 'CONTROL (the must): the sanitiser that drops the CLI\'s own names only (the release) keeps the third party\'s address and key in the hub ⇒ the sanitiser leg goes RED');
+  // …ONLY a plan's own fingerprint (its home inside a provider's home) moves it: a plain conversation's shell keeps a person's
+  // own gateway; a CODEX provider conversation's shell (no CLAUDECODE) drops codex's plan — and keeps an OpenCode agent's login
+  const GATEWAY = { ANTHROPIC_BASE_URL: 'https://gateway.example.test', ANTHROPIC_AUTH_TOKEN: 'person-own-token' };
+  const plainAfter = sanitise(block, { CLAUDECODE: '1', ...GATEWAY, PATH: '/usr/bin' });
+  const CODEX_SHELL = { ...PLAN_X, ...GATEWAY, PATH: '/usr/bin' };
+  const codexAfter = sanitise(block, CODEX_SHELL);
+  ok(plainAfter.ANTHROPIC_BASE_URL === GATEWAY.ANTHROPIC_BASE_URL && plainAfter.ANTHROPIC_AUTH_TOKEN === GATEWAY.ANTHROPIC_AUTH_TOKEN && !('CLAUDECODE' in plainAfter), 'a hub started inside a PLAIN conversation (no plan\'s fingerprint) keeps a person\'s own gateway and token — only the CLI\'s own names go, as on the release', plainAfter);
+  ok(!('VIBESPACE_PROVIDER_KEY' in codexAfter) && !('CODEX_HOME' in codexAfter) && codexAfter.ANTHROPIC_AUTH_TOKEN === GATEWAY.ANTHROPIC_AUTH_TOKEN && codexAfter.PATH === '/usr/bin', 'a hub started inside a CODEX provider conversation (its shell has no CLAUDECODE) drops codex\'s plan — the provider\'s key and home (the machine\'s ChatGPT login stays readable) — and only that plan', codexAfter);
+  const GATE_EXTRA = " || require('./src/server/provider-spawn.js').inheritedPlanNames(process.env).length) {";
+  if (!block.includes(GATE_EXTRA)) throw new Error('the anchor of the control «the sanitiser\'s plan test» is not in the source');
+  const codex0 = sanitise(block.replace(GATE_EXTRA, ') {'), CODEX_SHELL);
+  ok(codex0.CODEX_HOME === PLAN_X.CODEX_HOME && codex0.VIBESPACE_PROVIDER_KEY === KEY, 'CONTROL: a sanitiser that runs only inside Claude Code keeps a codex provider conversation\'s key and home in the hub ⇒ the codex leg goes RED');
+  // the probe record covers every real plan: for every shipped preset on every harness it fits, the plan's names ⊆ the probed
+  const probed = Object.fromEntries(MP.SPAWN_HARNESSES.map((h) => { const q = PSP.planNamesOf(H.get(h)); return [h, new Set([...q.names, ...q.homes])]; }));
+  const missed = [];
+  for (const sp of MP.SHIPPED) {
+    const d = MP.draftOf(sp.id, { baseUrl: sp.baseRequired ? 'https://llm.example.test/v1' : null, model: 'm-1', wire: 'openai-responses' });
+    for (const w of [null, 'anthropic-messages']) {
+      const rec = { ...d, ...(sp.baseRequired && w ? { wire: w } : {}), id: 'pv-probe-x', keyRef: MP.keyRefOf('pv-probe-x') };
+      for (const h of MP.SPAWN_HARNESSES) {
+        if (!MP.fitsHarness(rec, h)) continue;
+        const env = H.get(h).creds.providerSpawn({ provider: rec, key: 'k', home: '/h' }).localEnv;
+        for (const [n, v] of Object.entries(env)) if (v !== '' && !probed[h].has(n)) missed.push(`${sp.id}/${h}: ${n}`);
+      }
+    }
+  }
+  ok(missed.length === 0, 'the probe covers every real plan: for every shipped preset (and a self-hosted one under each interface) on every harness it fits, each name the plan sets is one the strip knows', missed);
+  // the wiring the legs above drive through the test's own seams, pinned at the hub's: the fit refusal's harness, the oracle,
+  // the two session lists' names
+  const AUR = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8'), PRR = fs.readFileSync(path.join(REPO, 'src/server/permission-rules.js'), 'utf8');
+  const SESR = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
+  ok(AUR.includes("(id, be, model) => require('./provider-spawn.js').modelFor(providers, id, model, be));") && PRR.includes("if (typeof accounts?.get === 'function' && !accounts.get(accountId)) return Promise.resolve({ ok: false, reason: 'account', detail: 'unknown account' });") && SESR.includes("ctx.accounts?.providerRecordOf?.(s._accountId)?.label || 'API key'") && SJ.includes("accounts.providerRecordOf?.(s._accountId)?.label || 'API key'"), 'the hub\'s own wiring: its fence asks with the harness (the fit refusal is on), the permission oracle reads an account\'s login only, and BOTH session lists (REST and the live payload) name a provider conversation by its record');
+  ok(eq([...MP.SPAWN_HARNESSES].sort(), H.list().filter((d) => d && d.creds && typeof d.creds.providerSpawn === 'function').map((d) => d.id).sort()), 'THE CAPABILITY ROW: the harnesses a third party may fit (model-providers SPAWN_HARNESSES — a PURE module, it cannot ask the registry) are EXACTLY the descriptors that declare a plan (creds.providerSpawn) — a harness that gains or loses one without the list is red here', MP.SPAWN_HARNESSES);
+  ok(eq(PSP.planNamesOf(H.get('claude')).homes, ['CLAUDE_SECURESTORAGE_CONFIG_DIR']) && PSP.planNamesOf(H.get('claude')).names.includes('ANTHROPIC_SMALL_FAST_MODEL') && eq(PSP.planNamesOf(H.get('codex')), { names: ['VIBESPACE_PROVIDER_KEY'], homes: ['CODEX_HOME'] }) && eq(PSP.planNamesOf(H.get('opencode')), { names: [], homes: [] }), 'the names are ASKED OF EACH PLAN (a name the plan learns joins by construction); a harness with no plan strips nothing (an OpenCode agent keeps its own ANTHROPIC_* login)', PSP.planNamesOf(H.get('claude')));
+
   const refused = async (what, data, re, code) => { const x = await drive(wsCreate, data, { accounts: am }); const err = x.sent.find((m) => m.type === 'error'); ok(x.spawned.length === 0 && !!err && re.test(err.message) && (!code || err.code === code), `REFUSED BY NAME, nothing spawned — ${what}`, err && { message: err.message, code: err.code }); };
   vault.lock('door');
   await refused('the vault locked (the key cannot be read: it never runs without it) — the frame carries its code (the page\'s unlock door)', { backend: 'claude', accountId: ds.id }, /^the vault is locked — unlock it to start a conversation on DeepSeek/, 'vault_locked');
@@ -277,6 +350,9 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   await refused('a model the provider does not serve (a ChatGPT id a resume carried)', { backend: 'claude', accountId: ds.id, model: 'gpt-5.5' }, /DeepSeek does not serve the model “gpt-5.5”/, 'model-not-served');
   const bare = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', wire: 'anthropic-messages', label: 'Bare' })).provider;
   await refused('a provider with no model at all (never the CLI\'s own default at a third party)', { backend: 'claude', accountId: bare.id }, /Bare has no model yet/, 'model-none');
+  const ci = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'opus', spawnOriginHint: { model: 'instance' } }, { accounts: am });
+  ok(ci.spawned.length === 1 && (() => { const a = ci.spawned[0].args; const i = a.indexOf('--model'); return i >= 0 && a[i + 1] === 'deepseek-chat'; })(), 'the INSTANCE\'S default (claude.defaultModel = opus, the client says it is no pick) at a third party is no pick: the provider\'s own default, never a refusal of «opus» (U2 cure)', ci.sent.map((m) => m.type + (m.code ? ':' + m.code : '')));
+  ok(PSP.modelFor(store, ds.id, '', 'opencode').code === 'provider-unfit' && /DeepSeek does not offer what OpenCode needs/.test(PSP.modelFor(store, ds.id, '', 'opencode').message) && PSP.modelFor(store, ds.id, '', 'claude').ok && PSP.modelFor(store, ds.id, '').ok, 'the fence refuses a harness the provider does not serve (a hand-made create on OpenCode: no spawn road — never its row id on the machine\'s own login)', PSP.modelFor(store, ds.id, '', 'opencode'));
   const cm = await drive(wsCreate, { backend: 'claude', accountId: ds.id, model: 'deepseek-reasoner' }, { accounts: am });
   const cd = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am });
   const argsOf = (x) => (x.spawned[0] || { args: [] }).args;
@@ -314,6 +390,32 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(src.split(fenceLine).length === 2, 'control: the model fence is two identifiable lines of ws-create');
   const k4 = await drive(M.load('src/ws-create.js', src.replace(fenceLine, ''), 'pv-nofence'), { backend: 'claude', accountId: ds.id, model: 'gpt-5.5' }, { accounts: am });
   ok(k4.spawned.length === 1 && modelOf(k4) === 'gpt-5.5', 'CONTROL: the create without the model fence sends gpt-5.5 to DeepSeek ⇒ the not-served leg goes RED');
+  const k5 = await drive(M.load('src/ws-create.js', src.replace(fenceLine, ''), 'pv-nofence-resume'), { backend: 'claude', accountId: gone.id, resume: true, resumeId: 'conv-gone-2', ignoreNoConvo: true }, { accounts: am });
+  const e5 = k5.sent.find((m) => m.type === 'error');
+  ok(k5.spawned.length === 0 && !!e5 && e5.code === 'provider-unknown' && /unknown model provider/.test(e5.message), 'past the fence (taken out), a removed provider on a RESUME is refused BY resolveForSpawn itself — provider-unknown with its code, nothing spawned, never rescued onto the machine\'s own login', e5);
+  const PSF = PSP.create({ providers: store, dataDir: DATA });
+  store.put({ id: 'pv-noaddr2', kind: 'self-hosted', label: 'NoAddr', preset: 'other', baseUrl: null, keyRef: MP.keyRefOf('pv-noaddr2'), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] });
+  vault.secretPut(MP.keyEntryOf('pv-noaddr2'), KEY);
+  const threw = (fn) => { try { fn(); return null; } catch (e) { return e.code || e.message; } };
+  const nvDir = scratchDir('hspawn-pv-unset');
+  const nvault = VE.create({ dataDir: nvDir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false, register: false });
+  const nstore = PS.create({ dataDir: nvDir, vault: () => nvault, log: () => {} });
+  nstore.put({ id: 'pv-unset1', kind: 'self-hosted', label: 'Unset', preset: 'other', baseUrl: 'https://llm.example.test/v1', keyRef: MP.keyRefOf('pv-unset1'), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] });
+  const bstore = PS.create({ dataDir: scratchDir('hspawn-pv-bad'), vault: () => ({ state: () => 'unlocked', secretGet: () => ({ ok: false, code: 'key-malformed' }), secretNames: () => [] }), log: () => {} });
+  bstore.put({ id: 'pv-bad1', kind: 'self-hosted', label: 'Bad', preset: 'other', baseUrl: 'https://llm.example.test/v1', keyRef: MP.keyRefOf('pv-bad1'), wire: 'anthropic-messages', modelsSource: 'configured', models: [{ id: 'm-1' }] });
+  const r3 = [threw(() => PSF('pv-noaddr2', 'claude')), threw(() => PSP.create({ providers: nstore, dataDir: nvDir })('pv-unset1', 'claude')), threw(() => PSP.create({ providers: bstore, dataDir: DATA })('pv-bad1', 'claude'))];
+  ok(eq(r3, ['provider-no-address', 'vault_not_set_up', 'key-unreadable']), 'the three refusals that had no leg, BY NAME before anything spawns: no address · the vault not set up · the key unreadable (a vault answer that is neither locked nor unset)', r3);
+  // the session's META never holds the key (the premise the key-nowhere leg could not see: drive()'s writeSessionMeta was a noop)
+  const metas = [];
+  const cmeta = await drive(wsCreate, { backend: 'claude', accountId: ds.id }, { accounts: am, writeSessionMeta: (...a) => { metas.push(JSON.stringify(a)); } });
+  const sess = cmeta.session ? Object.fromEntries(Object.entries(cmeta.session).filter(([k]) => k !== 'pty')) : null;
+  let sessText = null; try { sessText = JSON.stringify(sess); } catch { sessText = null; }   // a session that cannot be written out proves nothing: the leg fails
+  ok(cmeta.spawned.length === 1 && metas.length >= 1 && !metas.some((m) => m.includes(KEY)) && !!sess && typeof sessText === 'string' && !sessText.includes(KEY), 'the key is in NO session meta written (every writeSessionMeta call recorded) and NOT on the live session record (the pty aside) — only the provider\'s id', { metas: metas.length });
+  // codex TERMINAL mode: the -c table ahead of the terminal's own words too
+  const ct = await drive(wsCreate, { backend: 'codex', accountId: lab.id }, { accounts: am });
+  const ta = (ct.spawned[0] || { args: [] }).args;
+  const tIdx = ta.findIndex((a) => String(a).startsWith(`model_providers.pv_${lab.id.slice(3)}.base_url=`));
+  ok(ct.spawned.length === 1 && tIdx > 0 && ta[tIdx - 1] === '-c' && ta.includes(`model_provider="pv_${lab.id.slice(3)}"`) && !ta.some((a) => String(a).includes(KEY)), 'codex in a TERMINAL: the provider\'s -c table rides its command line too (each item after its -c), the key never', ta.slice(-14));
   const PSRC = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
   const seedGuard = "{ let fresh = true; try { fs.lstatSync(path.join(home, 'sessions')); fresh = false; } catch { } if (fresh) h.creds.seedDir(home); }";
   const PSPm = M.load('src/server/provider-spawn.js', PSRC.replace(seedGuard, 'h.creds.seedDir(home);'), 'pv-seed-always');

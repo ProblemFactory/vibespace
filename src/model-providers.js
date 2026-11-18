@@ -619,5 +619,5 @@ module.exports = {
   normalizeProvider, validateProvider, listedRows, withListed, sameModel, namedModel, MODEL_NAME_MAX, resolveModel, servesModel, modelsOf, sourceOf,
   MENU_EMPTY, menuOf, resolvePick, REFRESH, LISTABLE_KINDS, REFRESH_WORDS, modelsEndpointOf, refreshable, refreshVerdict, authHeaders, parseListed,
   SHIPPED, SHIPPED_AT, shippedOf, REGIONS, REGION_WORDS, FIT_HARNESSES, fits, fitsHarness, FIT_WORDS, WIRES,
-  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf, ownNetworkUrl,
+  keyEntryOf, keyRefOf, providerOfKeyRef, validateKey, tailOf, draftOf, KEY_ERRORS, rosterRowsOf, ownNetworkUrl, SPAWN_HARNESSES,
 };

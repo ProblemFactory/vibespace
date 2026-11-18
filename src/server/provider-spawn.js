@@ -50,10 +50,13 @@ function create({ providers, dataDir, harnessOf = (id) => require('../harnesses'
 /** THE MODEL a provider session starts with (adversarial read r1, MAJOR 2): the request re-resolved against the PROVIDER's
  *  rows — an alias onto its row, nothing ⇒ its default; one it does not serve (a ChatGPT / claude-* id a resume carried, the
  *  instance default) or no row at all ⇒ refused by name — never another vendor's id, never nothing, at a third party.
+ *  A harness the provider does not serve (a hand-made create on OpenCode / ACP, which have no spawn road) is refused here too
+ *  (U2 cure) — never its row id on the machine's own login.
  *  → null (not a provider id) | { ok, model } | { ok: false, code, message } */
-function modelFor(providers, id, model) {
+function modelFor(providers, id, model, backend = null, harnessOf = (b) => require('../harnesses').get(b)) {
   const p = providers.thirdParty().find((r) => r.id === id) || null;
   if (!p) return { ok: false, code: 'provider-unknown', message: `unknown model provider ${id} — it was removed; pick another account for this conversation` };
+  if (backend && !MP.fitsHarness(p, backend)) { let label = backend; try { label = (harnessOf(backend) || {}).label || backend; } catch { } return { ok: false, code: 'provider-unfit', message: `${p.label} does not offer what ${label} needs` }; }
   const want = typeof model === 'string' ? model.trim() : '';
   const m = MP.resolveModel(p, want);
   if (m) return { ok: true, model: m };
@@ -61,4 +64,50 @@ function modelFor(providers, id, model) {
   return { ok: false, code: 'model-not-served', message: `${p.label} does not serve the model “${want}” — pick one of its models` };
 }
 
-module.exports = { create, homeOf, modelFor };
+// THE PLAN'S NAMES NEVER RIDE INTO ANOTHER START (lane lg-providers U2 cure — the coordinator's must): a hub (re)started from
+// inside a provider conversation inherits that conversation's environment — the third party's address, its key, its model
+// names — and every later start would carry them (a subscription conversation sending its turns to the third party on the
+// provider's key while its badge names its own account). The names are asked of each harness's OWN plan (creds.providerSpawn,
+// a stand-in record under every key header), so a name the plan learns joins by construction: the ones it sets to a VALUE are
+// its payload (the switches it only empties are not); a HOME variable (its value the plan's directory) is the machine's too
+// and counts only when it points into a provider's home. Two doors read them: server.js's start sanitiser (inside a
+// conversation) and the one spawn line of ws-create (every start: none is inherited; a provider start's own plan is laid after).
+const PLAN_HOME = '/vs-plan-home-probe';
+const planProbe = (auth) => ({ id: 'pv-plan-names', kind: 'self-hosted', label: 'probe', preset: 'other', baseUrl: 'https://plan.invalid/v1', auth, wire: 'anthropic-messages', models: [{ id: 'm' }], defaultModel: 'm', aliases: {} });
+function planNamesOf(desc) {
+  const c = desc && desc.creds;
+  const names = new Set(), homes = new Set();
+  if (c && typeof c.providerSpawn === 'function') {
+    for (const auth of MP.AUTHS) {
+      let sp = null;
+      try { sp = c.providerSpawn({ provider: planProbe(auth), key: 'plan-probe-key', home: PLAN_HOME }); } catch { sp = null; }
+      for (const [k, v] of Object.entries((sp && sp.localEnv) || {})) { if (v === PLAN_HOME) homes.add(k); else if (v !== '') names.add(k); }
+    }
+  }
+  return { names: [...names].sort(), homes: [...homes].sort() };
+}
+const inProviderHome = (v) => String(v || '').split(path.sep).includes('provider-homes');
+/** the names of `env` a start of `backend` must not inherit (its harness's plan) */
+function ambientPlanNames(backend, env, harnessOf = (id) => require('../harnesses').get(id)) {
+  let d = null;
+  try { d = harnessOf(backend); } catch { d = null; }
+  const e = env || {};
+  const { names, homes } = planNamesOf(d);
+  return [...names.filter((n) => Object.prototype.hasOwnProperty.call(e, n)), ...homes.filter((n) => inProviderHome(e[n]))];
+}
+/** the hub's own environment at its start (server.js's sanitiser): every harness's plan — ONLY when the environment carries
+ *  that harness's plan's fingerprint (its home variable pointing into a provider's home: the plan always sets one). A person's own gateway
+ *  (ANTHROPIC_BASE_URL + a token they set) or an OpenCode agent's own login is no plan, and a hub started from a plain
+ *  conversation keeps it — as before (adversarial read of this cure, F3). A codex provider conversation's shell carries no
+ *  CLAUDECODE: server.js asks this outside that test too (F1). */
+function inheritedPlanNames(env, descriptors = require('../harnesses').list()) {
+  const e = env || {};
+  const out = new Set();
+  for (const d of descriptors || []) {
+    if (!planNamesOf(d).homes.some((n) => inProviderHome(e[n]))) continue;   // this harness's plan left no fingerprint: none of it is inherited
+    for (const n of ambientPlanNames(d && d.id, e, () => d)) out.add(n);
+  }
+  return [...out].sort();
+}
+
+module.exports = { create, homeOf, modelFor, planNamesOf, ambientPlanNames, inheritedPlanNames };

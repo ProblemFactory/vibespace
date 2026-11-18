@@ -718,7 +718,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }
           // A THIRD-PARTY PROVIDER serves only ITS OWN rows (lane lg-providers U2 r1): the model this session starts with is
           // re-resolved against them — an alias onto its row, nothing ⇒ its default; one it does not serve is REFUSED by name
-          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? accounts.providerModelFor(data.accountId, backend, data.model) : null;
+          const pvModel = accounts && typeof accounts.providerModelFor === 'function' ? accounts.providerModelFor(data.accountId, backend, /^(instance|harness)$/.test(String(data._modelOrigin || '')) ? '' : data.model) : null;   // an instance / harness DEFAULT is no pick at a third party: its own default (U2 cure)
           if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }
           if (pvModel) data.model = pvModel.model;
           // B-6c55: A LOCKED CONVERSATION'S CONTEXT ASK rides the spawn — the saved fact (the person's, src/lock-context.js), else the
@@ -1063,7 +1063,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
             _heldPoolMember: heldPoolMember, // the pool member this (non-hot) process bills for its life — src/server/usage-pool-engine.js heldPoolMemberFor
-            _oatRoad: oatEnvRoad ? 'env' : (spawnAccount && !data.hostId ? 'file' : null), // src/server/usage-pool-engine.js tokenGenOf // src/server/usage-pool-engine.js tokenGenOf
+            _oatRoad: oatEnvRoad ? 'env' : (spawnAccount && !data.hostId ? 'file' : null), // src/server/usage-pool-engine.js tokenGenOf
             _oatGen: oatEnvRoad && Number(spawnAccount.oatGen) > 0 ? Number(spawnAccount.oatGen) : null,
             _poolPin: (data._poolPin && spawnAccount && spawnAccount.id === data._poolPinPool) ? data._poolPin : null, // THE CONVERSATION'S PIN (2026-09-28): carried by a resume, never by a fork — for the pool the spawn bills (resumePoolPin)
             // HOW the billing resolved (B-f531): rides the created reply so
@@ -1533,6 +1533,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
                 delete env.CLAUDE_CODE_OAUTH_TOKEN;                 // top-precedence in the CLI — ambient copy = wrong billing
                 delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
+                for (const n of require('./server/provider-spawn.js').ambientPlanNames(backend, env)) delete env[n];   // lane lg-providers U2 cure: no start inherits a provider's plan (address, key, models) from the hub's env — a provider start lays its own just below
                 // Claude API key → ANTHROPIC_API_KEY; Claude subscription → its
                 // own CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates ONLY the creds
                 // store, transcripts stay shared); Codex subscription → its own

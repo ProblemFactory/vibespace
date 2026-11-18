@@ -41,15 +41,15 @@ const { router: persistenceRouter, setup: setupPersistence } = require('./src/ro
 // are silently unpersisted — terminate + resume loses everything (verified on
 // CLI 2.1.199 by A/B env test). Strip the whole inherited set at startup so all
 // spawn paths (dtach spawn line, wrappers, probes) run top-level.
-if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION) {
-  const stripped = [];
+if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION || require('./src/server/provider-spawn.js').inheritedPlanNames(process.env).length) {   // …or a provider conversation's shell of any harness (lane lg-providers U2 cure)
+  const stripped = [], plan = require('./src/server/provider-spawn.js').inheritedPlanNames(process.env);   // + a provider conversation's plan: its address, key, models, home
   for (const k of Object.keys(process.env)) {
-    if (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_') || k.startsWith('CLAUDE_WEBUI_')) {
+    if (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_') || k.startsWith('CLAUDE_WEBUI_') || plan.includes(k)) {
       stripped.push(k);
       delete process.env[k];
     }
   }
-  console.warn(`[env] Server was started from inside a Claude Code session — stripped inherited session env (${stripped.join(', ')}) so spawned CLIs run top-level. Without this, spawned sessions never write transcripts and their conversations are LOST on resume.`);
+  console.warn(`[env] Server was started from inside an agent conversation — stripped inherited session env (${stripped.join(', ')}) so spawned CLIs run top-level. Without this, spawned sessions never write transcripts and their conversations are LOST on resume.`);
 }
 
 // Optional persistent ops log (env-gated no-op without VIBESPACE_OPSLOG_DIR) —
@@ -1374,8 +1374,8 @@ function activeSessionsPayload() {
       // Billing identity badge: which account this session's env was spawned
       // with (null = the CLI's global login / subscription).
       accountId: s._accountId || null,
-      accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
-      accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
+      accountName: s._accountId ? (accounts.get(s._accountId)?.name || accounts.providerRecordOf?.(s._accountId)?.label || 'API key') : null,   // a provider conversation: its record's name (lane lg-providers U2 cure — as its badge and the REST list)
+      accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || accounts.providerRecordOf?.(s._accountId)?.tail || null) : null,
       todo: s._todos || null, autoAllowed: s._autoAllowed || 0, cpuNice: s._cpuNice || null, // {done, total, current} — the agent's own TodoWrite/plan
       poolPin: poolPinFactOf(s), // THE CONVERSATION'S PIN (2026-09-28): the billing submenu's ✓ "pinned" row + Session Properties
       stash: stashFactOf(s), // 2026-09-27: what waits for this agent's next turn (both stashes, src/stash-summary.js) — the strip above its composer + the card's hint

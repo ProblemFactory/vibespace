@@ -740,8 +740,8 @@ function setup(ctx) {
         agentNickname: s.agentNickname || '',
         parentThreadId: s.parentThreadId || null,
         accountId: s._accountId || null,
-        accountName: s._accountId ? (ctx.accounts?.get(s._accountId)?.name || 'API key') : null,
-        accountTail: s._accountId ? (ctx.accounts?.get(s._accountId)?.tail || null) : null,
+        accountName: s._accountId ? (ctx.accounts?.get(s._accountId)?.name || ctx.accounts?.providerRecordOf?.(s._accountId)?.label || 'API key') : null,   // a third-party provider's conversation: its record's name (lane lg-providers U2 cure — as its badge)
+        accountTail: s._accountId ? (ctx.accounts?.get(s._accountId)?.tail || ctx.accounts?.providerRecordOf?.(s._accountId)?.tail || null) : null,
         todo: s._todos || null,
         auth: ctx.sessionAuth ? ctx.sessionAuth(s) : null,
         mode: s.mode || 'terminal',
