@@ -8427,6 +8427,7 @@ export default {
   "Conversations": "会話",
   "Search is off: {why}": "検索はオフです：{why}",
   "Indexing {done} of {total} conversations…": "{total} 件中 {done} 件の会話をインデックス中…",
+  "The selected hit is no longer in the results — pick another": "選んだ結果は一覧から消えました。選び直してください",
   "{rows} messages and {files} files indexed": "{rows} 件のメッセージと {files} 件のファイルをインデックス済み",
   "The index starts a minute after the server": "インデックスはサーバー起動の 1 分後に始まります",
   "Search index": "検索インデックス",

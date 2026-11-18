@@ -8428,6 +8428,7 @@ export default {
   "Conversations": "对话",
   "Search is off: {why}": "搜索已关闭：{why}",
   "Indexing {done} of {total} conversations…": "正在索引 {done} / {total} 个对话…",
+  "The selected hit is no longer in the results — pick another": "选中的结果已不在列表中，请重新选择",
   "{rows} messages and {files} files indexed": "已索引 {rows} 条消息和 {files} 个文件",
   "The index starts a minute after the server": "索引在服务器启动一分钟后开始",
   "Search index": "搜索索引",

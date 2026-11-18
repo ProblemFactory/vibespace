@@ -389,7 +389,9 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     put('ag-conv-1', 'antigravity', 'x1', 'the olivequartz note of a conversation no transcript reader can read');
     put('ag-conv-1', 'antigravity', 's3', 'a card the server injected outside any record');   // the card door's key shape
     put('ag-conv-1', 'antigravity', 'x2', 'Another Claude session sent a message:\nthe wrapped words\n\nThis came from another Claude session — not typed by your user.');
-    put('ag-conv-1', 'antigravity', 'gm:g-0f0f0f0f:1790000000000', 'a group card the live door indexed');   // placeGroupCard's key
+    put('ag-conv-1', 'antigravity', 'gm:g-0f0f0f0f:1790000000000', 'a group card the live door indexed');
+    put('ag-conv-1', 'antigravity', 'u:7d1e0c2a-1b3c-4d5e-8f90-a1b2c3d4e5f6', 'a person row with a claude record key');   // cure 3: the real key shapes of a person's row
+    put('ag-conv-1', 'antigravity', 'h:1k2j3h:48', 'a person row with an ACP record key');   // placeGroupCard's key
     put(MIG_SID, 'claude', 'u:m-old', 'the stalewords row the release wrote');
     db1.prepare('INSERT INTO cursor (file, sid, host, size, mtime, lines, state) VALUES (?, ?, ?, ?, ?, ?, ?)').run(MIG_FILE, MIG_SID, '', fs.statSync(MIG_FILE).size, Math.floor(fs.statSync(MIG_FILE).mtimeMs), 1, 'done');
     db1.prepare('INSERT INTO meta (k, v) VALUES (?, ?)').run('lastBuild', '1790000000000');
@@ -440,7 +442,7 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
   ok(onw.p6after >= 1, `CONTROL (no wait for the whole set at a boot): the first search answers from the cache-only set and finds the words (${onw.p6after})`, onw);
   const omg = await migrateScene(wmut("if (!fresh && uv > 0 && uv < SCHEMA_VERSION && migrate())", "if (false)", 'nomigrate'));
   ok(omg.kept === 0, `CONTROL (the schema step drops the index, as before the cure): the conversation no transcript reader can read is gone from search (${omg.kept})`, omg);
-  ok(mg.grps && mg.grps.x1 === null && mg.grps.s3 === '' && mg.grps.x2 === null && mg.grps['gm:g-0f0f0f0f:1790000000000'] === 'g-0f0f0f0f', `the migration holds rows by their key's SHAPE: a group card under its own group, the card door's key as a possible peer card; the person's own old row stays theirs — never judged whole (a wrapped frame is judged by its head, as before) (${JSON.stringify(mg.grps)})`, mg);
+  ok(mg.grps && mg.grps.x1 === null && mg.grps['u:7d1e0c2a-1b3c-4d5e-8f90-a1b2c3d4e5f6'] === null && mg.grps['h:1k2j3h:48'] === null && mg.grps.s3 === '' && mg.grps.x2 === null && mg.grps['gm:g-0f0f0f0f:1790000000000'] === 'g-0f0f0f0f', `the migration holds rows by their key's SHAPE: a group card under its own group, the card door's key as a possible peer card; the person's own old row stays theirs — never judged whole (a wrapped frame is judged by its head, as before) (${JSON.stringify(mg.grps)})`, mg);
   const omk = await migrateScene(wmut('    if (!have.has(\'grp\')) markPeerShaped();', '    if (!have.has(\'grp\')) db.exec("UPDATE msg SET grp = \'\' WHERE role = \'user\'");', 'everyuser'));   // stale-pins: kept (the RED control puts the release's text back)
   ok(omk.grps && omk.grps.x1 === '', `CONTROL (every release user row held as a peer card, as the cure had it): the person's own row is judged whole — the leg goes RED (${JSON.stringify(omk.grps)})`, omk);
   const ok2 = await scene(wmut("  if (typeof mid === 'string' && mid.startsWith('gm:')) {", "  if (false) {", 'nokey'));
@@ -520,23 +522,26 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     // the cure's second reader: a Rebuild pressed DURING a walk — that walk ends without «built» (the drop removed what it had
     // walked) and a fresh walk follows it; a walk broken off by the final close builds nothing either
     const genScene = async (O, { closeMid = false } = {}) => {
-      let release = null, lists = 0, atSecond = 'not asked', rebuilt, guard;
+      let release = null, lists = 0, atSecond = 'not asked', rebuilt, guard, aWalked = null;
       const walked = new Promise((r) => { rebuilt = r; });   // the Rebuild's own walk says so at its end (its log line)
       const x = O.create({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-gen-')), homeDir: home, exitHook: false, bootDelayMs: 1e9,
-        log: { log(m) { if (String(m).includes('backfill (rebuild)')) rebuilt(); }, warn() { }, error() { } },
-        listConversations: async () => { lists++; if (lists === 1) { await new Promise((r) => { release = r; }); return []; } if (lists === 2) atSecond = x.stats().lastBuild; return []; } });
+        log: { log(m) { const a = /backfill \(tick\): (\d+) of (\d+)/.exec(String(m)); if (a) aWalked = `${a[1]}/${a[2]}`; if (String(m).includes('backfill (rebuild)')) rebuilt(); }, warn() { }, error() { } },
+        listConversations: async () => { lists++; if (lists === 1) { await new Promise((r) => { release = r; }); return ['gw-1', 'gw-2', 'gw-3'].map((sid) => ({ sid, backend: 'claude', cwd: '/w/gw' })); } if (lists === 2) atSecond = x.stats().lastBuild; return []; } });
       x.start(); await x.call('status', {});
       const first = x.backfill();           // a walk in flight: its list is still being read
       if (closeMid) await x.close({ final: true }); else await x.rebuild();
       release(); await first;
       for (let i = 0; i < 50 && !closeMid && lists < 2; i++) await new Promise((r) => setImmediate(r));   // a walk that follows starts at once
       if (lists >= 2) { await Promise.race([walked, new Promise((r) => { guard = setTimeout(r, 5000); })]); clearTimeout(guard); }
-      const out = { lists, atSecond, end: x.stats().lastBuild };
+      const out = { lists, atSecond, end: x.stats().lastBuild, aWalked };
       if (!closeMid) await x.close({ final: true });
       return out;
     };
     const gn = await genScene(SI);
     ok(gn.lists === 2 && gn.atSecond === null && !!gn.end, `a Rebuild during a walk: that walk ends without «built» and a fresh walk follows it — only that one sets the last build (${gn.lists} walks, ${gn.atSecond} between them)`, gn);
+    ok(gn.aWalked === '0/3', `cure 3: the walk a Rebuild overtook stops at once — it reads none of its 3 conversations into the fresh index (${gn.aWalked})`, gn);
+    const gns = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (st === 'closed' || st === 'disabled' || gen !== buildGen) break;"), "if (st === 'closed' || st === 'disabled') break;"), 'nostop'));   // stale-pins: kept (the RED control puts the parent's loop back; its anchor checked once)
+    ok(gns.aWalked === '3/3', `CONTROL (the overtaken walk goes on): it reads all 3 conversations — the leg goes RED (${gns.aWalked})`, gns);
     const gnc = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "if (gen === buildGen && st !== 'closed' && st !== 'disabled') {"), "if (st !== 'closed' && st !== 'disabled') {"), 'nogen'));
     ok(gnc.atSecond !== null && gnc.atSecond !== 'not asked', `CONTROL (no build generation): the overtaken walk says «built» while the index is empty again — the leg goes RED (${gnc.atSecond})`, gnc);
     const gnf = await genScene(MUT.load('src/server/search-index.js', O2.replace(pin(O2, "} finally { Promise.resolve(walking).catch(() => { }).then(() => backfill({ reason: 'rebuild' })).catch(() => { }); }"), "} finally { backfill({ reason: 'rebuild' }).catch(() => { }); }"), 'nochain'));
@@ -591,13 +596,14 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
       globalThis.document = { createElement: (t) => new N(t), addEventListener() { }, removeEventListener() { } };
       globalThis.fetch = async (u) => { asked.push(u); const a = answerOf(asked.length, new URL(u, 'http://x').searchParams.get('q')); return { ok: a.ok !== false, json: async () => { if (a.thrown) throw new SyntaxError('not JSON (stand-in)'); return a; } }; };
       const win = { id: 'sw-1', content: Object.assign(new N('div'), { _root: true }), _listenerCtl: new AbortController(), _openSpec: {} };
-      const app = { wm: { windows: new Map(), createWindow: () => win, revealWindow() { }, closeWindow() { } }, ws: { onGlobal() { }, offGlobal() { } }, sidebar: null, sessions: new Map() };
+      const opened = [];
+      const app = { wm: { windows: new Map(), createWindow: () => win, revealWindow() { }, closeWindow() { } }, ws: { onGlobal() { }, offGlobal() { } }, sidebar: null, sessions: new Map(), viewSession: (sid) => opened.push(sid) };
       const painted = async (n) => { for (let i = 0; i < 50 && asked.length < n; i++) await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r)); };
       try {
         SWx.openSearchWindow(app, { q }); await painted(1);
         const [box, , status, list] = win.content.children[0].children;
         const hits = () => list.querySelectorAll('.search-hit');
-        const h = { list, status, hits, key: (e) => box.onkeydown({ key: e, preventDefault() { } }), act: () => hits().findIndex((r) => r.classList.has('active')),
+        const h = { list, status, hits, opened, key: (e) => box.onkeydown({ key: e, preventDefault() { } }), act: () => hits().findIndex((r) => r.classList.has('active')),
           more: (i) => list.children[i].querySelectorAll('.search-more')[0].onclick(), ask: async (nq) => { const n = asked.length + 1; win._searchSet(nq); await painted(n); } };
         return await steps(h);
       } finally { win._listenerCtl.abort(); globalThis.document = doc0; globalThis.fetch = fetch0; }
@@ -638,6 +644,14 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
         await h.ask('quartz');
         return { said, act: h.act(), more: h.list.querySelectorAll('.search-more').length };
       }],
+      gone: [(n) => ans((n === 1 ? ['g0', 'g1', 'g2', 'g3', 'g4', 'g5'] : ['g0', 'g1', 'g2', 'g4', 'g5']).map((sid) => msgs(sid, [sid + '-u'])[0])), 'quartz', async (h) => {
+        for (let i = 0; i < 4; i++) h.key('ArrowDown');            // the fourth hit (g3) chosen
+        await h.ask('quartz');                                       // the re-ask: g3 is no longer in the answer
+        const o = { act: h.act() }; h.key('Enter'); Object.assign(o, { afterLost: h.opened.slice(), said: h.status.textContent });
+        h.key('ArrowDown'); h.key('Enter'); o.afterArrow = h.opened.slice();   // the person picks again
+        await h.ask('basalt'); h.key('Enter'); o.fresh = h.opened.slice();      // nobody chose: Enter takes the top hit
+        return o;
+      }],
       thrown: [(n, q) => (n === 2 ? { thrown: true } : ans(msgs('sw-conv', [0, 1, 2, 3, 4, 5].map((i) => `${q}-${i}`)))), 'quartz', async (h) => {
         h.more(0); for (let i = 0; i < 4; i++) h.key('ArrowDown');
         await h.ask('quartz'); const said = h.status.textContent;
@@ -674,6 +688,11 @@ console.log('§10 a cleared group message is not found (B-b291): judged at every
     ok(!(fic.groups === 2 && fic.a === 5 && fic.b === 3), `CONTROL (one key for every «Files» group): the repaint draws them as one node — the leg goes RED (${fic.groups} groups, ${fic.a} + ${fic.b})`, fic);
     const erc = await run5(await copy("if (!res.ok) { list.textContent = ''; rows = []; sel = -1; painted = ''; status.textContent", "if (!res.ok) { list.textContent = ''; status.textContent", 'errkeeps'), 'error');   // stale-pins: kept (the RED control puts the release's text back)
     ok(erc.act !== -1, `CONTROL (the error keeps the old place): the old selection comes back after the error — the leg goes RED (${erc.act})`, erc);
+    const go = await run5(SWm, 'gone');
+    ok(go.act === -1 && go.afterLost.length === 0 && go.said === 'The selected hit is no longer in the results — pick another' && go.afterArrow.join() === 'g0' && go.fresh.join() === 'g0,g0',
+      `cure 3 (the coordinator's (1)): the selected hit gone from the re-ask leaves the place LOST — Enter opens nothing and says so; an arrow key picks again; a person who never chose keeps Enter on the top hit (${JSON.stringify(go)})`, go);
+    const goc = await run5(await copy("if (lost) { status.textContent = t('The selected hit is no longer in the results — pick another'); return; } ", "", 'enterfalls'), 'gone');
+    ok(goc.afterLost.join() === 'g0', `CONTROL (Enter falls to the first row): another conversation than the one chosen opens — the leg goes RED (${goc.afterLost.join()})`, goc);
     const thc = await run5(await copy("if (e.name !== 'AbortError') { rows = []; sel = -1; painted = ''; status.textContent = t('Search failed'); } }", "if (e.name !== 'AbortError') status.textContent = t('Search failed'); }", 'thrownkeeps'), 'thrown');   // stale-pins: kept (the RED control puts the release's text back)
     ok(thc.act !== -1, `CONTROL (a thrown answer keeps the old place): the old selection comes back — the leg goes RED (${thc.act})`, thc);
   }

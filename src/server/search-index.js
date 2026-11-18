@@ -239,7 +239,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
       try { for (const s of activeSessions().values()) { const sid = sidOf(s); if (sid) live.add((s.host || '') + '|' + sid); } } catch { }
       progress.total = list.length;
       for (const c of list) {
-        if (st === 'closed' || st === 'disabled') break;
+        if (st === 'closed' || st === 'disabled' || gen !== buildGen) break;   // cure 3: a walk a Rebuild overtook stops (the fresh walk reads everything again)
         const key = (c.host || '') + '|' + c.sid;
         names.set(key, { name: c.name || null, backend: c.backend, cwd: c.cwd || '' });
         try {

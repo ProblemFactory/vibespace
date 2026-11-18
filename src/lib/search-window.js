@@ -106,7 +106,7 @@ export function openSearchWindow(app, opts = {}) {
   const list = el('div', 'search-list'); list.setAttribute('role', 'listbox');
   root.append(box, chips, status, list);
   winInfo.content.appendChild(root);
-  let ac = null, timer = null, poll = null, rerun = null, rows = [], sel = -1, painted = '';
+  let ac = null, timer = null, poll = null, rerun = null, rows = [], sel = -1, painted = '', lost = false;
 
   const paintChips = () => { chips.textContent = ''; for (const [k, label] of SCOPES) { const c = el('button', 'search-chip' + (k === scope ? ' on' : ''), t(label)); c.onclick = () => { scope = k; paintChips(); run(); }; chips.append(c); } };
   const select = (i) => { sel = Math.max(-1, Math.min(rows.length - 1, i)); rows.forEach((r, j) => r.classList.toggle('active', j === sel)); if (sel >= 0) rows[sel].scrollIntoView({ block: 'nearest' }); };
@@ -128,6 +128,7 @@ export function openSearchWindow(app, opts = {}) {
     // B-b291 cure 2 (lens two): the SAME query asked again (the 3 s re-ask while the index builds, a clear, the window's door)
     // keeps the person's place — the selected hit by its key, every group whose «+N more» is open; a new query starts afresh
     const same = !!q && q === painted; painted = q;
+    if (!same) lost = false;   // cure 3: a new query (or scope) is a new place
     const keep = same && sel >= 0 && rows[sel] ? rows[sel]._key : null, open = new Set(same ? [...list.children].filter((g) => g._open).map((g) => g._key) : []);
     rows = []; sel = -1;
     const groups = new Map(), drawn = [];
@@ -149,7 +150,7 @@ export function openSearchWindow(app, opts = {}) {
         const meta = el('span', 'search-hit-meta', h.kind === 'artifact' ? h.path.split('/').pop() : `${fmtTime(h.ts)} · ${hitWho(h)}`);
         if (h.kind === 'artifact') meta.title = h.path;
         row.replaceChildren(meta, snippetNode(h.snippet || {}));
-        row.onclick = () => activate(row._hit);
+        row.onclick = () => { lost = false; activate(row._hit); };
         row._hit = h;
         return row;
       };
@@ -164,7 +165,7 @@ export function openSearchWindow(app, opts = {}) {
     }
     list.replaceChildren(...drawn);
     rows = [...list.querySelectorAll('.search-hit')];
-    if (keep) { sel = rows.findIndex((x) => x._key === keep); if (sel >= 0) rows[sel].classList.add('active'); }
+    if (keep) { sel = rows.findIndex((x) => x._key === keep); if (sel >= 0) rows[sel].classList.add('active'); else lost = true; }   // cure 3: the selected hit gone from the answer is a LOST place — Enter opens nothing until the person picks again
   }
   async function run() {
     const v = box.value.trim();
@@ -183,9 +184,9 @@ export function openSearchWindow(app, opts = {}) {
   }
   box.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
   box.onkeydown = (e) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); select(sel + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); select(sel - 1); }
-    else if (enterSubmits(e)) { e.preventDefault(); const r = rows[sel >= 0 ? sel : 0]; if (r) activate(r._hit); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); lost = false; select(sel + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); lost = false; select(sel - 1); }
+    else if (enterSubmits(e)) { e.preventDefault(); if (lost) { status.textContent = t('The selected hit is no longer in the results — pick another'); return; } const r = rows[sel >= 0 ? sel : 0]; if (r) activate(r._hit); }   // never another hit than the one chosen; nobody chose ⇒ the top hit
     else if (e.key === 'Escape') { e.preventDefault(); if (box.value) { box.value = ''; run(); } else { try { app.wm.closeWindow(winInfo.id); } catch { } } }
   };
   winInfo._searchSet = (nq, sc) => { box.value = String(nq || ''); if (sc && SCOPES.some(([k]) => k === sc)) scope = sc; paintChips(); run(); setTimeout(() => box.focus(), 0); };
