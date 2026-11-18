@@ -131,6 +131,23 @@ async function restartLeg(KS, tag) {
   const [bt, bc] = await Promise.all([bootLeg(KEPT, 'now'), bootLeg(KB2, 'control')]);
   ok(bt.before === 'checking' && bt.after === 'full', `② a stop found at a boot (\`restart\`) says «checking» until the first check (${bt.before} → ${bt.after}) — never «its logins» off the file`, bt);
   ok(bc.before === 'full', `CONTROL: a store whose boot-found stop sets the presence says «${bc.before}» unchecked — ② is RED on it`, bc);
+  // B-7a30 unit 1' cure (its verdict's word): the store's pass that ENDED WITHOUT AN AWAIT has its own RED control — a read in the
+  // same synchronous run must get a NEW pass, never the finished one (the release-style `.finally` clear handed that one out)
+  const passLeg = async (KS, tag) => {
+    const dir = path.join(ROOT, 'pass-' + tag); const k = keyOf(88); fs.mkdirSync(path.join(dir, 'browser-profiles', k), { recursive: true });
+    const X = world(KS, dir);
+    X.S.recheckAll(); // nothing kept yet: this pass's body ends without an await
+    X.S.noteStop(k, { why: 'restart', hasDir: true, tabs: [{ url: 'https://pass.test/' }] }); // a stop found at a boot: no presence set
+    X.S.get(k); // the read asks for the pass — in the same synchronous run
+    await X.S.recheckAll();
+    const kind = X.S.get(k).kind; X.S.shutdown();
+    return kind;
+  };
+  const KSP = MUT.load('src/server/browser-kept.js', cut(cut(ksSrc, '    if (thereTick && !thereTick.done) return thereTick.p;', '    if (thereTick) return thereTick.p;', 'the store pass\'s «ended» test'),
+    '      } finally { pass.done = true; if (thereTick === pass) thereTick = null; }', '      } finally { Promise.resolve().then(() => { if (thereTick === pass) thereTick = null; }); }', 'the store pass\'s own end'), 'store-stalepass');
+  const [pt, pc] = await Promise.all([passLeg(KEPT, 'now'), passLeg(KSP, 'control')]);
+  ok(pt === 'full', `② a read in the same run as a pass that ended without an await gets a NEW pass — its folder is checked (${pt})`, pt);
+  ok(pc === 'checking', `CONTROL: a store whose pass is cleared one microtask after it ended hands that finished pass to the read — the folder is never checked (${pc}) — ② is RED on it`, pc);
   const KBN = require('../src/browser-kept.js');
   ok(/its logins are still there/.test(KBN.keptNoteText({ why: 'user', tabs: 2 })) && !/logins/.test(KBN.keptNoteText({ why: 'user', tabs: 2, logins: false })), '② the agent\'s «kept» note names its logins only for a folder the last check found (a folder still being checked, fenced or tabs only: not said)');
   ok(BF.KEPT_KINDS.includes('checking') && BF.keptLineWords(fact, (s) => s) === 'checking…' && BF.ownResumable(fact) === false && BF.ownResumable({ own: { state: 'stopped', kept: { kind: 'checking', tabs: 2 } } }) === true, '② the live view\'s kept line says the page\'s own words «checking…»; its Resume is drawn only for what is surely kept (its tabs), never for unchecked logins');
