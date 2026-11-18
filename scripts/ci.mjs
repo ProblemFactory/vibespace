@@ -2424,12 +2424,17 @@ export const FAST_NO_RETRY = Object.freeze([
  *  (killedFromOutside — the run is being torn down) is not a flake to look at twice; a suite that HUNG to its budget
  *  already cost the push gate its whole budget (300 s) and left a hang report naming its threads — a second hang would
  *  cost as much again, so it is red at once; so is one its OWN watchdog ended (suite-watchdog.mjs: exit 1 just under the
- *  budget, the report kept — `r.hangReport`). B-3f38 is about legs that read a clock under load, not about hangs. */
+ *  budget, the report kept — `r.hangReport`), and one that ran > 80 % of its budget (batch 24's reader). B-3f38 is about legs
+ *  that read a clock under load, not about hangs. */
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;
   if (r && r.killedFromOutside) return 'it died of a signal this runner did not send — the run is being torn down, not a flake';
   if (r && (r.hangReport || (r.error && r.error.code === 'ETIMEDOUT'))) return 'it hung — to its budget or to its own watchdog — and a second hang would cost the gate as much again (its hang report names the threads)';
+  // …and a red that ran most of its budget (batch 24's reader: a hang by another road, a suite ending itself near its clock) — a second
+  // try would cost the push gate as much again. (Not «✗ TIMEOUT» in the tail: the watchdog census reds every self-kill of 60 s and more,
+  // so the one reachable is a SHORT bound inside a leg — the load-sensitive leg this retry exists for; and a leg's NAME may say TIMEOUT)
+  if (s && r && Number(r.ms) > 0.8 * budgetFor(s)) return `it ran ${Math.round(Number(r.ms) / 1000)} s of its ${Math.round(budgetFor(s) / 1000)} s budget — a second try would cost the gate as much again`;
   return '';
 }
 export function writeFailLog(dir, sha, s, r, attempt, { tag = '[ci]', log = console.log } = {}) {
@@ -4099,7 +4104,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
       const why = skip(s);
       if (why) { skipped.push(s.name); log(`  ○ SKIPPED ${s.name} — ${why}`); continue; }
       const r = await run(s, { lane });
-      const cut = stoppedBy; // the tier stopped while it ran: SIGTERMed by another lane's red — not a verdict
+      const cut = !r.ok && stoppedBy; // the tier stopped while it ran: SIGTERMed by another lane's red — not a verdict (a row that answered GREEN is judged)
       if (cut) r.lines = [`  · ${s.name} stopped [lane ${lane}] — ${cut} is red`];
       await after(r);
       if (cut) break;
@@ -4112,10 +4117,11 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
       else {
         log(`  … ${s.name} failed — retrying once before calling it red [lane ${lane}]`);
         const again = await run(s, { lane, attempt: 2 });
-        const cut2 = stoppedBy; // another lane's red ended the retry: not a verdict (its first try's red stays in its fail log)
+        const cut2 = !again.ok && stoppedBy; // another lane's red ended the retry: not a verdict (its first try's red stays in its fail log); a retry that answered GREEN is judged — FLAKY
         if (cut2) again.lines = [`  · ${s.name} stopped [lane ${lane}] — ${cut2} is red`];
         await after(again);
-        if (cut2) break;
+        // …and the row is still NAMED red (batch 24's reader): its first try was red and its retry judged nothing — never dropped
+        if (cut2) { reds.push(s.name); log(`  · ${s.name}: red on its first try; its retry was stopped — ${cut2} is red`); break; }
         if (failDir) writeFailLog(failDir, sha, s, again, 2);
         if (ledger) { try { fs.mkdirSync(path.dirname(ledger), { recursive: true }); fs.appendFileSync(ledger, JSON.stringify(rerunRecord({ sha, suite: s.name, lane, first: r, again })) + '\n'); } catch (e) { log(`  · rerun ledger not written: ${e && e.message}`); } }
         log(rerunSaid('ci', s.name, r, again, ledger || '(no ledger)'));

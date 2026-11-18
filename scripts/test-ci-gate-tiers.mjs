@@ -724,12 +724,18 @@ console.log('\n§8f a red fast suite runs once more — green again is FLAKY and
   plant('test-rr-red', `console.log('  ✗ planted red (every try)');\nconsole.log('1 FAILED');\nprocess.exit(1);\n`);
   plant('test-chat-e2e', `console.log('  ✗ planted real-turn red');\nconsole.log('1 FAILED');\nprocess.exit(1);\n`);
   plant('test-rr-green', `console.log('ALL PASS (1)');\n`);
-  const row = (name) => ({ name, tier: 'fast', budgetMs: 8000 });
-  const drive = async (M, tag, { keepGoing = true, names = ['test-rr-flaky', 'test-rr-red', 'test-chat-e2e', 'test-rr-green'] } = {}) => {
+  // batch 24's reader: THE STOP LANDING DURING A RETRY, placed by FILES — cut-a is red on its first try and its retry then waits for
+  // ever; cut-b's first try waits until cut-a's retry has started, then both its tries are red: fail-fast stops on cut-b while
+  // cut-a's retry is in flight (SIGTERMed — «stopped», judged by nobody) and cut-a is still NAMED red
+  const cutFirst = path.join(root, 'cut-a-first'), cutRetrying = path.join(root, 'cut-a-retrying'), cutBFirst = path.join(root, 'cut-b-first');
+  plant('test-rr-cut-a', `import fs from 'node:fs';\nif (!fs.existsSync(${JSON.stringify(cutFirst)})) { fs.writeFileSync(${JSON.stringify(cutFirst)}, '1'); console.log('  ✗ planted cut-a (first try)'); console.log('1 FAILED'); process.exit(1); }\nfs.writeFileSync(${JSON.stringify(cutRetrying)}, '1');\nsetInterval(() => { }, 1000);\nsetTimeout(() => process.exit(1), 30000);\n`); // (its own bound: never an orphan past 30 s)
+  plant('test-rr-cut-b', `import fs from 'node:fs';\nconst red = (w) => { console.log('  ✗ planted cut-b (' + w + ')'); console.log('1 FAILED'); process.exit(1); };\nif (fs.existsSync(${JSON.stringify(cutBFirst)})) red('retry');\nfs.writeFileSync(${JSON.stringify(cutBFirst)}, '1');\nconst t = setInterval(() => { if (fs.existsSync(${JSON.stringify(cutRetrying)})) { clearInterval(t); red('first try'); } }, 10);\n`);
+  const row = (name) => ({ name, tier: 'fast', budgetMs: 60000 }); // (80 % of it — the retry's own budget rule — is far past any planted try)
+  const drive = async (M, tag, { keepGoing = true, names = ['test-rr-flaky', 'test-rr-red', 'test-chat-e2e', 'test-rr-green'], lanes = 1 } = {}) => {
     const failDir = path.join(root, `fail-${tag}`), ledger = path.join(root, `ledger-${tag}`, 'reruns.jsonl'), said = [], rows = [], inflight = new Set(), runs = [];
-    fs.rmSync(once, { force: true });
+    for (const f of [once, cutFirst, cutRetrying, cutBFirst]) fs.rmSync(f, { force: true });
     const res = await M.runFastLanes({ parallel: names.map(row), serial: [] }, {
-      lanes: 1, keepGoing, inflight, failDir, ledger, sha: 'f1a4e3f38000', log: (l) => said.push(l),
+      lanes, keepGoing, inflight, failDir, ledger, sha: 'f1a4e3f38000', log: (l) => said.push(l),
       run: (s, { lane, attempt = 1 }) => { runs.push(`${s.name}#${attempt}`); return M.runSuiteAsync(s, { root, sha: 'f1a4e3f38000', lane, inflight }); },
       after: async (r) => { rows.push(r.lines.join('\n')); },
     });
@@ -753,6 +759,21 @@ console.log('\n§8f a red fast suite runs once more — green again is FLAKY and
   const ff = await drive(ci, 'ff', { keepGoing: false, names: ['test-rr-flaky', 'test-rr-green'] });
   ok(!ff.reds.length && !ff.stoppedBy && ff.flaky.join(',') === 'test-rr-flaky' && ff.timings.map((x) => x.name).join(',') === 'test-rr-flaky,test-rr-green',
     'FAIL-FAST: a flake no longer stops the tier — it is retried, counted, and the next row runs');
+  const cut = await drive(ci, 'cut', { keepGoing: false, names: ['test-rr-cut-a', 'test-rr-cut-b'], lanes: 2 });
+  const Lc = Object.fromEntries(cut.lines.map((x) => [x.suite, x]));
+  ok(cut.stoppedBy === 'test-rr-cut-b' && cut.reds.join(',') === 'test-rr-cut-b,test-rr-cut-a' && cut.runs.slice().sort().join(' ') === 'test-rr-cut-a#1 test-rr-cut-a#2 test-rr-cut-b#1 test-rr-cut-b#2'
+    && cut.rows.some((l) => /test-rr-cut-a stopped \[lane 1\] — test-rr-cut-b is red/.test(l)) && cut.said.some((l) => /^ {2}· test-rr-cut-a: red on its first try; its retry was stopped — test-rr-cut-b is red$/.test(l))
+    && Lc['test-rr-cut-b']?.again.ok === false && !Lc['test-rr-cut-a'],
+    `FAIL-FAST, a stop during a retry (batch 24's reader): cut-b, red on both tries, stops the tier while cut-a's retry runs — that retry is «stopped» and judged by nobody, cut-a stays NAMED red (${cut.reds.join(', ')}); the ledger has cut-b's line only`);
+  {   // …and its CONTROL: the cut2 branch that only breaks (the batch-24 tip) drops cut-a from the reds
+    const src24 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8'), NAMED = "        if (cut2) { reds.push(s.name); log(`  · ${s.name}: red on its first try; its retry was stopped — ${cut2} is red`); break; }\n";
+    const M24 = src24.includes(NAMED) ? await import(pathToFileURL(mutantCopies('ci-cut2', REPO).write('scripts/ci.mjs', src24.replace(NAMED, '        if (cut2) break;\n'), 'cut2-drop', { esm: true })).href) : null;
+    const cut0 = M24 ? await drive(M24, 'cut0', { keepGoing: false, names: ['test-rr-cut-a', 'test-rr-cut-b'], lanes: 2 }) : null;
+    ok(!!cut0 && cut0.stoppedBy === 'test-rr-cut-b' && cut0.reds.join(',') === 'test-rr-cut-b', `CONTROL: the cut2 branch that only breaks names ONE red (${cut0 ? cut0.reds.join(', ') : 'the anchor is gone'}) — the leg above is red without the cure`);
+  }
+  ok(ci.fastRetryRefusal({ name: 'test-x', budgetMs: 10000 }, { status: 1, ms: 8500, lines: ['', '  ✗ a leg', ''] }).includes('of its 10 s budget')
+    && ci.fastRetryRefusal({ name: 'test-x', budgetMs: 10000 }, { status: 1, ms: 500, lines: ['', '  ✗ TIMEOUT (3 s) — a short bound inside a leg', ''] }) === '',
+    'a red that ran > 80 % of its budget is not retried (batch 24\'s reader); a quick red is — a short «✗ TIMEOUT» inside a leg included (the load-sensitive leg the retry exists for)');
   ok(ci.fastRetryRefusal({ name: 'test-x' }, { killedFromOutside: true }).includes('did not send') && ci.fastRetryRefusal({ name: 'test-x' }, { error: { code: 'ETIMEDOUT' } }).includes('hung') && ci.fastRetryRefusal({ name: 'test-x' }, { status: 1, hangReport: '/x/f1a4e3f3.test-x.1.hang.json' }).includes('own watchdog') && ci.fastRetryRefusal({ name: 'test-x' }, { status: 1 }) === ''
     && ci.FAST_NO_RETRY.every((r) => SUITES.some((s) => s.name === r.name && s.tier === 'fast') && r.why.length > 20),
     'fastRetryRefusal: a suite killed from outside (the run is being torn down) or hung — to its budget or to its own watchdog (a hang report kept) — is not retried; a plain red is; every FAST_NO_RETRY row names a fast suite and why');
