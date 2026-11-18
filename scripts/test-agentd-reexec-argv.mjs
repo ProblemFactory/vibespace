@@ -10,7 +10,8 @@
 // A live /proc-cmdline check is unreliable here: the daemon sets
 // process.title = 'vibespace-device', which clobbers argv memory on Linux. So
 // this proves (a) the pure helper preserves every flag, and (b) beginUpgrade
-// actually WIRES reExecArgv into the spawn (guards against reverting to the
+// actually WIRES reExecArgv into the spawn (guards against reverting to the — that pin and (d) / (f)'s: the fast
+// scripts/test-agentd-reexec-argv-pins.mjs since lane lg-text-legs-2, B-94d3 —
 // bare `[newPath]` array), verified in the ESBUILD BUNDLE too so a broken
 // require can't slip through.
 // Run: node scripts/test-agentd-reexec-argv.mjs
@@ -42,18 +43,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
     JSON.stringify(reExecArgv('/new/a.js', ['/usr/bin/node', '/old/a.js'])) === JSON.stringify(['/new/a.js']));
 }
 
-// ── (b) beginUpgrade WIRES reExecArgv into the re-exec spawn ──
-{
-  const src = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf-8');
-  // the spawn must go through reExecArgv, NOT a bare `[path.join(dir, ...)]`
-  // lane win-device-boot-hidden: the ONE spawn lives in startSuccessor(argv, env); every caller hands it reExecArgv(…)
-  const succCalls = src.split('\n').filter((l) => l.includes('startSuccessor(') && !l.includes('function startSuccessor(') && !/^\s*\/\//.test(l));
-  const reExecLine = succCalls.length === 2 && succCalls.every((l) => l.includes('startSuccessor(reExecArgv(')) && src.includes('function startSuccessor(argv, env) {') && src.split('\n').some((l) => l.includes('spawn(process.execPath, argv, {'));
-  check('agentd.js re-exec spawns via reExecArgv', !!reExecLine, 'the upgrade spawn no longer preserves argv');
-  check('agentd.js imports reExecArgv from the side-effect-free module', /require\(['"]\.\/reexec['"]\)/.test(src));
-  // the old bare-array form must be GONE from the upgrade spawn
-  check('no bare-array spawn in the upgrade path', !/spawn\(process\.execPath,\s*\[path\.join\(dir,/.test(src));
-}
+// ((b) the re-exec spawn's source pins of src/agentd/agentd.js: MOVED to the fast scripts/test-agentd-reexec-argv-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── (c) the ESBUILD bundle inlines reexec.js (a broken require would fail) ──
 {
@@ -106,11 +96,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
     repointCurrent(fs, { root: tmpR, dir: path.join(tmpR, '2.0.0'), platform: 'linux' });
     check('POSIX (real fs): current → the new version by the symlink swap', fs.readlinkSync(path.join(tmpR, 'current')) === path.join(tmpR, '2.0.0') && !fs.existsSync(path.join(tmpR, '.current.tmp')));
   } finally { try { fs.rmSync(tmpR, { recursive: true, force: true }); } catch { } }
-  // the daemon WIRES it and SAYS a failure; the re-exec's console is hidden
-  const src = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf-8');
-  check('agentd.js lands the repoint through repointCurrent (no inline symlink swap left)', src.includes('repointCurrent(fs, { root: ROOT, dir });') && !src.includes('fs.symlinkSync(dir, curTmp)'));
-  check('agentd.js says a failed landing: its log + `upgrade-failed` to the hub', /log\(`upgrade to \$\{version\} FAILED/.test(src) && src.includes("mux.control({ op: 'upgrade-failed', version, error: why })"));
-  check('the re-exec spawn hides its console on Windows (windowsHide)', src.includes("detached: true, stdio: 'ignore', windowsHide: true,"));
+  // (the landing's source pins of src/agentd/agentd.js: MOVED to the fast scripts/test-agentd-reexec-argv-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // CONTROL (scripts/mutant-copy.mjs): the Windows branch removed (the pre-fix repoint everywhere) — the FIX legs go red
   const rsrc = fs.readFileSync(path.join(repo, 'src/agentd/reexec.js'), 'utf-8');
   const mut = rsrc.replace("if (platform === 'win32') {", 'if (false) {');
@@ -190,14 +176,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
     check('REAL net.Server: EADDRINUSE → the same server re-listens once the holder closed (the close-then-listen re-arm works)', res === 'listening' && lines.length === 2, JSON.stringify([res, lines]));
     b.close(); try { fs.rmSync(tmpS, { recursive: true, force: true }); } catch { }
   }
-  // agentd.js WIRES both halves (and nothing else listens/exits around them)
-  const src = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf-8');
-  // lane win-device-boot-hidden: THE re-exec spawn lives in startSuccessor (one site); the self-upgrade calls it INSIDE
-  // handOver, the console self-heal calls it before any listener exists (the console step precedes the singleton)
-  const ho = src.indexOf('handOver({ server, log, exit: exitDaemon, spawnNext: () => {'), sp = src.indexOf("startSuccessor(reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js')))", ho), ho2 = src.indexOf('          } });', ho);
-  const def = src.indexOf('function startSuccessor(argv, env) {'), heal = src.indexOf('reExec: () => { startSuccessor(reExecArgv('), listen = src.indexOf('listenWithRetry(server, SOCK');
-  check('agentd.js: the self-upgrade starts its successor INSIDE handOver (close first) through startSuccessor — the ONE re-exec spawn; the console self-heal starts its successor before any listener exists; no bare exitDaemon(0) after a spawn', ho > 0 && sp > ho && sp < ho2 && (src.match(/spawn\(process\.execPath, argv, \{/g) || []).length === 1 && src.indexOf('spawn(process.execPath, argv, {') > def && def > 0 && heal > 0 && heal < listen && !/child\.unref\(\);\n\s*exitDaemon\(0\);/.test(src));
-  check('agentd.js: the listen goes through listenWithRetry gated by the singleton lock; the exit-on-any-error handler is gone', src.includes('listenWithRetry(server, SOCK, { log, lockIsOurs,') && /const lockIsOurs = \(\) => \{ try \{ return fs\.readFileSync\(LOCK/.test(src) && !src.includes("server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });") && !src.includes('server.listen(SOCK'));
+  // (the hand-over / listen wiring pins of src/agentd/agentd.js: MOVED to the fast scripts/test-agentd-reexec-argv-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   // CONTROLS (scripts/mutant-copy.mjs): each half removed — its leg goes red
   const rsrc = fs.readFileSync(path.join(repo, 'src/agentd/reexec.js'), 'utf-8');
   const mut1 = rsrc.replace("try { server.close(() => { timers.clearTimeout(t); go('upgrade hand-over: listener closed — starting the successor'); }); }", "try { timers.clearTimeout(t); go('pre-fix: no close'); }");

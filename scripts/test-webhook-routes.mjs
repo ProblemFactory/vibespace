@@ -2,7 +2,8 @@
 // test-webhook-routes — THE WEBHOOK DOOR ON A REAL SERVER (lane webhook-l1-server, docs/design-webhook.zh.md §4 / §7 /
 // §10). A throwaway worktree of THIS tree runs `node server.js` with sign-in ON, one stub agent session (dtach + a stub
 // CLI that records the frames it is handed) and a stub reply URL on loopback (`webhook.allowPrivateReplyUrl` in the
-// fixture's settings). Legs: the auth.js exemption line and the server.js JSON skip are pinned verbatim AND proven (a
+// fixture's settings). Legs: the auth.js exemption line and the server.js JSON skip are pinned verbatim (those two pins: the fast
+// scripts/test-webhook-routes-pins.mjs since lane lg-text-legs-2, B-94d3) AND proven here (a
 // malformed JSON body to /hook with a bad token is 401, never the parser's 400 — control: the same body to an owner
 // route is 400); an agent bearer on every owner verb ⇒ 403 agent-forbidden; two callers' receipts share no prefix and
 // carry no counter; a long-poll ended by a revoke ⇒ 401; an end-to-end call ⇒ record ⇒ a `fact` rule ⇒ ONE wake ⇒
@@ -26,12 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = async (fn, ms = 20000, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { try { const v = await fn(); if (v) return v; } catch { } await sleep(step); } return null; };
 try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); } catch (e) { if (e.code === 'ENOENT') { console.log('SKIP: no dtach on PATH (the stub agent session is a dtach session)'); process.exit(0); } }
 
-console.log('§0 the pins');
-const AUTH_LINE = "      if (/^\\/hook(?:\\/|$)/.test(p) || (req.method === 'GET' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/replies$/.test(p)) || (req.method === 'POST' && /^\\/api\\/channels\\/webhook\\/[a-z0-9][a-z0-9-]{0,62}\\/pair$/.test(p))) return next();";
-const authSrc = fs.readFileSync(path.join(repo, 'src/auth.js'), 'utf-8');
-ok(authSrc.split('\n').filter((l) => l === AUTH_LINE).length === 1 && (authSrc.match(/\/\^\\\/hook/g) || []).length === 1, 'src/auth.js holds the webhook exemption as ONE line, verbatim (exactly /hook/<slug>, the caller\'s replies GET, the pairing POST)');
-const serverSrc = fs.readFileSync(path.join(repo, 'server.js'), 'utf-8');
-ok(serverSrc.includes("OWN_BODY_RE = /^\\/(?:proxy\\/|hook\\/|api\\/channels\\/webhook\\/[^/]+\\/pair$|api\\/feedback\\/forward$)/;") && serverSrc.includes('app.use((req, res, next) => (OWN_BODY_RE.test(req.path) || (persistenceRouter.ownsBody && persistenceRouter.ownsBody(req.path)) ? next() : jsonBody(req, res, next)));'), 'server.js: the global JSON parser skips /hook/, the pairing route and the feedback forward door at the /proxy/ place');
+// (§0 the pins of src/auth.js and server.js: MOVED to the fast scripts/test-webhook-routes-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 const VNC_ENV = await vncEnv();
 const PORT = await freePort();

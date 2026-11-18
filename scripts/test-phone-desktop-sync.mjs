@@ -32,7 +32,7 @@
 //      phone-born one carries no full-screen box; ⑬ F4 a preset saved on the phone POSTs the held arrangement
 //   ⑭ THE CAPTURE CENSUS (static): every call of a raw page capture (captureState / captureWindows / captureWin), of THE
 //      ONE CAPTURE (desktop-manager.js captureBuilt) and of recordFor in src/lib, grep-derived per enclosing method — a
-//      site the table does not name is RED (a new back door), so is a dead row; the RED control runs it on the base
+//      site the table does not name is RED (a new back door), so is a dead row; the RED control runs it on the base — MOVED to the fast scripts/test-phone-desktop-sync-pins.mjs
 //   ⑮ lane layout-deferred-writer (B-4767, phone-arrangement-verify r2 F5): D's person presses an empty spot of its desktop
 //      and holds (records wait — §6b guard 3); a second desktop DW moves a window, the phone changes membership; D releases.
 //      ⑮a F5: DW's record, then the phone's ⇒ the move AND the phone's window land on D (the phone's record used to REPLACE
@@ -118,65 +118,7 @@ const fixture = () => ({
   ] } } },
 });
 
-// ── ⑭ THE CAPTURE CENSUS (lane phone-arrangement-fixes) ──
-const CAPTURE_CALL_RE = /\.(captureWindows|captureState|captureWin|captureBuilt|recordFor)\(/g;
-const CHOKE_PIN = "return captureForViewport({ held, built, viewport: this.app.isMobile ? 'phone' : 'desktop' });";
-const CAPTURE_SITES = [
-  // [file under src/lib, enclosing method, call, count, kind, a needle the enclosing method holds (its wiring pin)]
-  ['layout.js', 'captureState', 'captureWindows', 1, 'raw primitive', 'return { windows: this.captureWindows(this.app.desktopManager?.activeDesktopId), ...this.captureChrome() };'],
-  ['layout.js', 'captureWindows', 'captureWin', 1, 'raw primitive', 'const winState = this.captureWin(win, id);'],
-  ['desktop-manager.js', 'captureBuilt', 'captureWin', 1, 'THE ONE CAPTURE', CHOKE_PIN],
-  ['desktop-manager.js', 'captureBuilt', 'captureWindows', 1, 'THE ONE CAPTURE', CHOKE_PIN],
-  ['desktop-manager.js', 'recordFor', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'const built = this.captureBuilt(desktopId, held);'],
-  ['desktop-manager.js', 'presetState', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'windows: this.captureBuilt(this._activeId, held)'],
-  ['desktop-manager.js', 'onSyncRefused', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'built: this.captureBuilt(d, rec)'],
-  ['desktop-manager.js', 'onSyncRefused', 'recordFor', 1, 'a record (recordFor captures through THE ONE CAPTURE) — the breaker compares it with the refused one (userW inc-mw1ogdno-5jny)', 'const same = ref.json != null && ref.json === this._writeJson(d, this.recordFor(d));'],
-  ['desktop-manager.js', '_updateCachedDesktop', 'captureBuilt', 1, 'through THE ONE CAPTURE', 'const moved = this.captureBuilt(desktopId, '],
-  ['desktop-manager.js', 'deleteDesktop', 'recordFor', 1, 'a record (recordFor captures through THE ONE CAPTURE)', ''],
-  ['desktop-manager.js', 'switchTo', 'recordFor', 1, 'a record (recordFor captures through THE ONE CAPTURE)', ''],
-  ['stage-manager.js', 'enter', 'recordFor', 1, 'a record (recordFor captures through THE ONE CAPTURE)', ''],
-  ['layout.js', '_doAutoSave', 'recordFor', 2, 'a record (recordFor captures through THE ONE CAPTURE)', ''],
-  // a page with no desktop manager — never a phone: app.js builds one on every page (the APP_DM pin below)
-  ['layout.js', '_doAutoSave', 'captureState', 1, 'no desktop manager', 'const state = dm?.recordFor && desktopId ? dm.recordFor(desktopId) : this.captureState();'],
-  ['layout.js', 'savePreset', 'captureState', 1, 'no desktop manager', 'const state = dm?.presetState ? dm.presetState() : this.captureState();'],
-];
-const APP_DM = '\n    this.desktopManager = new DesktopManager(this);\n';
-const METHOD_RE = /^  (?:async |static )?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{\s*$/;
-/** [file, text] pairs → { sites (file · method · call · n), unknown, dead, unpinned } against CAPTURE_SITES. */
-const captureCensus = (srcs) => {
-  const tally = new Map(), bodies = new Map();
-  for (const [rel, text] of srcs) {
-    const lines = text.split('\n');
-    let method = null, start = 0;
-    lines.forEach((l, i) => {
-      const m = METHOD_RE.exec(l);
-      if (m) { method = m[1]; start = i; }
-      if (/^\s*(\/\/|\*|\/\*)/.test(l)) return;
-      const code = l.replace(/\s\/\/\s.*$/, '');
-      for (const c of code.matchAll(CAPTURE_CALL_RE)) {
-        const key = `${rel} · ${method} · ${c[1]}`;
-        tally.set(key, (tally.get(key) || 0) + 1);
-        if (!bodies.has(`${rel} · ${method}`)) { let e = start + 1; while (e < lines.length && lines[e] !== '  }') e++; bodies.set(`${rel} · ${method}`, lines.slice(start, e + 1).join('\n')); }
-      }
-    });
-  }
-  const sites = [...tally].map(([k, n]) => `${k} ×${n}`);
-  const rowKey = (r) => `${r[0]} · ${r[1]} · ${r[2]}`;
-  const unknown = [...tally].filter(([k, n]) => { const r = CAPTURE_SITES.find((x) => rowKey(x) === k); return !r || r[3] !== n; }).map(([k, n]) => `${k} ×${n}`);
-  const dead = CAPTURE_SITES.filter((r) => !tally.has(rowKey(r))).map(rowKey);
-  const unpinned = CAPTURE_SITES.filter((r) => r[5] && tally.has(rowKey(r)) && !(bodies.get(`${r[0]} · ${r[1]}`) || '').includes(r[5])).map(rowKey);
-  return { sites, unknown, dead, unpinned };
-};
-const libSources = (ref) => {
-  const out = [];
-  if (!ref) {
-    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (e.name.endsWith('.js')) out.push([path.relative(path.join(repo, 'src', 'lib'), f), fs.readFileSync(f, 'utf8')]); } };
-    walk(path.join(repo, 'src', 'lib'));
-  } else {
-    try { for (const f of execFileSync('git', ['-C', repo, 'ls-tree', '-r', '--name-only', ref, 'src/lib'], { encoding: 'utf8' }).split('\n').filter((x) => x.endsWith('.js'))) out.push([f.slice('src/lib/'.length), execFileSync('git', ['-C', repo, 'show', `${ref}:${f}`], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })]); } catch { return null; }
-  }
-  return out;
-};
+// (⑭ THE CAPTURE CENSUS's table and walker — CAPTURE_SITES, APP_DM, captureCensus, libSources: MOVED to the fast scripts/test-phone-desktop-sync-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 /** The commit before THIS lane's fix (its first commit carrying captureBuilt, minus one; HEAD while it is uncommitted). */
 // int263 seam (j): after the release squash the pair (phone-arrangement-local + its fixes) is ONE commit, so the commit before
 // `captureBuilt(` is the previous release — no phone protocol at all (⑩–⑬'s setup is not real there). The fix base must HOLD
@@ -184,25 +126,11 @@ const libSources = (ref) => {
 const fixBaseShaped = (ref) => { try { const t = execFileSync('git', ['-C', repo, 'show', `${ref}:src/lib/desktop-manager.js`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); return t.includes('captureForViewport') && !t.includes('captureBuilt('); } catch { return false; } };
 const fixBaseRef = (() => { let first = 'HEAD'; try { const c = execFileSync('git', ['-C', repo, 'log', '--format=%H', '--reverse', '-S', 'captureBuilt(', '--', 'src/lib/desktop-manager.js'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)[0]; if (c) first = c + '^'; } catch { }
   return fixBaseShaped(first) ? first : fixBaseShaped('f36369057') ? 'f36369057' : 'HEAD'; })();
-if (want(14)) {
-  console.log('— ⑭ THE CAPTURE CENSUS: every raw capture / ONE-capture / recordFor call site in src/lib');
-  const c = captureCensus(libSources(null));
-  console.log('    ⑭ sites: ' + c.sites.join(' | '));
-  ok(c.sites.length >= CAPTURE_SITES.length && !c.unknown.length, `⑭: every capture call site in src/lib (${c.sites.length}) is THE ONE CAPTURE, a raw primitive's own body, a record through it, or a pinned no-desktop-manager fallback — none unnamed`, J(c.unknown));
-  ok(!c.dead.length && !c.unpinned.length, '⑭: no dead row; every pinned row\'s method holds its pin (the choke ends in captureForViewport, its callers pass the held record)', J({ dead: c.dead, unpinned: c.unpinned }));
-  ok(fs.readFileSync(path.join(repo, 'src', 'lib', 'app.js'), 'utf8').includes(APP_DM), '⑭: app.js builds a DesktopManager on every page (the no-desktop-manager fallbacks never run on a phone)');
-  const baseSrcs = libSources(fixBaseRef);
-  if (!baseSrcs || baseSrcs.some(([f, t]) => f === 'desktop-manager.js' && t.includes('captureBuilt('))) skip(`⑭ RED control: no base tree without captureBuilt (${fixBaseRef})`);
-  else {
-    const b = captureCensus(baseSrcs);
-    console.log(`    ⑭ BASE (${fixBaseRef}) unnamed: ${b.unknown.join(' | ')}\n    ⑭ BASE unpinned: ${b.unpinned.join(' | ')}`);
-    ok(b.unknown.some((k) => k.startsWith('desktop-manager.js · onSyncRefused · captureWindows')) && b.unknown.some((k) => k.startsWith('desktop-manager.js · _updateCachedDesktop · captureWin')) && b.unpinned.includes('layout.js · savePreset · captureState'), '⑭ RED CONTROL: on the base tree the census names the three back doors (refusal merge, move, preset)', J(b));
-  }
-}
+// (⑭ THE CAPTURE CENSUS and its RED control on the base: MOVED to the fast scripts/test-phone-desktop-sync-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) skip('no chrome/chromium on this box — every leg needs one');
-else if (ONLY.length && ONLY.every((x) => x === '14')) console.log('  (⑭ alone: no chrome leg wanted)');
+else if (ONLY.length && ONLY.every((x) => x === '14')) console.log('  (⑭ alone: it lives in the fast scripts/test-phone-desktop-sync-pins.mjs — no chrome leg wanted)');
 else await (async () => {
   const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
   /** A tree at `ref`; `copy` = this checkout's source over it (the fixed tree judges THIS source, never a stale bundle);

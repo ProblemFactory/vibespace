@@ -1080,20 +1080,11 @@ async function parityLeg(ENGM, name) {
   const crow = c.show && c.show.rows && c.show.rows[0];
   ok(cut !== src && c.refused.ok && !(crow && crow.filter), 'CONTROL: a second schema at the door drops the rules and accepts "(a+)+" — the legs above would be red', JSON.stringify(c.refused));
 }
-{ const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-  const wv = asrc.slice(asrc.indexOf('const watchVerb = async'), asrc.indexOf("app.post('/api/agent/channels/watch'"));
-  ok(/eng\.agentWatch\(ctx, b\.target, b\)/.test(wv) && !/keywords|delivery:|dailyWakeCap/.test(wv.replace(/\/\/.*$/gm, '')), 'the route hands the body WHOLE to the engine\'s one grammar — no schema of its own in watchVerb');
-  ok(/app\.get\('\/api\/agent\/channels\/watches'/.test(asrc) && /agentWatchesFor\(channelPrincipal\(s, id\)/.test(asrc), 'the read-back route answers the caller\'s own principal'); }
+// (the watch route's source pins of src/agent-routes.js: MOVED to the fast scripts/test-channel-agent-watch-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
-// ── wiring pins: the route + CLI spell the three verbs ──
-{
-  const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8');
-  ok(/app\.post\('\/api\/agent\/channels\/watch', async \(req, res\) => \{ const t = await watchVerb\('watch', req, res\)/.test(asrc) && /app\.post\('\/api\/agent\/channels\/unwatch', async \(req, res\) => \{ const t = await watchVerb\('unwatch', req, res\)/.test(asrc) && /listFor\(channelPrincipal\(s, id\), \{ all: /.test(asrc), 'wiring: the agent routes for watch / unwatch / list --all');
-  ok(/verb === 'watch' \|\| verb === 'unwatch'/.test(cli) && /\/api\/agent\/channels\/list' \+ \(all \? '\?all=1' : ''\)/.test(cli) && /\{ target, args: rest \}/.test(cli), 'wiring: the CLI spells watch / unwatch / list --all and hands the watch flags to the server raw (lane agent-watch-parity: the grammar is the server\'s)');
-}
+// (the wiring pins of src/agent-routes.js + data/bin/vibespace-channels: MOVED to the fast scripts/test-channel-agent-watch-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
-{ const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8'); ok(cli && require(path.join(REPO, 'src/channel-watch-spec.js')).watchSpecFromArgs([]).spec.delivery === 'next-turn' && require(path.join(REPO, 'src/channel-watch-spec.js')).watchSpecOfBody({}).spec.delivery === 'next-turn', 'wiring (verify r1 ⑤): the CLI\'s default mode is next-turn — an agent never chooses a billed wake for itself by default'); }
+// (the CLI's next-turn default pin of data/bin/vibespace-channels + src/channel-watch-spec.js: MOVED to the fast scripts/test-channel-agent-watch-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log('⑪ lane dm-reply-infers (B-6b4b): a plain reply judged ONCE by the decision API — a yes wakes once, a no never, the memo holds, the scope and the caps');
 {
@@ -1560,15 +1551,7 @@ try {
       `(c) a NULL held conversation entry is skipped by THE one walker everywhere it is read — the account write, the agent's watch and Deliver answer (delivered 30, skipped ${d && d.skipped}); said ONCE in the journal («${(said[0] || '').slice(0, 110)}») (8b46c196: «Cannot read properties of null (reading 'key')» after each write was stored; Deliver «Cannot destructure property 'rows'» after it took effect)`, J2s({ threw, said: said.length, d: d && { ok: d.ok, n: d.n, skipped: d.skipped } }));
   } finally { w.eng.stop(); }
 } catch (e) { ok(false, '⑧ (c) threw on this tree: ' + ((e && e.stack) || e)); }
-// (d) THE ONE WALKER, a census: channels-access.js reads `held.convs` only through heldConvsOf — every other mention is the
-// writer's (the request created with `convs: []`, holdAside's push) or releaseAside's count of what the walker skipped (r16: and
-// its write that takes the entries it counted out — an unreadable entry is counted once per request)
-{
-  const lines10 = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8').split('\n');
-  const ALLOWED10 = [/const all = r2 && r2\.held && Array\.isArray\(r2\.held\.convs\) \? r2\.held\.convs : \[\];/, /const entries = \(Array\.isArray\(h\.convs\) \? h\.convs\.length : 0\) - convs\.length;/, /if \(!was\) r2\.held\.convs\.push\(/, /if \(!only && entries > 0\) h\.convs = convs;/];
-  const walks = lines10.map((l, i) => ({ l, i: i + 1 })).filter(({ l }) => /\.convs\b/.test(l) && !/^\s*(\*|\/\/|\/\*\*)/.test(l) && !/\b(?:plan|p0)\.convs\b/.test(l) && !ALLOWED10.some((re) => re.test(l)));
-  ok(walks.length === 0 && ALLOWED10.every((re) => lines10.some((l) => re.test(l))), `(d) THE ONE WALKER: no line of channels-access.js reads a held request's conversations but heldConvsOf (the writer's push and the skipped count aside) — ${walks.length} other read(s) (8b46c196: 7 — heldCountOf, fileHeldCard, holdAside's find, releaseAside, Deliver's flush, the answer, heldWatched)`, J2s(walks.map((x) => `${x.i}: ${x.l.trim().slice(0, 100)}`)));
-}
+// ((d) THE ONE WALKER — the census over src/server/channels-access.js's held.convs readers: MOVED to the fast scripts/test-channel-agent-watch-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 console.log('⑨ ROUND 11 (lane wake-approve-card) — a rule\'s REACH is a fact of the rule: a held decision whose conversation the rule no longer covers ends by name, as its live hits do');
 // THE RULE'S REACH (the r10 acceptance's minor, repro/accept-r10/skeptic/probe-held.mjs legs 1–2): a rule «title: Ops» names

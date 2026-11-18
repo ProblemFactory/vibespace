@@ -460,12 +460,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
   const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {";
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
-  // round 9 (seam ruling C with vault-agent-own): the GRANT road is judged on `shape.destKnown` (the reader READ every
-  // destination), NOT `shape.always` (whether «always» would be OFFERED) — decoupled so a keyed routing flag whose host is read,
-  // which withholds «always», is still coverable by a grant naming it. Pinned so an edit reverting the gate to shape.always is RED.
-  ok(/destinationKnown: !!shape\.destKnown/.test(DSRC), 'the standing verdictFor passes destinationKnown = shape.destKnown, not shape.always (ruling C)');
-  ok(/shape\.destKnown && !dest\.opaque && dest\.hosts\.length/.test(DSRC), 'the host-scoped paste short-circuit is gated on shape.destKnown (ruling C)');
-  ok(!/destinationKnown: !!shape\.always/.test(DSRC) && !/verdict\.ask && !refused && shape\.always &&/.test(DSRC), 'no grant-road gate reads shape.always for destination knowledge — the two facts stay decoupled');
+  // (⑩ round 9's ruling-C pins of src/server/vault-run-door.js: MOVED to the fast scripts/test-vault-use-grants-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');
   const w1 = await world({ doorMod: noShort });
   const e1 = entryOf(w1);
