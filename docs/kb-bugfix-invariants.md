@@ -4708,7 +4708,7 @@ The Design window's `design-open` push (the agent's `vibespace-design new|open|a
 
 **Invariant.** An Enter the input method owns is never a submit: every Enter-submits / -navigates / -searches / -picks handler on a text box goes through `enterSubmits(e)` or carries isComposing AND keyCode 229 itself (kb-patterns). A class's second incident gets a census over the source, not a second fixed site.
 
-**Gates:** test-enter-census (fast; 91 sites, 49 guarded, 42 exempt by kind), test-chat-enter-ime §6, test-channels-e2e ⑩c (heavy).
+**Gates:** test-enter-census (fast; 91 sites, 49 guarded, 42 exempt by kind at rel268 — 104 sites, 60 guarded, 44 exempt at .411's checkpoint a68be1413), test-chat-enter-ime §6, test-channels-e2e ⑩c (heavy).
 
 ## A GATE LEG READ STDERR'S FIRST LINE AS THE VERDICT: RED ON EVERY HUB RUN SINCE .250 (B-a23c, 2026-10-14; lane mediation-chrome-hub-red, .268)
 
