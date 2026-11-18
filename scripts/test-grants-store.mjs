@@ -73,7 +73,7 @@ console.log('① the ONE writer: atomic, all or nothing, every refusal by name')
   const s3 = GS.create({ dataDir: d3 });
   const rr = s3.rowsFor('exit', 'h:use');
   ok(!s3.health().readable && rr.length === 1 && GM.admits(rr, { conversationKey: 'x' }).code === 'unknown_shape' && s3.set('exit', 'h:use', { to: [G1] }).code === 'store_unreadable' && fs.readFileSync(path.join(d3, 'grants.json'), 'utf-8') === '{"v":1,"rows":[{"door":"exit"', 'an unreadable grants.json: every row is refused BY NAME (unknown_shape — never «nothing granted» silently, never everyone), every write store_unreadable, the file untouched');
-  ok(J([...GS.STORE_REFUSALS].sort()) === J(['except_unnamed', 'not_written', 'only_unnamed', 'store_unreadable']), 'STORE_REFUSALS names the store\'s own three (lane held-except-doors: + except_unnamed)');
+  ok(J([...GS.STORE_REFUSALS].sort()) === J(['except_unnamed', 'not_written', 'only_unnamed', 'store_unreadable']), 'STORE_REFUSALS names the store\'s own four (lane held-except-doors: + except_unnamed; lane lg-group-parents: + only_unnamed)');
 }
 
 // ═══ ② the audit ═══════════════════════════════════════════════════════════
@@ -597,6 +597,8 @@ console.log('⑩ lane lg-group-parents: «仅本组» (only:true) leaves by name
   const r2 = st.set('browser-profile', 'p9', { to: [G1, M1] }, 'user');   // a dialog / verb that never knew the flag
   const back = st.rowsFor('browser-profile', 'p9')[0].to;
   ok(r2.ok && back.find((e) => e.id === 'g1').only === true && back.some((e) => e.key === 'm1'), 'a later write that names the group WITHOUT the flag KEEPS it (carried — never re-read wider)', back);
+  const rn = st.set('browser-profile', 'p9', { to: [{ ...G1, only: null }, M1] }, 'user');
+  ok(rn.ok && st.rowsFor('browser-profile', 'p9')[0].to.find((e) => e.id === 'g1').only === true, 'the U1 verdict: a write that sends only:null is SILENT on the flag — it keeps «仅本组»');
   const r3 = st.set('browser-profile', 'p9', { to: [{ ...G1, only: false }, M1] }, 'user');
   ok(r3.ok && st.rowsFor('browser-profile', 'p9')[0].to.find((e) => e.id === 'g1').only === undefined, 'only an explicit only:false widens it');
   const lines = fs.readFileSync(st.auditFile, 'utf-8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.resource === 'p9');

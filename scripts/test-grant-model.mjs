@@ -268,17 +268,25 @@ console.log('⑥ lane lg-group-parents: a child group uses what its parents are 
   const own1 = L([row([P, Cg])], child), par1 = L([row([P])], child);
   ok(own1.entry.id === 'tg-c' && !own1.inherited && par1.inherited === true && par1.entry.id === 'tg-p', 'read 8: the verdict names the caller\'s OWN group before a parent\'s, and says `inherited` when a parent\'s entry decided', [own1.entry, par1.inherited]);
   const wasRow = { to: [PONLY] };
+  ok(GM.onlyCarried(wasRow, [{ ...P, only: null }]).to[0].only === true && GM.onlyCarried(wasRow, [{ ...P, only: null, mac: 'f'.repeat(64) }]).refused === 'group:tg-p', 'the U1 verdict: `only: null` is SILENT (carried; a marked entry refused) — only an explicit `false` widens');
+  const gv = { door: 'group-visibility', resource: 'tg-p', to: [{ kind: 'group', id: 'tg-p', level: 'visible' }], except: [] };
+  ok(!GM.admits([gv], child).ok && GM.admits([gv], parentOwn).ok && !GM.admits([GM.prepareRow(gv)], GM.prepareFacts(child)).ok, 'the U1 verdict: rule ④ holds IN THE MODEL — a group-visibility row never admits through the lineage, even when a caller hands it one');
+  const gvx = { door: 'group-visibility', resource: 'tg-x', to: [{ kind: 'group', id: 'tg-x', level: 'visible' }], except: [P] };
+  ok(GM.admits([gvx], { conversationKey: 'k', groupIds: ['tg-x', 'tg-c'], inheritedGroupIds: ['tg-p'] }).code === 'excepted', '…but its EXCEPTION still covers the descendants (rule ③ fails closed on every door — the U5a read, 5)');
+  const VU = require('../src/vault-use-grant.js');
+  const vm = { kind: 'group', id: 'tg-p', hosts: ['api.example.com'] };
+  ok(VU.canonOf('secrets:secret:abc1234567#secret', { ...vm, only: true }, [], 2) !== VU.canonOf('secrets:secret:abc1234567#secret', vm, [], 2) && !VU.canonOf('secrets:secret:abc1234567#secret', vm, [], 2).includes('#only'), 'the U1 verdict: the vault canon\'s «仅本组» spelling, here in a FAST suite too (a member without the flag keeps its bytes)');
   ok(GM.onlyCarried(wasRow, [P]).to[0].only === true && GM.onlyCarried(wasRow, [{ ...P, only: false }]).to[0].only === false && GM.onlyCarried(wasRow, [{ ...P, mac: 'f'.repeat(64) }]).refused === 'group:tg-p' && GM.onlyCarried({ to: [P] }, [P]).to[0].only === undefined, 'read 2: onlyCarried — a write silent on the flag keeps it; only:false widens; a marked entry is refused; a row without the flag carries nothing');
   // CONTROLS — the change removed turns the legs above red
   const MZ = mutantCopies('grant-model', REPO);
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/grant-model.js'), 'utf-8');
-    const HIT = "(F.groups.has(e.id) || (!e.only && F.inherited && F.inherited.has(e.id)))";
+    const HIT = "(F.groups.has(e.id) || (!e.only && toInherited && toInherited.has(e.id)))";
     const EXC = "    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x };";
     ok(src.split(HIT).length === 2 && src.split(EXC).length === 2, 'CONTROL setup: the inherited hit and the inherited exception are each found exactly once');
-    const M1 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id))'), 'no-inherited-hit');
+    const M1 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id))'), 'no-inherited-hit');   // stale-pins: kept (the mutant puts the release's own-only hit back)
     ok(!M1.admits([row([P])], child).ok, 'CONTROL (c): a model with no inherited hit refuses the child — ⑥ rule ② would be red');
-    const M2 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id) || (F.inherited && F.inherited.has(e.id)))'), 'ignores-only');
+    const M2 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id) || (toInherited && toInherited.has(e.id)))'), 'ignores-only');
     ok(M2.admits([row([PONLY])], child).ok, 'CONTROL (d): a model that ignores «仅本组» admits the child — ⑥ «仅本组» would be red');
     const M3 = MZ.load('src/grant-model.js', src.replace(EXC, ''), 'except-own-only');
     ok(M3.admits([row([{ kind: 'everyone' }], [P])], child).ok, 'CONTROL (e): an exception judged over own groups only lets the child escape «everyone except the parent» — ⑥ rule ③ would be red');

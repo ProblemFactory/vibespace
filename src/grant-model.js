@@ -426,7 +426,7 @@ function onlyCarried(was, to) {
   let moved = false;
   const out = [];
   for (const e of to) {
-    if (e && typeof e === 'object' && e.kind === 'group' && e.only === undefined && held.has(String(e.id))) {
+    if (e && typeof e === 'object' && e.kind === 'group' && (e.only === undefined || e.only === null) && held.has(String(e.id))) {   // the U1 verdict: `null` is as silent as absent (the tree's `x || null` spelling) — only `false` widens
       if (e.mac !== undefined) return { refused: `group:${e.id}` };
       out.push({ ...e, only: true }); moved = true;
     } else out.push(e);
@@ -460,6 +460,10 @@ function judgeRow(raw, F) { return judgePrepared(normRow(raw), F); }
 function judgePrepared(n, F) {
   if (!n || !n.ok) return { state: 'unknown', why: n ? n.why : 'not a row' };
   const row = n.row;
+  // lane lg-group-parents (the U1 verdict): rule ④ holds IN THE MODEL — the group-visibility door never inherits, whatever its
+  // caller hands it (a facts object shared across doors, e.g. grants-store rowsForPrincipal, carries no lineage there)
+  // (the `to` side only — an exception keeps covering the descendants: rule ③ fails closed on every door, this one too)
+  const toInherited = row.door === 'group-visibility' ? null : F.inherited;
   let exceptUndecided = false;
   for (const x of row.except) {
     if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x };   // lane lg-group-parents rule ③: a group's exception covers its descendants, always
@@ -471,7 +475,7 @@ function judgePrepared(n, F) {
   for (const e of row.to) {
     if (e.kind === 'everyone') { if (F.keys.size) hits.push(e); }
     else if (e.kind === 'conversation') { if (F.keys.has(e.key)) hits.push(e); }
-    else if (e.kind === 'group') { if (F.groups.has(e.id) || (!e.only && F.inherited && F.inherited.has(e.id))) hits.push(e); else if (F.unreadable) groupUndecided = true; }   // lane lg-group-parents rule ②: «含子组» unless «仅本组»
+    else if (e.kind === 'group') { if (F.groups.has(e.id) || (!e.only && toInherited && toInherited.has(e.id))) hits.push(e); else if (F.unreadable) groupUndecided = true; }   // lane lg-group-parents rule ②: «含子组» unless «仅本组»
   }
   if (hits.length) return exceptUndecided ? { state: 'unreadable', row } : { state: 'ok', row, hits: hits.sort((a, b) => SPECIFIC[b.kind] - SPECIFIC[a.kind]) };
   if (groupUndecided) return { state: 'unreadable', row };
