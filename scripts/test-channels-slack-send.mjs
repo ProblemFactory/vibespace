@@ -304,7 +304,7 @@ async function mentionLeg(name, registry = undefined, { limited = false } = {}) 
   ok(!!noTwo && !!noRaw && !!noDir && !!noAmb && !!noCatch, 'the five patch sites of the B-a0ae controls are in slack.js (once each)');
   const C2 = noTwo ? await mentionLeg('a0ae-two', noTwo) : null, CR = noRaw ? await mentionLeg('a0ae-raw', noRaw) : null, CD = noDir ? await mentionLeg('a0ae-dir', noDir) : null;
   const CA = noAmb ? await mentionLeg('a0ae-guess', noAmb) : null, CC = noCatch ? await mentionLeg('a0ae-nocatch', noCatch, { limited: true }) : null;
-  ok(CA && CA.adaPark.sent === '<@U0ADA0003> please look' && CC && CC.late.refused, `CONTROLS B-a0ae follow-up: the old fallback (a shorter reading when the longer answers TWO) notifies the third member «ada» for «@Ada Park» (${CA && JSON.stringify(CA.adaPark)}); without the catch a rate-limited directory REFUSES the proposal (${CC && JSON.stringify(CC.late)})`);
+  ok(CA && CA.adaPark.sent === '<@U0ADA0003> Park please look' && CC && CC.late.refused, `CONTROLS B-a0ae follow-up: the old fallback (a shorter reading when the longer answers TWO) notifies the third member «ada» for «@Ada Park», «Park» left as words (${CA && JSON.stringify(CA.adaPark)}); without the catch a rate-limited directory REFUSES the proposal (${CC && JSON.stringify(CC.late)})`);
   ok(C2 && C2.two.refused === 'mention-ambiguous' && CR && /^&lt;@U0BOB0001&gt;/.test(CR.raw.sent || '') && CD && CD.late.sent === '@Zed Late the numbers are in',
     `CONTROLS B-a0ae: without the two-word name «@Alice Chen» is refused as ambiguous (${C2 && JSON.stringify(C2.two)}); without the member check a typed <@U…> is escaped (${CR && CR.raw.sent}); without the directory read the late member notifies nobody (${CD && CD.late.sent})`);
 }

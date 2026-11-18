@@ -290,7 +290,7 @@ for (const { kind, caps } of REGISTERED) {
   const isrc = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf8');
   const KEEP = '(rawOk(x) ? { name: x.name, id: x.id, raw: true } : { name: peerName(x.name, 100), id: x.id })';
   ok(isrc.split(KEEP).length === 2, 'CONTROL setup: the bound keeps the raw mark at ONE site');
-  const lost = await boundBy(M.load('src/channels/index.js', isrc.replace(KEEP, '({ name: peerName(x.name, 100), id: x.id })'), 'a0ae-bound'));
+  const lost = await boundBy(M.load('src/channels/index.js', isrc.replace(KEEP, '({ name: peerName(x.name, 100), id: x.id })'), 'a0ae-bound'));   // stale-pins: kept — the RED control puts the base's bound back on purpose
   ok(!lost.some((m) => m.raw === true), 'CONTROL the bound without the raw keep (the base): every typed mention loses its mark — the send escapes it (the first real gate\'s red)', lost);
   // the follow-up (verdict 05:26Z): the typed-token CHECK itself — its own-id condition removed ⇒ another member's token passes as raw
   const IDCHK = '(x.name.startsWith(`<@${x.id}>`) || x.name.startsWith(`<@${x.id}|`))';

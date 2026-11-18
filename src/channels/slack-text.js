@@ -410,8 +410,9 @@ function atNamePairs(text) {
  *  carries as typed — prepareSend keeps one of a conversation MEMBER as its mention (toMrkdwn's `raw`); any other stays words. */
 const RAW_MENTION_RE = /<@([A-Z0-9][A-Z0-9_]{1,40})(?:\|[^<>\n]{0,80})?>/g;
 /** The follow-up: the text with each typed `<@ID…>` token blanked (same length) — the @Name reader never takes a name from
- *  inside a token's label (the send turns the whole token into its mention; a label's name would notify nobody). */
-const withoutTypedMentions = (text) => String(text == null ? '' : text).replace(RAW_MENTION_RE, (m) => ' '.repeat(m.length));
+ *  inside a token's label (the send turns the whole token into its mention; a label's name would notify nobody). Bounded
+ *  like atNames: the first SEND_MAX × 2 characters (the @Name reader reads no further). */
+const withoutTypedMentions = (text) => String(text == null ? '' : text).slice(0, SEND_MAX * 2).replace(RAW_MENTION_RE, (m) => ' '.repeat(m.length));
 function rawMentions(text) {
   const s = String(text == null ? '' : text).slice(0, SEND_MAX * 2);
   const out = [];

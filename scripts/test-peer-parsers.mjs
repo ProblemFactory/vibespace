@@ -183,6 +183,13 @@ const ROWS = [
     shapes: { '<<<<': (n) => '<'.repeat(n), '> lines': (n) => '> x\n'.repeat(n / 4) } },
   { mod: 'slack-text', fn: 'atNames', cap: { n: 8000, holds: (out) => out.length <= 50 }, capInput: (n) => '@a '.repeat(n / 3), run: (m, x) => m.atNames(x),
     shapes: { '@@@@': (n) => '@'.repeat(n), '@a ': (n) => '@a '.repeat(n / 3), ' @x.y.z-': (n) => ' @x.y.z-'.repeat(n / 8) } },
+  // B-a0ae (bl-proposals): the agent's draft read for «@First Last» names and typed `<@ID|label>` tokens — each cut at SEND_MAX × 2, ≤ 50 out
+  { mod: 'slack-text', fn: 'atNamePairs', cap: { n: 8000, holds: (out) => out.length <= 50 }, capInput: (n) => Array.from({ length: Math.floor(n / 6) }, (_, i) => `@n${i}`).join(' '), run: (m, x) => m.atNamePairs(x),
+    shapes: { '@@@@': (n) => '@'.repeat(n), '@a ': (n) => '@a '.repeat(n / 3), '@a b c ': (n) => '@a b c '.repeat(n / 7), '@a + words': (n) => '@a ' + 'b '.repeat(n / 2), ' @x.y.z-': (n) => ' @x.y.z-'.repeat(n / 8) } },
+  { mod: 'slack-text', fn: 'rawMentions', cap: { n: 8000, holds: (out) => out.length <= 50 }, capInput: (n) => Array.from({ length: Math.floor(n / 8) }, (_, i) => `<@U${i}A>`).join(' '), run: (m, x) => m.rawMentions(x),
+    shapes: { '<@<@': (n) => '<@'.repeat(n / 2), '<@U1|x… unclosed': (n) => ('<@U1|' + 'x'.repeat(80)).repeat(n / 85), '<@UUUU… unclosed': (n) => ('<@' + 'U'.repeat(41)).repeat(n / 43) } },
+  { mod: 'slack-text', fn: 'withoutTypedMentions', cap: { n: 8000, holds: (out, n) => out.length <= n }, capInput: (n) => '<@U1> '.repeat(n / 6), run: (m, x) => m.withoutTypedMentions(x),
+    shapes: { '<@<@': (n) => '<@'.repeat(n / 2), '<@U1|x… unclosed': (n) => ('<@U1|' + 'x'.repeat(80)).repeat(n / 85), '<@U1> ': (n) => '<@U1> '.repeat(n / 6) } },
   { mod: 'slack', fn: 'toRecord', cap: { n: R.MAX_TEXT, holds: (out, n) => out && out.text.length <= n }, capInput: (n) => ({ ts: '1700000000.000100', user: 'U1', text: 'x'.repeat(n) }), run: (m, x) => m.toRecord('s', 'C1', typeof x === 'string' ? { ts: '1700000000.000100', user: 'U1', text: x } : x, {}),
     shapes: { '<<<<': (n) => '<'.repeat(n), '<@U1>': (n) => '<@U1>'.repeat(n / 5), 'rich_text': (n) => ({ ts: '1700000000.000100', user: 'U1', text: 'x', blocks: slackMany(n) }) } },
   { mod: 'slack', fn: 'recordView', cap: { n: 64 * K, holds: (out) => out && out.author.name.length <= 200 }, capInput: (n) => ({ text: 'x', author: { id: 'B1', name: 'x'.repeat(n), isBot: true }, raw: { username: 'y'.repeat(n) } }), run: (m, x) => m.recordView(typeof x === 'string' ? { text: 'x', author: { id: 'B1', name: x, isBot: true }, raw: { username: x } } : x),
