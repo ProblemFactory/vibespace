@@ -204,6 +204,14 @@ export function kernelDoors(r) {
 export function kernelPollDue(r) {
   return !!(r && !r.error && Array.isArray(r.engines) && r.engines.some((e) => e && e.kernel && typeof e.kernel === 'object' && e.kernel.state === 'downloading'));
 }
+/** B-0bc7 (the second adversarial read): the Settings row's step after an engines answer — `polling` = a download ran at the row's
+ *  last GOOD read. A read that failed (fetchJson's null, an error) never ends a running download's progress: the doors stay as drawn
+ *  (`redraw` false) and the row asks again. → {polling, tick, redraw} */
+export function kernelPollStep(r, polling = false) {
+  if (!r || r.error) return { polling: !!polling, tick: !!polling, redraw: false };
+  const due = kernelPollDue(r);
+  return { polling: due, tick: due, redraw: true };
+}
 /** B-0bc7: what a person's «Download kernel» answered, in words — '' when it ran (the card's line says the rest through kernel.state);
  *  a refusal by its CODE (the route's own refusals before any byte: disk, build_platform_unsupported, install_running,
  *  browser_engine_protocol; a landing / a put-back in flight; anything else by its code); null ⇒ the hub did not answer. */

@@ -4,7 +4,7 @@ import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-att
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
-import { kernelDoors, kernelDownloadWords, kernelPollDue } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
+import { kernelDoors, kernelDownloadWords, kernelPollStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
 import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -739,9 +739,16 @@ class SettingsUI {
   _paintKernelDoors(line, r, again) {
     const next = line.nextElementSibling;
     let box = next && next.classList && next.classList.contains('settings-engine-doors') ? next : null;
-    const doors = kernelDoors(r);
     if (!this._kernelAsks) this._kernelAsks = new Set();
     if (!this._kernelSaid) this._kernelSaid = new Map();
+    const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); }; // the tick is the LINE's: a redrawn row asks on its own
+    // the second adversarial read: a read that FAILED (fetchJson's null, an error) never ends a download's progress — the doors stay as
+    // drawn and the row is asked again while a download was running
+    const step = kernelPollStep(r, line._kernelPolling);
+    line._kernelPolling = step.polling;
+    if (!step.redraw) { if (step.tick) tick(); return; }
+    for (const e of r.engines || []) if (e && e.kernel && e.kernel.state === 'downloading') this._kernelSaid.delete(String(e.id)); // a download that runs ends that door's old answer
+    const doors = kernelDoors(r);
     const said = doors.filter((d) => this._kernelSaid.get(d.id));
     if (!doors.length) { if (box) box.remove(); } else {
       if (!box) { box = document.createElement('div'); box.className = 'settings-engine-doors'; line.after(box); }
@@ -757,7 +764,7 @@ class SettingsUI {
         return [b, w];
       }));
     }
-    if (kernelPollDue(r) && !line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); // the tick is the LINE's: a redrawn row asks on its own
+    if (step.tick) tick();
   }
   /** B-0bc7: a person's «Download kernel» — POST /api/browser/engines/:id/kernel: it answers when the download STARTS (or at once with a
    *  refusal by name); the row is asked again then, and keeps asking while it downloads (_paintKernelDoors); one ask per engine. */

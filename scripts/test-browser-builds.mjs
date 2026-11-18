@@ -2935,6 +2935,10 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
     'B-0bc7: the unread waiting kernel\'s words name the door in the Settings row (engineFactText) — and NOT on the Change build… / New profile… cards, which have none (the adversarial read)', { unreadSet, unreadCard });
   ok(BMk.kernelPollDue(R0) === true && BMk.kernelPollDue({ ...R0, engines: R0.engines.filter((e) => e.id !== 'eng-busy') }) === false && BMk.kernelPollDue(null) === false && BMk.kernelPollDue({ error: 'unreachable' }) === false,
     'B-0bc7 kernelPollDue: the row asks again while ANY kernel downloads (the press\'s POST answers at the start) and stops when none does');
+  // the second adversarial read: a read that FAILED in the middle of a download never ends its progress
+  const judgeStep = (M) => { const a = M.kernelPollStep(R0, false), b = M.kernelPollStep(null, true), c = M.kernelPollStep({ error: 'unreachable' }, true), d = M.kernelPollStep(null, false), e = M.kernelPollStep({ ...R0, engines: R0.engines.filter((x) => x.id !== 'eng-busy') }, true);
+    return a.polling && a.tick && a.redraw && b.polling && b.tick && !b.redraw && c.tick && !c.redraw && !d.tick && !d.polling && !e.polling && !e.tick && e.redraw; };
+  ok(judgeStep(BMk), 'B-0bc7 kernelPollStep: a good read with a download ⇒ polling, ask again; a FAILED read while a download ran ⇒ the doors stay as drawn and the row asks again; a failed read with none running ⇒ nothing; a good read with none ⇒ the poll ends');
   const ANS = [[{ ok: true, started: true, id: 'eng-missing' }, ''], [{ ok: false, code: 'install_running', error: 'x' }, 'its kernel is already downloading'],
     [{ ok: false, code: 'disk', error: 'x' }, 'the kernel could not be downloaded: not enough free disk space'],
     [{ ok: false, code: 'build_platform_unsupported', error: 'x' }, 'the kernel could not be downloaded: the engine offers no kernel for this computer'],
@@ -2953,7 +2957,8 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   const ui = read('src/lib/settings-ui.js'), css = read('public/style.css');
   ok(/line\.textContent = engineFactText\(r, t\); this\._paintKernelDoors\(line, r, \(\) => this\._loadEngines\(row, path, line\)\);/.test(ui)
     && /fetchJson\(`\/api\/browser\/engines\/\$\{encodeURIComponent\(id\)\}\/kernel`, \{ method: 'POST' \}\)/.test(ui)
-    && /if \(kernelPollDue\(r\) && !line\._kernelTick\) line\._kernelTick = setTimeout\(\(\) => \{ line\._kernelTick = null; if \(line\.isConnected\) again\(\); \}, 1500\);/.test(ui)
+    && ui.includes('const tick = () => { if (!line._kernelTick) line._kernelTick = setTimeout(() => { line._kernelTick = null; if (line.isConnected) again(); }, 1500); };')
+    && ui.includes('    const step = kernelPollStep(r, line._kernelPolling);\n    line._kernelPolling = step.polling;\n    if (!step.redraw) { if (step.tick) tick(); return; }') && ui.includes('    if (step.tick) tick();\n')
     && !/setInterval\(again/.test(ui) && /const words = kernelDownloadWords\(ans, t\);\n\s+if \(words\) this\._kernelSaid\.set\(id, words\);/.test(ui) && /b\.disabled = d\.busy \|\| this\._kernelAsks\.has\(d\.id\);/.test(ui)
     && /, \.settings-engine-download \{ flex: none;/.test(css) && /\.settings-engine-doors \{/.test(css),
     'B-0bc7 wiring: the Settings engine row draws the doors with every engines answer, POSTs a press, asks the row again by the line\'s own tick while a kernel downloads (never a timer tied to the POST), disables a busy door, says each door\'s answer beside it — the row\'s own button rule (theme variables)');
@@ -2965,6 +2970,11 @@ console.log('— B-0bc7: the engine card\'s «Download kernel» door');
   const fCopy = MUTK.write('src/lib/browser-build-model.js', msrc.replace(needle, "    if ((!e.installed && !(k && k.state === 'failed')) || (k && k.next && k.next.unread)) out.push("), 'no-failed-door', { esm: true });
   const BMx = await import('file://' + fCopy);
   ok(!judgeDoors(BMx) && !BMx.kernelDoors(R0).some((d) => d.id === 'eng-failed'), 'CONTROL (B-0bc7): a door rule without the failed download — that engine has no «Download kernel» ⇒ the door table goes RED', BMx.kernelDoors(R0));
+  const stepNeedle = "  if (!r || r.error) return { polling: !!polling, tick: !!polling, redraw: false };";
+  ok(msrc.split(stepNeedle).length === 2, 'B-0bc7 control setup: the failed-read step is found once');
+  const fCopy2 = MUTK.write('src/lib/browser-build-model.js', msrc.replace(stepNeedle, "  if (!r || r.error) return { polling: false, tick: false, redraw: true };"), 'failed-read-ends', { esm: true });
+  const BMy = await import('file://' + fCopy2);
+  ok(!judgeStep(BMy), 'CONTROL (B-0bc7, round 2\'s should): a step that lets ONE failed read end the poll (the doors removed, never asked again) goes RED');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
