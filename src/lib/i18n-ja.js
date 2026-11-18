@@ -3058,6 +3058,7 @@ export default {
   "awaiting you": "あなた待ち",
   "ago": "前",
   "No background jobs yet — agents register them with vibespace-job": "バックグラウンドジョブはまだありません — エージェントが vibespace-job で登録します",
+  "Auto via the CLI (burn-aware background refresh)": "CLI 経由の自動（消費量に応じたバックグラウンド更新）",
   "Session “{name}” not found — it may have been renamed or closed": "セッション「{name}」が見つかりません——名前が変更されたか閉じられた可能性があります",
   "Session “{name}” is not open right now": "セッション「{name}」は現在開かれていません",
   "Session properties": "セッションのプロパティ",

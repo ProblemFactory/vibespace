@@ -2,7 +2,7 @@ import { titleMinText, billingPillForms, billingPillHtml } from './title-chips.j
 import { navBarFold, navTitleMinText, navMoreRows, navMoreLoud } from './title-chips.js'; // lane phone-titlebar-title: THE TITLE OWNS THE BAR — the chips beside it yield by measure
 import { FOLDED } from './bar-fold.js';
 import { t } from './i18n.js';
-import { windowWords } from './window-types.js';
+import { windowWords, windowKindWords, windowTitle } from './window-types.js';
 import { escHtml, onOutsidePress, showContextMenu, showToast, uiScale } from './utils.js';
 import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { showWindowContextMenu } from './taskbar.js';

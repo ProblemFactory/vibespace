@@ -3058,6 +3058,7 @@ export default {
   "awaiting you": "等你处理",
   "ago": "前",
   "No background jobs yet — agents register them with vibespace-job": "还没有后台任务——agent 用 vibespace-job 注册",
+  "Auto via the CLI (burn-aware background refresh)": "CLI 自动（燃烧感知的后台刷新）",
   "Session “{name}” not found — it may have been renamed or closed": "找不到会话「{name}」——可能已改名或已关闭",
   "Session “{name}” is not open right now": "会话「{name}」当前未打开",
   "Session properties": "会话属性",

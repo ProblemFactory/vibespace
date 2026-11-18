@@ -340,7 +340,8 @@ ok([...censusTypes].every((t) => regTypes.includes(t)), `every createWindow type
   // counts; a tenth reader changes one — either is red until it is classified here (the title line = windowWords; a list, a toast,
   // the phone list and compact bar, a split toast = windowTitle).
   // mobile-nav: the phone bar is phone-six's painter (2.369.408) — its compact line keeps the whole title as it is (主开发 2026-11-17: closure F13's compact change dropped); windowWords names the regular bar's hover title, windowTitle the phone list
-  const SITES = { 'src/lib/taskbar.js': { words: 4, title: 4 }, 'src/lib/mobile-nav.js': { words: 1, title: 1 }, 'src/lib/tab-group.js': { words: 0, title: 2 }, 'src/lib/window.js': { words: 0, title: 2 } };
+  // the restack for 2.369.411: the release carries no phone-six painter (windowWords' one mobile-nav site, the regular bar's hover title)
+  const SITES = { 'src/lib/taskbar.js': { words: 4, title: 4 }, 'src/lib/mobile-nav.js': { words: 0, title: 1 }, 'src/lib/tab-group.js': { words: 0, title: 2 }, 'src/lib/window.js': { words: 0, title: 2 } };
   const sitesNow = {};
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   for (const abs of walk(path.join(repo, 'src'))) {

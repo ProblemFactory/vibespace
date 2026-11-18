@@ -102,8 +102,8 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
   // _focusExistingSession (session-lifecycle.js), each sliced out of its file
   const DMJ = fs.readFileSync(path.join(repo, 'src/lib/desktop-manager.js'), 'utf8'), SLJ = fs.readFileSync(path.join(repo, 'src/lib/session-lifecycle.js'), 'utf8');
   const slice = (src, name) => { const i = src.indexOf('\n  ' + name + '('); const j = src.indexOf('\n  }\n', i); return i < 0 ? '' : src.slice(i, j + 4); };
-  const mkWm = (doorSrc = sliceDoor(WJ), focusSrc = slice(WJ, 'focusWindow')) => new Function('revealDesktop', 'stageWindowKind', 'STAGE_ID', 'revealTab', 'showToast', 't', 'return {' + doorSrc + ',' + focusSrc + ',' + slice(WJ, '_focusMostRecent') + '};')(
-    revealDesktop, stageWindowKind, '__stage__', revealTab, (m) => toasts.push(m), (x) => x);
+  const mkWm = (doorSrc = sliceDoor(WJ), focusSrc = slice(WJ, 'focusWindow')) => new Function('revealDesktop', 'stageWindowKind', 'STAGE_ID', 'revealTab', 'showToast', 't', 'windowWords', 'windowTitle', 'return {' + doorSrc + ',' + focusSrc + ',' + slice(WJ, '_focusMostRecent') + '};')(
+    revealDesktop, stageWindowKind, '__stage__', revealTab, (m) => toasts.push(m), (x) => x, windowWords, windowTitle);   // + lane ui-plain-words' door names a window through them (the restack for 2.369.411)
   const mkRefocus = (src = slice(DMJ, '_refocusShown')) => new Function('return {' + src + '};')()._refocusShown;
   const el = (z) => { const cls = new Set(); return { style: { zIndex: String(z) }, classList: { add: (...c) => c.forEach((x) => cls.add(x)), remove: (...c) => c.forEach((x) => cls.delete(x)), contains: (c) => cls.has(c) } }; };
   const scene = (methods, { stage = false, land = true, refocus = mkRefocus() } = {}) => {

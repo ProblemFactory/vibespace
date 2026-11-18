@@ -29,7 +29,7 @@ const require = createRequire(import.meta.url);
 const BASELINE_PATH = path.join(REPO, 'scripts/fixtures/plain-words-baseline.json');
 const WALL_CHARS = 240;
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs, B-1747)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 // ── the shapes (each a named rule; the CLI names are DERIVED from the tracked data/bin) ──
@@ -127,13 +127,17 @@ const B = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
 // when the unit moved onto master (2.369.405, again 2.369.406), each judged and named — NOT debt: they never count toward MAX_DEBT_ROWS, the debt stays shrink-only,
 // and a row whose line is gone is red until it leaves this table ──
 const ALLOWED = {
-  shapes: { flag: { 'On {machine}, run: xcode-select --install': 'machine-needs: the command IS the step a person types on the Mac — folding it would leave the instruction empty' } },
+  shapes: { flag: { 'On {machine}, run: xcode-select --install': 'machine-needs: the command IS the step a person types on the Mac — folding it would leave the instruction empty' },
+    // the restack for 2.369.411 (lane bl-accounts' hand): the release's own lines this census met on 2.369.410, each judged
+    cli: { 'The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown); Auto via the CLI = a background loop spawns “claude -p /usage” (the official binary makes the fetch — this app never calls the endpoint itself) with a BURN-AWARE cadence: refreshes within minutes when the dead-reckoner sees real spending drift, 45min-with-jitter staleness cap for active accounts, and idle accounts are never polled.': 'the release (2.369.410): Claude\'s quota row is the release\'s — 主开发\'s ruling (a) at the restack for 2.369.411: the row stays as the release ships it, settings-4 does not ride; its description naming /usage is not this unit\'s to reword' },
+    env: { '{plugin} · its plugin was denied {resource}, outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path': 'B-a470 (2.369.410): an engine plugin\'s own probe error is QUOTED, not hidden — ERR_ACCESS_DENIED is the plugin\'s own code, said so a person can report it',
+      '{plugin} · its plugin was denied a path outside its own folder (ERR_ACCESS_DENIED) — a bug in the plugin, unless its manifest declares that path': 'B-a470 (2.369.410): the same quoted probe error, its no-resource form' } },
   sites: { 'the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace': { n: 3, why: 'machine-needs: the same step at its third place (machine-app.js) — the command is the step' } },
   wall: {
-    'accounts.onDemandQuotaRefresh': 'usage-predict (2.369.408): Claude\'s quota row as it shipped — its options and its sentence per choice are pinned word for word by test-agy-wall-signal ⑨b (law 1, law 6, the Off sentence naming «Refresh all», the select\'s width); settings-4 withdrawn on the restack (主开发 2026-11-17)',
-    'antigravity.autoUsageReads': 'usage-predict (2.369.408): Antigravity\'s own reads row — its sentence per choice and the U3 clause order are pinned word for word by test-agy-wall-signal ⑨b',
+    'accounts.onDemandQuotaRefresh': 'the release (2.369.410): Claude\'s quota row as the release ships it («On-demand quota refresh», Manual plus ONE automatic read after a usage wall) — 主开发\'s ruling (a) at the restack for 2.369.411: the row stays the release\'s, settings-4 does not ride',
   },
-  doors: { 'src/lib/setup-flows.js': { n: 7, why: 'loop-day-report (2.369.407): the Diagnostics hour table\'s raw journal lines — hourlyTable is run ALONE by test-loop-day-report (new Function over its slice), so it cannot call the module\'s door; six older folds of this file stay debt' },
+  doors: { 'src/lib/chat-renderers.js': { n: 48, why: 'the release (2.369.410): B-3d90 folds a hook card\'s named detail in a <details>, and phone-run-box\'s note names the swap\'s inner <details> (a comment the census counts) — the release\'s own lines, met at the restack for 2.369.411' },
+    'src/lib/setup-flows.js': { n: 7, why: 'loop-day-report (2.369.407): the Diagnostics hour table\'s raw journal lines — hourlyTable is run ALONE by test-loop-day-report (new Function over its slice), so it cannot call the module\'s door; six older folds of this file stay debt' },
     'src/lib/ffmpeg-door.js': { n: 1, why: 'machine-needs pick 3d: «What the machine printed» — a failure log filled AFTER the run, in the install dialog\'s log look (as desktop-app-launcher\'s); the door draws static lines' } },
 };
 
@@ -245,7 +249,7 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   const keys = [...Object.keys(DA.TABLE), 'link-token'];
   const unworded = keys.filter((op) => !words[op]);
   ok(!unworded.length, `every device op has its EXACT word (${keys.length} ops, ${new Set(Object.values(words)).size} words) — no prefix row stands in`, unworded);
-  ok(!/ACT_WORDS\[o\.split\(':'\)\[0\]\]/.test(dlg) && /hasOwnProperty\.call\(ACT_WORDS, String\(op \|\| ''\)\)/.test(dlg), 'actWords looks an op up EXACTLY (no family fallback)');
+  ok(!/ACT_WORDS\[o\.split\(':'\)\[0\]\]/.test(dlg) && /hasOwnProperty\.call\(ACT_WORDS, String\(op \|\| ''\)\)/.test(dlg), 'actWords looks an op up EXACTLY (no family fallback)');   // stale-pins: kept — the old family fallback must stay GONE
   let aw = null; try { aw = new Function('t', tbl + '\n' + dlg.slice(dlg.indexOf('export function actWords('), dlg.indexOf('\n}\n', dlg.indexOf('export function actWords(')) + 2).replace(/export /g, '') + '; return actWords;')((x) => x); } catch { aw = null; }
   const fams = [...new Set(Object.keys(words).filter((k) => k.includes(':')).map((k) => k.split(':')[0]))].filter((f) => words[f]);
   ok(!!aw && fams.length >= 1 && fams.every((f) => aw(f + ':no-such-action') === 'an act') && aw('desktop-grab') === 'Take a screenshot' && words['desktop-grab'] === 'Take a screenshot',
@@ -337,7 +341,7 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   const hb = read('src/browser-human.js'); const hconfs = [...hb.matchAll(/\bconfirm(?:\s*=[^{\n]*|:\s*)\{([^\n]*)/g)].map((m) => m[1]); // `confirm: {` or `const confirm = n ? {` (closure 2: the old match found none, so a dropped word stayed green)
   ok(hconfs.length >= 1 && hconfs.every((c) => /confirmText\s*:/.test(c)), `every .confirm object of humanEndChoices names its button (${hconfs.length})`, hconfs.filter((c) => !/confirmText/.test(c)).map((c) => c.slice(0, 80)));
   ok(/confirmText\s*:\s*(?:t\((?:i18nKey\()?'OK'\)?\)|'OK'|undefined|null|'')/.test("showConfirmDialog({ title: t('X'), confirmText: t(i18nKey('OK')) })"), 'CONTROL: t(i18nKey(\'OK\')) is seen as an explicit OK');
-  const planted = "showConfirmDialog({ title: t('Remove account'), message: msg })";
+  const planted = "showConfirmDialog({ title: t('Remove account'), message: msg })";   // stale-pins: kept — the old confirm, planted by this RED control
   ok(callsOf(planted).length === 1 && !/confirmText\s*:/.test(callsOf(planted)[0].call), 'CONTROL: a planted call without confirmText is seen as bare');
 }
 
@@ -349,7 +353,7 @@ console.log('⑥ controls: a planted instance of each rule is RED by name');
   const panel = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-panel.js'), 'utf8'), row = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-row.js'), 'utf8');
   const pw = fs.readFileSync(path.join(REPO, 'src/lib/plain-words.js'), 'utf8');
   const sel = /const FOLD_PRESS = '\.ut-detail-exp, ' \+ TECH_FOLD_SELECTOR;/.test(panel) ? '.ut-detail-exp, ' + ((pw.match(/export const TECH_FOLD_SELECTOR = '([^']+)';/) || [])[1] || '') : '';
-  ok((panel.match(/if \(e\.target\.closest\(FOLD_PRESS\)\) return;/g) || []).length === 3 && !/closest\('\.ut-detail-exp'\)\) return;/.test(panel), 'the tray, the phone home and the mini rows guard a press with FOLD_PRESS (no guard names the detail expander alone)');
+  ok((panel.match(/if \(e\.target\.closest\(FOLD_PRESS\)\) return;/g) || []).length === 3 && !/closest\('\.ut-detail-exp'\)\) return;/.test(panel), 'the tray, the phone home and the mini rows guard a press with FOLD_PRESS (no guard names the detail expander alone)');   // stale-pins: kept — the old press guard must stay GONE
   // the press, played: element trees and a closest() that reads the guard's selector list (class or [attr="v"])
   const el = (cls, attrs = {}, parent = null) => ({ cls: cls.split(' '), attrs, parent });
   const matches = (n, one) => { const a = one.match(/^\[([\w-]+)="([^"]*)"\]$/); return a ? n.attrs[a[1]] === a[2] : n.cls.includes(one.replace(/^\./, '')); };
