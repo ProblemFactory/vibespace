@@ -409,9 +409,7 @@ if (!probe) {
       w8.eng.switchCandidates(w8.P).length === 3 && w8.eng.healthyPoolMembers(w8.P).length === 1, JSON.stringify({ decide: w8.eng.switchCandidates(w8.P).length, act: w8.eng.healthyPoolMembers(w8.P).length }));
     // WIRING PIN: the pure-list fix is worthless if the engine's decision site
     // goes back to the act list (the 2.355.0 unstaged-wiring class).
-    const engSrc = code('src/server/usage-pool-engine.js');
-    ok('§5b WIRING: maybePoolAutoSwitchForPool decides on switchCandidates, and the act sites keep healthyPoolMembers',
-      /const members = switchCandidates\(poolId\)/.test(engSrc) && /const alive = healthyPoolMembers\(poolId\)/.test(engSrc), '');
+    // (§5b the act sites' wiring pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 }
 
@@ -548,31 +546,12 @@ if (!probe) {
   }
 }
 
-// ── §7 the session-less producer is keyed by its spawn's config dir ─────────
-{
-  const ur = read('src/usage-routes.js');
-  ok('§7 the spawn\'s creds dir is derived ONCE from `key`…', /const credsDir = isGlobal \? null : accounts\.subDir\(key\);/.test(ur) && /if \(credsDir\) env\.CLAUDE_SECURESTORAGE_CONFIG_DIR = credsDir;/.test(ur));
-  // …and it is derived exactly ONCE in that function, so "the key and the
-  // credentials are one decision" is STRUCTURAL rather than a check that could
-  // never fail (an unfalsifiable guard is not protection — 2.369.43).
-  const panelBody = ur.slice(ur.indexOf('async function refreshViaCliPanel'), ur.indexOf("app.post('/api/usage/refresh'"));
-  const subDirRefs = (panelBody.match(/accounts\.subDir\(/g) || []).length;
-  ok('§7 …exactly ONE derivation of the creds dir in the whole function (a second one is how the two could ever disagree)', subDirRefs === 1, 'subDir( refs in refreshViaCliPanel: ' + subDirRefs);
-  // …and the WRITE names that same `key`. The pin moved with the mechanism
-  // (2026-09-08): the panel no longer builds a path and renames a temp file —
-  // every usage-cache write in the product goes through src/usage-cache-write.js
-  // so a reading merges into the file's typed `limits` per limitId. What must
-  // stay true is what it always was: the object goes to the file for `key`, and
-  // nothing in this function writes that directory behind the choke point.
-  ok('§7 …and writes the panel back under that same key', /usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: merged/.test(panelBody), 'panel write site');
-  ok('§7 …and nothing in the panel refresh writes the cache directory directly', !/fs\.writeFileSync\([^)]*USAGE_CACHE_DIR/.test(panelBody) && !/fs\.renameSync/.test(panelBody), 'raw writes inside refreshViaCliPanel');   // stale-pins: kept — an absence check on the panel refresh body (the token left src/app-secrets-seal.js — B-694d)
-  ok('§7 …and says WHY (a reading with no session is keyed by the credentials its process was handed)', /its identity IS the config dir the spawn was given/.test(ur));
-}
+// (§7 the session-less producer's key — source pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── §8 UI honesty ──────────────────────────────────────────────────────────
 {
   const S = await import(path.join(REPO, 'src/lib/usage-source.js'));
-  ok('§8 the pure module imports nothing (DOM-free by construction)', !/^\s*import /m.test(read('src/lib/usage-source.js')));
+  // (§8 the pure module imports nothing — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   ok('§8 each producer gets its own名 label', S.readingSource('on-demand').key === 'panel' && S.readingSource('passive').key === 'session' && S.readingSource('rate-limit-event').key === 'session' && S.readingSource('limit-banner').key === 'banner' && S.readingSource('wall').key === 'wall' && S.readingSource('remote-statusline').key === 'remote');
   ok('§8 a NEW writer shows up verbatim instead of being absorbed into "own session"', S.readingSource('brand-new-thing').key === 'other' && S.readingSource('brand-new-thing').label === 'brand-new-thing');
   ok('§8 corroboration is three-state (agreed / disagreed / no opinion)', S.corroborationNote(true) === 'corroborated' && S.corroborationNote(false) === 'not corroborated' && S.corroborationNote(undefined) === null);
@@ -581,184 +560,10 @@ if (!probe) {
   ok('§8 a signed-out member names the state, the instant, and that its newest reading POSTDATES the death (= not its own)', st.what === 'signed out' && st.since === 1000 && st.suspect === true, JSON.stringify(st));
   ok('§8 …while a reading from before the death is simply old, not suspect', S.staleSince({ state: 'wiped', usable: false, since: 5000 }, 1000).suspect === false);
   ok('§8 the stamp is absolute (a "5 days ago" for something that will never move again is the wrong unit)', /\d/.test(S.stampText(Date.parse('2026-09-03T05:55:00Z'))) && S.stampText(null) === '—');
-  const um = read('src/lib/usage-meter.js');
-  // The import list GREW with the limit-aware helpers (B-9213/B-8b12), so the
-  // pin asserts the four provenance rules are still imported FROM THE PURE
-  // MODULE and that there is still exactly ONE provenance line per panel —
-  // the mechanism — instead of pinning the literal line, which would go red
-  // for every future helper and green for a second hand-written line.
-  const imp = (um.match(/import \{([^}]*)\} from '\.\/usage-source\.js';/) || [, ''])[1];
-  ok('§8 WIRING: the meter imports the pure rules and renders ONE provenance line for both panels',
-    ['corroborationNote', 'readingSource', 'stampText', 'staleSince'].every((n) => imp.includes(n)) && (um.match(/\$\{sourceLine\(/g) || []).length === 2,
-    'usage-source import: ' + imp.trim());
-  ok('§8 WIRING: it reads the per-account credential state /api/usage now carries', /this\._usageLogins = data\?\.logins \|\| \{\}/.test(um) && /logins: \(\(\) => \{/.test(read('src/usage-routes.js')));
-  ok('§8 WIRING: every interpolated value goes through escHtml (the panel renders peer-controlled account names)', /escHtml\(src\.tip\)/.test(um) && /escHtml\(t\('via \{source\}'/.test(um));
+  // (§8 the meter's wiring pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
-// ── §9 source pins: nobody may key on the observation again ────────────────
-{
-  const eng = code('src/server/usage-pool-engine.js');
-  ok('§9 orgVerifiedKey exists nowhere in executable code (the comments keep the refutation on record)', !/\borgVerifiedKey\b/.test(eng) && /REFUTED AND REMOVED: `orgVerifiedKey/.test(read('src/server/usage-pool-engine.js')));
-  ok('§9 sessionReadingMember is gone too — one question, one answer', !/\bsessionReadingMember\b/.test(eng));
-  ok('§9 the OTel label has NO reader left in the engine (observedMemberFor / corroborateReading / noteDivergence retired 2026-09-30 — the org is a machine-wide label)', !/\bobservedMemberFor\b|\bcorroborateReading\b|\bnoteDivergence\b|observedOrgFor\?\.\(/.test(eng));
-  ok('§9 server.js executes no setTruthLookup at all (the OTel map may never key a bake again)', !/setTruthLookup\s*\(/.test(code('server.js')));
-  ok('§9 the ingest writes no attribution record (the corrective-record era is over)', !/recordAttribution\(/.test(code('src/server/otel-ingest.js')));
-  const st = read('src/slot-transitions.js');
-  ok('§9 accounts.js is the ONLY writer of the transition ledger', /\.record\(/.test(code('src/accounts.js')) && !/slotTransitions\.record\(/.test(code('src/server/usage-pool-engine.js')));
-  ok('§9 …and the engine holds a READ-ONLY view of it', /const slotTransitions = new SlotTransitions/.test(read('src/server/usage-pool-engine.js')) && /READ-ONLY view of the transition ledger/.test(read('src/server/usage-pool-engine.js')));
-  ok('§9 the statusline resolves the credential LINK per write (its spawn key is fixed for the process\'s life)', /VIBESPACE_ACCOUNT_LINK/.test(read('data/bin/vibespace-usage')) && /fs\.readlinkSync\(link\)/.test(read('data/bin/vibespace-usage')) && /VIBESPACE_ACCOUNT_LINK=\$\{spawnAccount\.linkPath\}/.test(read('src/spawn/local.js')));
-  ok('§9 …and the spawn seam NAMES that link (linkPath) instead of letting the consumer guess which localEnv key holds it', /linkPath: link,/.test(read('src/accounts.js')) && /linkPath: this\._acctDir\('claude', id\),/.test(read('src/accounts.js')));
-  ok('§9 …and the REMOTE branch deliberately has no such twin, with the reason written down', /Spawn-fixed BY CONSTRUCTION on a remote host/.test(read('src/ws-create.js')));
-  ok('§9 login-state has ONE home, and every consumer imports it from there', ["src/server/usage-pool-engine.js", "src/usage-routes.js", "src/reading-repair.js"].every((f) => /require\('\.\.?\/(\.\.\/)?login-state\.js'\)/.test(read(f))));
-  ok('§9 the migration is registered append-only with a dated id', /id: '2026-09-reattribute-readings-by-slot'/.test(read('src/server/migrations.js')));
-  ok('§9 …and it says out loud what it did, even when that is nothing', /\[migrate\] readings-by-slot:/.test(read('src/server/migrations.js')));
-  // §9b THE LAW INDEX IS A SOURCE PIN TOO (integration r2, a reproduced
-  // merge-only doc regression). CLAUDE.md is auto-loaded and its routing table
-  // is what gates the NEXT change to this subsystem, so a superseded paragraph
-  // there outranks any essay that contradicts it. The Pool/billing row is ONE
-  // 3.3 KB line, so a hand-merge that keeps "both sides verbatim" resurrects
-  // the refuted rule SUB-LINE, where a lost/resurrected-LINE check sees
-  // nothing. Pinned against the code that refutes it, not against a snapshot:
-  // the row may not claim the observed org still routes VALUES while
-  // readingSlotFor is what every value producer calls.
-  {
-    const md = read('CLAUDE.md');
-    const row = md.split('\n').find((l) => /^\|\s*\*\*Pool\/billing decisions\*\*/.test(l)) || '';
-    ok('§9b the Pool/billing routing row exists and is one well-formed 3-cell row', !!row && row.split('|').length === 5, String(row.length));
-    const REFUTED = /quota VALUES keep the observed-org routing/;
-    ok('§9b …and it does NOT still say the observed org routes quota VALUES (the rule this chain deleted from the code)', !REFUTED.test(row), row.slice(0, 200));
-    ok('§9b …while the rule that REPLACED it is stated there', /EVERY reading AND every rejection is attributed to the credential SLOT/.test(row) && /readingSlotFor/.test(row));
-    // the CODE half of the same claim — the doc is wrong precisely because the
-    // engine routes every value through the slot and the OTel override is dead
-    const engSrc = code('src/server/usage-pool-engine.js');
-    ok('§9b …and the engine agrees: values go through readingSlotFor, nothing keys on the observation', /readingSlotFor\(/.test(engSrc) && !/\borgVerifiedKey\b/.test(engSrc) && !/setTruthLookup\s*\(/.test(code('server.js')));
-    // NEGATIVE CONTROL: the pin can SEE the refuted sentence when it is there
-    // (this is the leg the merge defeated — a line-granularity check reports
-    // zero resurrected lines with the paragraph present).
-    ok('§9b NEGATIVE CONTROL: the same predicate fails on the pre-fix row text', (() => {
-      const prefix = row.slice(0, 1331);
-      const resurrected = prefix + "**A REJECTION is attributed to the credential SLOT (the token-slot-validated link), never to the OTel-observed org — that names the identity the CLI cached at SPAWN (2026-09-07 loop incident); quota VALUES keep the observed-org routing.** " + row.slice(1331);
-      return REFUTED.test(resurrected) && resurrected.split('|').length === 5;
-    })());
-    // …and the historical ESSAY is deliberately allowed to keep the refuted
-    // rule (it narrates round 1 keeping it and round 2 finishing it) — a pin
-    // that also banned the record would delete the history.
-    // (and it narrates it in the PAST tense — "kept", not "keep" — which is
-    // exactly the difference between a record and a rule)
-    ok('§9b …and the kb ESSAY may still narrate the refuted rule as history, in the past tense', /Round 1 \(2\.369\.66\) changed only the CONSUMER:/.test(read('docs/kb-file-structure.md')) && /quota VALUES kept the observed-org routing/.test(read('docs/kb-file-structure.md')));
-    // The SAME rule for the 2026-09-08 half: the auto-loaded index is what gates
-    // the NEXT change to this subsystem, so the row must carry the rule the code
-    // now runs, and the file index must name the module that holds it.
-    // 2026-09-15 SIZE LAW (owner: CLAUDE.md is an INDEX, ≤ ~300 chars per
-    // entry, the essay lives in the kb it points to): the auto-loaded row
-    // above keeps the HEAD + the replacement rule; the FULL row — every
-    // round's block, in order, with its terminators — lives verbatim in
-    // docs/kb-design-lessons.md §18 (`### Row: Pool/billing decisions`,
-    // the `**It belongs in…**` cell) and THAT is what the round-by-round
-    // pins and their negative controls below read.
-    const full = (() => {
-      const kb = read('docs/kb-design-lessons.md');
-      const m = kb.match(/^### Row: Pool\/billing decisions\n[\s\S]*?^\*\*It belongs in…\*\* (.*)$/m);
-      return m ? m[1] : '';
-    })();
-    ok('§9b the FULL Pool/billing row lives in kb-design-lessons §18 and is longer than the index head', full.length > row.length && full.length > 10000, String(full.length));
-    ok('§9b the routing full also states the rule THIS change added (the window outranks the bookkeeping)',
-      /LAG SHADOW/.test(full) && /WINDOW IDENTITY GUARD/.test(full) && /reading-lag\.js/.test(full) && /NO EVIDENCE ⇒ NO REFUSAL/.test(full), full.slice(-320));
-    ok('§9b …including the two properties a later edit is most likely to drop: the PHASE comparison, and that `ownWindow` is stamped and never read back out of `sevenDay.resetsAt`',
-      /resetsAt mod 604800/.test(full) && /NEVER read back out of `sevenDay\.resetsAt`/.test(full));
-    ok('§9b …and the file index names the PURE module beside the ledger it works with', /^  reading-lag\.js — PURE \(imports nothing\)/m.test(((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read('docs/kb-file-structure.md'))));
-    // r2: the auto-loaded index gates the NEXT change, so it must carry the two
-    // rules round 2 established — WHICH HALF of a window identifies an account,
-    // and WHERE the established window may be kept. Both are the kind of thing
-    // a later edit "simplifies" back, and each one cost a reproduced incident.
-    ok('§9b …and the two rules ROUND 2 established: the weekly half is the only identity evidence (a 5h window names a TIME), and the established window lives in a sidecar no reading producer writes',
-      /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(full) && /FIVE-HOUR window names a TIME/.test(full)
-      && /ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(full) && /\.window-<key>/.test(full)
-      && /NOT a field of the usage-cache snapshot/.test(full), full.slice(-400));
-    ok('§9b NEGATIVE CONTROL: those predicates fail on the full as ROUND 1 left it (they are not matching prose that was already there)',
-      (() => {
-        const r1 = full.replace(/\*\*THE WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE\*\*[\s\S]*?The statusline carries a byte-identical MIRROR/,
-          'A weekly window is an ACCOUNT FINGERPRINT compared by its PHASE (`resetsAt mod 604800`, ±120s) because a roll adds exactly one week. `cache.ownWindow` is STAMPED AT THE WRITE by the one producer whose key and credential dir are the same decision (refreshViaCliPanel) and NEVER read back out of `sevenDay.resetsAt`; every session-attributed writer PRESERVES it. The statusline carries a byte-identical MIRROR');
-        return r1.length < full.length
-          && !/WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r1) && !/ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(r1)
-          // …while the ROUND 1 properties this full also pins are still there,
-          // so the control differs in exactly the dimension it names
-          && /resetsAt mod 604800/.test(r1) && /NEVER read back out of `sevenDay\.resetsAt`/.test(r1);
-      })());
-    ok('§9b NEGATIVE CONTROL: the same predicates fail on the full as it stood before this change (they are not matching prose that was always there)',
-      // the terminus moves with the chain: every later round appends to the
-      // SAME block, so this control strips through whatever the last one ended
-      // with (r4: "…AFTER the guard chose the key.**") and must still remove
-      // strictly more than nothing, or it has silently stopped applying.
-      (() => { const before = full.replace(/\*\*AND THE READING IS EVIDENCE ABOUT ITSELF[\s\S]*?AFTER the guard chose the key\.\*\* /, ''); return !/LAG SHADOW/.test(before) && !/reading-lag\.js/.test(before) && !/PER BUCKET/.test(before) && before.length < full.length; })());
-    // r3: the two rules THIS round established are exactly the kind a later edit
-    // "simplifies" back — one of them is a single line's POSITION, the other is
-    // which of two clocks a shipped single file is allowed to believe.
-    ok('§9b …and the two rules ROUND 3 established: the clock ranks BELOW the windows (a proxy may not overrule what it stands for, and an unknown age does not expire), and the statusline dates the RE-POINT from the link the pool re-mints — never from its own last observation',
-      /THE CLOCK RANKS BELOW THE WINDOWS/.test(full) && /`repointAgeMs == null` is UNKNOWN/.test(full)
-      && /lstat\(link\)\.mtimeMs`? IS that instant/.test(full) && /systematically OLDER than the re-point/.test(full)
-      && /AND THE STATUSLINE RUNS THE GUARD/.test(full) && /\.window-refused\.ndjson/.test(full), full.slice(-900));
-    ok('§9b NEGATIVE CONTROL: those predicates fail on the full as ROUND 2 left it (they are not matching prose that was already there)',
-      (() => {
-        const r2 = full.replace(/\*\*THE CLOCK RANKS BELOW THE WINDOWS\*\*[\s\S]*?nothing is written anywhere\)\. /, '');
-        return r2.length < full.length
-          && !/THE CLOCK RANKS BELOW THE WINDOWS/.test(r2) && !/AND THE STATUSLINE RUNS THE GUARD/.test(r2)
-          // …while the ROUND 1+2 properties this full also pins are still there
-          && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r2) && /ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(r2)
-          && /resetsAt mod 604800/.test(r2);
-      })());
-    // r4: the rule most likely to be "simplified" back is the one that reads as
-    // an optimisation — deciding a record once instead of once per bucket.
-    ok('§9b …and the rule ROUND 4 established: the repair moves PER BUCKET (the {5h,7d} primary half decides where the record goes; every other bucket is archived with its own reason), and "no evidence ⇒ no refusal" governs REFUSING TO WRITE, not MOVING',
-      /THE REPAIR MOVES PER BUCKET, NEVER WHOLESALE/.test(full) && /ONE BUCKET AT A TIME/.test(full)
-      && /the PRIMARY half is `\{5h,7d\}`/.test(full) && /governs REFUSING TO WRITE, not MOVING/.test(full)
-      && /preserve-merges the previous scoped bucket/.test(full), full.slice(-900));
-    ok('§9b NEGATIVE CONTROL: that predicate fails on the full as ROUND 3 left it (it is not matching prose that was already there)',
-      (() => {
-        const r3 = full.replace(/\*\*AND THE REPAIR MOVES PER BUCKET, NEVER WHOLESALE[\s\S]*?AFTER the guard chose the key\.\*\* /, '');
-        return r3.length < full.length
-          && !/THE REPAIR MOVES PER BUCKET/.test(r3) && !/ONE BUCKET AT A TIME/.test(r3)
-          // …while every earlier round's properties this full pins are still there
-          && /THE CLOCK RANKS BELOW THE WINDOWS/.test(r3) && /AND THE STATUSLINE RUNS THE GUARD/.test(r3)
-          && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r3);
-      })());
-    // r5: the rule most likely to be "simplified" back is the one that reads
-    // like bookkeeping — which KEY the cache half iterates. It is the whole
-    // difference between arming the live guard on an identity and arming it on
-    // one of that identity's two files.
-    ok('§9b …and the two rules ROUND 5 established: an identity can hold MORE THAN ONE cache file (so the cache half enumerates the files the product accepts, and the `acct:` rung is the only one that may ask the streams), and a bucket\'s fate is decided on the RECORD\'s buckets, not on the dated view of them',
-      /AND AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(full) && /keyed on the FILES the product accepts/.test(full)
-      && /structurally inert on it/.test(full) && /re-poisoned the just-cleaned stream on the next tick/.test(full)
-      && /documented LAST RESORT/.test(full) && /a PSEUDO key never/.test(full)
-      && /A BUCKET'S FATE IS DECIDED ON THE RECORD'S BUCKETS/.test(full) && /counted PARTIAL/.test(full), full.slice(-1200));
-    ok('§9b NEGATIVE CONTROL: those predicates fail on the full as ROUND 4 left it (they are not matching prose that was already there)',
-      (() => {
-        const r4 = full.replace(/\*\*AND AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE[\s\S]*?never a drop line\.\*\*/, '');
-        return r4.length < full.length
-          && !/AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(r4) && !/A BUCKET'S FATE IS DECIDED ON THE RECORD'S BUCKETS/.test(r4)
-          // …while every earlier round's properties this full pins are still there
-          && /THE REPAIR MOVES PER BUCKET/.test(r4) && /THE CLOCK RANKS BELOW THE WINDOWS/.test(r4)
-          && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r4);
-      })());
-    // r6: the rule most likely to be dropped is the one that reads like an
-    // implementation detail of r5 — that the DIRECTORY is not every file.
-    ok('§9b …and the rule ROUND 6 established: the `__global__` key has a SECOND snapshot outside the directory (`data/usage-cache.json`), judged by the directory half\'s own answer, archived-then-UNLINKED rather than mirrored, and reported as its own state',
-      /AND THE `__global__` KEY HAS A SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY/.test(full)
-      && /USAGE_CACHE_FILE/.test(full) && /newest-wins merge/.test(full)
-      && /never a second `identityKeyFor` over that payload/.test(full)
-      && /UNLINKED, not mirrored/.test(full) && /globalFile: clean \/ archived \/ unresolvable \/ absent/.test(full)
-      && /STANDING SWEEP derives the persisted-snapshot ROOTS from the source/.test(full), full.slice(-1400));
-    ok('§9b NEGATIVE CONTROL: that predicate fails on the full as ROUND 5 left it (it is not matching prose that was already there)',
-      (() => {
-        const r5 = full.replace(/ \*\*AND THE `__global__` KEY HAS A SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY[\s\S]*?to judge or seed it with\.\*\*/, '');
-        return r5.length < full.length
-          && !/SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY/.test(r5) && !/globalFile: clean \/ archived/.test(r5)
-          // …while every earlier round's properties this full pins are still there
-          && /AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(r5) && /THE REPAIR MOVES PER BUCKET/.test(r5)
-          && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r5);
-      })());
-  }
-}
+// (§9 the source pins + §9b the law index and the kb full row (with their negative controls) — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── §11 ROUND 2: the six defects the adversarial verifier reproduced ────────
 // Every leg drives the REAL producer / the REAL merge / the REAL migration,
@@ -801,11 +606,7 @@ if (!probe) {
   const preFixKey = (s2) => (s2.host && !s2._accountId) ? 'host-' + s2.host : (s2._accountId || '__global__');
   ok('§11a NEGATIVE CONTROL: the pre-fix host rule sends that codex snapshot to host-h1 — the claude file, with codex numbers and no `source`', preFixKey(remoteCodex) === 'host-h1' && w.eng.readingSlotFor(remoteCodex).key === '__global_codex__', `pre-fix=${preFixKey(remoteCodex)} now=${w.eng.readingSlotFor(remoteCodex).key}`);
   ok('§11a …and the reading resolver agrees with the un-pinned codex twin again (readingSlotFor vs liveQuotaKeyFor, which noteWallSignal uses on the same session)', w.eng.readingSlotFor(remoteCodex).key === '__global_codex__' && w.eng.resolveUsageKey(remoteCodex) === '__global_codex__');
-  // the codex panel's disk seed must actually be able to see it
-  const seedLine = read('src/usage-routes.js').split('\n').find((l) => /exec\(fn\)/.test(l) && /cxs/.test(l));
-  const lit = seedLine && seedLine.match(/\/(\^\(cxs[^/]+)\//);
-  const seedRe = lit ? new RegExp(lit[1]) : null;
-  ok('§11a …so the codex panel\'s own disk seed can read it (a host-<id> file would be invisible to it)', !!seedRe && seedRe.test('__global_codex__.json') && !seedRe.test('host-h1.json'), String(seedLine).trim().slice(0, 120));
+  // (§11a the codex panel's disk seed — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // …and the rule is a TRANSFORM OF THE ANSWER, not a backend test: every
   // machine identity except the claude one passes through, so a third harness
   // keeps whatever key it already had (a `backend === 'claude'` spelling would
@@ -1002,7 +803,7 @@ if (!probe) {
     ok('§11d …the ACCOUNT can still spawn and produce readings through that token', acctSt.usable === true && acctSt.state === 'oat', JSON.stringify(acctSt));
     const bm = w2.eng.sessionBillingMember(w2.session, w2.P);
     ok('§11d a POOL SLOT pointing at that same member never validates — an oat lives in accounts.json and rides spawn ENV, so re-pointing a link can never hand it to a RUNNING CLI (a wiped login is dropped by poolMembers before the state leg even runs; §5 pins the doubly-expired shape that reaches it)', bm.slotOk === false && bm.slotReason === 'slot-not-a-member', JSON.stringify(bm));
-    ok('§11d …and the engine\'s reader is the FILE one, deliberately (making it account-aware would make a wiped member a valid switch TARGET)', /const st = memberLoginState\(linkedId\);/.test(read('src/server/usage-pool-engine.js')) && /loginState\(fp, \{ backend: 'claude' \}\)/.test(read('src/server/usage-pool-engine.js')) && /DELIBERATELY THE FILE, NOT THE ACCOUNT/.test(read('src/server/usage-pool-engine.js')));
+    // (§11d the engine's FILE reader — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 }
 
@@ -1054,26 +855,7 @@ if (!probe) {
   }
 }
 
-// (f) LOW — the kb essay a reader reaches FIRST still documented the mechanism
-//     this change deleted. A refuted claim stays on record, but it must be
-//     MARKED refuted where it lives.
-{
-  // PER MENTION, not per line: these essays are single giant paragraphs, so a
-  // line-level rule passes as soon as ANY other sentence on it says REFUTED
-  // (measured — it let the very sentence this leg exists for slip back in).
-  for (const f of ['docs/kb-file-structure.md', 'docs/kb-bugfix-invariants.md']) {
-    const src = read(f);
-    const stale = [];
-    let hits = 0;
-    for (const m2 of src.matchAll(/sessionReadingMember|unsatisfiable guard/g)) {
-      hits++;
-      const near = src.slice(Math.max(0, m2.index - 40), m2.index + 260);
-      if (!/REFUTED|DELETED/.test(near)) stale.push(near.slice(0, 100).replace(/\s+/g, ' '));
-    }
-    ok(`§11f ${f}: every mention of the deleted resolver / the "unsatisfiable guard" claim is marked REFUTED WHERE IT STANDS (${hits} mentions)`, stale.length === 0 && hits >= 3, stale.join(' | '));
-  }
-  ok('§11f …and both essays name the resolver that replaced it', /readingSlotFor/.test(read('docs/kb-file-structure.md')) && /readingSlotFor/.test(read('docs/kb-bugfix-invariants.md')));
-}
+// (§11f the refuted claim is MARKED refuted — the docs census — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
 // ── §12 ROUND 3: the five defects the adversarial verifier reproduced ───────
 // Same discipline as §11: drive the REAL producer / the REAL migration, and
@@ -1170,10 +952,7 @@ if (!probe) {
     cap.done();
     ok('§12a …end to end: the entry lands on the member the RESUMED session\'s link was on', JSON.parse(fs.readFileSync(path.join(dataDir, 'usage-history', 'attribution.ndjson'), 'utf8').trim()).acct === FISH);
   }
-  // WIRING PIN: a pure join that the orchestrator never hands dataDir to is the
-  // 2.355.0 unstaged-wiring class.
-  ok('§12a WIRING: repairReadings passes dataDir into repairAttribution, and the lookup goes through the join (never the raw sid)', /repairAttribution\(\{ dataDir, historyDir:/.test(read('src/reading-repair.js')) && /transitions\.slotAt\(keys, r\.ts/.test(read('src/reading-repair.js')) && !/transitions\.slotAt\(r\.sid/.test(code('src/reading-repair.js')));
-  ok('§12a WIRING: the journal backfill records the SAME namespace the engine prints (webui id), so its rows are joinable by the same map', /per-session switch \$\{poolId\}\/\$\{sid\}/.test(read('src/server/usage-pool-engine.js')) && /const row = s\n\s*\? \{ sessionId: s\[2\]/.test(read('src/reading-repair.js')));
+  // (§12a the wiring pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // (b) MEDIUM — the r2 emptied-sid fix re-bakes through `_acctAt`'s session-meta
@@ -1216,7 +995,7 @@ if (!probe) {
   // NEGATIVE CONTROL: an ordinary account still falls back the r2 way
   const e4 = mk('sub-live0000', (id) => (id === 'sub-live0000' ? { type: 'subscription', name: 'Live' } : null));
   ok('§12b NEGATIVE CONTROL: an ordinary subscription in session-meta is still the un-refuted fallback (the fix drops POOLS, it does not disable the fallback)', e4.acct === 'sub-live0000' && e4.atype === 'subscription' && e4.aname === 'Live', JSON.stringify(e4));
-  ok('§12b …and this is the attribution log\'s own invariant (src/server/usage-attribution.js, moved out of server.js), applied at the second site that reaches the same decision', /never to the pool id itself/.test(read('src/server/usage-attribution.js')) && /_nonPoolAcct/.test(code('src/usage-history.js')));
+  // (§12b the attribution log's own invariant — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // (c) MINOR — the provenance line labelled EVERY codex reading "via unknown /
@@ -1248,10 +1027,7 @@ if (!probe) {
     const g2 = (() => { try { return JSON.parse(fs.readFileSync(path.join(w2.cacheDir, '__global_codex__.json'), 'utf8')); } catch { return null; } })();
     ok('§12c a codex REFUSAL is stamped as the limit banner it is, never as the live push (the same branch also SYNTHESIZES a spent bucket, which is not a reading)', !!g2 && g2.source === 'limit-banner' && S.readingSource(g2.source).key === 'banner', JSON.stringify(g2 && { source: g2.source, u7: g2.sevenDay?.utilization }));
   }
-  ok('§12c …both new keys carry zh+ja entries', (() => {
-    const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-    return ['session transcript', "A live Codex session on this account's credential slot pushed its own rate limits."].every((k) => zh.includes(JSON.stringify(k).slice(1, -1)) && ja.includes(JSON.stringify(k).slice(1, -1)));
-  })());
+  // (§12c both new keys' zh / ja — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // WIRING: every codex snapshot writer stamps, and the PURE mapper still does
   // not (the channel is not a property of the payload).
   const cq = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
@@ -1263,7 +1039,7 @@ if (!probe) {
   const cqSrc = read('src/harnesses/codex-quota.js');
   const normBody = cqSrc.slice(cqSrc.indexOf('function normalizeCodexRateLimit'), cqSrc.indexOf('// The typed exhaustion enum'));
   ok('§12c the PURE normalizer still stamps nothing — the channel is named at the WRITE, never inferred from the payload shape', bare.source === undefined && normBody.length > 500 && !/\bsource\b\s*[:=]/.test(normBody), `${normBody.length}B scanned`);
-  ok('§12c WIRING: every codex snapshot writer stamps a source, and the engine takes it as a PARAMETER (one helper, two channels — one of which does not always carry a reading)', /const writeSnap = \(snap, source\) =>/.test(read('src/server/usage-pool-engine.js')) && /snap\.source = source;/.test(read('src/server/usage-pool-engine.js')) && /writeSnap\(snap0, 'codex-rate-limits'\)/.test(read('src/server/usage-pool-engine.js')) && /writeSnap\(snap, 'limit-banner'\)/.test(read('src/server/usage-pool-engine.js')) && /if \(snap\) snap\.source = 'codex-rate-limits';/.test(read('src/usage-routes.js')) && /normalized\.source = 'codex-rollout';/.test(read('src/usage-routes.js')));
+  // (§12c every snapshot writer stamps a source — wiring pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // NEGATIVE CONTROL: the verbatim-unknown rule is intact for a producer we
   // have genuinely never met — the fix names OUR writers, it does not bucket.
   ok('§12c NEGATIVE CONTROL: an unmet producer is still reported verbatim, and a MISSING one still says "unknown"', S.readingSource('some-future-writer').key === 'other' && S.readingSource('some-future-writer').label === 'some-future-writer' && S.readingSource(undefined).key === 'unknown');
@@ -1331,7 +1107,7 @@ if (!probe) {
     render(w2, P(1, 2));
     ok('§12d …and the state file carries no `.json`, so every usage-cache scanner keeps ignoring it', fs.readdirSync(path.join(w2.d, 'usage-cache')).some((n) => n.startsWith('.slot-') && !n.endsWith('.json')));
   }
-  ok('§12d the rule NAMES the server-side twin it mirrors (one reading-lag rule, two implementations that must not drift)', /a re-point reaches the running CLI on its NEXT request/i.test(read('src/server/usage-pool-engine.js')) && /NEXT request/.test(read('data/bin/vibespace-usage')));
+  // (§12d the rule names its server-side twin — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // (e) LOW — record()'s dedup key was the sessionId alone, so EVERY pool shared
@@ -1549,8 +1325,7 @@ if (!probe) {
     return a >= 0 && b > a ? txt.slice(a, b) : null;
   };
   const bSrc = cut(SRC), bTool = cut(TOOL);
-  ok('§13 the statusline carries a BYTE-IDENTICAL mirror of the rule (it ships to checkout-less hosts and cannot require src/)',
-    !!bSrc && bSrc.length > 2000 && bSrc === bTool, `src=${bSrc && bSrc.length} tool=${bTool && bTool.length}`);
+  // (§13 the statusline's byte-identical mirror — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   // …and functionally, over the same table, through the SHIPPED file's own text
   {
     const mod = { exports: {} };
@@ -1596,8 +1371,7 @@ if (!probe) {
     const rl = { five_hour: { used_percentage: 22, resets_at: 1788850800 }, seven_day: { used_percentage: 93, resets_at: W_A } };
     ok('§13 …including the statusline\'s OWN payload shape (snake_case rate_limits)', T.windowOf(rl).sevenDay === W_A && T.windowOf(rl).fiveHour === 1788850800
       && JSON.stringify(T.windowOf(rl)) === JSON.stringify(L.windowOf(rl)));
-    ok('§13 …and the shipped tool USES it (the r3 sidecar now records the window + the instant, and asks the shared rule)',
-      /const d = decideLagShadow\(\{/.test(TOOL) && /prevWindow: ownWindowOf\(st\.key\) \|\| st\.win \|\| null/.test(TOOL) && /writeSlotState\(sf, \{ key, fp, win, at: Date\.now\(\) \}/.test(TOOL), '');
+    // (§13 the shipped tool USES the rule — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
   // NEGATIVE CONTROL: the r3-only rule, applied to the incident, does nothing —
   // the numbers moved (0.92 → 0.93), so "same payload" never fires.
@@ -1923,17 +1697,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§15 …and a limit-banner write', !!w.readWindow(w.LINK)?.sevenDay);
     ok('§15 …because it is NOT a field of the snapshot those producers rewrite (that is what let one statusline render disarm the whole guard)',
       w.readCache(w.LINK).ownWindow === undefined, JSON.stringify(Object.keys(w.readCache(w.LINK))));
-    const ur = read('src/usage-routes.js');
-    // (inc-mubu23bd-5vxi: the capture READS the sidecar — the naming ladder asks
-    // its `scoped` map which model a cap window is — and must never WRITE it)
-    ok('§15 SOURCE PIN: the ONLY producer that writes the window sidecar is the panel refresh — the one whose key and credential dir are the same decision (rate-limit-capture may only READ it, for the model-cap naming ladder)',
-      // lane oat-identity-fix-r3: every `.window-` write goes through its owner's ONE writer (src/window-stamp.js — the census of
-      // WHO writes is test-oat-identity §9a, derived from the source), every read through its ONE reader
-      /windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, \{ \.\.\.w, at: Date\.now\(\), source: 'on-demand'/.test(ur)
-      && !/writeSidecar|writeWindowStamp|writeFileSync\([^)]*windowSidecarName|renameSync\([^)]*windowSidecarName/.test(code('src/rate-limit-capture.js'))
-      && /require\('\.\/window-stamp\.js'\)\.readWindowStamp\(cacheDir, key\)/.test(code('src/rate-limit-capture.js')), '');
-    ok('§15 …and it is never READ BACK from `sevenDay.resetsAt` (the field a mis-filed reading overwrites — that would let one bad write redefine the account)',
-      /windowStamp\.readWindowStamp\(USAGE_CACHE_DIR, key\)/.test(code('src/server/usage-pool-engine.js')) && !/ownWindow = .*sevenDay\.resetsAt/.test(code('src/server/usage-pool-engine.js'))); // the sidecar's ONE reader (lane oat-identity-fix-r3)
+    // (§15 the window sidecar's one writer and one reader — source pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
   // ── THE CLOBBER (r2, reproduced). The window used to be a FIELD of the
@@ -2250,18 +2014,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     }
     // SOURCE PINS — each fix is one line, and each is the kind a later edit
     // "simplifies" back. The rule they enforce is in the module's own header.
-    ok('§15 SOURCE PIN: the shipped tool dates the RE-POINT from the link the pool re-minted, and keeps `st.at` only as forensics',
-      /fs\.lstatSync\(process\.env\.VIBESPACE_ACCOUNT_LINK\)\.mtimeMs/.test(shipped)
-      && /repointAgeMs: repointAgeMs\(\),/.test(shipped)
-      && !/repointAgeMs: Date\.now\(\) - \(Number\(st\.at\)/.test(shipped)
-      && /at: Date\.now\(\) \}/.test(shipped), '');
-    ok('§15 SOURCE PIN: in BOTH spellings the clock bound sits BELOW the two window rungs, and a null age does not expire',
-      [read('src/reading-lag.js'), shipped].every((txt) => {
-        const w1 = txt.indexOf("why: 'window-of-previous-slot'");
-        const w2 = txt.indexOf("why: 'window-of-new-slot'");
-        const cl = txt.indexOf("why: 'shadow-expired'");
-        return w1 > 0 && w2 > w1 && cl > w2 && /repointAgeMs != null && \(!\(Number\(repointAgeMs\) >= 0\)/.test(txt);
-      }), '');
+    // (§15 the re-point date + the clock bound in both spellings — SOURCE PINS — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
   // ── THE FIVE-HOUR RUNG (r2, reproduced), through the REAL producer. A
@@ -2394,13 +2147,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const arch = fs.readFileSync(path.join(dd, 'archive', 'readings-window-anchors.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     ok('§16 a foreign reading matching NO account is ARCHIVED with the reason, never re-filed on a guess', r.anchors.archived === 1 && r.anchors.refiled === 0 && /matches no known account/.test(arch[0].reason), JSON.stringify(r.anchors));
   }
-  ok('§16 the migration is registered append-only with a dated id, and says out loud what it did',
-    /id: '2026-09-refile-readings-by-window(-v\d+)?'/.test(read('src/server/migrations.js')) && /\[migrate\] readings-by-window:/.test(read('src/server/migrations.js')));
-  ok('§16 …and it hands the CURRENT roster as the only accounts that may RECEIVE a reading (a removed subscription cannot hold one)',
-    /roster = accounts\.filter\(\(a\) => a\.type === 'subscription'\)\.map\(\(a\) => a\.id\)/.test(read('src/server/migrations.js')));
-  ok('§16 …and the RECORDS as well (r5): resolving a cache FILE to its identity is `usageIdentityGroups`\' job, which reads backend + type + email — ids alone would make this a second, weaker spelling of the engine\'s map',
-    /accounts = \(st\?\.accounts \|\| \[\]\)\.filter\(\(a\) => a && a\.id\)/.test(read('src/server/migrations.js'))
-    && /repairByWindow\(\{ dataDir, roster, accounts, id:/.test(read('src/server/migrations.js')));
+  // (§16 the migration's registration + roster pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── §16b PER BUCKET, NEVER WHOLESALE (r4, reproduced on a COPY of this
@@ -2674,29 +2421,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   // manufactured downstream by the per-key preserve-merge — and each of those
   // preserves reads the TARGET's own previous list, AFTER the guard has moved
   // `key`. So this is a source pin, not a behaviour change.
-  {
-    const eng = read('src/server/usage-pool-engine.js');
-    const calls = [...eng.matchAll(/(?<!function )guardReadingTarget\(([^,]+),\s*([^,]+),/g)].map((m) => m[2].trim());
-    ok('§16b every live guard call is handed a PRODUCER PAYLOAD, never a merged cache snapshot (a merged snapshot is the one shape that can be mixed)',
-      calls.length === 3 && calls.every((a) => /^readingLag\.windowOf\((parsed|snap)\)$/.test(a) || a === 'win'),
-      JSON.stringify(calls));
-    // (inc-mubu23bd-5vxi: since 2.1.274 one record states EVERY window; the guard
-    // is handed exactly those — `lanesSnapshot(ev)` is derived from the record
-    // alone, never from a cache — so the premise "one response, one payload" holds)
-    ok('§16b …and the one that is not a whole payload is a rate_limit_event — ONE response: its representative bucket, or every window that same response stated (never a cache snapshot)',
-      /const win = ev\.status === 'rejected' \? null : readingLag\.windowOf\(ev\.windows \? lanesSnapshot\(ev, \{ named: true \}\) : ev\);/.test(eng)
-      && /function lanesSnapshot\(ev, \{ named = false \} = \{\}\) \{\n  const out = \{\};\n  for \(const l of lanesOf\(ev\)\)/.test(read('src/rate-limit-capture.js'))
-      && /if \(x\.kind === 'sevenDay'\) out\.sevenDay = r;/.test(read('src/reading-lag.js')), '');
-    ok('§16b …and each cache writer preserves the TARGET\'s own scopedWeekly, read AFTER the guard has chosen the key (so a re-file can never import a stranger\'s bucket)',
-      (() => {
-        const tool = read('data/bin/vibespace-usage');
-        const refile = tool.indexOf("if (d.action === 'refile') key = d.key;");
-        const openFile = tool.indexOf("const f = path.join(CACHE_DIR, key + '.json');", refile);
-        const preserve = tool.indexOf('const prevScoped = (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [];', openFile);
-        return /if \(\(!parsed\.scopedWeekly \|\| !parsed\.scopedWeekly\.length\) && Array\.isArray\(prev\.scopedWeekly\)/.test(eng)
-          && refile > 0 && openFile > refile && preserve > openFile;
-      })(), '');
-  }
+  // (§16b every live guard call + the writers' scopedWeekly — source pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── §16c ONE IDENTITY, MORE THAN ONE CACHE FILE (r5, reproduced on a COPY of
@@ -2818,9 +2543,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       }
       return out;
     };
-    ok('§16c SOURCE PIN: that IS how the live guard is keyed — the engine reads `.window-<cache file name>`, so an identity with two files needs two sidecars',
-      /files = fs\.readdirSync\(USAGE_CACHE_DIR\)\.filter\(\(f\) => f\.endsWith\('\.json'\) && !f\.startsWith\('__models__'\)\);/.test(read('src/server/usage-pool-engine.js'))
-      && /const key = fn\.slice\(0, -5\);[\s\S]{0,200}windowStamp\.readWindowStamp\(USAGE_CACHE_DIR, key\)/.test(read('src/server/usage-pool-engine.js')), ''); // the sidecar's ONE reader (lane oat-identity-fix-r3) names it `.window-<key>`
+    // (§16c the live guard's key — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     const dir = path.join(dataDir, 'usage-cache');
     const stranger = { kind: 'sevenDay', resetsAt: WB };   // a reading that is provably B's
     const groupOf = (id) => (id === '__global__' || id === A ? A : id);
@@ -2845,12 +2568,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   // REAL recorder is driven here with the real freshest-cache choice.
   {
     const eng = read('src/server/usage-pool-engine.js');
-    ok('§16c SOURCE PIN: the sweep anchors the FRESHEST cache of an identity group, so the machine login\'s snapshot is what the next tick records for the whole identity',
-      /if \(!g\.cache \|\| cache\.fetchedAt > g\.cache\.fetchedAt\) \{ g\.cache = cache; g\.accountId = accountId; \}/.test(eng)
-      // B-a5c0: the per-group step moved into usage-estimator's sweepAnchorGroup — the engine hands it the group whole
-      && /sweepAnchorGroup\(\{\s*identityKey, group: g, anchors: usageAnchors,/.test(eng)
-      // (no-5h-window r5: the freshest cache is read through the identity's own «no 5h limit» — `group.tomb5h`)
-      && /const cache = (?:withOwnAbsence\(group\?\.cache, group\?\.tomb5h\)|group\?\.cache);[\s\S]{0,3000}anchors\.maybeRecord\(\{ identityKey, accountId: group\.accountId, cache,/.test(read('src/usage-estimator.js')), '');
+    // (§16c the sweep anchors the freshest cache — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     const { UsageAnchors, identityKeyFor } = require(path.join(REPO, 'src/usage-anchors.js'));
     const sweepOnce = (dd) => {
       const dir = path.join(dd, 'usage-cache');
@@ -2905,8 +2623,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const g = repair.identityCacheKeys(dir, repair.establishedWindows(streams(dd), { roster: ROSTER }), { accounts: ACCOUNTS }).find((k) => k.key === '__global__');
     ok('§16c …and a PSEUDO key is never resolved from the streams at all: `accountId: null` cannot tell the machine login from the codex one',
       g && g.ident === null && /no established stream names this account/.test(g.why), JSON.stringify(g && [g.ident, g.why]));
-    ok('§16c SOURCE PIN: that is the engine\'s own spelling — both pseudo caches are recorded with a null accountId',
-      /const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\);[^\n]*\n\s*const accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null : fn\.slice\(0, -5\);/.test(read('src/server/usage-pool-engine.js')));
+    // (§16c the two pseudo caches' null account — source pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
   // (f) NEGATIVE CONTROL — the r4 cache half, as a PATCHED COPY of the real
@@ -3095,10 +2812,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       ok('§16c(h) NEGATIVE CONTROL: without the reload the unlinked file changes NOTHING for that process — both rows keep the stranger\'s window (what r6 shipped before its verifier)',
         stale.rep.globalFile === 'archived' && stale.body.rateLimit?.sevenDay?.resetsAt === WB && stale.body.accounts?.[A]?.sevenDay?.resetsAt === WB,
         JSON.stringify([stale.body.rateLimit?.sevenDay, stale.body.accounts?.[A]?.sevenDay]));
-      // .396 seam (lane hub-loop-stalls, commit 2): the boot runs the migrations inside bootTrace.step('migrations', () => …),
-      // so the call ends «runLocalMigrations());» — the pin follows the wrapper's close paren; the reload must still FOLLOW it
-      ok('§16c(h) WIRING PIN: server.js calls usage.reloadRateLimitCache() right after runLocalMigrations() (inside its boot-trace step), and usage-routes exports it',
-        /runLocalMigrations\(\)\)?;(?:\s*persistenceRouter\.reloadSettings\?\.\(\)\s*(?:\/\*[^*]*\*\/)?\s*;)?\s*usage\.reloadRateLimitCache\?\.\(\)/.test(read('server.js')) && /reloadRateLimitCache,/.test(read('src/usage-routes.js')));
+      // (§16c(h) server.js reloads the cache after the migrations — wiring pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
     }
     ok('§16c …and a second run has nothing left to do (idempotent: the copy is gone, and what re-seeded it came FROM the repaired directory)',
       (() => { const r2 = repair.repairByWindow({ dataDir: dd, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8h2' }); return r2.globalFile === 'clean' && sibOf(dd)?.sevenDay?.resetsAt === WA; })(), '');
@@ -3206,19 +2920,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         && JSON.parse(fs.readFileSync(path.join(nf, 'archive', 'readings-window-usage-cache.ndjson'), 'utf8').trim().split('\n').pop()).store === 'usage-cache.json',
         String(threw && threw.message).slice(0, 160));
     }
-    // SOURCE PINS: the two product facts this half stands on — the file the
-    // seed is read from, and the newest-wins merge a stale copy wins.
-    ok('§16c SOURCE PIN: `data/usage-cache.json` really is the `__global__` slot\'s other home — one reader, one writer, and the same-account merge writes the NAMED subscription\'s snapshot into it',
-      /const USAGE_CACHE_FILE = path\.join\(__dirname, 'data', 'usage-cache\.json'\);/.test(read('server.js'))
-      && /function readUsageCache\(\) \{[\s\S]{0,200}JSON\.parse\(fs\.readFileSync\(USAGE_CACHE_FILE, 'utf-8'\)\)[\s\S]{0,80}cached\?\.claude/.test(read('src/usage-routes.js'))
-      // (lane no-5h-window r4: the merged snapshot keeps the slot's OWN «no 5h limit» — quota-model withOwnAbsence)
-      && /const \{ name, email, \.\.\.usage \} = newest;\s*\n\s*_rateLimitCache = (?:quotaModel\.withOwnAbsence\(usage, g\)|usage); writeUsageCache\(\);/.test(read('src/usage-routes.js'))
-      // …and the wrapper holds NOTHING but that payload, which is why archiving
-      // `.claude` archives the whole file
-      && /fs\.writeFileSync\(tmpPath, JSON\.stringify\(\{ claude: _rateLimitCache \}, null, 2\)\);/.test(read('src/usage-routes.js')), '');
-    ok('§16c SOURCE PIN: …and it is read back NEWEST-WINS, which is why a rewound rebuild can never displace a stale copy — and why `!_rateLimitCache` re-seeds it once the copy is gone',
-      /if \(!_rateLimitCache \|\| \(u\.fetchedAt > \(_rateLimitCache\.fetchedAt \|\| 0\)\)\) \{ _rateLimitCache = u; writeUsageCache\(\); \}/.test(read('src/usage-routes.js'))
-      && /out\.fetchedAt = anchor\.fetchedAt;/.test(read('src/reading-repair.js')), '');
+    // (§16c the global slot's other home + newest-wins — source pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
     // STANDING SWEEP — "is there a THIRD home for a reading snapshot?" is a
     // number to re-measure, not a fact to inherit (the r5 lesson, one level up:
@@ -4032,20 +3734,7 @@ esac
   global.__vsEvent = (n, d) => { events.push(n + ':' + d); try { prevEv && prevEv(n, d); } catch { } };
 
   // ⓪ the mechanism pins: the fixed spawn isolates the org context, derived from the ONE creds dir
-  {
-    const ur = read('src/usage-routes.js');
-    const body = ur.slice(ur.indexOf('async function refreshViaCliPanel'), ur.indexOf("app.post('/api/usage/refresh'"));
-    const spawnBody = ur.slice(ur.indexOf('function spawnPanelProbe('), ur.indexOf('function setupUsage('));
-    ok('§19 ⓪ the panel spawn sets CLAUDE_CONFIG_DIR to the account\'s isolated probe dir, derived from the ONE creds dir (never a second subDir lookup)',
-      /const probeConfigDir = credsDir \? path\.join\(credsDir, '\.probe-config'\) : null;/.test(body) && /spawnPanelProbe\(bin, \{ root: probeConfigDir, env \}/.test(body) && /if \(probeConfigDir\) env\.CLAUDE_CONFIG_DIR = probeConfigDir;/.test(spawnBody) && (body.match(/accounts\.subDir\(/g) || []).length === 1);
-    // mirror-263 §19: the mint's second look made the spawn shared and each caller brought its own env + cwd — the isolation left the site
-    const om = read('src/server/oat-mint.js');
-    ok('§19 ⓪ …ONE spawn site owns the isolation: spawnPanelProbe derives the config dir AND the empty cwd from the root its caller proves; no caller sets CLAUDE_CONFIG_DIR or a cwd for it (the panel refresher and the token mint\'s probe rung pass a root)',
-      /function spawnPanelProbe\(bin, \{ root, env: identityEnv \}, done\)/.test(spawnBody) && /const probeCwd = probeCwdOf\(probeConfigDir\);/.test(spawnBody) && /fs\.mkdirSync\(probeCwd, /.test(spawnBody)
-      && !/env\.CLAUDE_CONFIG_DIR/.test(body) && /probePanel\(\{ root: configOf\(m\.dir\), env: /.test(om) && !/probePanel\(\{[^\n]*cwd:/.test(om) && /spawnOnce\(\{ root, env \}/.test(om));
-    ok('§19 ⓪ …the measurement that justifies it is recorded beside the code (the CLI version and which file each env var moves)', /2\.1\.274/.test(ur) && /CLAUDE_CONFIG_DIR \|\| \$HOME/.test(ur));
-    ok('§19 ⓪ …and the identity gate runs BEFORE the write and returns false on a refusal', body.indexOf('if (idv.refused) {') > 0 && body.indexOf('if (idv.refused) {') < body.indexOf('usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged') && /if \(idv\.refused\) \{[\s\S]{0,1600}?return false;/.test(body));
-  }
+  // (§19 ⓪ the probe's isolation — source pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 
   const w = mkProbeWorld();
   try {
@@ -4247,7 +3936,7 @@ esac
     ok('§19 ⑨ …from then on the account\'s own readings are WRITTEN (7d 8 % in the new window) and its own panel is verified and written (7 %) — the self-heal the panel alone could no longer provide',
       r9b === true && p9b && p9b.outcome === 'written' && p9b.identityVerified === true && w9.readCache(w9.LINK).sevenDay.resetsAt === MOVED_WIN && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.07) < 1e-9,
       JSON.stringify({ p: p9b && { o: p9b.outcome, iv: p9b.identityVerified, why: p9b.why }, c: w9.readCache(w9.LINK).sevenDay }));
-    ok('§19 ⑨ …and the standing repair runs HOURLY too (server.js; its anchors read off the loop first since B-1319), quiet unless it changed something', /setInterval\(\(\) => \{ (?:require\('\.\/src\/reading-repair\.js'\)\.prefetchAnchorRows\(path\.join\(__dirname, 'data', 'usage-anchors'\)\)\.then\(\(\) => \{ )?try \{ const rep = repairIdentityAnchors\('hourly'\)/.test(read('server.js')) && /if \(why !== 'hourly' \|\| changed\)/.test(read('src/server/usage-pool-engine.js')));
+    // (§19 ⑨ the hourly standing repair — wiring pin — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
   // ⑩ A SHARED PHASE VERIFIES NOTHING (final verifier: four members on this
@@ -4424,13 +4113,7 @@ esac
       r.counts.emptied === 1 && r.counts.replaced === 0 && c.orgUuid === 'aaaa' && !c.sevenDay && !c.scopedWeekly && !c.fetchedAt && /no anchor of Member A agrees/.test(c.emptiedReason), JSON.stringify(c));
     ok('§20 …and the EMPTIED remnant still carries the org facts (overage + spend) — an emptied reading is not an emptied bill', c.overage && c.overage.inUse === true && c.overage.status === 'allowed' && c.spend && c.spend.used === 12.5, JSON.stringify({ ov: c.overage, sp: c.spend }));
   }
-  // the wiring pins: registered once, run at every boot after the one-shots, exported, routed
-  ok('§20 the migration is registered append-only with a dated id and says out loud what it did',
-    /id: '2026-09-repair-sidecars-by-api-phase'/.test(read('src/server/migrations.js')) && /\[migrate\] sidecars-by-api-phase:/.test(read('src/server/migrations.js')));
-  ok('§20 …and the SAME repair runs at every boot, after the one-shot registry (server.js), through the engine\'s one entry point',
-    (() => { const sv = read('server.js'); const i = sv.indexOf("repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.();"); return i > 0 && i > sv.indexOf('.runLocalMigrations();'); })() && /repairIdentityAnchors, \/\/ B-855a c2/.test(read('src/server/usage-pool-engine.js')) && /repairSidecarsByApiPhase\(\{ dataDir: path\.join\(rootDir, 'data'\), accounts: list, id: 'identity-repair:' \+ why \}\)/.test(read('src/server/usage-pool-engine.js')));
-  ok('§20 …the human-triggered route exists and hands the engine\'s entry point to setupUsage',
-    /app\.post\('\/api\/usage\/repair-identity'/.test(read('src/usage-routes.js')) && /repairIdentityAnchors\('manual'\)/.test(read('src/usage-routes.js')) && /establishedWindows, repairIdentityAnchors, probeUsageForAccountKey/.test(read('server.js')));
+  // (§20 the repair's wiring pins — MOVED to the fast scripts/test-readings-attribution-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
 
 // ── §22 THE LONG-LIVED TOKEN'S IDENTITY POST-CHECK RIDES THE SLOT, READ-ONLY (lane oat-identity-postcheck, B-3102 (b)) ──
