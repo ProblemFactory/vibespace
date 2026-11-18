@@ -199,6 +199,7 @@ class JobManager {
     this._unread = { store: null, archive: null }; this._unreadT = { store: null, archive: null }; this._unreadTries = { store: 0, archive: 0 }; this._unreadSaid = { store: false, archive: false }; this._unreadStopped = false;
     // cure r1 (主开发 00:40Z): one read again in flight a store, bounded; the note THIS process wrote and the items its hold filed — lifted when a read answers
     this._unreadP = { store: null, archive: null }; this._unreadSlow = { store: 0, archive: 0 }; this._unreadNoteAt = { store: null, archive: null }; this._unreadLiftedOwed = { store: null, archive: null }; this._unreadItems = { store: [], archive: [] };   // cure 2: _unreadLiftedOwed — a failure's note still being written when a read again ended it
+    this._unreadMissingAt = { store: 0, archive: 0 }; this._unreadGoneOwed = { store: null, archive: null };   // cure 3: «missing» read once more; a gone failure's note
     this._logsSaidNow = new Set();   // set-aside files whose item was filed in this process, merged into the record's `heldSaid`
     this._logsHeldSaid = '';         // the journal's last HELD line (said once per process per set of files)
     this._logsOwed = new Set();   // ids whose whole-dir removal the storage did not do (held / failed) — re-sent before every pass; ≤ LOGS_OWED_MAX, a restart forgets them (the law's pass takes them 14 days after their newest file)
@@ -296,7 +297,7 @@ class JobManager {
     this.d.log('[jobs] store corrupt → preserved at', bad || (this.readOnly ? '(nowhere — a read-only engine writes nothing)' : '(nowhere — its note holds the job-logs clean-up)'), '— rebuilding skeletons; error:', e.message);
     try {
       // B-ef97: an id the archive holds has its record there — a skeleton beside it would be a second, empty record of it
-      const archived = new Set(this._loadArchive().map((r) => r.id));   // cure r1: set aside or not (a held store's skeleton beside its archived copy)
+      const archived = new Set(pre && Array.isArray(pre.archivedIds) ? pre.archivedIds : this._loadArchive().map((r) => r.id));   // cure r1: set aside or not (a held store's skeleton beside its archived copy); cure 3: read off the loop by a read again
       for (const id of (pre && pre.logIds) || fs.readdirSync(this.logsDir)) {   // cure r2: the read again lists it off the loop
         if (!id.startsWith('jb-') || archived.has(id)) continue;
         // B-2204: owner-less and view 'session' — the person sees it (isUser), no conversation does (was view 'all': every one)
@@ -343,6 +344,9 @@ class JobManager {
         if (pre.bad) this.d.log(`[jobs] ${path.basename(file)}: torn bytes when read again — set aside as ${path.basename(pre.bad)}, before its load`);   // cure 2: said where it is done
       }
       if (which === 'store') { try { pre.logIds = await fs.promises.readdir(this.logsDir); } catch { pre.logIds = []; } }   // cure 2: a read-only engine lists off the loop too
+      // cure 3: the archive's ids (the load drops a skeleton the archive holds) — read here, off the loop, when nothing loaded it yet (a
+      // read-only engine never sweeps); a read that fails leaves the load its own road
+      if (which === 'store' && this.archive == null) { try { const v = JSON.parse(await fs.promises.readFile(this.archiveFile, 'utf-8')); pre.archivedIds = Array.isArray(v) ? v.map((r) => r && r.id).filter(Boolean) : null; } catch (e) { pre.archivedIds = e && e.code === 'ENOENT' ? [] : null; } }
     }
     if (which === 'store' && a.state === 'data' && !this.readOnly) {
       // cure 2: ONE FILE AT A TIME — the read it serves holds one pool thread a store (r2 fanned out with no bound)
@@ -398,9 +402,19 @@ class JobManager {
     clearTimeout(timer);
     if (!first && !this._unreadSlow[which]++) this.d.log(`[jobs] ${base}: a read again did not answer in ${Math.round(ms / 1000)} s — the storage may hang; it is waited on (never doubled) and tried again on the same pace (said once)`);
     const got = first || await job.catch(() => null);
-    if (!got || this._unreadStopped || !this._unread[which]) { this._ctlPre = null; return; }
+    if (!got || this._unreadStopped || !this._unread[which]) {
+      this._ctlPre = null;
+      // cure 3: torn bytes set aside, then the engine stopped before their load — said here; the next start's clean-up pass names the
+      // held file to the person (records-held), and its prefix holds the clean-up
+      if (got && got.pre && got.pre.bad) this.d.log(`[jobs] ${base}: its torn bytes were set aside as ${path.basename(got.pre.bad)} and the engine stopped before loading them — the next start names that file`);
+      return;
+    }
     const { a, pre } = got;
-    if (a.state === 'unreadable') { this._unread[which].code = a.code; return; }   // the next try is armed already
+    if (a.state === 'unreadable') { this._unread[which].code = a.code; this._unreadMissingAt[which] = 0; return; }   // the next try is armed already
+    // cure 3 (主开发 11:10Z, as if a must): a store that answers «missing» RIGHT AFTER an unreadable answer is READ ONCE MORE before
+    // anything is written at its path — a storage that says «no such file» for a moment about a file that exists must not have it
+    // written over by the next save: the hold stands until a SECOND read again says missing too
+    if (a.state === 'missing' && !this._unreadMissingAt[which]) { this._unreadMissingAt[which] = now(); this.d.log(`[jobs] ${base}: a read again answered «no such file» — read once more before anything is written there (the hold stands)`); return; }
     const tries = this._unreadTries[which], was = this._unread[which];
     this._unread[which] = null;   // the answer is loaded as the boot loads it: torn bytes that still cannot be set aside hold again
     try {
@@ -418,7 +432,7 @@ class JobManager {
       // WHOLE read. A file that is GONE, or torn bytes, end the hold with THEIR own true sentence, and the clean-up stays held
       if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));
       else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));
-      this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0;
+      this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0; this._unreadMissingAt[which] = 0;
       this.d.log(`[jobs] ${base} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${a.state === 'data' ? `${a.value.length} record(s)` : a.state === 'missing' ? 'the file is GONE — the records it held are not here; a new list starts, the job-logs clean-up stays held' : `torn bytes, set aside${pre && pre.bad ? ` as ${path.basename(pre.bad)}` : ''} — rebuilt from the job logs; the job-logs clean-up stays held`} — ${this.readOnly ? 'a read-only engine writes nothing' : 'writes resume'}`);
       try { this.d.broadcast('jobs-updated', { reread: which }); } catch { }
     }
@@ -461,6 +475,7 @@ class JobManager {
     for (const id of items) { try { this.d.resolveNotice && this.d.resolveNotice(id); } catch { } }
     if (a.state === 'missing') {
       this._unreadNoteAt[which] = null;   // the note stands: it is a person's to move now, no read's to lift
+      this._unreadGoneOwed[which] = this._logsNoteOwed[which] || null;   // cure 3: its note still being written lands with no second item
       if (!this._logsUnread[which]) this._logsUnread[which] = 'ENOENT';
       if (!this.readOnly) this._forYou(null, M.forYouCopy(null, 'records-gone', { store: base, note: name, error: was && was.code, when: was && was.at, until: now() }));
       this.d.log(`[jobs] ${base}: the file was GONE when read again — the records it held are not here; ${name} holds the job-logs clean-up until a person moves it`);
@@ -537,7 +552,10 @@ class JobManager {
       }
       if (r === 'written' || r === 'stood') {
         this._logsNoteOwed[t.side] = null;
-        if (r === 'written') {
+        if (r === 'written' && this._unreadGoneOwed[t.side] === t.o) {   // cure 3: «gone» was said for this very failure — no «unread» item after it
+          this._unreadGoneOwed[t.side] = null;
+          this.d.log(`[jobs] ${t.side}: the note ${t.file} landed after «gone» was said for the same failure — it holds the job-logs clean-up; no second item`);
+        } else if (r === 'written') {
           this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) — the note ${t.file} holds the job-logs clean-up until a person moves it`);
           // «said» keyed by the note AND its moment: a note a person moved and a later failure wrote again is told again
           const v = this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: t.o.at });

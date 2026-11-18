@@ -921,7 +921,8 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     if (J._logsNoteP) await J._logsNoteP;
     const wrote = fs.existsSync(note);
     fs.rmdirSync(F); if (after === 'torn') fs.writeFileSync(F, '[{"id":"jb-f2760g01",');   // gone: nothing there at all
-    await J._unreadRetry('store'); await new Promise((r) => setTimeout(r, 80));
+    await J._unreadRetry('store'); if (after === 'gone') await J._unreadRetry('store');   // cure 3: «missing» is read once more
+    await new Promise((r) => setTimeout(r, 80));
     const mine = filed.slice(f0), fact = (k) => mine.find((n) => n && n.fact === k) || null;
     const out = { wrote, ended: !J._unread.store, noteLeft: fs.existsSync(note), done: fs.readdirSync(d).some((n) => /^jobs\.json\.unread-done-\d+$/.test(n)), held: J._logsUnread.store, readAgain: !!fact('records-read-again'), gone: fact('records-gone'), corrupt: fact('store-corrupt'), resolved: resolved.length - r0, asides: asides(d, 'jobs.json'), skel: J.jobs.has('jb-f2760g01'), said: lg.filter((l) => /read again after/.test(l)).join(' | ') };
     J.shutdown(); return out;
@@ -957,7 +958,71 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const pf = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch'), pfx = await prefScene(JS2, 'jobs-triage-reread-prefetch-mut');
   ok(pf.during && pf.during.tries >= 5 && pf.during.storeReads === 1 && pf.during.ctlReads === 1 && pf.during.held && pf.back && pf.said === 1 && pf.loads === 1, 'cure 2: a SLOW prefetch holds the one slot — the tries go on, ONE read of the store, ONE control file in flight at a time, said once, ONE load once it answers', pf);
   ok(pfx.during && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
-  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 5, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  // ── CURE 3 (主开发 11:10Z, as if a must): a store that answers «missing» RIGHT AFTER an unreadable answer is read once more before
+  // anything is written at its path — the storage that says «no such file» for a moment about a file that is there
+  const onceScene = async (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json'), b = JSON.stringify([rec('jb-f2760m01')]), lm = [];
+    plant(F, b, 'folder');
+    const J = engine(Mod, d, lm, { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    fs.rmdirSync(F);   // «no such file», for a moment
+    await J._unreadRetry('store');
+    const heldAfterOne = !!J._unread.store;
+    J._dirty = true; J._save();   // the next save meanwhile
+    const wroteOver = fs.existsSync(F);
+    if (!wroteOver) fs.writeFileSync(F, b);   // the storage answers again: the file was there all along
+    await J._unreadRetry('store');
+    const out = { heldAfterOne, wroteOver, back: !J._unread.store && J.jobs.has('jb-f2760m01'), said: lm.some((l) => /a read again answered «no such file» — read once more before anything is written there/.test(l)) };
+    if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
+  };
+  const ONCE_A = "    if (a.state === 'missing' && !this._unreadMissingAt[which]) {";
+  ok(jsrc.split(ONCE_A).length === 2, 'B-f276 cure 3 control setup: «missing» read once more is one line');
+  const JO = MJ.load('src/jobs.js', jsrc.replace(ONCE_A, '    if (false /* MUTANT: cure 2 — «missing» believed at once */) {'), 'missing-once');
+  const on = await onceScene({ JobManager }, 'jobs-triage-reread-once'), onx = await onceScene(JO, 'jobs-triage-reread-once-mut');
+  ok(on.heldAfterOne && !on.wroteOver && on.back && on.said, 'cure 3: a store that answers «missing» right after an unreadable answer is READ ONCE MORE — the hold stands, the next save writes nothing at its path, and the file that was there all along is read back whole', on);
+  ok(!onx.heldAfterOne && onx.wroteOver && !onx.back, 'cure 3 CONTROL (cure 2: «missing» believed at once, in a copy): the hold ends and the next save WRITES OVER the path — the records that were there are lost', onx);
+  // CURE 3: no «unread» item after «gone» was said for the same failure (its note, still being written, lands after)
+  {
+    const d = mkDir('jobs-triage-gone-owed'), F = path.join(d, 'jobs.json');
+    plant(F, '[]', 'folder');
+    const J = engine({ JobManager }, d, [], { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    if (J._logsNoteP) await J._logsNoteP;
+    const f0 = filed.length;
+    J._logsRemover = () => ({ note: async () => ({ notes: { 'jobs.json.corrupt-unread': 'written' } }) });
+    const o1 = { error: 'EISDIR', at: T0 + 1 }; J._logsNoteOwed.store = o1; J._unreadGoneOwed.store = o1;
+    await J._logsWriteNotes();
+    const after1 = filed.slice(f0).filter((n) => n && n.fact === 'records-unread').length;
+    const o2 = { error: 'EISDIR', at: T0 + 2 }; J._logsNoteOwed.store = o2; J._unreadGoneOwed.store = null;   // the release's state: nothing said «gone»
+    await J._logsWriteNotes();
+    const after2 = filed.slice(f0).filter((n) => n && n.fact === 'records-unread').length;
+    ok(after1 === 0 && after2 === 1, 'cure 3: a note that lands after «gone» was said for the SAME failure files no «unread» item (it holds the clean-up, said in the journal); CONTROL: without the «gone» mark the note files its item', { after1, after2 });
+    J.shutdown();
+  }
+  // CURE 3: a read-only engine's torn read again reads the archive's ids in the prefetch — no synchronous read on the loop
+  const roScene = async (Mod, name) => {
+    const d = mkDir(name), F = path.join(d, 'jobs.json');
+    fs.writeFileSync(path.join(d, 'jobs-archive.json'), JSON.stringify([{ ...rec('jb-f2760r02'), archivedAt: T0 - D, archivedWhy: 'done' }]));
+    for (const id of ['jb-f2760r01', 'jb-f2760r02']) fs.mkdirSync(path.join(d, 'job-logs', id), { recursive: true });
+    const holder = spawn('sleep', ['60'], { stdio: 'ignore' }), PIx = require(path.join(ROOT, 'src/proc-identity.js'));
+    await until(() => !!PIx.identityOf(holder.pid));
+    fs.writeFileSync(path.join(d, 'jobs.lock'), JSON.stringify({ pid: holder.pid, starttime: PIx.identityOf(holder.pid).starttime, at: T0 }));   // another engine holds the lock
+    plant(F, '[]', 'folder');
+    const J = engine(Mod, d, [], { unreadRetry: { firstMs: 3600e3, maxMs: 3600e3 } });
+    const ro = J.readOnly;
+    fs.rmdirSync(F); fs.writeFileSync(F, '[{"id":"jb-f2760r01",');   // torn bytes
+    const rfs = fs.readFileSync; let sync = 0;
+    fs.readFileSync = function (f, ...a) { if (String(f).startsWith(d)) sync++; return rfs.call(this, f, ...a); };
+    try { await J._unreadRetry('store'); } finally { fs.readFileSync = rfs; }
+    const out = { ro, sync, skel: J.jobs.has('jb-f2760r01'), archivedSkel: J.jobs.has('jb-f2760r02') };
+    J.shutdown(); try { holder.kill('SIGKILL'); } catch { }
+    return out;
+  };
+  const AR_A = "      if (which === 'store' && this.archive == null) {";
+  ok(jsrc.split(AR_A).length === 2, 'B-f276 cure 3 control setup: the archive prefetch is one line');
+  const JR = MJ.load('src/jobs.js', jsrc.replace(AR_A, '      if (false /* MUTANT: cure 2 — the load reads the archive on the loop */) {'), 'ro-archive');
+  const ro = await roScene({ JobManager }, 'jobs-triage-reread-ro'), rox = await roScene(JR, 'jobs-triage-reread-ro-mut');
+  ok(ro.ro && ro.sync === 0 && ro.skel && !ro.archivedSkel, 'cure 3: a READ-ONLY engine\'s torn read again makes no synchronous read on the loop — the archive\'s ids come with the prefetch (its skeletons skip the archived job)', ro);
+  ok(rox.ro && rox.sync > 0, 'cure 3 CONTROL (cure 2, in a copy): the load reads jobs-archive.json synchronously on the loop', rox);
+  for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 7, label: 'B-f276 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
