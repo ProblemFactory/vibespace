@@ -1020,10 +1020,11 @@ export async function runR29LoginNails({ repoDir, ok }) {
           let stashed = '';
           let n = 0;
           globalThis.__r29Reinjected = 0;
+          globalThis.__r29Stashed = false;
           globalThis.__r29Open = false;
           const tick = () => {
             if (++n > 3000) return;
-            if (el.value) stashed = el.value;
+            if (el.value) { stashed = el.value; globalThis.__r29Stashed = true; }
             else if (stashed && globalThis.__r29Open) { setTimeout(() => { el.value = stashed; globalThis.__r29Reinjected += 1; }, 55); return; }
             setTimeout(tick, 10);
           };
@@ -1036,6 +1037,10 @@ export async function runR29LoginNails({ repoDir, ok }) {
         // THE CEILING ON THE CLOCK HANDED IN (B-518e): the clock passes it and ONE look starts the same expireLiveFillCeiling its
         // timer would (that answer is thrown away: it is the fence while the wipe runs); the wipe LIFTS the fence and leaves its
         // guard — waited for by those two facts, never a 300 ms sleep
+        // (the site must have SEEN the filled value before the wipe — the page says so — or it has nothing to put back: with the
+        // ceiling started at once, a wipe inside the page's first tick left it nothing; the gate's red on 759214214, UTC zone)
+        const stashedOf = async (raw) => Boolean((await raw.evalInDom('globalThis.__r29Stashed === true'))?.result?.result?.value);
+        const p2cStashed = await until(() => stashedOf(rawOtp));
         clock += 60_001;
         dialogs.liveFillOnTarget(PID, tidOtp);
         const p2cLifted = await until(() => dialogs.liveFillOnTarget(PID, tidOtp) === null && dialogs.hasPostLiftGuard(PID, tidOtp));
@@ -1061,9 +1066,10 @@ export async function runR29LoginNails({ repoDir, ok }) {
           let stashed = '';
           let n = 0;
           globalThis.__r29Reinjected = 0;
+          globalThis.__r29Stashed = false;
           const tick = () => {
             if (++n > 3000) return;
-            if (el.value) stashed = el.value;
+            if (el.value) { stashed = el.value; globalThis.__r29Stashed = true; }
             else if (stashed) { setTimeout(() => { el.value = stashed; globalThis.__r29Reinjected += 1; }, 55); return; }
             setTimeout(tick, 10);
           };
@@ -1077,6 +1083,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         // A same-origin credential submit, the road the dialogs WATCH (B-518e, the read: two bare Network events reached no wipe —
         // only a request the Fetch domain paused is a credential request — so the 180 ms ceiling had been this scene's wipe):
         // the fake kernel pauses it, the dialogs mark it, its end wipes `#pw`
+        const p2eStashed = await until(() => stashedOf(rawPw));   // (the site has seen the value before the submit's wipe)
         const p2eSubmit = await fk.simulateSubmitRequest(tidPw, {
           url: `${ORIGIN}/api/login`,
           method: 'POST',
@@ -1106,7 +1113,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
         ok(
           wipeDispatchesChangeAndBlur
-            && p2cLifted && windowOpen && p2cBack && p2eSubmit?.action === 'continue' && p2eBack && navLifted
+            && p2cStashed && p2cLifted && windowOpen && p2cBack && p2eStashed && p2eSubmit?.action === 'continue' && p2eBack && navLifted
             && fOtp.ok === true
             && Boolean(p2cRearmed)
             && Boolean(readP2cOtp?.error && /login_fill_live/.test(String(readP2cOtp.error.message || '')))
@@ -1118,7 +1125,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
             && afterNavFence === null
             && readAfterNav?.result?.result?.value === `${ORIGIN}/dashboard`,
           'R29-4 (Item 4 value has left the page): wipeNode dispatches change+blur, postLiftGuards re-arm login_fill_live on P2c (OTP ceiling re-inject) and P2e (password submit re-inject) with 0 secret leaks, and top-frame navigation lifts cleanly',
-          { wipeDispatchesChangeAndBlur, p2cLifted, windowOpen, readWindow, p2cBack, p2eSubmit, p2eBack, navLifted, p2cRearmed, readP2cOtp, p2eRearmed, readP2ePw, afterNavFence, readAfterNav },
+          { wipeDispatchesChangeAndBlur, p2cStashed, p2cLifted, windowOpen, readWindow, p2cBack, p2eStashed, p2eSubmit, p2eBack, navLifted, p2cRearmed, readP2cOtp, p2eRearmed, readP2ePw, afterNavFence, readAfterNav },
         );
       } finally {
         try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
