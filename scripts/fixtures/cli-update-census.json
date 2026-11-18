@@ -23,6 +23,16 @@
    "sites": 6
   },
   {
+   "id": "lock-context-1m",
+   "file": "src/lock-context.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a Lock's 1M ask (B-6c55): the [1m] suffix read off a model and put back on the target the lock commands — whether the model HAS a 1M form is the installed CLI's own catalog's word (longContextOf), never a list of ours",
+   "suite": "test-fable-cap-pool-storm",
+   "match": "one-m-suffix",
+   "sites": 2
+  },
+  {
    "id": "catalog-reader-window",
    "file": "src/claude-model-catalog.js",
    "keyedOn": "model",
