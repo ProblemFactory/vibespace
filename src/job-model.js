@@ -732,6 +732,7 @@ const FOR_YOU_WORDS = Object.freeze({
   // bl-jobs B-f276 cure r2 (主开发's ruling, 02:23Z): the hold LIFTED — one true sentence of what happened (the storage did not answer from
   // this time to that time; the records were read again; nothing was lost); the high-urgency item it follows is resolved
   'records-read-again': 'Job records in {store} could not be read from {when} to {until} ({error}); VibeSpace read them again and nothing was lost — nothing was written over them, and old job logs are cleaned up again.',
+  'notifs-unread': 'The Background Work notices waiting for your conversations could not be read ({when}: {error}). New ones wait here and are delivered as ever; the file is read again — a restart before then loses only what arrived meanwhile.',   // the B-f276 remainder (the waiting notices' file held — its read r1, M2)
   // bl-jobs batch 2 cure 2 (主开发 09:20Z, THE LAW): a read again that found the file GONE ends the hold with ITS OWN true sentence —
   // what is gone, and that the old job logs stay until the note is moved (never «nothing was lost»)
   'records-gone': 'Job records in {store} could not be read from {when}; when VibeSpace read it again ({until}) the file was gone — the jobs it listed are not in VibeSpace now, and a new list starts empty. Old job logs are kept: they are not cleaned up until {note} is moved or deleted.',
@@ -812,6 +813,7 @@ function forYouWords(job, kind, opts) {
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'], params: { file: String(file || 'the store file') } }, urgency: 'high' };
   if (kind === 'records-unread') return { fact: 'records-unread', words: { key: FOR_YOU_WORDS['records-unread'], params: { store: String(store || 'a job record file'), note: String(note || 'its note'), error: recordsErrorParam(error), when: recordsWhenParam(when) } }, urgency: 'high' };
+  if (kind === 'notifs-unread') return { fact: 'notifs-unread', words: { key: FOR_YOU_WORDS['notifs-unread'], params: { error: recordsErrorParam(error), when: recordsWhenParam(when) } }, urgency: 'normal' };
   if (kind === 'records-read-again') return { fact: 'records-read-again', words: { key: FOR_YOU_WORDS['records-read-again'], params: { store: String(store || 'a job record file'), error: recordsErrorParam(error), when: recordsWhenParam(when), until: recordsWhenParam(until) } }, urgency: 'low' };
   if (kind === 'records-gone') return { fact: 'records-gone', words: { key: FOR_YOU_WORDS['records-gone'], params: { store: String(store || 'a job record file'), note: String(note || 'its note'), error: recordsErrorParam(error), when: recordsWhenParam(when), until: recordsWhenParam(until) } }, urgency: 'high' };
   if (kind === 'records-unread-unnoted') return { fact: 'records-unread-unnoted', words: { key: FOR_YOU_WORDS['records-unread-unnoted'], params: { store: String(store || 'a job record file'), error: recordsErrorParam(error), when: recordsWhenParam(when) } }, urgency: 'high' };

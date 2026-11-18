@@ -499,5 +499,66 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   ok(SV.includes("app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list(), ...(machineMounts.unreadWords() ? { unread: machineMounts.unreadWords() } : {}) }));"), 'WIRING: the mounts list answers WHY it is empty while held (GET /api/machine-mounts `unread`)');
 }
 
+console.log('§5 job-notifications.json (src/jobs.js) — every job notice still waiting for its conversation');
+{
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const LOADN = '    this._notifsAnswer(SR.storeAnswer(read, { valid: NOTIFS_SHAPE }));\n';
+  ok(JSRC.split(LOADN).length === 2, 'control setup: the anchor of the control «the release\'s load» is in jobs.js (the notifications\' one storeAnswer call)');
+  const RELEASE = MJ.load('src/jobs.js', JSRC.replace(LOADN, '    try { this.releasedAtBoot = []; this._notifsFrom(JSON.parse(read.text)); } catch { }   /* MUTANT: the release — any failure is an empty map */\n'), 'release-notifs');
+  const body = JSON.stringify({ 'conv-old': [{ ts: 1, jobId: 'jb-0n000001', text: 'done exit=0 ok (1m)' }] });
+  const onDisk = (F) => { try { return Object.keys(JSON.parse(fs.readFileSync(F, 'utf8'))).sort().join(); } catch (e) { return '(' + (e.code || 'unparsed') + ')'; } };
+  const scene = async (Mod, name) => {
+    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, 'job-notifications.json'); plant(F, body);
+    const filed = [], resolved = [];
+    const J = new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser: (n) => { filed.push(n); return { ok: true, id: 'it-n' + filed.length }; }, resolveNotice: (id) => resolved.push(id), log: () => { }, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init();
+    const held = !!J._notifsUnread, waitingAtBoot = J.pendingNotifs.size;
+    J.pendingNotifs.set('conv-new', [{ ts: 2, jobId: 'jb-0n000002', text: 'failed exit=3 (2m)' }]);   // a notice filed while held
+    J.pendingNotifs.set('conv-old', [{ ts: 3, jobId: 'jb-0n000003', text: 'done exit=0 ok (3m)' }]);   // its read r1 (S2): one for a conversation the file also holds
+    // its read r1 (M1): the job of the file's notice is CLEARED while held (Clear content… rewrote only what memory held)
+    J.jobs.set('jb-0n000001', { id: 'jb-0n000001', kind: 'task', name: 'deploy prod', state: 'done', clearedAt: 5, owner: {}, access: { view: 'session', control: 'session' }, runs: [] });
+    J._saveNotifs(); J._save();   // a delivery's own write, and the store's
+    const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
+    if (!asRoot) fs.chmodSync(F, 0o000);
+    unplant(F, body);
+    if (J._notifsRetry) await J._notifsRetry();
+    const old = (J.pendingNotifs.get('conv-old') || []).map((n) => `${n.jobId}:${n.text}`);
+    let fileOld0 = null; try { fileOld0 = ((JSON.parse(fs.readFileSync(F, 'utf8')) || {})['conv-old'] || []).some((n) => n && n.jobId === 'jb-0n000001'); } catch { }
+    const out = { held, waitingAtBoot, kept, waiting: [...J.pendingNotifs.keys()].sort().join(), file: onDisk(F), fileOld0, stillHeld: !!J._notifsUnread, old, said: filed.filter((n) => n && n.fact === 'notifs-unread').length, resolved: resolved.slice() };
+    J.shutdown(); return out;
+  };
+  const r = await scene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-held');
+  ok(r.held && r.waitingAtBoot === 0 && r.kept, 'job-notifications.json unreadable at boot: HELD — nothing is written over it (a delivery\'s write and the store\'s refused)', r);
+  ok(!r.stillHeld && r.waiting === 'conv-new,conv-old' && r.file === 'conv-new,conv-old', 'read again: the notices waiting in the file are BACK, and the one filed meanwhile waits beside them — both on disk', r);
+  ok(r.old.length === 2 && r.old[1] === 'jb-0n000003:done exit=0 ok (3m)' && r.old[0].startsWith('jb-0n000001:') && !r.old[0].includes('done exit=0 ok (1m)'),
+    'its read r1: the SAME conversation in the file and in memory — both notices, the file\'s first (S2); the file\'s notice of a job CLEARED while held takes the clear\'s words, never its old text (M1)', r.old);
+  ok(r.said === 1 && r.resolved.join() === 'it-n1', 'its read r1 (M2): the hold is said ONCE in For you, and that item is resolved once the file reads', { said: r.said, resolved: r.resolved });
+  const MERGE = '        const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];\n';
+  const CLEAR = "        if (merge) for (const n of list) { const j = this.jobs.get(n.jobId) || (this.archive || []).find((r) => r && r.id === n.jobId); if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0))) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; } }\n";
+  ok(JSRC.split(MERGE).length === 2 && JSRC.split(CLEAR).length === 2, 'control setup: the anchors of the controls «the merge» and «the clear at the merge» are in jobs.js');
+  const rm = await scene(MJ.load('src/jobs.js', JSRC.replace(MERGE, '        const mine = [];   /* MUTANT: no merge */\n'), 'no-merge'), 'notifs-no-merge');
+  ok(rm.old.length === 1, 'CONTROL (no merge, in a copy): the notice filed for conv-old while held is LOST at the read (the file\'s list replaced it)', rm.old);
+  const rc = await scene(MJ.load('src/jobs.js', JSRC.replace(CLEAR, '        /* MUTANT: no clear at the merge */\n'), 'no-clear-merge'), 'notifs-no-clear');
+  ok(rc.old.some((x) => x === 'jb-0n000001:done exit=0 ok (1m)'), 'CONTROL (no clear at the merge, in a copy): the cleared job\'s old words come back with the file', rc.old);
+  const rx = await scene(RELEASE, 'notifs-release');
+  ok(!rx.held && (asRoot || (!rx.kept && rx.fileOld0 === false)), 'CONTROL (the release\'s load, in a copy): a failed read is an EMPTY map and the next save WRITES OVER the file — the file\'s own waiting notice (jb-0n000001 for conv-old) is gone (under root the stand-in is a folder)', rx);
+  // torn bytes at boot: HELD (the boot's main thread makes no new store write — test-store-write-census); the read again, off the
+  // loop, copies them aside and lifts with none waiting
+  {
+    const d = path.join(D, 'notifs-torn'); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'job-notifications.json'), '{"conv-a": [');
+    const J = new (require(path.join(ROOT, 'src/jobs.js')).JobManager)({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log: () => { }, logsSweep: { bootDelayMs: 3600e3 } });
+    J.init();
+    const asidesOf = () => fs.readdirSync(d).filter((n) => /^job-notifications\.json\.corrupt-\d+$/.test(n));
+    const heldAtBoot = !!J._notifsUnread, asidesAtBoot = asidesOf().length;
+    await J._notifsRetry();
+    const asides = asidesOf();
+    ok(heldAtBoot && asidesAtBoot === 0 && !J._notifsUnread && J.pendingNotifs.size === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"conv-a": [',
+      'torn bytes at boot are HELD (no copy on the boot\'s thread); the read again copies them aside OFF the loop and lifts with no notice waiting', { heldAtBoot, asidesAtBoot, asides: asides.length });
+    J.shutdown();
+  }
+}
+
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'store-read-law ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 report();

@@ -894,9 +894,9 @@ const STORE_READS = [
   // lane lg-store-writes (主开发 2026-11-20 03:10Z): the desktop app records and the device alerts' ledger — a failed read or torn bytes HOLD (never started empty)
   { file: 'src/server/device-alerts.js', store: 'device-alerts.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: LEDGER_VALID \}\);\n    if \(a\.state === 'data'\) seen = a\.value\.seen;/ },
   { file: 'src/desktop-serve.js', store: 'desktop-apps.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: STORE_VALID \}\);\n    if \(a\.state === 'data'\) \{ store = \{ apps: a\.value\.apps \}; return; \}/ },
-  { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
+  { file: 'src/jobs.js', store: 'job-notifications.json', state: 'answer', mark: /this\._notifsAnswer\(SR\.storeAnswer\(read, \{ valid: NOTIFS_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — the waiting notices never written over
 ];
-const READ_DEBT_CAP = 6;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json — bl-jobs B-f276's remainder)
+const READ_DEBT_CAP = 5;     // lower it as each debt row flips to `answer` — never raise it (8 → 7: hosts.json, 7 → 6: machine-mounts.json, 6 → 5: job-notifications.json — bl-jobs B-f276's remainder)
 const READ_DEBT_AT_BIRTH = 8;            // the census's first count (2026-11-17): DEBT_CAP never passes it
 const STATES = new Set(['answer', 'right', 'names', 'debt']);
 const USES_HELPER = /require\(['"](?:\.{1,2}\/)+(?:[\w-]+\/)*store-read(?:\.js)?['"]\)/;
