@@ -676,7 +676,21 @@ try {
     // lane attention-predicate-shared (the owner 2026-10-19 on the .318 tray, 「很容易误触」): the fold is a TOGGLE in the bar's last
     // slot and 「全部标为已看」 keeps its own — read both rects before the press, again after it
     const rectsOf = `(() => { const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const q = e.getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)]; }; return { seen: r(${JSON.stringify(bSel + ' > .ut-band-bar > .ut-seen-all')}), fold: r(${JSON.stringify(bSel + ' > .ut-band-bar > .ut-fold')}) }; })()`;
+    // THE POINT IS THE TOGGLE (the 2.369.410 train's hosted red, 主开发 15:10Z — a probe on the runner): a global toast («Marked
+    // done · Undo», ⑭'s marks) may stand over the open panel's right side — the release's behaviour too (this suite's guarded door
+    // says so) — and a raw press there lands on the toast's Undo, OUTSIDE the panel, whose outside rule hides it. So the toast
+    // stack is cleared the way this suite's own door clears it BEFORE the point is read, and the point is CHECKED — its top element
+    // is the toggle inside the panel — a counted step that says what stands there; the three presses below stay raw at that point
+    const topAt = (x, y) => `(() => { const e = document.elementFromPoint(${x}, ${y}); if (!e) return { fold: false, what: 'nothing' }; const t = e.closest('.global-toast'); const inPanel = !!e.closest('#user-todos-popup'); return { fold: !!e.closest('.ut-fold') && inPanel, what: t ? 'a toast: ' + (e.className || e.tagName) + ' «' + t.textContent.trim().slice(0, 60) + '»' : (inPanel ? 'in the panel: ' : 'outside the panel: ') + (e.className || e.tagName) }; })()`;
+    await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`);
     const fb = await evalJs(`(() => { const f = document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}); f.scrollIntoView({ block: 'nearest' }); const q = f.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
+    // RED CONTROL: a toast's action button left over the point (planted) — the step is RED and NAMES the toast
+    await evalJs(`(() => { const t = document.createElement('div'); t.className = 'global-toast zz-plant-15'; t.textContent = 'Marked done · '; const u = document.createElement('button'); u.className = 'global-toast-action'; u.textContent = 'Undo'; u.style.cssText = 'position:fixed;left:${Math.round(fb.x) - 20}px;top:${Math.round(fb.y) - 10}px;width:40px;height:20px;z-index:2147483647'; t.appendChild(u); document.body.appendChild(t); return true; })()`);
+    const planted15 = await evalJs(topAt(fb.x, fb.y));
+    await evalJs(`document.querySelectorAll('.zz-plant-15').forEach((el) => el.remove()); true`);
+    check(`CONTROL: a toast's action button left over the point — the step is RED and names the toast (${planted15 && planted15.what})`, !!planted15 && !planted15.fold && /^a toast: global-toast-action «Marked done/.test(planted15.what), planted15);
+    const at15 = await evalJs(topAt(fb.x, fb.y));
+    check(`the point the presses below use is the TOGGLE inside the panel — no toast over it (what stands there: ${at15 && at15.what})`, !!at15 && at15.fold, at15);
     const rBefore = await evalJs(rectsOf);
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
