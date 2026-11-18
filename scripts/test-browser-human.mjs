@@ -1449,7 +1449,10 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const sites = siteCount(fnAtBy(true)), sites0 = siteCount(fnAtBy(false));
   // conversation-only: admission, caps, pins, the takeover's siblings, the re-judge, the ephemeral records, the timers, the
   // log lines that count conversations — each needs a CONVERSATION (his row has no session, no key an agent could hold)
-  const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 2,
+  // B-7a30 unit 2' (bl-browser-a): the ephemeral row's lease read moved out of ephemerals()' anonymous mapper into ephRow, so
+  // ephemeralFor(bk) builds only its own row — the same site, the same class: it reads the CONVERSATION lease of an ephemeral
+  // profile (its sessionId, leased), and the person's own row never holds one (an ephemeral profile is not_attachable)
+  const CONVERSATION = { ephEventFields: 1, ephRow: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 2,
     // lane keeper-sweep-yields (2.369.407): retireEphemeral's second site reads «is this record's CONVERSATION carried again» once
     // more after the reap's await, before any stop (a conversation resumed meanwhile keeps its browser); retireInSteps asks the same
     // of each orphan before its step — an ephemeral record's lease is its conversation's, and the person's own row never holds one
