@@ -16,7 +16,7 @@ import { UI_ICONS } from './icons.js';
 import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs: the filter row folds through THE chrome-bar fold
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
 import { noteWarmthAnswer } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the poll tick's ONE warmth pass
-import { rerenderVerdict } from './mounts-live.js'; // B-a31a cure: what a re-render does to the Remote panel (keep a healthy one, refresh a slow one)
+import { rerenderVerdict, noteAskOnce } from './mounts-live.js'; // B-a31a cure: what a re-render does to the Remote panel (keep a healthy one, refresh a slow one)
 
 // Consecutive failed /api/sessions polls before the sidebar admits the list is
 // frozen. 3 × 5s ≈ 15s — long enough that one blip stays invisible, short
@@ -1432,10 +1432,10 @@ class Sidebar {
     // Only a tab change (another tab's content in the list) paints it anew.
     // The cure (07:52Z): a panel saying «the server is slow» is NOT healthy — a re-render (the poll's recovery edge) asks ONCE.
     if (this._activeTab === 'mounts') {
-      const shown = this.listEl.querySelector(':scope > .mounts-panel');
-      const v = rerenderVerdict({ tab: this._activeTab, shown: !!shown, slow: !!(shown && shown.querySelector(':scope > .mounts-slow')) });
+      const shown = this.listEl.querySelector(':scope > .mounts-panel'), slowEl = shown && shown.querySelector(':scope > .mounts-slow');
+      const v = rerenderVerdict({ tab: this._activeTab, shown: !!shown, slow: !!slowEl });
       if (v === 'keep') return;
-      if (v === 'refresh') { this._renderMountsSoon?.(); return; }
+      if (v === 'refresh') { if (noteAskOnce(slowEl)) this._renderMountsSoon?.(); return; } // cure 2: ONCE per note
     }
 
     this.listEl.innerHTML = '';

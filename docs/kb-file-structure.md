@@ -880,6 +880,7 @@ scripts/fixtures/stream/ — lane stream-p1a-transport: fake-desk-720p.h264 (THE
 scripts/probes/stream-glass-to-glass.mjs — lane stream-p1a-transport: the latency harness (a clock page with a binary band for the machine's screen, the viewer snippet reading it per presented frame, selftest) — run by part B on the real machine
 src/desktop-apps.js — PURE lane machine-needs-at-pairing pick 3a/3d: XPRA_KEY_FETCH / XPRA_KEY_CHECK — xpra.org's apt key FILE checked against its pinned SHA-256 before it enters the keyring (exactly one key); a failed fetch leaves nothing; the Dockerfile runs the same lines
 src/lib/sidebar-mounts.js — CLIENT lane machine-needs-at-pairing pick 3: the pairing sheet's step ② «What this device will be used for» (setupOn / setupArg / drawNeeds — the tick is cmdOf's -Setup / --setup); the facts from src/ffmpeg-install.js + TIGHTVNC
+src/lib/mounts-live.js — PURE B-a31a: the Remote panel under a burst — coalesce, singleFlight, the row's last run and status face patched in place, the pushed-run overlay, rerenderVerdict, the slow note (one timer), noteAskOnce
 src/agentd/setup-mode.js — DEVICE lane machine-needs-at-pairing pick 3: the installers' one-shot setup modes — --setup ffmpeg|mac[,sharing], --setup-plan tightvnc|xpra (the row's own plan, src/desktop-apps.js); agentd.js hands the flags here and returns
 scripts/vibespace-agentd-install.ps1 / .sh — lane machine-needs-at-pairing pick 3: -Setup desktop / --setup …: after the agent runs; TightVNC in the agent's ONE administrator window; the summary LAST; a need not met never ends the pairing
 src/ffmpeg-install.js — PURE lane machine-needs-at-pairing pick 2: 「取得 FFmpeg」 — the two pinned builds (fixed address, archive + exe SHA-256, no signer), the unelevated plan (`stream`), the stamp + its verdict; registered in src/installs.js ⇒ essay
@@ -15190,3 +15191,27 @@ The design «The separation of the interface from the work — the design for la
 - LOOK AGAIN: `forget(dir)` before a check whose purpose is «look again before I write». In accounts: `_lookAgain(id)` (pendingSignin, discardPendingSignin, reloginResolve: a sign-in row handed out, removed, a login moved); the two SLOT WRITERS (ensureSessionPoolLink, setPoolTarget) stay byte-identical (THE SLOT LAW) and look again from OUTSIDE their text — LOOK_AGAIN_SLOT_WRITERS wraps each prototype method and forgets the member's folder, the conversation's link and the pool's default link (each in its own try) before the writer's own check and its ledger «from»; both pool self-heals in resolveForSpawn and the engine's api-window sidecar rewrite forget first too. `dropRun()` at a hand-off no wrapper sees (a worker's write behind a synchronous flush). THE fs HOLDERS BY DESIGN: this helper, loop-blame (never undone), boot-trace (its undo restores only while outermost) — test-pool-pass-reads ⑯ rows every site that assigns into fs.
 - memberLoginState's cross-run signature is the file's stat whenever a stat answers (a failed read keeps it, as at the release); readers that read a usage-cache file to rewrite it stay direct (fresh).
 - Gate: scripts/test-pool-pass-reads.mjs (the counting leg with today's asks as RED; the run's lifetime; an error as the answer; a write by an unlisted writer seen; RED: a blind write hook).
+
+### src/lib/mounts-live.js — THE REMOTE PANEL UNDER A BURST (B-a31a, lane bl-machines-b, 2026-11-18)
+- **Why it exists.** The owner's incident: «the Remote panel refreshes wildly and sometimes says failed to load». On the release, every recorded exit command sent every page a bare `hosts-updated`. Each page then made 8 fetches and redrew the panel whole, and one failed fetch blanked it. The panel's pieces that decide this live here, PURE and DOM-light, so test-exit-runs-dialog §5 drives them over a fake element tree. src/lib/sidebar-mounts.js wires them.
+- **Pieces.**
+  - `coalesce(fn, ms)`: one run per window.
+  - `singleFlight(fn)`: one in flight, one trailing; the callers' promise is the trailing one's.
+  - `patchLastRunRow`: a row's last-run line gets its words in place.
+  - `rowsByHost`: rows by `row._hostId`.
+  - `noteLastRun` / `overlayLastRuns`: a run pushed while a refresh is on its way wins over the older list, by `at`.
+  - `rerenderVerdict`: what a sidebar re-render does — keep a healthy panel, ONE refresh for one that shows the slow note, paint when there is none.
+  - `noteAskOnce`: that refresh once per note.
+  - `slowNote`: the note made once with ONE bounded self-retry timer.
+  - `patchHostFace`: an ssh row's status face — the dot, its words, the tools badge, the state chip, the failure line — patched in place. An equal face touches no node.
+- **The laws it holds.**
+  - A recorded command is its row's new fact (`host-last-run`, src/exit-proxy.js), never a whole-list refetch.
+  - A slow answer keeps what was shown and says so.
+  - The panel is true again by itself: the connection back ⇒ one refresh, the recovery edge ⇒ one refresh for a slow panel.
+  - The two-minute probe never rebuilds a row.
+- **Counts measured in a real page** (scratch hub, a stand-in device, 40 commands at 2/s):
+  - per command 8 fetches + 1 whole redraw ⇒ 0 + 0;
+  - ten re-renders ⇒ 0 refreshes;
+  - reconnect ⇒ 1;
+  - slow + recovery ⇒ 1.
+

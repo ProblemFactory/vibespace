@@ -11,6 +11,11 @@
 //                            landed) keeps the pushed one: the newer `at` wins; entries the list caught up with leave `seen`
 //   rerenderVerdict(state)  — what a SIDEBAR re-render does to the panel: a healthy panel is KEPT (no storm), a panel saying
 //                            «the server is slow» is not healthy (ONE coalesced refresh), no panel yet is painted
+//   noteAskOnce(note)       — that refresh is asked ONCE per note (the law), however many re-renders follow
+//   slowNote(panel, opts)   — the note itself: made once with ONE bounded self-retry timer; met again it only says its words
+//   patchHostFace(top, prev, next, makers) — a machine row's STATUS face (the dot, its words, the tools badge, the state chip)
+//                            patched IN PLACE: a probe whose answer equals what the row shows touches NO node; a changed answer
+//                            changes the dot and its words only (every other node of the row kept)
 /** fn runs once per `ms` window, however many calls arrive in it. */
 export function coalesce(fn, ms, { setTimer = setTimeout } = {}) {
   let pending = false;
@@ -79,4 +84,73 @@ export function rerenderVerdict({ tab, shown, slow } = {}) {
   if (tab !== 'mounts') return 'other';
   if (!shown) return 'paint';
   return slow ? 'refresh' : 'keep';
+}
+/** A re-render asks a slow note's refresh ONCE (B-a31a cure 2: «once per note», however many digest changes follow). */
+export function noteAskOnce(note) {
+  if (!note || note._asked) return false;
+  note._asked = true;
+  return true;
+}
+const kid = (el, c) => (el && el.children ? [...el.children].find((k) => hasClass(k, c)) : null);
+/** The slow note on `panel`: made ONCE — its words, its Retry, and ONE bounded self-retry timer (`retryMs`); met again (a refresh
+ *  that failed again) it says its words again and enables Retry — never a second timer, never a loop. → { box, made } | null */
+export function slowNote(panel, { words, retry, retrying, onRetry, onSelfRetry, setTimer = setTimeout, retryMs = 15000 } = {}) {
+  if (!panel) return null;
+  const had = kid(panel, 'mounts-slow');
+  if (had) {
+    const w = kid(had, 'mounts-slow-words'), b = kid(had, 'mounts-slow-retry');
+    if (w) w.textContent = words;
+    if (b) b.disabled = false;
+    return { box: had, made: false };
+  }
+  const box = document.createElement('div');
+  box.className = 'mounts-slow';
+  box.setAttribute('role', 'status');
+  const w = document.createElement('span');
+  w.className = 'mounts-slow-words';
+  w.textContent = words;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn-cancel mounts-slow-retry'; b.textContent = retry;
+  // the note stays, saying it retries, until that refresh's answer: a new list replaces the panel (and the note), a slow one says so again
+  b.onclick = () => { w.textContent = retrying; b.disabled = true; if (onRetry) onRetry(); };
+  box.append(w, ' ', b);
+  panel.prepend(box);
+  setTimer(() => { if (box.isConnected && onSelfRetry) onSelfRetry(); }, retryMs);
+  return { box, made: true };
+}
+const faceKey = (f) => (f ? JSON.stringify([f.dot, f.dotTip, f.badge || '', f.chip ? [f.chip.kind, f.chip.text, f.chip.title] : null, f.errline ? [f.errline.text, f.errline.title] : null]) : '');
+/** Two status faces show the same thing. */
+export function hostFaceSame(a, b) { return !!a && !!b && faceKey(a) === faceKey(b); }
+/** Patch a machine row's status face IN PLACE (`row` = the .mounts-row; its .mounts-host-top holds the dot, the badge and the
+ *  chip): an equal face ⇒ 'same' and no node touched; else the dot's class and words, the tools badge (replaced only when its
+ *  words changed), the state chip (added / replaced / removed) and the row's failure line (its words in place, added /
+ *  removed) — every other node of the row stays the same node. `chipOf(chip)` / `badgeOf(html)` make the new nodes. */
+export function patchHostFace(row, prev, next, { chipOf, badgeOf } = {}) {
+  const top = kid(row, 'mounts-host-top');
+  if (!top || !next) return 'none';
+  if (hostFaceSame(prev, next)) return 'same';
+  const dot = kid(top, 'mounts-dot');
+  if (dot) {
+    const cls = 'mounts-dot mounts-dot-' + next.dot;
+    if (dot.className !== cls) dot.className = cls;
+    if (dot.getAttribute('title') !== next.dotTip) dot.setAttribute('title', next.dotTip);
+  }
+  if ((prev && prev.badge || '') !== (next.badge || '')) {
+    const old = kid(top, 'mounts-badge'), name = kid(top, 'mounts-name');
+    const nb = next.badge && badgeOf ? badgeOf(next.badge) : null;
+    if (old && nb) old.replaceWith(nb); else if (old) old.remove(); else if (nb && name) name.after(nb);
+  }
+  const oldChip = kid(top, 'host-state-chip');
+  const chip = next.chip && chipOf ? chipOf(next.chip) : null;
+  if (oldChip && chip) oldChip.replaceWith(chip);
+  else if (oldChip) oldChip.remove();
+  else if (chip) { const acts = kid(top, 'mounts-row-actions'); if (acts) top.insertBefore(chip, acts); else top.appendChild(chip); }
+  const oldErr = kid(row, 'mounts-errline');
+  if (next.errline) {
+    const e = oldErr || document.createElement('div');
+    if (!oldErr) { e.className = 'mounts-errline'; row.appendChild(e); }
+    if (e.textContent !== next.errline.text) e.textContent = next.errline.text;
+    if (e.getAttribute('title') !== next.errline.title) e.setAttribute('title', next.errline.title);
+  } else if (oldErr) oldErr.remove();
+  return 'patched';
 }

@@ -49,6 +49,9 @@
 //      THE CURE (07:52Z): ten re-renders over a healthy panel ⇒ 0 refreshes, the slow note + the recovery edge ⇒ 1, the
 //      connection back ⇒ 1; the wiring (reconnect hook, ONE self-retry, «Loading…» first, the dots' one timer, a null run
 //      forgets); CONTROLS (n) the tip before the cure (a slow panel «healthy»), (o) no reconnect hook
+//      CURE 2 (08:26Z): one probe with an unchanged status replaces 0 row nodes (a changed one touches the dot and its words
+//      only); two failures ⇒ one note, one 15-s timer; two re-renders over one note ⇒ one ask; the dots probe only on screen.
+//      CONTROLS (p) a probe that rebuilds, (q) _autoTestHosts swapping the row, (r) a note made again, (s) asked every pass
 // Run: node scripts/test-exit-runs-dialog.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -86,6 +89,8 @@ class FakeEl {
   insertBefore(n, ref) { if (n.parentElement) n.remove(); const i = ref ? this.children.indexOf(ref) : -1; n.parentElement = this; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); return n; }   // _machineLine's own moves (§5)
   after(n) { const p = this.parentElement; if (!p) return; const i = p.children.indexOf(this); if (n.parentElement) n.remove(); n.parentElement = p; p.children.splice(i + 1, 0, n); }
   replaceWith(n) { const p = this.parentElement; if (!p) return; if (n.parentElement) n.remove(); p.children.splice(p.children.indexOf(this), 1, n); n.parentElement = p; this.parentElement = null; }   // chat-view _swapMessageEl's own move (§5)
+  prepend(n) { if (n.parentElement) n.remove(); this.children.unshift(n); n.parentElement = this; }
+  get isConnected() { let e = this; while (e.parentElement) e = e.parentElement; return !!e._root; }
 }
 const titled = (root) => [root, ...root.all].filter((n) => typeof n.title === 'string' && n.title !== '' || 'title' in n.attrs);
 globalThis.window = globalThis;
@@ -391,20 +396,24 @@ const wiring = (src) => ({
   overlay: /overlayLastRuns\(hd && hd\.hosts, this\._lastRunSeen\);/.test(src) && /const rows = rowsByHost\(this\.listEl\);/.test(src),
   same: /\{ const lr = this\._lastRunLine\(h\); if \(lr\) row\.appendChild\(lr\); \}/.test(src),
   reconnect: /this\.app\.ws\.onStateChange\?\.\(\(up\) => \{ if \(up && this\._activeTab === 'mounts'\) this\._renderMountsSoon\(\); \}\);/.test(src),
-  oneRetry: /setTimeout\(\(\) => \{ if \(box\.isConnected && this\._activeTab === 'mounts'\) this\._renderMounts\(\); \}, 15000\);/.test(src),
+  oneRetry: /slowNote\(panel, \{ words: tr\('The server is slow to answer — this is the list it gave last\.'\), retry: tr\('Retry'\), retrying: tr\('Retrying…'\),[\s\S]{0,80}onSelfRetry: \(\) => \{ if \(this\._activeTab === 'mounts'\) this\._renderMounts\(\); \} \}\);/.test(src),
   loadingFirst: /l\.className = 'mounts-loading'; l\.textContent = tr\('Loading…'\); this\.listEl\.replaceChildren\(l\);[\s\S]{0,200}if \(!this\._mountsFlight\)/.test(src),
-  dots: /_mountsDotsTick\(\) \{[\s\S]{0,200}if \(this\._activeTab !== 'mounts' \|\| document\.hidden \|\| !this\.listEl\) return;[\s\S]{0,300}this\._autoTestHosts\(hs, hlist\);[\s\S]{0,60}\}, 60000\);/.test(src) && /this\._mountsDotsTick\(\); \/\/ B-a31a cure \(a\)/.test(src),
+  dots: /_mountsDotsTick\(\) \{[\s\S]{0,200}if \(!this\._mountsOnScreen\(\)\) return;[\s\S]{0,200}this\._mountsProbeStale\(\);[\s\S]{0,80}\}, 60000\);/.test(src) && /this\._mountsDotsNow\(\); \/\/ B-a31a cure \(a\) \+ cure 2/.test(src)
+    && /return r\.width > 0 && r\.height > 0 && r\.right > 0 && r\.bottom > 0 && r\.left < \(window\.innerWidth \|\| 0\) && r\.top < \(window\.innerHeight \|\| 0\);/.test(src)
+    && /new IntersectionObserver\(\(es\) => \{ if \(es\.some\(\(e\) => e\.isIntersecting\)\) this\._mountsDotsNow\(\); \}\)\.observe\(this\.listEl\)/.test(src),
+  inPlace: (() => { const m = /\n    _autoTestHosts\(hosts, hlist\) \{[\s\S]*?\n    \},/.exec(src); return !!m && (m[0].match(/this\._patchHostFace\(h, hlist\)/g) || []).length === 2 && !/_swapHostRow/.test(m[0]); })()
+    && /const face = isDial \? null : this\._hostFace\(h\);[^\n]*\n      row\._face = face;/.test(src),
   nullForgets: /else if \(this\._lastRunSeen\) this\._lastRunSeen\.delete\(hostId\);/.test(src),
 });
 const SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
-const GUARD = "const v = rerenderVerdict({ tab: this._activeTab, shown: !!shown, slow: !!(shown && shown.querySelector(':scope > .mounts-slow')) });\n      if (v === 'keep') return;\n      if (v === 'refresh') { this._renderMountsSoon?.(); return; }";
+const GUARD = "const v = rerenderVerdict({ tab: this._activeTab, shown: !!shown, slow: !!slowEl });\n      if (v === 'keep') return;\n      if (v === 'refresh') { if (noteAskOnce(slowEl)) this._renderMountsSoon?.(); return; } // cure 2: ONCE per note";
 const guarded = (src) => { const rail = src.indexOf("{ this._renderRailPanel?.(); return; }"), g = src.indexOf(GUARD), w = g < 0 ? -1 : src.indexOf("this.listEl.innerHTML = '';", g); return rail > 0 && g > rail && w > g && w - g < 600; };
-ok(guarded(SB) && /^import \{ rerenderVerdict \} from '\.\/mounts-live\.js';/m.test(SB), 'a sidebar re-render never wipes a Remote panel that shows — it asks rerenderVerdict (src/lib/sidebar.js: before the list\'s wipe, after the rail panels\' own)');
+ok(guarded(SB) && /^import \{ rerenderVerdict, noteAskOnce \} from '\.\/mounts-live\.js';/m.test(SB), 'a sidebar re-render never wipes a Remote panel that shows — it asks rerenderVerdict (src/lib/sidebar.js: before the list\'s wipe, after the rail panels\' own)');
 const wr = wiring(SM);
 ok(Object.values(wr).every(Boolean), 'the wiring: host-last-run → the row patch (coalesced); a list frame → ONE coalesced, single-flight refresh, never a direct whole redraw; a failed or held refresh keeps the panel and says so; the builder and the patch draw the same line', wr);
 const slowCss = rule(STY, '.mounts-slow');
 ok(/var\(--/.test(slowCss) && !/#[0-9a-fA-F]{3}/.test(slowCss) && /position: sticky; top: 0;/.test(slowCss) && /background: var\(--bg-sidebar\)/.test(slowCss), 'the slow note\'s CSS reads theme variables only, and it stays in view however far the list is scrolled (sticky, on the sidebar\'s own background — the pictures showed it scrolled out of sight)', slowCss);
-const a6PH = { src: SM.replace("if (msg.type === 'host-last-run' && msg.hostId) this._patchHostLastRun(msg.hostId, msg.lastRun || null);", '').replace("&& this._activeTab === 'mounts') this._renderMountsSoon();", "&& this._activeTab === 'mounts') this._renderMounts();") };
+const a6PH = { src: SM.replace("if (msg.type === 'host-last-run' && msg.hostId) this._patchHostLastRun(msg.hostId, msg.lastRun || null);", '').replace("&& this._activeTab === 'mounts') this._renderMountsSoon();", "&& this._activeTab === 'mounts') this._renderMounts();") }; // stale-pins: kept — the control BUILDS the release's listener line; it pins no product line
 ok(a6PH.src !== SM && !Object.values(wiring(a6PH.src)).every(Boolean), 'CONTROL (h): the release\'s listener (every frame a whole refetch and redraw) — the wiring census goes red');
 const a6PI = patched('src/lib/mounts-live.js', 'if (pending) return; pending = true; ', '');
 const a6PJ = patched('src/lib/mounts-live.js', "if (old && line) { if (old.textContent !== line.textContent) old.textContent = line.textContent; return 'updated'; }", "if (old && line) { for (const k of kids) k.remove(); for (const k of kids) row.appendChild(k === old ? line : Object.assign(document.createElement(k.tagName), { className: k.className })); return 'updated'; } // CONTROL: the row rebuilt whole");
@@ -436,6 +445,53 @@ const pn = patched('src/lib/mounts-live.js', "return slow ? 'refresh' : 'keep';"
 ok(pn.applies && (rerenderCase(await bundle('src/lib/mounts-live.js', pn))).afterSlow === 0, 'CONTROL (n): the tip before the cure (a showing panel is always «healthy») — the slow note never leaves by itself: the recovery leg goes red');
 const noReconnect = SM.replace("this.app.ws.onStateChange?.((up) => { if (up && this._activeTab === 'mounts') this._renderMountsSoon(); });", '');
 ok(noReconnect !== SM && !wiring(noReconnect).reconnect, 'CONTROL (o): no refresh when the connection comes back (the tip before the cure) — the wiring census goes red');
+
+// CURE 2 (主开发 08:26Z): THE TWO-MINUTE PROBE PATCHES A ROW IN PLACE; the note's retry and the re-render's ask are ONCE
+const el = (tag, cls, txt) => { const e = document.createElement(tag); e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const faceCase = (M) => {
+  const root = el('div', 'mounts-list'); root._root = true;
+  const row = el('div', 'mounts-row'); row._hostId = 'host-ssh';
+  const top = el('div', 'mounts-row-top mounts-host-top');
+  const dot = el('span', 'mounts-dot mounts-dot-ok'); dot.setAttribute('title', '31ms');
+  top.append(dot, el('b', 'mounts-name', 'buildbox'), el('span', 'mounts-badge', 'READY'), el('span', 'mounts-row-actions'));
+  row.append(top, el('div', 'mounts-path', 'me@buildbox:22')); root.appendChild(row);
+  const F = { dot: 'ok', dotTip: '31ms', badge: '<span class="mounts-badge">READY</span>', chip: null, errline: null };
+  const makers = { chipOf: (c) => el('span', 'host-state-chip host-state-' + c.kind, c.text), badgeOf: (h) => el('span', 'mounts-badge', h.replace(/<[^>]+>/g, '')) };
+  const before = [row, ...row.all], attrs0 = before.map((n) => n.className + '|' + (n.getAttribute ? n.getAttribute('title') : ''));
+  const same = M.patchHostFace(row, F, { ...F }, makers);
+  const after1 = [row, ...row.all];
+  const replaced1 = before.filter((n) => !after1.includes(n)).length, added1 = after1.filter((n) => !before.includes(n)).length;
+  const touched1 = after1.filter((n, i) => before.includes(n) && attrs0[before.indexOf(n)] !== n.className + '|' + (n.getAttribute ? n.getAttribute('title') : '')).length;
+  const DOWN = { dot: 'err', dotTip: 'Connection refused', badge: F.badge, chip: { kind: 'error', text: 'unreachable', title: 'Connection refused' }, errline: { text: 'Couldn’t connect: Connection refused', title: 'Connection refused' } };
+  const changed = M.patchHostFace(row, F, DOWN, makers);
+  const after2 = [row, ...row.all];
+  const replaced2 = before.filter((n) => !after2.includes(n)).length;
+  return { same, replaced1, added1, touched1, changed, replaced2, dotNow: dot.className, chipBeforeActs: top.children.findIndex((k) => k._cls.includes('host-state-chip')) === top.children.length - 2, errline: row.children.some((k) => k._cls.includes('mounts-errline') && k.textContent === DOWN.errline.text) };
+};
+const fc = faceCase(ML);
+ok(fc.same === 'same' && fc.replaced1 === 0 && fc.added1 === 0 && fc.touched1 === 0, 'ONE PROBE whose answer equals what the row shows ⇒ ZERO row nodes replaced, none added, none touched (a focused button or an open control stays)', fc);
+ok(fc.changed === 'patched' && fc.replaced2 === 0 && fc.dotNow === 'mounts-dot mounts-dot-err' && fc.chipBeforeActs && fc.errline, 'a CHANGED answer changes the dot and its words only: the dot\'s class and title, the chip before the actions, the failure line — every node the row had is the same node', fc);
+const pq2 = (() => { const src0 = fs.readFileSync(path.join(REPO, 'src/lib/mounts-live.js'), 'utf8'); const src = src0.replace("  if (hostFaceSame(prev, next)) return 'same';\n", '').replace("    if (dot.className !== cls) dot.className = cls;", "    { const nd = document.createElement('span'); nd.className = cls; dot.replaceWith(nd); } // CONTROL: the probe rebuilds what it shows"); return { file: 'src/lib/mounts-live.js', src, applies: src !== src0 && !src.includes("return 'same';\n  const dot") }; })();
+ok(pq2.applies && faceCase(await bundle('src/lib/mounts-live.js', pq2)).replaced1 > 0, 'CONTROL (p): a probe that rebuilds what it shows (the tip as it stood replaced the whole row twice) — the zero-replaced leg goes red');
+const tipProbe = SM.replace(/(\n    _autoTestHosts\(hosts, hlist\) \{[\s\S]*?)this\._patchHostFace\(h, hlist\)/, '$1this._swapHostRow(h, hlist)');
+ok(tipProbe !== SM && !wiring(tipProbe).inPlace, 'CONTROL (q): _autoTestHosts swapping the row (the tip as it stood) — the in-place wiring goes red');
+const noteCase = (M) => {
+  const root = el('div', 'mounts-list'); root._root = true; const panel = el('div', 'mounts-panel'); root.appendChild(panel);
+  const timers = []; let selfRetries = 0;
+  const o = { words: 'slow', retry: 'Retry', retrying: 'Retrying…', onRetry: () => {}, onSelfRetry: () => { selfRetries++; }, setTimer: (f, ms) => timers.push({ f, ms }) };
+  const a = M.slowNote(panel, o), b = M.slowNote(panel, o);           // a refresh that failed, then failed AGAIN
+  const notes = panel.children.filter((k) => k._cls.includes('mounts-slow')).length;
+  timers.forEach((t) => t.f());
+  const note = panel.children[0];
+  return { made: [a && a.made, b && b.made], timers: timers.length, ms: timers[0] && timers[0].ms, notes, selfRetries, asks: [M.noteAskOnce(note), M.noteAskOnce(note), M.noteAskOnce(null)] };
+};
+const nc = noteCase(ML);
+ok(nc.made[0] === true && nc.made[1] === false && nc.notes === 1 && nc.timers === 1 && nc.ms === 15000 && nc.selfRetries === 1, 'the slow note: TWO FAILURES ⇒ ONE note and ONE 15-s self-retry timer (never a second, never a loop)', nc);
+ok(JSON.stringify(nc.asks) === '[true,false,false]', 'a re-render asks the note\'s refresh ONCE: two re-renders over one note ⇒ one ask', nc.asks);
+const pr2 = patched('src/lib/mounts-live.js', '  const had = kid(panel, \'mounts-slow\');\n  if (had) {', '  const had = kid(panel, \'mounts-slow\');\n  if (false) { // CONTROL: no «met again»');
+ok(pr2.applies && noteCase(await bundle('src/lib/mounts-live.js', pr2)).timers === 2, 'CONTROL (r): a note made again at each failure — two timers: the retry leg goes red');
+const ps2 = patched('src/lib/mounts-live.js', '  if (!note || note._asked) return false;', '  if (!note) return false; // CONTROL');
+ok(ps2.applies && noteCase(await bundle('src/lib/mounts-live.js', ps2)).asks[1] === true, 'CONTROL (s): a re-render that asks at every pass — the once-per-note leg goes red');
 ok((coalesceCase(await bundle('src/lib/mounts-live.js', a6PI))).set1 === 60, 'CONTROL (i): a coalescer with no window — 60 frames, 60 paints: §6 goes red');
 ok(!patchCase(await bundle('src/lib/mounts-live.js', a6PJ)).replaced, 'CONTROL (j): the row rebuilt whole (new nodes) — §6\'s in-place leg goes red');
 ok((await flightCase(await bundle('src/lib/mounts-live.js', a6PK))).most > 1, 'CONTROL (k): no single-flight guard — refreshes overlap: §6 goes red');

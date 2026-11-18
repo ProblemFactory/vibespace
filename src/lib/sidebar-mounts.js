@@ -20,7 +20,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { FLAGS, SHOWN, IMPLIES, normalize, allowWord, allowArgOf } from './device-allow-words.js'; // lane device-allow-flags: the device's own allow list, ticked here
 import * as FFI from '../ffmpeg-install.js'; // lane machine-needs-at-pairing pick 3: step ②'s ffmpeg row (the pinned build's facts)
 import * as MDM from '../machine-desktop-model.js'; // lane machine-needs-at-pairing pick 3: step ②'s TightVNC row
-import { coalesce, singleFlight, patchLastRunRow, rowsByHost, noteLastRun, overlayLastRuns } from './mounts-live.js'; // B-a31a: the panel under a burst — a row patch, one refresh at a time
+import { coalesce, singleFlight, patchLastRunRow, rowsByHost, noteLastRun, overlayLastRuns, slowNote, patchHostFace } from './mounts-live.js'; // B-a31a: the panel under a burst — a row patch, one refresh at a time
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -189,7 +189,9 @@ export function installSidebarMounts(Sidebar) {
       // B-a31a cure: frames sent while the page's connection was down are lost — the open panel asks ONCE when it comes back
       // (the coalesced, single-flight refresh); the dots' timer starts again when the page is shown again
       this.app.ws.onStateChange?.((up) => { if (up && this._activeTab === 'mounts') this._renderMountsSoon(); });
-      document.addEventListener?.('visibilitychange', () => { if (!document.hidden && this._activeTab === 'mounts') this._mountsDotsTick(); });
+      document.addEventListener?.('visibilitychange', () => { if (!document.hidden) this._mountsDotsNow(); });
+      // B-a31a cure 2: the list coming into view (the sidebar unfolded, the phone's drawer opened) probes the stale dots at once
+      try { new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) this._mountsDotsNow(); }).observe(this.listEl); } catch { }
       this.app.ws.onGlobal((msg) => {
         // B-a31a: a RECORDED command is its row's new fact, patched in place (coalesced); a record's own change refreshes ONCE
         // (coalesced, single-flight) — never a whole refetch and redraw per pushed frame
@@ -269,26 +271,10 @@ export function installSidebarMounts(Sidebar) {
     },
     /** B-a31a A SLOW ANSWER IS NOT A FAILURE: the panel keeps what it showed and says the hub is slow, with its Retry */
     _mountsSlow() {
+      // B-a31a cure 2: the note is made ONCE with ONE bounded self-retry (15 s); a refresh that fails again only says its words again
       const panel = this.listEl && this.listEl.querySelector('.mounts-panel');
-      if (!panel) return;
-      const SLOW = tr('The server is slow to answer — this is the list it gave last.');
-      const had = panel.querySelector(':scope > .mounts-slow');
-      if (had) { const w = had.querySelector('.mounts-slow-words'), b = had.querySelector('.mounts-slow-retry'); if (w) w.textContent = SLOW; if (b) b.disabled = false; return; } // a Retry that met a slow server again
-      const box = document.createElement('div');
-      box.className = 'mounts-slow';
-      box.setAttribute('role', 'status');
-      const words = document.createElement('span');
-      words.className = 'mounts-slow-words';
-      words.textContent = SLOW;
-      const again = document.createElement('button');
-      again.type = 'button'; again.className = 'btn-cancel mounts-slow-retry'; again.textContent = tr('Retry');
-      // the note stays, saying it retries, until that refresh's answer: a new list replaces the panel (and the note), a slow one says so again
-      again.onclick = () => { words.textContent = tr('Retrying…'); again.disabled = true; this._renderMounts(); };
-      box.append(words, ' ', again);
-      panel.prepend(box);
-      // B-a31a cure: ONE bounded self-retry while the note shows (never a loop) — a held hub that recovered is seen without a
-      // press; a later failure keeps the note (and its Retry), a landed refresh takes it away with the panel it replaces
-      setTimeout(() => { if (box.isConnected && this._activeTab === 'mounts') this._renderMounts(); }, 15000);
+      slowNote(panel, { words: tr('The server is slow to answer — this is the list it gave last.'), retry: tr('Retry'), retrying: tr('Retrying…'),
+        onRetry: () => this._renderMounts(), onSelfRetry: () => { if (this._activeTab === 'mounts') this._renderMounts(); } });
     },
     /** B-a31a cure (a) A STATUS DOT DOES NOT LIE BY AGE: ONE timer for the panel while the Remote tab shows and the page is
      *  visible — the ssh rows are re-probed on their own 2-minute rule (_autoTestHosts skips a fresher one). It stops when the
@@ -297,12 +283,27 @@ export function installSidebarMounts(Sidebar) {
       if (this._mountsDotsT) return;
       this._mountsDotsT = setTimeout(() => {
         this._mountsDotsT = null;
-        if (this._activeTab !== 'mounts' || document.hidden || !this.listEl) return;
-        const hlist = this._mountsHostList;
-        const hs = this._hostsData && Array.isArray(this._hostsData.hosts) ? this._hostsData.hosts.filter((h) => h.transport !== 'dial') : [];
-        if (hlist && hlist.isConnected && hs.length) this._autoTestHosts(hs, hlist);
+        if (!this._mountsOnScreen()) return; // stops: a folded sidebar, a closed drawer, a hidden page probe nothing
+        this._mountsProbeStale();
         this._mountsDotsTick();
       }, 60000);
+    },
+    /** B-a31a cure 2: the panel is REALLY on screen — the Remote tab, the page shown, the list laid out inside the viewport */
+    _mountsOnScreen() {
+      if (document.hidden || this._activeTab !== 'mounts' || !this.listEl || typeof this.listEl.getBoundingClientRect !== 'function') return false;
+      const r = this.listEl.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < (window.innerWidth || 0) && r.top < (window.innerHeight || 0);
+    },
+    /** the panel seen again: the stale dots probed at once (their own 2-minute rule), and the timer running */
+    _mountsDotsNow() {
+      if (!this._mountsOnScreen()) return;
+      this._mountsProbeStale();
+      this._mountsDotsTick();
+    },
+    _mountsProbeStale() {
+      const hlist = this._mountsHostList;
+      const hs = this._hostsData && Array.isArray(this._hostsData.hosts) ? this._hostsData.hosts.filter((h) => h.transport !== 'dial') : [];
+      if (hlist && hlist.isConnected && hs.length) this._autoTestHosts(hs, hlist);
     },
     async _renderMountsOnce() {
       this._initMountsSync();
@@ -533,7 +534,7 @@ export function installSidebarMounts(Sidebar) {
       root.appendChild(note);
       this.listEl.appendChild(root);
       scrollers.forEach((el, i) => { if (keepScroll[i]) el.scrollTop = keepScroll[i]; });
-      this._mountsDotsTick(); // B-a31a cure (a)
+      this._mountsDotsNow(); // B-a31a cure (a) + cure 2: on screen only
     },
 
     _buildMountRow(m) {
@@ -926,18 +927,46 @@ export function installSidebarMounts(Sidebar) {
         if (st && now - (st.at || 0) < 120000) continue;
         if (this._hostTesting?.has(h.id)) continue;
         (this._hostTesting = this._hostTesting || new Set()).add(h.id);
-        // The row was painted BEFORE the probe started — repaint it now so the
-        // probe window (up to 10s on a fresh-ssh probe) reads as "checking"
-        // instead of the grey never-tested dot, which looked like a dead machine.
-        this._swapHostRow(h, hlist);
+        // B-a31a cure 2: the row is PATCHED IN PLACE, never rebuilt. A FIRST probe says «checking» (the dot and its words:
+        // a grey never-tested dot looked like a dead machine); a re-probe keeps what the row shows until its answer DIFFERS —
+        // an equal answer touches no node (a focused button or an open control in the row is never torn away)
+        if (!st) this._patchHostFace(h, hlist);
         api(`/api/hosts/${h.id}/test`, { method: 'POST' })
           .then((r) => { this._hostStatus[h.id] = { ...r, at: Date.now() }; })
           .catch((e) => { this._hostStatus[h.id] = { error: e.message, at: Date.now() }; })
           .finally(() => {
             this._hostTesting.delete(h.id);
-            this._swapHostRow(h, hlist);
+            this._patchHostFace(h, hlist);
           });
       }
+    },
+
+    /** B-a31a cure 2: an ssh row's STATUS face — what its dot, the dot's words, the tools badge and the state chip show (the
+     *  builder draws it, the probe patches it in place) */
+    _hostFace(h) {
+      const st = this._hostStatus?.[h.id];
+      const testing = this._hostTesting?.has(h.id);
+      return {
+        dot: (st ? (st.ok ? 'ok' : 'err') : 'off'),
+        dotTip: (testing ? tr('Checking the connection…') : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet')),
+        badge: (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : ''),
+        chip: testing ? { kind: 'pending', text: tr('testing…'), title: tr('Checking the connection…') } : (st && !st.ok ? { kind: 'error', text: tr('unreachable'), title: st.error || '' } : null),
+        // a FAILED probe surfaced in the row itself (real report: the error lived only in the dot's hover tooltip)
+        errline: st && !st.ok ? { text: tr('Couldn’t connect:') + ' ' + String(st.error || 'unreachable').slice(0, 300), title: String(st.error || '') } : null,
+      };
+    },
+    /** B-a31a cure 2: the row's status face patched IN PLACE (mounts-live.js patchHostFace) → 'same' | 'patched' | 'none' */
+    _patchHostFace(h, hlist) {
+      if (!hlist || !hlist.isConnected) return 'none';
+      const row = [...hlist.children].find((el) => el._hostId === h.id);
+      if (!row) return 'none';
+      const face = this._hostFace(h);
+      const did = patchHostFace(row, row._face, face, {
+        chipOf: (c) => hostStateChip(c.kind, { text: c.text, title: c.title }),
+        badgeOf: (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; },
+      });
+      row._face = face;
+      return did;
     },
 
     // Rebuild ONE machine row in place (no full re-render → no flicker).
@@ -990,19 +1019,20 @@ export function installSidebarMounts(Sidebar) {
       row.className = 'mounts-row';
       row._hostId = h.id; // in-place replacement key (_autoTestHosts)
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
-      const testing = !isDial && this._hostTesting?.has(h.id);
       // lane-pairing ③: a dial row's dot, badge, sub-line and tooltip all read THE one state (PURE dialRowState) —
       // never `online` alone (a refused dial read "offline" while the server had refused it by name)
       const rs = isDial ? dialRowState(h) : null;
       const dialWords = rs ? dialStateText(rs) : '';
-      const dot = isDial ? (rs.state === 'connected' ? 'ok' : (rs.state === 'auth-fail' || rs.state === 'refused') ? 'err' : 'off') : (st ? (st.ok ? 'ok' : 'err') : 'off');
+      const face = isDial ? null : this._hostFace(h); // B-a31a cure 2: the status face the probe patches in place
+      row._face = face;
+      const dot = isDial ? (rs.state === 'connected' ? 'ok' : (rs.state === 'auth-fail' || rs.state === 'refused') ? 'err' : 'off') : face.dot;
       const dotTip = isDial
         ? dialWords + (rs.state === 'refused' && h.dial?.lastRefusal?.from ? ` · ${tr('from {addr}', { addr: h.dial.lastRefusal.from })}` : '')
-        : (testing ? tr('Checking the connection…') : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet'));
+        : face.dotTip;
       const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user}@${h.host}:${h.port}`;
       const badge = isDial
         ? `<span class="mounts-badge${rs.state === 'connected' ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${escHtml(rs.state === 'connected' ? tr('DEVICE') : rs.state === 'auth-fail' ? tr('KEY REFUSED') : rs.state === 'refused' ? tr('REFUSED') : tr('OFFLINE'))}</span>`
-        : (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : '');
+        : face.badge;
       // lane win-input-elevated: a Windows device agent the owner raised to run as administrator wears an ADMIN badge; a Windows
       // device at normal rights offers the 「Run as administrator…」 door (below). Elevation is Windows-only and the owner's choice.
       const winDev = isDial && h.dial && h.dial.lastAccept && h.dial.lastAccept.platform === 'win32';
@@ -1016,8 +1046,7 @@ export function installSidebarMounts(Sidebar) {
         ${badge}${elevBadge}`;
       // The auto-probe can take up to 10s (fresh ssh) — during it the grey dot
       // was indistinguishable from "never tested / dead machine". Say checking.
-      if (testing) top.appendChild(hostStateChip('pending', { text: tr('testing…'), title: tr('Checking the connection…') }));
-      else if (!isDial && st && !st.ok) top.appendChild(hostStateChip('error', { text: tr('unreachable'), title: st.error || '' }));
+      if (face && face.chip) top.appendChild(hostStateChip(face.chip.kind, { text: face.chip.text, title: face.chip.title }));
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -1138,11 +1167,11 @@ export function installSidebarMounts(Sidebar) {
       // no visible reason — the error lived only in the dot's hover tooltip,
       // invisible on touch and undiscoverable on a 6px target). Same errline
       // pattern as storage rows; full text in title.
-      if (!isDial && st && !st.ok) {
+      if (face && face.errline) {
         const err = document.createElement('div');
         err.className = 'mounts-errline';
-        err.textContent = tr('Couldn’t connect:') + ' ' + String(st.error || 'unreachable').slice(0, 300);
-        err.title = String(st.error || '');
+        err.textContent = face.errline.text;
+        err.title = face.errline.title;
         row.appendChild(err);
       }
       return row;
