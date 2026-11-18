@@ -15,7 +15,9 @@
  *  · A DEAD OR SLOW STARTER IS NEVER «the mount is down»: a request whose start was never confirmed, or that got no
  *    answer by its own bound + GUARD_MS — + one more GUARD_MS while the starter lives (a whole-box stall) — answers
  *    `unknown` (never «hung», never «error»). That starter is replaced ONCE; a second fault puts the old road back (a direct
- *    start from this process, the site's own env) — said once; a fresh starter is tried again at most once an hour (REARM_MS).
+ *    start from this process, the site's own env) — said once in the journal and named by every hourly loop line while in force
+ *    («program-starts=direct-since-…»); a fresh starter is tried again at most once an hour (REARM_MS), and a fault after
+ *    that re-arm falls back for the hour (a broken starter costs one `unknown` an hour).
  *  · HYGIENE: the starter is born with serviceEnv (the service list, never the hub's secrets); a request carries the
  *    names its site sets (`envAdd`: DISPLAY / XAUTHORITY / a locale / DOCKER_*), never a secret-shaped name; argv as the
  *    site had it. A child gets the starter's env + those names — never more than the site gave before.
@@ -31,7 +33,8 @@ const REARM_MS = 60 * 60000;      // the old road is not for the process's life:
 const SECRET_NAME = SECRET_SHAPE;   // its read (S): THE one secret shape (src/agent-env.js), never a second, weaker copy
 
 function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = GUARD_MS, rearmMs = REARM_MS } = {}) {
-  let proc = null, seq = 0, restarted = false, direct = false, directAt = 0, said = false, buf = '';
+  let proc = null, seq = 0, restarted = false, direct = false, directAt = 0, directSince = 0, said = false, buf = '';
+  const mono = () => performance.now();   // the re-arm's clock never steps with the wall clock (its read: a clock stepped back kept the old road an hour longer)
   const pending = new Map();      // id → { resolve, settled, onTimeout, onLateExit, timer, started, pid }
   const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0, rearmed: 0 };
 
@@ -70,7 +73,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     for (const [id, q] of pending) { if (!q.settled) { stats.unknown++; settle(id, { unknown: true, why }); } else pending.delete(id); }
     if (!restarted) { restarted = true; return; }
     if (!direct) {
-      direct = true; directAt = Date.now();
+      direct = true; directAt = mono(); directSince = Date.now();
       if (!said) { said = true; try { log.warn?.(`[child-starter] the starter failed twice (${why}) — the timer sites start their programs from the hub's process again (the old road)`); } catch { } }
     }
   }
@@ -78,7 +81,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
    *  `env` is the site's own env, used ONLY on the old road; `envAdd` the names it sets, the only ones sent to the starter. */
   function run(cmd, args = [], o = {}) {
     stats.requests++;
-    if (direct && Date.now() - directAt >= rearmMs) { direct = false; restarted = false; stats.rearmed++; }   // a fresh starter, tried again (a whole-box stall is not for good)
+    if (direct && mono() - directAt >= rearmMs) { direct = false; restarted = true; stats.rearmed++; }   // a fresh starter, tried again (a whole-box stall is not for good) — ONE: a fault after the re-arm falls back for the hour
     if (direct) return runDirect(cmd, args, o);
     if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); return direct ? runDirect(cmd, args, o) : Promise.resolve({ unknown: true, why: 'no starter' }); } }
     const id = ++seq, add = {};
@@ -115,7 +118,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   }
   /** the hub's end of the pipe closed (a test's «the hub is gone»): the starter ends by itself — nothing is signalled */
   function closePipe() { const p = proc; proc = null; if (p) { if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { }); try { p.stdin.end(); } catch { } } return p; }
-  return { run, closePipe, stats: () => ({ ...stats, restarted, direct, pending: pending.size, pid: proc ? proc.pid : null }), _proc: () => proc };
+  return { run, closePipe, stats: () => ({ ...stats, restarted, direct, directSince: direct ? directSince : 0, pending: pending.size, pid: proc ? proc.pid : null }), _proc: () => proc };
 }
 
 let shared = null;

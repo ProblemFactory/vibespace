@@ -1110,7 +1110,9 @@ function environCensus(needles, { procRoot = '/proc' } = {}) {
 // A request carries only the names that decide WHICH program runs and HOW it reaches X: PATH / HOME / the X and locale
 // names, as the site's env has them (a name the site's env lacks is removed) — never the rest of its env, never a secret
 let _starter = null;
-const X_ENV_NAMES = Object.freeze(['PATH', 'HOME', 'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'LC_ALL', 'LC_CTYPE', 'LANG', 'LOCPATH']);
+// + PYTHONPATH / LD_LIBRARY_PATH: the release handed the belt's tools the site's whole env — an xpra installed under a venv or a
+// non-system prefix reads its version only with them (the install card would say «no version» otherwise)
+const X_ENV_NAMES = Object.freeze(['PATH', 'HOME', 'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'LC_ALL', 'LC_CTYPE', 'LANG', 'LOCPATH']);
 function useStarter(s) { _starter = s && typeof s.run === 'function' ? s : null; }
 // ONLY THE BELT's calls ride it (`belt: true` — what the fit runs on its timer: windowTree, viewableWindows, displaySize, the xrandr
 // resize, the wmctrl / xdotool fit, and xpraVersion, which the facts refresh of every belt tick asks; the same functions answer a

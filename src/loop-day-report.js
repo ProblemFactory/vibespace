@@ -11,7 +11,7 @@
  *     census-asks=<n> census-paid=<s> hub-up=<h> hub-heap=<MB>/<MB> hub-rss=<MB> cli=<n>/<MB> wrapper=<n>/<MB> browser=<n>/<MB>
  *     agentd=<n>/<MB> other=<n>/<MB> procs-by=<service|container|tree> conversations=<n> turn-running=<n> turn-waiting=<n>
  *     idle-under-1h=<n> idle-1-2h=<n> idle-2-4h=<n> idle-over-4h=<n> turn-unknown=<n> ages-read=<n>/<n> browsers-ready=<n> browsers-idle-1h=<n>
- *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s>
+ *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s> program-starts=<starter|direct-since-<minute>Z|?>
  * EACH FIELD COUNTS WHAT ITS NAME SAYS: held / holds / longest / top = the hour's holds of a second or more AFTER the boot (an hour
  * no watchdog watched prints «?» — never a clean hour); boot-held / boot-holds = the boot's own, apart; lost-holds = holds the
  * watchdog's ring dropped before the hour's book read them; no-ours-holds / no-ours-held = the hour's holds whose
@@ -117,6 +117,9 @@ function censusWords(c) {
  * browsers: { ready, idle1h } | null, sizes: { conversations, pageSockets, deviceLinks, wsIn, wsOut, parsedChars, creates, resumes,
  * writes, writeMaxMs } }
  */
+/** B-91aa: the starter's state for the line — `starter` (the timer sites' programs start in the small process), `direct-since-<minute>Z`
+ *  (the old road in force: they fork the hub again), `?` (not told) */
+const startsOf = (st) => (!st || typeof st !== 'object' ? '?' : st.direct ? `direct-since-${Number.isFinite(st.directSince) && st.directSince > 0 ? new Date(st.directSince).toISOString().slice(0, 16) + 'Z' : '?'}` : 'starter');
 function line(rep = {}) {
   const h = rep.hour || newHour(null);
   const w = h.watched !== false;
@@ -139,7 +142,8 @@ function line(rep = {}) {
     `browsers-ready=${int(br ? br.ready : null)}`, `browsers-idle-1h=${int(br ? br.idle1h : null)}`,
     `page-sockets=${int(z.pageSockets)}`, `device-links=${int(z.deviceLinks)}`,
     `ws-in=${int(z.wsIn)}`, `ws-out=${int(z.wsOut)}`, `parsed=${Number.isFinite(z.parsedChars) ? `${(z.parsedChars / 1e6).toFixed(1)}M` : '?'}`,
-    `creates=${int(z.creates)}`, `resumes=${int(z.resumes)}`, `writes=${int(z.writes)}`, `write-max=${s1(z.writeMaxMs)}`].join(' ');
+    `creates=${int(z.creates)}`, `resumes=${int(z.resumes)}`, `writes=${int(z.writes)}`, `write-max=${s1(z.writeMaxMs)}`,
+    `program-starts=${startsOf(rep.starter)}`].join(' ');   // B-91aa: the timer sites' programs — «starter», or the old road in force since when
 }
 
 const N = '(\\d+|\\?)', S = '(\\d+\\.\\ds|\\?)';
@@ -149,7 +153,8 @@ const LINE_RE = new RegExp('^\\[loop-(hour|exit)\\] hour=(\\d{4}-\\d\\d-\\d\\dT\
   + ` census-asks=${N} census-paid=(\\d+\\.\\d\\ds|\\?) hub-up=(\\d+\\.\\dh|\\?)`
   + ' hub-heap=(\\d+MB|\\?)\\/(\\d+MB|\\?) hub-rss=(\\d+MB|\\?)' + KIDS.map((n) => ` ${n}=${N}\\/(\\d+MB|\\?)`).join('') + ' procs-by=(service|container|tree|\\?)'
   + ` conversations=${N}` + AGES.map((a) => ` ${a}=${N}`).join('') + ` ages-read=${N}\\/${N} browsers-ready=${N} browsers-idle-1h=${N}`
-  + ` page-sockets=${N} device-links=${N} ws-in=${N} ws-out=${N} parsed=(\\d+\\.\\dM|\\?) creates=${N} resumes=${N} writes=${N} write-max=${S}$`);
+  + ` page-sockets=${N} device-links=${N} ws-in=${N} ws-out=${N} parsed=(\\d+\\.\\dM|\\?) creates=${N} resumes=${N} writes=${N} write-max=${S}`
+  + ' program-starts=(starter|direct-since-\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\dZ|\\?)$');
 /** the causes a line may name: a code location of the hub's own, a verdict's fixed words, the three markers */
 function causesOk(text) {
   const m = /top="([^"]*)"/.exec(String(text || ''));

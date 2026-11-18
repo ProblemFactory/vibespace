@@ -47,6 +47,7 @@ let starts = 0, kills = 0;
 const realSpawn = CP.ChildProcess.prototype.spawn, realKill = CP.ChildProcess.prototype.kill;
 CP.ChildProcess.prototype.spawn = function (...a) { starts++; return realSpawn.apply(this, a); };
 CP.ChildProcess.prototype.kill = function (...a) { kills++; return realKill.apply(this, a); };
+for (const k of ['spawnSync', 'execFileSync', 'execSync']) { const real = CP[k]; CP[k] = function (...a) { starts++; return real.apply(this, a); }; }   // the synchronous starts too (they wait on the loop the whole child)
 const counting = async (fn) => { const s0 = starts; await fn(); return starts - s0; };
 
 const CS = require(path.join(REPO, 'src/server/child-starter.js'));
@@ -67,11 +68,12 @@ try {
     const S0 = CS.createChildStarter(); CS.setChildStarter(S0); D.useStarter(null);
     await S0.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });   // the starter's own start (made once), outside the window
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/desktop-app-keeper.js'), 'utf8'), INJ = "displayFacts.useStarter(require('./child-starter').childStarter());";
-    mutantCopies('hub-program-starts-k', REPO).load('src/server/desktop-app-keeper.js', ksrc.replace(INJ, () => '/* no injection */'), 'no-inject');
-    const red0 = await counting(() => beltSize(D, { ...process.env }));
-    require(path.join(REPO, 'src/server/desktop-app-keeper.js'));
-    const r0 = S0.stats().requests, now0 = await counting(() => beltSize(D, { ...process.env }));
-    ok(ksrc.split(INJ).length === 2 && red0 === 1 && now0 === 0 && S0.stats().requests === r0 + 1,
+    const KREQ = "const displayFacts = require('../desktop-display');", MK = mutantCopies('hub-program-starts-k', REPO), dsrc0 = fs.readFileSync(path.join(REPO, 'src/desktop-display.js'), 'utf8');
+    const keeperOver = (tag, withInj) => { const dp = MK.write('src/desktop-display.js', dsrc0, 'dd-' + tag); MK.load('src/server/desktop-app-keeper.js', ksrc.replace(KREQ, () => `const displayFacts = require(${JSON.stringify(dp)});`).replace(INJ, () => (withInj ? INJ : '/* no injection */')), 'k-' + tag); return require(dp); };
+    const DR = keeperOver('red', false), DG = keeperOver('green', true);   // each its OWN desktop-display instance, loaded by its keeper
+    const red0 = await counting(() => beltSize(DR, { ...process.env }));
+    const r0 = S0.stats().requests, now0 = await counting(() => beltSize(DG, { ...process.env }));
+    ok(ksrc.split(INJ).length === 2 && ksrc.split(KREQ).length === 2 && red0 === 1 && now0 === 0 && S0.stats().requests === r0 + 1,
       `the hub's keeper hands desktop-display its starter: a belt call then starts ${now0} programs from the main process (the starter ran it); RED (a keeper without the injection): ${red0}`);
     S0.closePipe();
   }
@@ -228,7 +230,9 @@ try {
     SC.closePipe();
     ok(msrc.split(START).length === 2 && e1 === 'ok' && e1r === 'hung', `a held mark whose pid now runs another process (its start time differs): asked again («${e1}»); RED (the pid alone): «${e1r}» for good`);
   }
-  { // ④f a starter that answers AFTER its first guard (a whole-box stall) is given one more guard — no fault, its answer used
+  { // ④f a starter that answers AFTER its first guard (a whole-box stall) is given one more guard — no fault, its answer used.
+    // A LOAD-CLOCK LEG (主开发 16:28Z): the hub sends nothing between its two guards, so no event can stand in for the clock — the
+    // stand-in answers 800 ms after the request, the guards end at 600 and 1 100 ms (200 / 300 ms of slack); the RED is a real control
     const LATE = path.join(T, 'late-starter.js');
     fs.writeFileSync(LATE, "let b='',n=0;process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;const late=n++?800:0;process.stdout.write(JSON.stringify({id:m.id,ev:'started',pid:1})+'\\n');setTimeout(()=>process.stdout.write(JSON.stringify({id:m.id,ev:'exit',code:0,signal:null,stdout:'late'})+'\\n'),late)}});process.stdin.on('end',()=>process.exit(0));\n");
     // the first request warms the stand-in (its boot is never inside the window); the second is answered 800 ms after it: past its bound + one guard (600), inside the second guard (1 100)
@@ -248,10 +252,10 @@ try {
       SR.closePipe();
       return { st0, stD, stA, stB, said: said2.length };
     };
-    const csrc2 = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), REARM = "    if (direct && Date.now() - directAt >= rearmMs) {";
-    const g = await rearm(CS), gr = await rearm(MC.load('src/server/child-starter.js', csrc2.replace(REARM, () => '    if (false) {'), 'red-rearm'));
-    ok(csrc2.split(REARM).length === 2 && g.st0.direct && g.stD.starts === g.st0.starts && g.stA.starts === g.st0.starts + 1 && g.stA.rearmed === 1 && g.stB.direct && g.said === 1 && gr.stA.starts === gr.st0.starts && gr.stA.direct,
-      `after two faults the old road (${g.stD.starts} starts while it lasts); past its re-arm time a fresh starter is tried (${g.stA.starts}, re-armed ${g.stA.rearmed}), its faults put the old road back (${g.stB.direct}), said ${g.said} time in all; RED (no re-arm): the old road for good (${gr.stA.starts} starts)`, { g, gr });
+    const csrc2 = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), REARM = "    if (direct && mono() - directAt >= rearmMs) {", ONE = 'direct = false; restarted = true; stats.rearmed++;';
+    const g = await rearm(CS), gr = await rearm(MC.load('src/server/child-starter.js', csrc2.replace(REARM, () => '    if (false) {'), 'red-rearm')), g2 = await rearm(MC.load('src/server/child-starter.js', csrc2.replace(ONE, () => 'direct = false; restarted = false; stats.rearmed++;'), 'red-two'));   // stale-pins: kept (the cure's re-arm, planted back as RED 2)
+    ok(csrc2.split(REARM).length === 2 && csrc2.split(ONE).length === 2 && g.st0.direct && g.stD.starts === g.st0.starts && g.stA.starts === g.st0.starts + 1 && g.stA.rearmed === 1 && g.stA.direct && g.stB.starts === g.stA.starts && g.said === 1 && gr.stA.starts === gr.st0.starts && gr.stA.direct && g2.stB.starts === g2.stA.starts + 1,
+      `after two faults the old road (${g.stD.starts} starts while it lasts); past its re-arm time ONE fresh starter is tried (${g.stA.starts}) and its one fault puts the old road back for the hour (no second start: ${g.stB.starts}), said ${g.said} time in all; RED (no re-arm): the old road for good; RED 2 (a replacement after the re-arm): ${g2.stB.starts - g2.stA.starts} more start`, { g, gr, g2 });
   }
   { // ④h a stray line on the pipe (`null`, a number) is no answer and never throws in the hub's handler
     const STRAY = path.join(T, 'stray-starter.js');
@@ -278,6 +282,28 @@ try {
   const own = { ok: await beltSize(D, cleanEnv, xdpy, ':7'), bad: await beltSize(D, cleanEnv, xfail, ':7') };
   ok(viaS.ok.ok && viaS.ok.w === 1000 && viaS.ok.h === 507 && JSON.stringify(viaS.ok) === JSON.stringify(own.ok) && viaS.bad.ok === false && own.bad.ok === false && /xdpyinfo failed/.test(viaS.bad.why) && /xdpyinfo failed/.test(own.bad.why),
     `the belt's size read is the same object both ways (${viaS.ok.w}x${viaS.ok.h}); a tool that exits 3 fails both ways («${viaS.bad.why}» · «${own.bad.why}»)`, { viaS, own });
+  // ⑥b the belt's OTHER sites (the window tree, the visible windows, the xrandr resize, the wmctrl / xdotool fit) and the port scan's
+  // docker rung, one call each through a stand-in program: 0 starts from the main process; RED the tip's call lines planted back
+  const STUBX = path.join(T, 'stub-x'); fs.writeFileSync(STUBX, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const beltAll = async (X) => {
+    X.useStarter(S5);
+    return counting(async () => {
+      const o = { display: ':42', env: cleanEnv };
+      await X.windowTree({ ...o, bins: { xwininfo: STUBX } });
+      await X.viewableWindows({ ...o, bins: { xdotool: STUBX } });
+      await X.setDisplaySize({ ...o, bins: { xrandr: STUBX }, w: 800, h: 600 });
+      await X.applyWindowPlan({ ...o, bins: { xdotool: STUBX, wmctrl: STUBX }, plan: { main: 1, resize: { id: 1, framed: true, w: 800, h: 600 } } });
+      await X.applyWindowPlan({ ...o, bins: { xdotool: STUBX, wmctrl: null }, plan: { main: 1, resize: { id: 1, w: 800, h: 600 } } });
+    });
+  };
+  const rb0 = S5.stats().requests, b5 = await beltAll(D), rb = S5.stats().requests - rb0;
+  const b5r = await beltAll(MC.load('src/desktop-display.js', dsrc.replace(D_NEW, () => '  if (false) {\n    const envAdd = {};'), 'red-belt-all'));
+  ok(b5 === 0 && rb === 5 && b5r === 5, `the belt's other sites (a window tree, the visible windows, an xrandr resize, a wmctrl and an xdotool fit): ${b5} starts from the main process, ${rb} by the starter; RED (the tip's call line planted back): ${b5r}`);
+  const P2_NEW = "      await this._enrichDocker(ports, (cmd) => starter.run('sh', ['-c', cmd], { timeoutMs: 6000, maxBuffer: 1024 * 1024, capture: true, envAdd: dockerEnv() }).then((r) => String(r.stdout || '')));";
+  const P2_OLD = "      await this._enrichDocker(ports, (cmd) => new Promise((resolve) => require('child_process').execFile('sh', ['-c', cmd], { timeout: 6000, maxBuffer: 1024 * 1024 }, (e, so) => resolve(String(so || '')))));";
+  const dockerRung = async (P) => { const pf = pfOf(P); mounts.push(pf); pf.detectLocal = async () => [{ port: 40001, proc: '' }]; CS.setChildStarter(S5); const r0 = S5.stats().requests; const n = await counting(() => pf.detect('__local__')); return { main: n, via: S5.stats().requests - r0 }; };
+  const dk = await dockerRung({ PortForwardManager }), dkr = await dockerRung(MC.load('src/port-forward.js', psrc.replace(P2_NEW, () => P2_OLD), 'red-docker'));
+  ok(psrc.split(P2_NEW).length === 2 && dk.main === 0 && dk.via >= 1 && dkr.main >= 1, `an anonymous listener: the docker / uid rungs' sh (${dk.via}) by the starter, ${dk.main} from the main process; RED (the tip's docker line planted back): ${dkr.main} from the main process`, { dk, dkr });
   // a call that is NOT the belt's (an unmount — a person's or an agent's act) starts as before even with the starter injected
   D.useStarter(S5);
   const fbin = path.join(T, 'fbin'); fs.mkdirSync(fbin, { recursive: true });

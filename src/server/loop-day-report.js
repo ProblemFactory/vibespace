@@ -201,7 +201,7 @@ function turnsOf(entries, t, times = new Map()) {
   return out;
 }
 
-function create({ log = console, census = async () => null, foldCensus = null, sizes = () => ({}), wallNow = () => Date.now(), watched = () => true,
+function create({ log = console, census = async () => null, foldCensus = null, sizes = () => ({}), starter = () => require('./child-starter').childStarter().stats(), wallNow = () => Date.now(), watched = () => true,
   sessions = () => [], browsers = () => null, lost = () => null, upMs = () => process.uptime() * 1000, buffersDir = null, outputs = outputTimes, walkWaitMs = PROCS_WAIT_MS,
   elu = (a, b) => performance.eventLoopUtilization(a, b), kids = (signal) => procKids({ signal }), heap = () => { const s = v8.getHeapStatistics(); return { heapUsed: s.used_heap_size, heapLimit: s.heap_size_limit }; },
   rss = () => process.memoryUsage.rss(), keepHours = KEEP_HOURS } = {}) {
@@ -215,6 +215,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   const busySince = (from) => { try { return from ? elu(elu(), from).utilization : null; } catch { return null; } };
   const memNow = (k) => { let h = {}; try { h = heap() || {}; } catch { } let r = null; try { r = rss(); } catch { } return { heapUsed: h.heapUsed, heapLimit: h.heapLimit, rss: r, kids: k }; };
   const sizesNow = () => { try { return sizes() || {}; } catch { return {}; } };
+  const starterNow = () => { try { return starter() || null; } catch { return null; } };   // B-91aa: «program-starts=» — the old road in force is said every hour
   const entriesNow = () => { try { return [...(sessions() || [])]; } catch { return []; } };
   const turnsNow = (t, entries = entriesNow(), times = null) => { try { return turnsOf(entries, t, times); } catch { return null; } };
   /** THE AGE PASS (cure r3, T2): ONE at a time, ended at its time-out (cancelled) — then the hour's idle ages are «?» and the line says
@@ -264,7 +265,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     if (k) lastKids = k;
     const entries = entriesNow();
     const ag = await agesOnce(entries);
-    const rep = { kind: 'hour', hour: h, toMs, busy, engines, upMs: upNow(), mem: memNow(k), turns: turnsNow(toMs, entries, ag.times), agesRead: ag, browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts } };
+    const rep = { kind: 'hour', hour: h, toMs, busy, engines, upMs: upNow(), mem: memNow(k), turns: turnsNow(toMs, entries, ag.times), agesRead: ag, browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts }, starter: starterNow() };
     rep.line = LDR.line(rep);
     kept.push(rep); if (kept.length > keepHours) kept.splice(0, kept.length - keepHours);
     try { log.log(rep.line); } catch { }
@@ -283,7 +284,7 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     exitSaid = true;
     const t = wallNow();
     if (!watchedNow()) cur.watched = false;
-    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, upMs: upNow(), mem: memNow(lastKids), turns: turnsNow(t, entriesNow(), null), agesRead: { read: 0, total: entriesNow().length }, browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() } };
+    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, upMs: upNow(), mem: memNow(lastKids), turns: turnsNow(t, entriesNow(), null), agesRead: { read: 0, total: entriesNow().length }, browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() }, starter: starterNow() };
     rep.line = LDR.line(rep);
     try { log.log(rep.line); } catch { }
     return rep;
