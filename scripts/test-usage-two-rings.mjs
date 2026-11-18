@@ -54,14 +54,17 @@ const US = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-source.js')
 // differ between two renders the CONTROL legs compare byte for byte. NOT PROVEN: the row's midnight shape does not fit the two
 // sightings' hours (02:3x PT, 18:44 PT); this holds every clock read either way.
 const RealDate = Date, NOW = RealDate.now();
-globalThis.Date = class HeldDate extends RealDate { constructor(...a) { super(...(a.length ? a : [NOW])); } static now() { return NOW; } };
+// (batch 29's readers) `instanceof Date` still holds for a Date made BEFORE the swap (the hasInstance below); and the clock never moves
+// from here to the end of the legs (the real Date is put back before the closing line) — a leg that polls on Date.now (a deadline loop)
+// would spin for ever: hold no such leg in this suite
+globalThis.Date = class HeldDate extends RealDate { constructor(...a) { super(...(a.length ? a : [NOW])); } static now() { return NOW; } static [Symbol.hasInstance](x) { return x instanceof RealDate; } };
 const nowS = Math.floor(Date.now() / 1000), H = 3600, D = 86400, MIN = 60e3;
 // …the premise, at a boundary built on purpose: the same instant read at 23:56 and at 00:06 local is two different words — a word
 // the clock decides; the held clock (both its doors) is what keeps two renders of the legs below byte-identical
 {
   const T = new Date(2026, 10, 9, 23, 55, 0, 0).getTime();
   const before = US.resetInstantText ? US.resetInstantText(T, T + MIN) : '', after = US.resetInstantText ? US.resetInstantText(T, T + 11 * MIN) : '';
-  ok(`B-7b56 PREMISE: one instant read at 23:56 «${before}» and at 00:06 «${after}» — a word the clock decides; and the held clock holds both doors (Date.now ${Date.now() === NOW}, new Date() ${new Date().getTime() === NOW})`, !!before && !!after && before !== after && Date.now() === NOW && new Date().getTime() === NOW, `${before} / ${after}`);
+  ok(`B-7b56 PREMISE: one instant read at 23:56 «${before}» and at 00:06 «${after}» — a word the clock decides; and the held clock holds both doors (Date.now ${Date.now() === NOW}, new Date() ${new Date().getTime() === NOW}) and a Date made before it is still a Date (${new RealDate(0) instanceof Date})`, !!before && !!after && before !== after && Date.now() === NOW && new Date().getTime() === NOW && new RealDate(0) instanceof Date, `${before} / ${after}`);
 }
 const LIFTED_AT = Date.now() - 6 * D * 1000; // the tombstone: the instant the vendor's answer first named no 5h window
 const WEEK = { utilization: 0.37, resetsAt: nowS + 3 * D };
@@ -586,5 +589,7 @@ console.log('— the words (zh + ja), no mark (r3\'s slash withdrawn), the wirin
   ok('ci.mjs runs this suite', /'test-usage-two-rings'/.test(srcOf('scripts/ci.mjs')));
 }
 
+globalThis.Date = RealDate; // the REAL Date put back once the legs are done (the verdict's small)
+ok('the real Date is back after the legs (the held clock ends with them)', globalThis.Date === RealDate);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

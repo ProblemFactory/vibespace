@@ -618,9 +618,9 @@ leg('§3 IN-PROCESS ㊲ UNKNOWN BLOCKS A SPAWN — a service whose last run\'s w
   // B-d24c (the adversarial read: on the hosted run A was NEVER spawned — its start decides inside the leg's 15 ms grace on a scope
   // read bounded at 5 ms, and one loop stall refused it for good): THIS start gets bounds no stall reaches (the boot's part above keeps
   // the leg's 15 ms / 5 ms); a read still in flight from r1 answers the old scope, the loop asks again and reads it empty
+  const was = { memorySample: E.d.memorySample, reapReadMs: E.d.reapReadMs }; // the leg's own 15 ms / 5 ms — PUT BACK after (the verdict's small)
   E.d.memorySample = { stopMs: 8000 }; E.d.reapReadMs = 8000;
-  E.start(A); await until(() => E.spawned.length, 9000, 5);
-  delete E.d.memorySample; delete E.d.reapReadMs;
+  try { E.start(A); await until(() => E.spawned.length, 9000, 5); } finally { E.d.memorySample = was.memorySample; E.d.reapReadMs = was.reapReadMs; }
   ok(E.spawned.length === 1 && E.spawned[0].id === A.id && journal(E, A, /^its scope is empty — nothing of its last run runs \(its wrapper is still not proven gone: pid\.json unreadable\)$/), 'its scope read EMPTY ends the doubt — the next start goes, said', E.spawned);
   E.stop(B); await until(() => B.runs[0].doubtOver, 8000, 5); // the person's stop: what can be named of it is stopped, the doubt ended
   E.start(B); await until(() => E.spawned.length === 2, 8000, 5);
