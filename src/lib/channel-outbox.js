@@ -298,7 +298,8 @@ function appendReplyTarget(card, p) {
   const pr = p.prepared;
   if (pr && typeof pr === 'object') {
     card.appendChild(envRow('chan-prop-notifies', t('Notifies'), Array.isArray(pr.notifies) && pr.notifies.length ? pr.notifies.join(', ') : t('nobody (no @name here was resolved)')));
-    if (Array.isArray(pr.plain) && pr.plain.length) card.appendChild(envRow('chan-prop-plain', t('Not a member here'), t('{names} — sent as plain words, nobody is notified', { names: pr.plain.map((n) => '@' + n).join(', ') })));
+    // B-a0ae: a typed <@U…> that matched no member is shown as typed (never «@<@U…>»)
+    if (Array.isArray(pr.plain) && pr.plain.length) card.appendChild(envRow('chan-prop-plain', t('Not a member here'), t('{names} — sent as plain words, nobody is notified', { names: pr.plain.map((n) => (String(n).startsWith('<@') ? n : '@' + n)).join(', ') })));
   }
 }
 /** design 012 D20: the audience in words — a DM, a private conversation's members, the whole workspace, or a

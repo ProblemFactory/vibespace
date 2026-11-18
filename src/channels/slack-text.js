@@ -373,20 +373,36 @@ function atNames(text) {
   return out;
 }
 const BROADCAST_WORDS = Object.freeze(['here', 'channel', 'everyone']);
-/** B-a0ae (fb-c3d847cfc8: «@First Last» notified nobody): each `@Name` with the word right after it — `{one, two}`, `two` =
- *  «First Last» when one space and a name word follow (null otherwise); prepareSend tries the TWO-word name first. */
+/** B-a0ae (fb-c3d847cfc8: «@First Last» notified nobody): each `@Name` with the names it may continue into — `{one, longer}`,
+ *  `longer` = «First Last» and «First Middle Last» when one space and a name word follow (up to NAME_WORDS words, longest
+ *  first); prepareSend tries the longest that answers ONE person first. r1 (the lane's adversarial read): judged per
+ *  OCCURRENCE — «@Alice Chen … @Alice Wong» are two (their first word alike), «@Alice Chen … @Alice» too. */
 const NEXT_WORD_RE = /^ ([\p{L}\p{N}][\p{L}\p{N}._'-]{0,39})/u;
+const NAME_WORDS = 3;
 function atNamePairs(text) {
   const s = String(text == null ? '' : text).slice(0, SEND_MAX * 2);
-  const out = [];
+  const out = [], seen = new Set();
   let m;
   AT_RE.lastIndex = 0;
   while ((m = AT_RE.exec(s)) && out.length < 50) {
     const one = m[2].replace(/[.'-]+$/, '');
-    if (!one || out.some((x) => x.one === one)) continue;
-    const w = m[2] === one ? NEXT_WORD_RE.exec(s.slice(m.index + m[0].length)) : null;
-    const next = w ? w[1].replace(/[.'-]+$/, '') : '';
-    out.push({ one, two: next ? `${one} ${next}` : null });
+    if (!one) continue;
+    const words = [one];
+    let at = m.index + m[0].length;
+    while (words.length < NAME_WORDS && m[2] === one) {
+      const w = NEXT_WORD_RE.exec(s.slice(at, at + 48));
+      if (!w) break;
+      const word = w[1].replace(/[.'-]+$/, '');
+      if (!word) break;
+      words.push(word);
+      at += w[0].length;
+      if (word !== w[1]) break;   // the word ended a sentence («@Ann Smith.»)
+    }
+    const longer = words.slice(1).map((_, i) => words.slice(0, i + 2).join(' ')).reverse();
+    const key = [one, ...longer].join('\u0000');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ one, longer, two: longer.length ? longer[longer.length - 1] : null });
   }
   return out;
 }
