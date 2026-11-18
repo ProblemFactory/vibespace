@@ -27,6 +27,9 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
     // …and that sentence says what happens to the message ANYWAY (a refusal
     // that only says "no" leaves the user wondering if it is lost).
     const fn = /function queueVerbRefusal\(op, label\) \{[\s\S]*?\n\}/.exec(src)?.[0] || '';
+    // THE ONE EXCEPTION to the method in this file (the readers' note, B-94d3): this leg LIFTS queueVerbRefusal's body out
+    // of the source TEXT and RUNS it. It loads no module and needs nothing but that text, so it stays here, named; ⑬b's lift
+    // of queueAdvert stays in the heavy (it runs over a real normalizer).
     const refusal = new Function('op', 'label', fn + '; return queueVerbRefusal(op, label);');
     for (const [verb, must] of [['steer', /runs after it/], ['reorder', /order they were sent/], ['edit', /remove it and send a new one/], ['run-now', /runs when the current turn ends/], ['run-all', /run when the current turn ends/]]) {
       ok(`ws refusal for '${verb}' names the harness AND what happens to the message`, /Claude/.test(refusal(verb, 'Claude')) && must.test(refusal(verb, 'Claude')), refusal(verb, 'Claude'));
