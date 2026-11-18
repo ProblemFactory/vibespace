@@ -7687,6 +7687,29 @@ await section(async () => {
   ok(copiesIn(WRAP).length === 0, '§108 a wrapper over the door is not a copy — even with a press of its own on the NEXT line (the body ends where the definition does)');
 });
 
+// ── §109 (B-6617, lane bl-tests-e, 2026-11-17): NO KB TEXT NAMES A VERSION NEWER THAN package.json IN FULL FORM ──
+// int361 met it twice on the .365 train (six lines from three lanes, then one more): a lane wrote «2.369.NNN» for the release it
+// expected to ride, and only the HEAVY test-codex-effort-meta ⑩ (every version its cited files name is a release on the
+// integration branch) caught it — at the train, after a heavy run. This is its FAST twin, pure: every full 2.369.N the kb files,
+// CLAUDE.md and that suite's cited source files name is at most package.json's own version (the release being cut may name
+// itself). A lane writes «.NNN»; a CHANGELOG heading is not read here (the changelogs head the next patch by rule).
+console.log('\n§109 no kb text names a version newer than package.json in full form (B-6617, the fast twin of test-codex-effort-meta ⑩)');
+await section(async () => {
+  const CUR = JSON.parse(read('package.json')).version, [cMaj, cMin, cPat] = CUR.split('.').map(Number);
+  const SITES109 = [...fs.readdirSync(path.join(REPO, 'docs')).filter((f) => /^kb-.*\.md$/.test(f)).map((f) => 'docs/' + f), 'CLAUDE.md',
+    'data/bin/codex-chat-wrapper.js', 'src/codex-message-manager.js', 'src/codex-session-store.js', 'src/server/stdout/codex-events.js', 'src/lib/agent-meta.js',
+    'src/lib/chat-status-bar.js', 'src/lib/chat-view.js', 'src/ws-handler.js', 'src/session-schema.js', 'src/harnesses/codex-models.js'];
+  // a version ends at a non-digit — a sentence's full stop too («rides 2.369.408.»; the reader's find: 11 such in the kb) — and a
+  // later MINOR of the same major is future as well (2.370.1 while package.json says 2.369.407)
+  const futureIn = (text) => [...String(text).matchAll(/(?<!\d|\d\.)(\d+)\.(\d+)\.(\d+)(?!\d|\.\d)/g)].filter((m) => +m[1] === cMaj && (+m[2] > cMin || (+m[2] === cMin && +m[3] > cPat))).map((m) => m[0]);
+  const hits = SITES109.flatMap((f) => read(f).split('\n').flatMap((l, i) => futureIn(l).map((v) => `${f}:${i + 1} ${v}`)));
+  ok(SITES109.length >= 15 && SITES109.every((f) => read(f).length > 0) && hits.length === 0, `§109 no file of ${SITES109.length} (the kb, CLAUDE.md, the heavy ⑩'s sites) names a ${cMaj}.${cMin}.N past package.json's ${CUR} in full form — write «.NNN»${hits.length ? ' — ' + hits.slice(0, 8).join(' · ') : ''}`);
+  const next = `${cMaj}.${cMin}.${cPat + 1}`;
+  ok(futureIn(`a line about ${next} (the train)`).join() === next && futureIn(`the cure rides ${next}.`).join() === next && futureIn(`and ${cMaj}.${cMin + 1}.1 next`).join() === `${cMaj}.${cMin + 1}.1`
+    && futureIn(`${CUR} and ${cMaj}.${cMin}.${cPat - 1}`).length === 0 && futureIn(`.${cPat + 1} · 1${next} · ${next}.1 · ${cMaj}.1.322`).length === 0,
+    `§109 NEG: ${next} in full form is named (at a sentence's end too), and a later minor; ${CUR}, an older release, a Claude Code build (${cMaj}.1.322), the «.${cPat + 1}» short form, a number inside a longer one are not`);
+});
+
 await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
