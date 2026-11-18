@@ -2583,9 +2583,9 @@ class TaskGroupManager {
   }
 
   list() {
-    return Object.values(this._state.tasks)
+    return this._withChildIndex(() => Object.values(this._state.tasks)
       .map((t) => this._view(t))
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
   }
 
   /** lane grants-unify: a group's outside visibility AS THE STORE HOLDS IT → `{externalVisibility: 'visible'|'messageable'|null,
@@ -2622,6 +2622,9 @@ class TaskGroupManager {
     return {
       ...t, plan: undefined, backlog: (t.backlog || []).map((b) => ({ ...b })), progress: [...(t.progress || [])], sessions: [...(t.sessions || [])],
       ...(Array.isArray(t.parents) ? { parents: [...t.parents] } : {}),   // lane lg-group-parents: a copy, never the live list
+      // lane lg-group-parents U5a: the lineage as the store reads it, DERIVED (never stored) — the window draws «继承自 X» and greys
+      // a parent pick that would close a cycle from these, so it never re-implements the walk
+      ancestors: this.ancestorsOf([t.id]), descendants: this._descendantsOf(t.id),
       ctx: rows.map((r) => ({ ...r, ...(r.tags ? { tags: [...r.tags] } : {}) })),
       ctxRes: res.map((x) => (x.ref ? { ref: true } : { abs: x.abs || null, kind: x.kind, via: x.via || null, ...(x.host ? { host: x.host } : {}) })),
       folders: TC.discoverFolders(rows, res), contextDir: TC.notesDir(rows, res),
@@ -2682,7 +2685,17 @@ class TaskGroupManager {
   /** The parents a group names that this store still holds (its own order). */
   parentsOf(id) { const t = this._has(id) ? this._state.tasks[id] : null; return t && Array.isArray(t.parents) ? t.parents.filter((p) => p !== id && this._has(p)) : []; }
   /** The groups that name `id` as a parent (direct children, creation order). */
-  childrenOf(id) { return Object.values(this._state.tasks).filter((t) => t && Array.isArray(t.parents) && t.parents.includes(id)).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map((t) => t.id); }
+  childrenOf(id) {
+    if (this._childIx) return this._childIx.get(id) || [];   // the U5a read, 2: a list() builds the index ONCE (else every step scanned every group)
+    return Object.values(this._state.tasks).filter((t) => t && Array.isArray(t.parents) && t.parents.includes(id)).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map((t) => t.id);
+  }
+  _withChildIndex(fn) {
+    if (this._childIx) return fn();
+    const ix = new Map();
+    for (const t of Object.values(this._state.tasks).sort((a, b) => ((a && a.createdAt) || 0) - ((b && b.createdAt) || 0))) for (const p of t && Array.isArray(t.parents) ? t.parents : []) { if (!ix.has(p)) ix.set(p, []); if (!ix.get(p).includes(t.id)) ix.get(p).push(t.id); }
+    this._childIx = ix;
+    try { return fn(); } finally { this._childIx = null; }
+  }
   /** Every ANCESTOR of the groups `ids` (breadth-first, nearest first; never one of `ids` themselves). An archived group gives
    *  nothing ITSELF but the road runs THROUGH it (the U3a read, MAJOR 4: a grandparent's «除了» must still cover a grandchild
    *  whose middle group was archived — rule ③ fails closed); a parent this store no longer holds is skipped; a cycle

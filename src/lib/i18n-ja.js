@@ -11775,6 +11775,22 @@ export default {
   "+ Reference another Task Group…": "＋ 別のタスクグループを参照…", // lane task-group-context
   "Takes the rows another group marked 「Other groups may reference it」 into this group's table (read-only here unless shared read-write)": "別のグループが「他のタスクグループが参照できる」にした行を、このグループの表に取り込みます（相手が書き込み可にしない限り読み取り専用）", // lane task-group-context
   "{n} shared rows": "参照できる行 {n}", // lane task-group-context
+  // lane lg-group-parents U5a (B-91a7): a Task Group's parents and what it inherits
+  "Parent groups": "親グループ",
+  "this group uses what each parent is granted, and is told the rows and rules each parent gives its child groups": "このグループは各親グループに与えられた権限を使え、親が子グループに渡す行とルールを受け取ります",
+  "No parent group": "親グループなし",
+  "archived — gives nothing itself (its parents still reach through it)": "アーカイブ済み——自身は何も渡しません（その親グループはこれを通じて引き継がれます）",
+  "Every other Task Group is already a parent": "ほかのタスクグループはすべて親グループです",
+  "Remove this parent": "この親グループを外す",
+  "+ Add a parent group…": "＋ 親グループを追加…",
+  "At most {n} parent groups": "親グループは最大 {n} 個",
+  "sits below this group — it cannot also be its parent": "このグループの下にあるため、親にはできません",
+  "No other Task Group yet": "ほかのタスクグループはまだありません",
+  "Standing rules inherited from parent groups (read-only here)": "親グループから継承した常駐指示（ここでは読み取り専用）",
+  "Inherited from {name}": "{name} から継承",
+  "Child groups see it": "子グループにも",
+  "Every child Task Group (and theirs) is told this row, read-only": "すべての子タスクグループ（その子も）にこの行が読み取り専用で伝わります",
+  "Rows inherited from parent groups (read-only here — change them in the parent)": "親グループから継承した行（ここでは読み取り専用——親で変更してください）",
   "No other Task Group to reference yet": "参照できる他のタスクグループはまだありません", // lane task-group-context
   "rows go in table order; one that does not fit steps down a level: contents → names + key files → names → note only": "表の順に入れます。入りきらない行は一段下げます：内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → 説明だけ", // lane task-group-context
   "What a new conversation receives": "新しい会話が受け取るもの", // lane task-group-context

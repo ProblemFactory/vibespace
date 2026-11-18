@@ -355,6 +355,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     chip('discover', t('Discover sessions'), tags.includes('discover'), { disabled: isFile || (isRootRow(x && x.abs) && !tags.includes('discover')), title: t('Conversations started in this folder (or below it) join this group') }).onclick = () => toggle('discover');
     chip('notes', t('Agents keep notes here'), tags.includes('notes'), { disabled: isFile || (kind === 'remote' && !tags.includes('notes')), title: t("This group's shared memory: agents write their notes here (one row); its .vibespace/TASK.md mirrors the group") }).onclick = () => toggle('notes');
     chip('readonly', t('Agents may not change it'), tags.includes('readonly')).onclick = () => toggle('readonly');
+    // lane lg-group-parents U5a: 含子组 — the row rides READ-ONLY to every child group (a child of a child too); drawn BEFORE the share
+    // chip so the share's Read-only / Read-write switch stays beside its own chip (the U5a read, 7)
+    const kids = chip('children', t('Child groups see it'), r.children === true, { title: t('Every child Task Group (and theirs) is told this row, read-only') });
+    kids.onclick = () => { const rows = rowsOf(); rows[i] = { ...rows[i], children: r.children !== true }; writeRows(rows); };
     const share = chip('share', t('Other groups may reference it'), !!r.share, { title: t('Another Task Group can take this row into its own Context table') });
     share.onclick = () => { const rows = rowsOf(); rows[i] = { ...rows[i], share: r.share ? null : 'ro' }; writeRows(rows); };
     if (r.share) {
@@ -502,6 +506,44 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     title.onchange = () => { if (title.value.trim() && title.value.trim() !== task.title) patch({ title: title.value.trim() }); };
     nameSec.appendChild(title);
 
+    // lane lg-group-parents U5a: 父组 — the groups this one inherits from (the owner's rule ①: several = the union). The store
+    // is the judge (a cycle is refused there by name); the list greys what it would refuse, from the view's derived lineage
+    const parSec = section(host, t('Parent groups'), t('this group uses what each parent is granted, and is told the rows and rules each parent gives its child groups'));
+    parSec.classList.add('task-parents');
+    const byId = new Map((sidebar._tasks || []).map((g) => [g.id, g]));
+    const parents = Array.isArray(task.parents) ? task.parents.filter((id) => byId.has(id)) : [];
+    // the U5a read, 4: an edit reads the list as the store last answered it (never the last paint), one write at a time
+    let parentsBusy = false;
+    const parentsNow = () => { const cur = (sidebar._tasks || []).find((g) => g.id === task.id) || task; return (Array.isArray(cur.parents) ? cur.parents : []).filter((id) => byId.has(id)); };
+    const setParents = async (next) => { if (parentsBusy) return; parentsBusy = true; parSec.classList.add('busy'); try { await patch({ parents: next }); } finally { parentsBusy = false; parSec.classList.remove('busy'); } };
+    const parList = document.createElement('div'); parList.className = 'task-parents-list';
+    if (!parents.length) parList.innerHTML = `<span class="task-detail-hint">${escHtml(t('No parent group'))}</span>`;
+    for (const pid of parents) {
+      const g = byId.get(pid);
+      const c = document.createElement('span'); c.className = 'task-parent-chip' + (g.archived ? ' archived' : '');
+      c.innerHTML = `<span class="task-parent-name">${escHtml(g.title || pid)}</span>${g.archived ? `<span class="task-detail-hint">${escHtml(t('archived — gives nothing itself (its parents still reach through it)'))}</span>` : ''}`;
+      const x = document.createElement('button'); x.className = 'task-detail-x task-parent-x'; x.textContent = '×'; x.title = t('Remove this parent');
+      x.onclick = () => setParents(parentsNow().filter((p) => p !== pid));
+      c.appendChild(x);
+      parList.appendChild(c);
+    }
+    parSec.appendChild(parList);
+    const addPar = document.createElement('button');
+    addPar.className = 'task-detail-link task-parent-add';
+    addPar.textContent = t('+ Add a parent group…');
+    addPar.onclick = (e) => {
+      const below = new Set(Array.isArray(task.descendants) ? task.descendants : []);
+      const others = (sidebar._tasks || []).filter((g) => g.id !== task.id && !parents.includes(g.id));
+      const full = parents.length >= 8;
+      const items = full ? [{ caption: t('At most {n} parent groups', { n: 8 }) }] : others.length ? others.map((g) => (below.has(g.id)
+        ? { label: g.title, off: t('sits below this group — it cannot also be its parent') }   // the U5a read, 1: a row that cannot work SAYS WHY (test-control-says-why)
+        : { label: g.title + (g.archived ? ` — ${t('archived — gives nothing itself (its parents still reach through it)')}` : ''), action: () => setParents([...parentsNow(), g.id]) }))
+        : [{ caption: (sidebar._tasks || []).length > 1 ? t('Every other Task Group is already a parent') : t('No other Task Group yet') }];
+      const rect = addPar.getBoundingClientRect();
+      showContextMenu(e.clientX || rect.left, e.clientY || rect.bottom, items);
+    };
+    parSec.appendChild(addPar);
+
     // 说明 / 常驻指令 — the ONE home of the group's rules
     const objSec = section(host, t('Description / standing instructions'), t("told word for word to every member conversation — the one home of this group's rules"));
     const obj = document.createElement('textarea');
@@ -513,6 +555,14 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // resolves with nothing) never releases them
     obj.onchange = () => { const v = obj.value; Promise.resolve(patch({ objective: v, ...(task.kind !== 'task' ? { kind: 'task' } : {}) })).then((d) => { if (d && d.task && d.task.objective === v && obj.value === v) markLanded(obj); }, () => { }); };
     objSec.appendChild(obj);
+    // lane lg-group-parents U5a: «继承自 X» — each ancestor's standing instructions, read-only here (nearest parent first)
+    const inhRules = (Array.isArray(task.ancestors) ? task.ancestors : []).map((id) => byId.get(id)).filter((g) => g && String(g.objective || '').trim());
+    if (inhRules.length) {
+      const box = document.createElement('div'); box.className = 'task-inherited task-inherited-rules';
+      box.innerHTML = `<div class="task-detail-hint">${escHtml(t('Standing rules inherited from parent groups (read-only here)'))}</div>`
+        + inhRules.map((g) => `<div class="task-inherited-item"><div class="task-inherited-from">${escHtml(t('Inherited from {name}', { name: g.title }))}</div><pre class="task-inherited-text">${escHtml(String(g.objective).trim())}</pre></div>`).join('');
+      objSec.appendChild(box);
+    }
 
     // the CONTEXT TABLE
     const ctxSec = section(host, t('Context table'), t("every row tells the agent its path and note; 「Tell the agent」 sets only how deep. A relative path resolves against the row above's folder, then the group's first folder, then home."));
@@ -576,6 +626,19 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       showContextMenu(e.clientX || rect.left, e.clientY || rect.bottom, items);
     };
     ctxSec.appendChild(refBtn);
+    // lane lg-group-parents U5a: the rows each ancestor gives its child groups (含子组), read-only here — «继承自 X»
+    // the U5a read, 8: each row shown where it points (the parent's resolved path), and once — the group's own rows and a nearer
+    // parent's win, as the injection tells them (src/task-groups.js _toldRows)
+    const seenAt = new Set((task.ctx || []).map((o, k) => ((task.ctxRes || [])[k] || {}).abs || (o && o.path)).filter(Boolean));
+    const inhRows = (Array.isArray(task.ancestors) ? task.ancestors : []).map((id) => byId.get(id)).filter(Boolean)
+      .map((g) => ({ g, rows: (g.ctx || []).map((o, k) => ({ o, at: ((g.ctxRes || [])[k] || {}).abs || (o && o.path) })).filter(({ o, at }) => o && !o.ref && o.children === true && !seenAt.has(at) && (seenAt.add(at), true)) }))
+      .filter((x) => x.rows.length);
+    if (inhRows.length) {
+      const box = document.createElement('div'); box.className = 'task-inherited task-inherited-rows';
+      box.innerHTML = `<div class="task-detail-hint">${escHtml(t('Rows inherited from parent groups (read-only here — change them in the parent)'))}</div>`
+        + inhRows.map(({ g, rows: rs }) => `<div class="task-inherited-item"><div class="task-inherited-from">${escHtml(t('Inherited from {name}', { name: g.title }))}</div>${rs.map(({ o, at }) => `<div class="task-inherited-row"><span class="ctx-path">${escHtml(at)}</span><span class="task-detail-hint">${escHtml(o.note || '')}</span></div>`).join('')}</div>`).join('');
+      ctxSec.appendChild(box);
+    }
     // the budget bar
     const budget = document.createElement('div');
     budget.className = 'ctx-budget';

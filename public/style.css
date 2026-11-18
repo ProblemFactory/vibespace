@@ -5046,6 +5046,17 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ctx-tags { flex-direction: row; flex-wrap: wrap; gap: 3px; }
 .ctx-tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; }
 .ctx-tag.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* lane lg-group-parents U5a: a group's parents (chips) and what it inherits (read-only, «继承自 X») */
+.task-parents-list { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.task-parent-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 4px 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
+.task-parent-chip.archived { opacity: 0.6; }
+.task-parent-x { padding: 0 4px; }
+.task-parents.busy { opacity: 0.6; pointer-events: none; }
+.task-inherited { margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 6px; }
+.task-inherited-from { font-size: 11px; color: var(--text-dim); }
+.task-inherited-text { margin: 2px 0 0; white-space: pre-wrap; font-size: 11px; color: var(--text); max-height: 160px; overflow: auto; }
+.task-inherited-row { display: flex; gap: 8px; align-items: baseline; font-size: 11px; min-width: 0; }
+.task-inherited-row .ctx-path { overflow-wrap: anywhere; }
 .ctx-tag:disabled { opacity: 0.35; cursor: default; }
 .ctx-tag[data-tag="share"].on, .ctx-tag-ref { border-style: dashed; }
 .ctx-share { margin-left: 2px; }

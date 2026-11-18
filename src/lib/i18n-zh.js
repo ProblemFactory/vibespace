@@ -11776,6 +11776,22 @@ export default {
   "+ Reference another Task Group…": "＋ 引用另一个任务组…", // lane task-group-context
   "Takes the rows another group marked 「Other groups may reference it」 into this group's table (read-only here unless shared read-write)": "把另一个任务组标了「其他任务组可引用」的行引用进本组的表（在这里只读，除非对方标了可写）", // lane task-group-context
   "{n} shared rows": "{n} 行可引用", // lane task-group-context
+  // lane lg-group-parents U5a (B-91a7): a Task Group's parents and what it inherits
+  "Parent groups": "父组",
+  "this group uses what each parent is granted, and is told the rows and rules each parent gives its child groups": "本组可以使用每个父组获得的授权，并收到父组给子组的行和规则",
+  "No parent group": "没有父组",
+  "archived — gives nothing itself (its parents still reach through it)": "已归档——自身不再给出任何东西（它的父组仍经由它传下来）",
+  "Every other Task Group is already a parent": "其他任务组都已经是父组",
+  "Remove this parent": "移除这个父组",
+  "+ Add a parent group…": "＋ 添加父组…",
+  "At most {n} parent groups": "最多 {n} 个父组",
+  "sits below this group — it cannot also be its parent": "它在本组之下——不能同时是本组的父组",
+  "No other Task Group yet": "还没有别的任务组",
+  "Standing rules inherited from parent groups (read-only here)": "从父组继承的常驻指令（此处只读）",
+  "Inherited from {name}": "继承自 {name}",
+  "Child groups see it": "含子组",
+  "Every child Task Group (and theirs) is told this row, read-only": "每个子任务组（以及它们的子组）都会收到这一行，只读",
+  "Rows inherited from parent groups (read-only here — change them in the parent)": "从父组继承的行（此处只读——请在父组里修改）",
   "No other Task Group to reference yet": "还没有别的任务组可以引用", // lane task-group-context
   "rows go in table order; one that does not fit steps down a level: contents → names + key files → names → note only": "按本表顺序装；装不下的退一档：内容 → 文件名 + 关键文件内容 → 文件名 → 只说明", // lane task-group-context
   "What a new conversation receives": "新对话会收到", // lane task-group-context

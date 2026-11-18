@@ -481,6 +481,14 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     s4.update(Bq.id, { parents: null });
     ok(s4.get(Bq.id).parents === undefined, 'read 10: parents:null clears (as the sibling fields read null)');
   }
+  // U5a: the window draws the lineage from the view — DERIVED there, never stored
+  {
+    const s6 = freshStore();
+    const A = s6.create({ title: 'A6' }), B6 = s6.create({ title: 'B6', parents: [A.id] }), C6 = s6.create({ title: 'C6', parents: [B6.id] });
+    ok(same(s6.view(C6.id).ancestors, [B6.id, A.id]) && same(s6.view(A.id).descendants, [B6.id, C6.id]) && s6.get(C6.id).ancestors === undefined && !('descendants' in s6.get(A.id)) && same(s6.list().find((g) => g.id === B6.id).ancestors, [A.id]), 'U5a: the view carries the lineage DERIVED (ancestors nearest first, every descendant) — the record never stores it');
+    const td = read('src/lib/task-detail.js');
+    ok(/const parSec = section\(host, t\('Parent groups'\)/.test(td) && /setParents\(\[\.\.\.parentsNow\(\), g\.id\]\)/.test(td) && /setParents\(parentsNow\(\)\.filter\(\(p\) => p !== pid\)\)/.test(td) && /await patch\(\{ parents: next \}\)/.test(td) && /const below = new Set\(Array\.isArray\(task\.descendants\) \? task\.descendants : \[\]\);/.test(td) && /off: t\('sits below this group — it cannot also be its parent'\)/.test(td) && !/disabled: true/.test(td) && /chip\('children', t\('Child groups see it'\)/.test(td) && /children: r\.children !== true/.test(td) && /task\.ancestors/.test(td), 'U5a: the Settings tab — the parents row writes through PATCH (the store judges), greys a group below this one from the view\'s descendants; each Context row\'s 含子组 chip; the inherited rules and rows drawn from the view\'s ancestors');
+  }
   // CONTROL: the writer without its cycle check writes the cycle
   const MZ = mutantCopies('task-groups-parents', ROOT);
   try {
