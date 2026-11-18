@@ -227,6 +227,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
       const at = records.indexOf(p);
       const w = await commit((rs) => rs.filter((r) => r !== p), (rs) => (rs.some((r) => r.id === id) ? rs : [...rs.slice(0, at), p, ...rs.slice(at)]));
       if (!w.ok) return w;
+      gen.delete(id);   // its key generation goes with it (the chain cure's read: the map never grows past the live records)
       let keyDropped = true;
       try { const v = vault(); if (v && v.state() !== 'not_set_up') keyDropped = !!(v.secretDrop(MP.keyEntryOf(id)) || {}).ok; } catch { keyDropped = false; }
       if (!keyDropped) log(`[providers] ${id}: its vault entry could not be dropped — the record is gone all the same`);

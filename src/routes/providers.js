@@ -103,7 +103,7 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
     // the key or the address changed while it ran: what it tested is no longer there — said as a refusal with its words, never «Works»
     if (r.changed) return res.status(409).json({ ok: false, code: 'changed', error: PT.REFUSAL_WORDS.changed });
     if (r.verdict !== 'cli-missing') changed('test', String(req.params.id));
-    res.json({ ok: true, harness: r.harness, verdict: r.verdict, words: PT.VERDICT_WORDS[r.verdict], detail: r.detail, at: r.at, kept: r.kept !== false });   // kept: false ⇒ the verdict was not written (the page says so)
+    res.json({ ok: true, harness: r.harness, verdict: r.verdict, words: PT.VERDICT_WORDS[r.verdict], detail: r.detail, at: r.at, kept: r.kept !== false });   // kept: false ⇒ the verdict was not written (the ANSWER says so — no page words it yet; a key changed mid-run is the 409 above)
   }));
   app.delete('/api/providers/:id', door(async (req, res) => {
     if (!person(req, res)) return;

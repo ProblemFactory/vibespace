@@ -518,7 +518,17 @@ const storeMutant = (pairs) => { let t = fs.readFileSync(SSRC, 'utf-8'); for (co
   await tst.rekey(x0.id, 'sk-provider-retest-key-31337');
   ok(!!tst.get(x0.id).tested.claude, 'CONTROL: a new key that keeps the old «tested» lets the wizard say «Works» for a key nobody tested ⇒ the leg goes RED');
   vault.secretDrop(M.keyEntryOf(x0.id)); fs.rmSync(tdir, { recursive: true, force: true });
+  const genBefore = pstore.generationOf(t0.id);
   await pstore.remove(t0.id);
+  ok(genBefore >= 2 && pstore.generationOf(t0.id) === 0, 'the key GENERATION counts each new key / address (2 here) and leaves with the record (the map never grows past the live records — the chain cure\'s read)', { genBefore });
+  const PSg = storeMutant([['      gen.delete(id);   // its key generation goes with it', '      // gen kept']]);
+  const gdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvkey-g-'));
+  const gst = PSg.create({ dataDir: gdir, catalogOf, vault: () => vault, log: () => {} });
+  const g0 = (await gst.add({ preset: 'other', key: KEY, baseUrl: 'https://llm.example.test/v1', model: 'm1', wire: 'anthropic-messages', label: 'Gen' })).provider;
+  await gst.rekey(g0.id, 'sk-provider-generation-key-5150');
+  await gst.remove(g0.id);
+  ok(gst.generationOf(g0.id) === 1, 'CONTROL: a store that keeps a removed record\'s generation keeps it for the process\'s life ⇒ the leg goes RED');
+  fs.rmSync(gdir, { recursive: true, force: true });
 }
 const VIu = require(path.join(ROOT, 'src/vault-inventory.js'));
 const vrow = VIu.secretRowOf(vault.secretNames().find((n) => n.name === M.keyEntryOf(pid)), { providerName: (id) => pstore.get(id).label });
