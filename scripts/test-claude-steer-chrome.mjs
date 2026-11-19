@@ -700,14 +700,21 @@ async function startMock({ postMs = 0 } = {}) {
       const lastText = last ? flat(last.content) : '';
       const main = Array.isArray(body?.tools) && body.tools.some((t) => t && t.name === 'Bash');
       const hasTool = !!last && Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_result');
-      if (main) reqs.push({ t: Date.now(), lastText, hasTool, all: S(msgs).match(/\bMARK-[A-Z0-9]+\b/g) || [] });
+      const entry = main ? { t: Date.now(), lastText, hasTool, all: S(msgs).match(/\bMARK-[A-Z0-9]+\b/g) || [], hungUpBeforeFirst: false } : null;
+      if (entry) reqs.push(entry);
       if (!/\/v1\/messages(\?|$)/.test(req.url) || req.method !== 'POST' || !body?.stream) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(S({ id: 'msg_mock', type: 'message', role: 'assistant', model: body?.model || 'mock', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }));
         return;
       }
       // ④ the model takes `postMs` to answer after a tool result — the window a person presses Stop in after the frame rode it
-      if (main && hasTool && postMs > 0) { let closed = false; res.on('close', () => { closed = true; }); await sleep(postMs); if (closed) return; }
+      if (main && hasTool && postMs > 0) { let closed = false; res.on('close', () => { closed = true; }); await sleep(postMs); if (closed) { if (entry) entry.hungUpBeforeFirst = true; return; } }
+      // KIND (c), MEASURED, never assumed (the coordinator's ruling 2026-11-19 22:56Z): the first event waits ONE tick, and a client
+      // whose connection closed before it is RECORDED — «reached the server, the client hung up before the first event»
+      let gone = false; const onGone = () => { gone = true; }; res.once('close', onGone);
+      await new Promise((r) => setImmediate(r));
+      res.off('close', onGone);
+      if (gone || res.destroyed || !res.socket || res.socket.destroyed) { if (entry) entry.hungUpBeforeFirst = true; return; }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       const ev = (type, data) => { try { res.write(`event: ${type}\ndata: ${S({ type, ...data })}\n\n`); } catch { } };
       ev('message_start', { message: { id: 'msg_mock_' + reqs.length, type: 'message', role: 'assistant', model: body.model || 'mock', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } });
@@ -821,6 +828,12 @@ process.stdout.write(JSON.stringify(mm.messages.filter(m=>m.role==='user').map(m
 // exactly the held frame's ONE follow-up did — and then the wrapper recorded the stop-late fact on its result and the page drew it
 // once. Anything else is red: a second leaked request, C before the settle, a leak that was not told, a fact told where nothing
 // leaked. Every run prints how many follow-ups leaked, by leg: a leak is never a silent green.
+// THE THIRD KIND (the coordinator's ruling 2026-11-19 22:56Z — measured, never assumed): (c) the follow-up's request reached the
+// SERVER and its client hung up BEFORE the model's first event. The CLI's own result then says no reply and no spend; the product
+// has no fact to tell, and telling «may be billed» on a guess is the pretending the law forbids. The leg calls a leak (c) ONLY when
+// the mock MEASURED it (startMock: the first event held one tick, the client's close seen before it); (c) is printed and counted
+// every run under its own name and is not red. A leak that is neither a told (b) nor a measured (c) stays RED. Whether the vendor
+// bills (c) is unmeasured (row B-28b1).
 const { createMessageManager: stopLawMM } = require(path.join(REPO, 'src/normalizers.js'));
 function lateOf(recs) { return recs.filter((x) => x.type === 'result' && x.webui_stop_late).length; }
 function shownOf(recs) {
@@ -830,10 +843,23 @@ function shownOf(recs) {
 }
 /** `leaked` = the carried marks of each request that reached the model after Stop and is not C's own. */
 function stopLaw(leaked, late, shown) {
-  if (!leaked.length) return late === 0 && shown === 0;
-  return leaked.length === 1 && leaked[0].includes('MARK-B') && !leaked[0].includes('MARK-C') && late === 1 && shown === 1;
+  if (!leaked.length) return late === 0 && shown === 0;   // (a)
+  if (leaked.length !== 1 || !leaked[0].carries.includes('MARK-B') || leaked[0].carries.includes('MARK-C')) return false;
+  return leaked[0].hungUp ? late === 0 && shown === 0 : late === 1 && shown === 1;   // (c) measured: nothing told · (b) told once
 }
-const leakedOf = (l) => (l.reqsAfterStop || []).filter((q) => !q.carries.includes('MARK-C')).map((q) => q.carries);
+const KIND_C = 'reached the server, the client hung up before the first event';
+const kindOf = (leaked) => (!leaked.length ? 'a' : leaked.length > 1 ? 'many' : leaked[0].hungUp ? 'c' : 'b');
+/** a request after Stop as the law reads it: what it carried, and whether the mock MEASURED its client hanging up before the first event */
+const asLeak = (q) => ({ carries: q.all || q.carries || [], hungUp: !!(q.hungUpBeforeFirst || q.hungUp) });
+const leakedOf = (l) => (l.reqsAfterStop || []).filter((q) => !q.carries.includes('MARK-C')).map(asLeak);
+// THE LAW's own red control (PURE): each kind a measured fact — and what stays red
+{
+  const told = { carries: ['MARK-A', 'MARK-B'], hungUp: false }, hung = { carries: ['MARK-A', 'MARK-B'], hungUp: true };
+  ok(stopLaw([], 0, 0) && stopLaw([told], 1, 1) && stopLaw([hung], 0, 0)
+      && !stopLaw([told], 0, 0) && !stopLaw([hung], 1, 1) && !stopLaw([told, told], 1, 1) && !stopLaw([hung, told], 1, 1) && !stopLaw([], 1, 1)
+      && !stopLaw([{ carries: ['MARK-B', 'MARK-C'], hungUp: false }], 1, 1) && kindOf([hung]) === 'c' && kindOf([told]) === 'b' && kindOf([]) === 'a',
+    'THE STOP LAW (B-28b1 + the 2026-11-19 ruling), PURE: (a) none · (b) the ONE follow-up reached the model, told once · (c) MEASURED — reached the server, the client hung up before the first event — told nothing; RED: an untold (b), a told (c), two leaks, a fact told where nothing leaked, C in a leak');
+}
 const cReqsOf = (l) => (l.reqsAfterStop || []).filter((q) => q.carries.includes('MARK-C'));
 async function realLateC(at) {
   const r = await realWrapper('late-' + at);
@@ -860,7 +886,7 @@ async function realLateC(at) {
     at, tC, delta: at, cHeld: r.queued('m-c'), cHanded: r.hand('handed').includes('m-c'), follows: r.follows(), drops: r.drops(),
     // the wrapper's own order of events: its settle line before C's «held» line (or C never held) = C came after the settle
     settledBeforeC: (() => { const lg = r.log(); const iS = lg.indexOf('stop settled'), iC = lg.indexOf('held a mid-turn frame'); return iS >= 0 && (iC < 0 || iS < iC); })(),
-    reqsAfterStop: after.map((q) => ({ beforeDrain: drainAt === null || q.t < drainAt, carries: q.all })),
+    reqsAfterStop: after.map((q) => ({ beforeDrain: drainAt === null || q.t < drainAt, carries: q.all, hungUp: !!q.hungUpBeforeFirst })),
     answeredC: r.recs.some((x) => x.type === 'assistant' && /MARK-C/.test(S(x.message?.content || []))),
     late: lateOf(r.recs), shown: shownOf(r.recs),
   };
@@ -894,7 +920,7 @@ else {
       await until(() => r.results() >= 2, 15000);
       await sleep(2500);
       const reqsAfterStop = r.mock.reqs.length - reqsAtStop;
-      const leaked = r.mock.reqs.slice(reqsAtStop).map((q) => q.all);   // B-28b1: before MARK-D, every one is a leaked follow-up
+      const leaked = r.mock.reqs.slice(reqsAtStop).map(asLeak);   // B-28b1: before MARK-D, every one is a leaked follow-up
       const late = lateOf(r.recs), shown = shownOf(r.recs);
       const follow = r.follows();
       const kept = r.drops().flatMap((d) => d.keptIds);
@@ -925,6 +951,8 @@ else {
   ok(lands.afterTool.length === 1 && /The user sent a new message while you were working:\s*MARK-B handed while the Bash runs/.test(lands.afterTool[0]) && lands.results === 1, '§A ① the REAL CLI took the stamped frame INTO THE RUNNING TURN: the request after the tool result carries «The user sent a new message while you were working: …» — one turn', lands);
   ok(S(lands.handed) === S(['m-b']) && S(lands.landed) === S(['m-b']), '§A ① …and the wrapper said handed → landed', lands);
   console.log(`    §A leaked follow-ups (B-28b1: the CLI read the second interrupt after its request left) — ② ${stops.leaked.length} · ③ stop ${leakedOf(rl0).length} · result ${leakedOf(rlRes).length} · settled ${leakedOf(rlSet).length} · δ20 ${leakedOf(rl20).length} · δ45 ${leakedOf(rl45).length}; told ${[stops, rl0, rlRes, rlSet, rl20, rl45].map((l) => l.late).join('/')}, shown ${[stops, rl0, rlRes, rlSet, rl20, rl45].map((l) => l.shown).join('/')}`);
+  { const K = [['②', stops.leaked], ['③ stop', leakedOf(rl0)], ['result', leakedOf(rlRes)], ['settled', leakedOf(rlSet)], ['δ20', leakedOf(rl20)], ['δ45', leakedOf(rl45)]];
+    console.log(`    §A the kind of each (a none · b told · c ${KIND_C}): ${K.map(([n, l]) => `${n} ${kindOf(l)}`).join(' · ')} — (c) ${KIND_C}: ${K.filter(([, l]) => kindOf(l) === 'c').length}`); }
   ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && stopLaw(stops.leaked, stops.late, stops.shown), '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — THE LAW (B-28b1): no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact was recorded and shown', stops);
   ok(S(stops.drop) === S([{ items: 0, kept: 1 }]), '§A ② …ONE queue_dropped that puts nothing back and counts the handed frame (the toast\'s «stays with the turn»)', stops);
   ok(Array.isArray(stops.nextCarries) && stops.nextCarries.includes('MARK-B') && stops.nextCarries.includes('MARK-D'), '§A ② …and it stayed in the conversation: the next message\'s request carries it too', stops);
@@ -956,7 +984,7 @@ else {
       await sleep(800);
       const lg = r.log();
       // B-28b1 (TELL, DO NOT PRETEND): nothing else is sent after Stop here — every request after it is a leaked follow-up
-      const leaked = r.mock.reqs.slice(reqsAtStop).map((q) => q.all);
+      const leaked = r.mock.reqs.slice(reqsAtStop).map(asLeak);
       const fres = r.recs.filter((x) => x.type === 'result' && x.__at >= tStop).pop() || null;
       const out = { reqsAfterStop: r.mock.reqs.length - reqsAtStop, leaked, late: lateOf(r.recs), shown: shownOf(r.recs),
         // the facts the wrapper judges a leak by (stopLateOf): the follow-up result's OWN usage and its answer — printed every run
@@ -992,9 +1020,9 @@ else {
       return { bubbles: restartReplay(r) };
     })(),
   ]);
-  console.log(`    §A ⑤ leaked follow-ups (B-28b1): ${hookStopReal.leaked.length} · told ${hookStopReal.late} · shown ${hookStopReal.shown} · the follow-up's result ${S(hookStopReal.followResult)}`);
+  console.log(`    §A ⑤ leaked follow-ups (B-28b1): ${hookStopReal.leaked.length} · kind ${kindOf(hookStopReal.leaked)}${kindOf(hookStopReal.leaked) === 'c' ? ` (${KIND_C})` : ''} · told ${hookStopReal.late} · shown ${hookStopReal.shown} · the follow-up's result ${S(hookStopReal.followResult)}`);
   ok(hookStopReal.follows === 1 && hookStopReal.waited && hookStopReal.clockLines === 0 && hookStopReal.hookAfterStop >= 1, '§A ⑤ the REAL CLI with the product\'s OWN prompt hook (~2.9 s before the follow-up\'s init): the window waited through it (no bound / backstop line), the hook ran after Stop, the follow-up\'s init was interrupted (7df30f96: its 2 s clock closed the window inside the hook and the follow-up was answered)', hookStopReal);
-  ok(stopLaw(hookStopReal.leaked, hookStopReal.late, hookStopReal.shown), '§A ⑤ …THE LAW (B-28b1), as ② and ③: no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact rides its result and is shown once', hookStopReal);
+  ok(stopLaw(hookStopReal.leaked, hookStopReal.late, hookStopReal.shown), '§A ⑤ …THE LAW (B-28b1), as ② and ③: no request reached the model after Stop, or the held frame\'s ONE follow-up did and the stop-late fact rides its result and is shown once, or it reached the server and its client hung up before the first event (MEASURED by the mock) and nothing is told', hookStopReal);
   const img = Array.isArray(copyReal.bubbles) ? copyReal.bubbles.filter((b) => /IMG-1/.test(b.text)) : [];
   ok(img.length === 1 && img[0].images === 1 && img[0].msgId === 'm-i', '§A ⑥ a 400 KB screenshot held mid-turn, after THE RESTART (the buffer merged with the CLI\'s JSONL, rebuilt): ONE bubble, WITH the image (7df30f96: one bubble, 0 images — its text-only copy hid the record)', copyReal);
   const ed = Array.isArray(editReal.bubbles) ? editReal.bubbles.filter((b) => /MARK-E/.test(b.text)) : [];
