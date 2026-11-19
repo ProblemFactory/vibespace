@@ -67,6 +67,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a workspace with sign-in, the welcome tour's first screen waits up to 3 seconds for the server, so it usually starts at three steps, not four.
 - In Diagnostics, a new kind of record from a Codex conversation is no longer counted as Claude Code's, and no longer counted twice.
 - An agent running many commands on a paired machine no longer slows the whole workspace: each command's record is written in the background.
+- The Helm chart no longer restarts an instance busy for a few minutes (a restart ended its conversations); it stops taking new requests until it answers again.
 - On slow storage, putting a browser engine's previous kernel back no longer leaves browser starts and downloads waiting forever; each answers within 30 seconds.
 - A browser engine that asks for -disable-sync with one dash is now treated like the two-dash form: it is left out, so the browser can still sign in to Google.
 - The live view of an idle agent browser that two conversations share no longer stays blank when you open it: it shows its own tab.
@@ -124,7 +125,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a profile with a proxy, a page’s calls (WebRTC) also go only through the proxy; a call that needs UDP does not connect.
 - A locked vault stops a proxied browser from starting; it never falls back to a direct connection.
 - A cloud browser’s profile does not take a proxy: that browser runs at its vendor, where the proxy cannot reach it.
-- The Helm chart no longer restarts an instance busy for a few minutes (a restart ended its conversations); it stops taking new requests until it answers again.
+- Website login form and login card: the two-step code field opens VibeSpace's own list of your vault's two-step codes, instead of the browser's suggestions.
+- A two-step code name that matches nothing in the vault is said under the field right away, not only when you save.
 
 ### Security
 - A cluster install can let only its ingress reach each user's VibeSpace (networkPolicy.ingress, off until tried on a test cluster).
