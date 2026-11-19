@@ -141,7 +141,7 @@ const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 // a judgment — the reap is retried by a later tick). Round 6: A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — whoever started it
 // (the boot, the sweep, a start), by every tick whatever its job's state, REAP_TRIES times; then said once and dropped
 const STOP_GRACE_MS = 10_000;
-const URL_GRACE_MS = 2 * 60 * 1000, URL_CHECK_TRIES = 3, URL_CHECK_EVERY_MS = 30_000, URL_LOOK_MS = 5000, URL_RELOOK_MS = 15_000, URL_ROUNDS = 3; // B-74f5: a URL change is judged after a restart's grace (the hub's, the job's own, the vault unlock's re-publish) by looks at both addresses (≤ 3, 30 s apart, 5 s each); «the old one failed» needs two looks 15 s apart; an inconclusive change is looked at again at the next publish read, ≤ 3 rounds
+const URL_GRACE_MS = 2 * 60 * 1000, URL_CHECK_TRIES = 3, URL_CHECK_EVERY_MS = 30_000, URL_LOOK_MS = 5000, URL_RELOOK_MS = 15_000, URL_ROUNDS = 3; // B-74f5: a URL change is judged after a restart's grace (the hub's, the job's own, the vault unlock's re-publish) by looks at both addresses (≤ 3, 30 s apart, 5 s each); «the old one failed» needs two looks 15 s apart; an inconclusive change is looked at again at the next publish read, ≤ 3 rounds, then dropped from the record
 const REAP_READ_MS = 2000;
 const REAP_TRIES = 12;
 // THE LADDER's last rung (round 7): a wrapper still there WEDGE_MS after its scope was killed is killed with its group
@@ -268,7 +268,7 @@ class JobManager {
       this._forYou(null, M.forYouCopy(null, 'engine-failed', { error: e.message }));
     }
   }
-  shutdown() { if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
+  shutdown() { for (const t of this._urlTimers || []) clearTimeout(t); this._urlTimers = new Set(); /* B-74f5 r3: the URL checks end with the engine */ if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
 
   _takeLock() {
     try {
@@ -2211,11 +2211,12 @@ class JobManager {
     const kept = next && next.ok && JN.keepsWebUrl(job.lastPublicUrl, next.url); // B-74f5: a web address read as tcp:// is not said as the address it has now
     const v = JN.noticeVerdict({ prev: job.publishDown || null, next: kept ? { ...next, url: job.lastPublicUrl } : next, url: job.lastPublicUrl || null, at: now() });
     if (v.record) job.publishDown = v.record; else delete job.publishDown;
-    // B-74f5 r2 — ONE WAKE A CHANGE: a recovery to ANOTHER address is said by that change's own check, once (JN.urlChangeWords)
-    const held = !!(v.notice && v.notice.kind === 'recovered' && next.ok && next.url && job.lastPublicUrl && next.url !== job.lastPublicUrl);
-    if (next.ok) this._adoptJobUrl(job, next.url || null, held ? { recovered: { since: v.notice.since || null } } : {});
+    // B-74f5 r3 (主开发 04:23Z, L1–L3): a «DOWN» is answered by its «back UP» AT ONCE, always; where the address moved the recovery
+    // names both (`named`) and the change's later check only confirms it in the journal; a misread (`kept`) never moves the words
+    const named = !!(v.notice && v.notice.kind === 'recovered' && !kept && next.ok && next.url && job.lastPublicUrl && next.url !== job.lastPublicUrl);
+    if (next.ok) this._adoptJobUrl(job, next.url || null, { named });
     else job.publishedUrl = null;
-    if (v.notice && !held) this._notifyOwner(job, { what: v.notice.what });
+    if (v.notice) this._notifyOwner(job, { what: v.notice.what });
     return { cause: v.record ? v.record.cause : null, attempts: v.record ? v.record.attempts : 0, notice: v.notice };
   }
   _isJobForward(job, rec) {
@@ -2280,9 +2281,9 @@ class JobManager {
   }
   /** The job's live URL + its last one (`lastPublicUrl` survives a stop). B-74f5: a URL different from the last one is SAID only once
    *  proven (`_checkUrlChange`); a web address read as tcp:// (the http probe misfired while the service or the relay came back)
-   *  stays the web one until then. r2: the pending pair is PERSISTED (`urlPending`) — a hub restart inside the grace checks the
-   *  change it stored again, never loses it; `recovered` = a «DOWN» was said: the recovery waits for this check and is said by it. */
-  _adoptJobUrl(job, url, { recovered = null } = {}) {
+   *  stays the web one until then. The pending pair is PERSISTED (`urlPending`) — a hub restart inside the grace checks the change it
+   *  stored again; `named` = a recovery already named both addresses: the check then only confirms (r3: nothing is ever held). */
+  _adoptJobUrl(job, url, { named = false } = {}) {
     const before = job.lastPublicUrl || null;
     if (!url) { job.publishedUrl = url; return; }
     const keep = JN.keepsWebUrl(before, url);
@@ -2290,46 +2291,54 @@ class JobManager {
     if (!keep) job.lastPublicUrl = url;
     const pend = job.urlPending || null;
     if (!before || before === url) {
-      if (pend && pend.to === url && pend.from !== url) { if (!job._urlCheck && (Number(pend.rounds) || 0) < URL_ROUNDS) this._checkUrlChange(job, pend.from, url, { recovered: pend.recovered || null, rounds: Number(pend.rounds) || 0 }); } // a hub restart inside the grace, or an inconclusive change looked at again
+      if (pend && pend.to === url && pend.from !== url) { if (!job._urlCheck && job._urlGaveUp !== `${pend.from} ${url}`) this._checkUrlChange(job, pend.from, url, { named: !!pend.named, rounds: Number(pend.rounds) || 0 }); } // a hub restart inside the grace, or an inconclusive change looked at again
       else if (pend || job._urlCheck) { job._urlCheck = null; delete job.urlPending; } // the web address came back: its tcp read is forgotten
       return;
     }
-    if (job._urlCheck && job._urlCheck.from === before && job._urlCheck.to === url) { if (recovered && !job._urlCheck.recovered) { job._urlCheck.recovered = recovered; if (job.urlPending) job.urlPending.recovered = recovered; } return; } // one check per change
+    if (job._urlCheck && job._urlCheck.from === before && job._urlCheck.to === url) { if (named && !job._urlCheck.named) { job._urlCheck.named = true; if (job.urlPending) job.urlPending.named = true; } return; } // one check per change
+    if (job._urlGaveUp === `${before} ${url}`) return; // looked at URL_ROUNDS times: dropped, the journal said why
     const same = pend && pend.from === before && pend.to === url;
-    if (same && (Number(pend.rounds) || 0) >= URL_ROUNDS) return; // looked at enough: the journal said why
-    this._checkUrlChange(job, before, url, { recovered: recovered || (same ? pend.recovered || null : null), rounds: same ? Number(pend.rounds) || 0 : 0 });
+    this._checkUrlChange(job, before, url, { named: named || !!(same && pend.named), rounds: same ? Number(pend.rounds) || 0 : 0 });
   }
   /** The start of the job's current run (ms) — a service's own restart opens the same grace a hub restart does (B-74f5 r2). */
   _runStartOf(job) { const r = (job.runs || [])[(job.runs || []).length - 1]; return (r && Number(r.startedAt)) || 0; }
   /** B-74f5: the looks at both addresses after the restart's grace — the hub's start, the job's own run start, or the vault unlock's
-   *  re-publish (`relayChanged`), + URL_GRACE_MS; JN.urlChangeVerdict says whether the change is proven, JN.urlChangeWords what is
-   *  said (one notice at most). r2: a proven look is CONFIRMED by a second look at the old address URL_RELOOK_MS later. A later
-   *  change, a teardown or the old address coming back supersedes the check. */
-  _checkUrlChange(job, from, to, { recovered = null, rounds = 0, tries = URL_CHECK_TRIES, confirm = false } = {}) {
-    const tok = job._urlCheck = { from, to, recovered };
-    job.urlPending = { from, to, rounds, ...(recovered ? { recovered } : {}) };
+   *  re-publish (`relayChanged`), + URL_GRACE_MS; JN.urlChangeVerdict says whether the change is proven, JN.urlChangeWords whether
+   *  it is said (a proven change the recovery already named is a journal line). A proven look is CONFIRMED by a second look at the
+   *  old address URL_RELOOK_MS later. A later change, a teardown, the old address coming back, the job's end or the engine's stop
+   *  ends the check, in silence. */
+  _checkUrlChange(job, from, to, { named = false, rounds = 0, tries = URL_CHECK_TRIES, confirm = false } = {}) {
+    const tok = job._urlCheck = { from, to, named };
+    job.urlPending = { from, to, rounds, ...(named ? { named: true } : {}) };
     const start = Math.max(this._bootAt || 0, this._relayAt || 0, this._runStartOf(job));
     const wait = confirm ? (this.d.urlRelookMs ?? URL_RELOOK_MS)
       : Math.max(0, start + (this.d.urlGraceMs ?? URL_GRACE_MS) - now()) + (tries < URL_CHECK_TRIES ? (this.d.urlCheckEveryMs ?? URL_CHECK_EVERY_MS) : 0);
+    const timers = this._urlTimers || (this._urlTimers = new Set());
     const t = setTimeout(async () => {
+      timers.delete(t);
       if (job._urlCheck !== tok || this.jobs.get(job.id) !== job) return;
+      if (!['up', 'starting'].includes(job.state)) { job._urlCheck = null; delete job.urlPending; return; } // r3: the job ended — nothing is said about a service no longer there
       let toOk = false, fromOk = true;
       try { [toOk, fromOk] = await Promise.all([this._urlAnswers(to), this._urlAnswers(from)]); } catch { toOk = false; fromOk = true; } // a look that threw proves nothing
       if (job._urlCheck !== tok) return;
       const v = JN.urlChangeVerdict({ from, to, toAnswers: toOk, fromAnswers: fromOk });
-      const next = { recovered: tok.recovered, rounds, tries };
+      const next = { named: tok.named, rounds, tries };
       if (v.say && !confirm) { this._checkUrlChange(job, from, to, { ...next, confirm: true }); return; } // «the old one failed» is seen twice
       if (v.again && tries > 1) { this._checkUrlChange(job, from, to, { ...next, tries: tries - 1 }); return; }
       job._urlCheck = null;
-      if (v.again && !tok.recovered) { job.urlPending = { from, to, rounds: rounds + 1 }; this._touch(job); this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why} (looked at again at the next publish read)`); return; }
+      if (v.again) {
+        if (rounds + 1 < URL_ROUNDS) { job.urlPending = { from, to, rounds: rounds + 1, ...(tok.named ? { named: true } : {}) }; this._touch(job); this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why} (looked at again at the next publish read)`); return; }
+        delete job.urlPending; job._urlGaveUp = `${from} ${to}`; this._touch(job); this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why} after ${URL_ROUNDS} rounds (dropped)`); return; // r3: an exhausted pair leaves the record
+      }
       delete job.urlPending;
       if (v.say && job.lastPublicUrl !== to) { job.lastPublicUrl = to; job.publishedUrl = to; } // a web address read as tcp://, now proven
       this._touch(job);
-      const words = JN.urlChangeWords({ from, to, verdict: v, recovered: tok.recovered });
-      if (!words) { this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.why}`); return; }
-      this.d.log(`[jobs] ${job.id} public URL ${v.say ? 'changed' : 'back up'}`);
+      const words = JN.urlChangeWords({ from, to, verdict: v, named: tok.named });
+      if (!words) { this.d.log(`[jobs] ${job.id}: a new public URL was not said — ${v.say ? 'confirmed: the recovery already named both addresses' : v.why}`); return; }
+      this.d.log(`[jobs] ${job.id} public URL changed`);
       this._notifyOwner(job, { what: words });
     }, wait);
+    timers.add(t);
     t.unref?.();
   }
   /** B-74f5: does a public address answer? tcp:// = a TCP connect; http(s):// = one GET / answered below 500 and not the relay's own

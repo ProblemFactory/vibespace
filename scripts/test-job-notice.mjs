@@ -242,7 +242,7 @@ try {
   // (i) RED CONTROL — a patched copy of src/jobs.js with the pre-fix per-attempt notice back: five failures ⇒ five notices
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
-  const AT = '    if (v.notice && !held) this._notifyOwner(job, { what: v.notice.what });'; // B-74f5 r2: a recovery to another address is held for its change's check
+  const AT = '    if (v.notice) this._notifyOwner(job, { what: v.notice.what });'; // B-74f5 r3: a «DOWN» is answered by its «back UP» at once, always
   ok(JS.split(AT).length === 2, 'the verdict\'s notice is the one notify of a publish outcome');
   const PRE = '    if (!next.ok && job.lastPublicUrl) this._notifyOwner(job, { what: `public URL ${job.lastPublicUrl} is DOWN — publish failed: ${(next.error && next.error.message) || next.error}` });'; // the pre-fix rule
   const JMpre = mutantCopies('job-notice', ROOT).load('src/jobs.js', JS.replace(AT, PRE), 'pre-fix').JobManager;
@@ -314,8 +314,8 @@ try {
     const JSb = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
     const { mutantCopies: mcB } = await import('./mutant-copy.mjs');
     const { anchored } = await import('./scratch.mjs');
-    const NOW_HEAD = "  _adoptJobUrl(job, url, { recovered = null } = {}) {\n    const before = job.lastPublicUrl || null;\n    if (!url) { job.publishedUrl = url; return; }\n    const keep = JN.keepsWebUrl(before, url);\n    job.publishedUrl = keep ? before : url;\n    if (!keep) job.lastPublicUrl = url;\n";
-    const BASE_HEAD = "  _adoptJobUrl(job, url, { recovered = null } = {}) {\n    const before = job.lastPublicUrl || null;\n    job.publishedUrl = url;\n    if (!url) return;\n    job.lastPublicUrl = url;\n    if (before && before !== url) { this.d.log(`[jobs] ${job.id} public URL changed`); this._notifyOwner(job, { what: `public URL CHANGED: ${before} → ${url} (the old link no longer works — share the new one)` }); return; }\n";   // stale-pins: kept — the base's adopt, written back by this RED control
+    const NOW_HEAD = "  _adoptJobUrl(job, url, { named = false } = {}) {\n    const before = job.lastPublicUrl || null;\n    if (!url) { job.publishedUrl = url; return; }\n    const keep = JN.keepsWebUrl(before, url);\n    job.publishedUrl = keep ? before : url;\n    if (!keep) job.lastPublicUrl = url;\n";
+    const BASE_HEAD = "  _adoptJobUrl(job, url, { named = false } = {}) {\n    const before = job.lastPublicUrl || null;\n    job.publishedUrl = url;\n    if (!url) return;\n    job.lastPublicUrl = url;\n    if (before && before !== url) { this.d.log(`[jobs] ${job.id} public URL changed`); this._notifyOwner(job, { what: `public URL CHANGED: ${before} → ${url} (the old link no longer works — share the new one)` }); return; }\n";   // stale-pins: kept — the base's adopt, written back by this RED control
     const JMb = mcB('job-notice-b74f5', ROOT).load('src/jobs.js', anchored(JSb, NOW_HEAD, BASE_HEAD, 'B-74f5 control: the base\'s adopt'), 'base-adopt').JobManager;
     answering.clear(); answering.add(URL0);
     const r = await scene(JMb, 'base');
@@ -336,23 +336,84 @@ try {
       const out = { atOnce, said: said.slice(), url: wj.publishedUrl, pending: wj.urlPending || null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const w1 = await wake(JobManager, 'wak');
-    ok(w1.atOnce.length === 1 && /is DOWN/.test(w1.atOnce[0]) && w1.said.length === 2 && /back UP at a NEW address/.test(w1.said[1]) && w1.said[1].includes(URL0) && w1.said[1].includes(URL1) && /down since/.test(w1.said[1]) && !w1.pending,
-      'B-74f5 r2 (a): a service said DOWN that comes back at ANOTHER address wakes its conversation ONCE — the recovery waits for the change\'s check and is said by it, after the grace («back UP at a NEW address: A → B …; it was down since …»)', JSON.stringify(w1));
-    const HOLD = "    const held = !!(v.notice && v.notice.kind === 'recovered' && next.ok && next.url && job.lastPublicUrl && next.url !== job.lastPublicUrl);";
-    const JMw = mcB('job-notice-b74f5-wake', ROOT).load('src/jobs.js', anchored(JSr, HOLD, "    const held = false;", 'B-74f5 r2 control: the recovery not held'), 'no-hold').JobManager;
+    ok(w1.atOnce.length === 2 && /is DOWN/.test(w1.atOnce[0]) && /back UP at/.test(w1.atOnce[1]) && w1.atOnce[1].includes(URL0) && w1.atOnce[1].includes(URL1) && /not checked yet/.test(w1.atOnce[1]) && w1.said.length === 2 && !w1.pending && lines.some((l) => /confirmed: the recovery already named both addresses/.test(l)),
+      'B-74f5 r3 (L1 / L2): a service said DOWN that comes back at ANOTHER address is told UP AT ONCE, both addresses named («not checked yet»); the later check only confirms it — a journal line, never a second wake', JSON.stringify(w1));
+    const NAMED = '      const words = JN.urlChangeWords({ from, to, verdict: v, named: tok.named });';
+    const JMw = mcB('job-notice-b74f5-wake', ROOT).load('src/jobs.js', anchored(JSr, NAMED, '      const words = JN.urlChangeWords({ from, to, verdict: v, named: false });', 'B-74f5 r3 control: the confirmation said again'), 'named-said').JobManager;
     const w0 = await wake(JMw, 'wa0');
-    ok(w0.said.length === 3 && /back UP at/.test(w0.said[1]) && /public URL CHANGED/.test(w0.said[2]), 'RED CONTROL (B-74f5 r2 (a)): a recovery not held is said at once AND the proven change after the grace — two wakes for one change', JSON.stringify(w0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    ok(w0.said.length === 3 && /back UP at/.test(w0.said[1]) && /public URL CHANGED/.test(w0.said[2]), 'RED CONTROL (B-74f5 r3 (L2)): a check that ignores what the recovery named says the move again — two wakes for one event', JSON.stringify(w0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    // (L1 / L3) THE MUST'S OWN SCENE (主开发 04:23Z): DOWN said; the relay comes back and the probe misreads the web address as tcp; one more
+    // publish read inside the grace reads it right — the person was told UP at once, at the web address, and nothing is lost after
+    const misread = async (JM, tag) => {
+      said.length = 0; lines.length = 0; answering.clear(); answering.add(URL0);
+      const E = mkU(JM, tag, { urlGraceMs: 80, urlCheckEveryMs: 20, urlRelookMs: 20 }), mj = jobU(tag); E.jobs.set(mj.id, mj);
+      relay.mode = 'unreachable'; await E._ensurePublish(mj);
+      relay.mode = 'tcp'; await E._ensurePublish(mj);
+      const atOnce = said.slice();
+      relay.mode = 'ok'; await E._ensurePublish(mj); // inside the grace: the keep-up restart's / the boot replay's read, right this time
+      await new Promise((res) => setTimeout(res, 250)); // past the grace (80 ms here) and its looks
+      const out = { atOnce, said: said.slice(), url: mj.publishedUrl, pending: mj.urlPending || null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
+    };
+    const m1 = await misread(JobManager, 'mis');
+    ok(m1.atOnce.length === 2 && /is DOWN/.test(m1.atOnce[0]) && /back UP/.test(m1.atOnce[1]) && m1.atOnce[1].includes(URL0) && !m1.atOnce[1].includes('tcp://') && m1.said.length === 2 && m1.url === URL0 && !m1.pending,
+      'B-74f5 r3 (L1 / L3): DOWN said, then a tcp MISREAD of the web address — «back UP» at the web address AT ONCE (the misread changes nothing it says), and a later right read loses nothing (the round-2 hole: the held «back UP» was dropped in silence)', JSON.stringify(m1));
+    const NOTIFY = '    if (v.notice) this._notifyOwner(job, { what: v.notice.what });';
+    const JMm = mcB('job-notice-b74f5-mis', ROOT).load('src/jobs.js', anchored(JSr, NOTIFY, "    if (v.notice && !(v.notice.kind === 'recovered' && next.url !== job.lastPublicUrl)) this._notifyOwner(job, { what: v.notice.what });", 'B-74f5 r3 control: the round-2 hold'), 'held').JobManager;
+    const m0 = await misread(JMm, 'mi0');
+    ok(m0.said.length === 1 && /is DOWN/.test(m0.said[0]), 'RED CONTROL (B-74f5 r3 (L1)): a recovery held behind the raw address\'s check is dropped when the right read clears it — told DOWN, never told UP', JSON.stringify(m0.said));
+    // (smalls) a check whose job ENDED says nothing; the engine's STOP ends its checks; an EXHAUSTED pending pair leaves the record
+    const ended = async (JM, tag) => {
+      said.length = 0; lines.length = 0; answering.clear(); answering.add(TCP0);
+      const E = mkU(JM, tag, { urlGraceMs: 80, urlRelookMs: 20 }), ej = jobU(tag); E.jobs.set(ej.id, ej);
+      relay.mode = 'tcp'; await E._ensurePublish(ej); ej.state = 'exited';
+      await new Promise((res) => setTimeout(res, 250));
+      const out = { said: said.slice(), pending: ej.urlPending || null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
+    };
+    const e1 = await ended(JobManager, 'end');
+    ok(e1.said.length === 0 && !e1.pending, 'B-74f5 r3 (small): a change check whose job has ENDED says nothing about a service no longer there, and its pending pair leaves the record', JSON.stringify(e1));
+    const ENDLINE = "      if (!['up', 'starting'].includes(job.state)) { job._urlCheck = null; delete job.urlPending; return; } // r3: the job ended — nothing is said about a service no longer there";
+    const e0 = await ended(mcB('job-notice-b74f5-end', ROOT).load('src/jobs.js', anchored(JSr, ENDLINE, '', 'B-74f5 r3 control: no job-ended line'), 'no-ended').JobManager, 'en0');
+    ok(e0.said.length === 1 && /public URL CHANGED/.test(e0.said[0]), 'RED CONTROL (B-74f5 r3 (small)): without the job-ended line the check speaks about a service that exited', JSON.stringify(e0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
+    const stopped = async (JM, tag) => {
+      said.length = 0; lines.length = 0; answering.clear(); answering.add(TCP0);
+      const E = mkU(JM, tag, { urlGraceMs: 100, urlRelookMs: 20 }), sj = jobU(tag); E.jobs.set(sj.id, sj);
+      relay.mode = 'tcp'; await E._ensurePublish(sj); stopEngine(E); cur = null; relay.mode = 'ok';
+      await new Promise((res) => setTimeout(res, 300));
+      return { said: said.slice() };
+    };
+    const p1 = await stopped(JobManager, 'stp');
+    ok(p1.said.length === 0, 'B-74f5 r3 (small): the engine\'s stop clears its URL checks — nothing is said by a stopped engine', JSON.stringify(p1));
+    const STOPCLR = '  shutdown() { for (const t of this._urlTimers || []) clearTimeout(t); this._urlTimers = new Set(); /* B-74f5 r3: the URL checks end with the engine */ ';
+    const p0 = await stopped(mcB('job-notice-b74f5-stp', ROOT).load('src/jobs.js', anchored(JSr, STOPCLR, '  shutdown() { ', 'B-74f5 r3 control: no timers cleared at the stop'), 'no-stop-clear').JobManager, 'st0');
+    ok(p0.said.length === 1, 'RED CONTROL (B-74f5 r3 (small)): a stop that leaves the URL timers lets a stopped engine speak', JSON.stringify(p0.said));
+    const exhaust = async (JM, tag) => {
+      said.length = 0; lines.length = 0; answering.clear(); // nothing answers: every round is inconclusive
+      const E = mkU(JM, tag, { urlGraceMs: 60, urlCheckEveryMs: 20 }), xj = jobU(tag); E.jobs.set(xj.id, xj);
+      const rounds = [];
+      for (let k = 0; k < 4; k++) { // each round: one publish read, then its line (the fourth: a NEGATIVE look — no round starts)
+        const n0 = lines.length; relay.mode = 'tcp'; await E._ensurePublish(xj);
+        const t0 = Date.now(); while (!lines.slice(n0).some((l) => l.includes(xj.id) && /was not said/.test(l)) && Date.now() - t0 < (k < 3 ? 1500 : 250)) await new Promise((res) => setTimeout(res, 10));
+        rounds.push({ pending: xj.urlPending ? xj.urlPending.rounds : null, newLine: lines.slice(n0).find((l) => l.includes(xj.id)) || null });
+      }
+      const out = { rounds, said: said.slice() }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
+    };
+    const x1 = await exhaust(JobManager, 'exh');
+    ok(x1.said.length === 0 && x1.rounds[2].pending === null && /after 3 rounds \(dropped\)/.test(x1.rounds[2].newLine || '') && x1.rounds[3].pending === null && x1.rounds[3].newLine === null,
+      'B-74f5 r3 (small): an inconclusive change is looked at again at the next publish reads, three rounds — then its pending pair LEAVES the record and no fourth round starts', JSON.stringify(x1.rounds));
+    const ROUNDLINE = '        if (rounds + 1 < URL_ROUNDS) {';
+    const x0 = await exhaust(mcB('job-notice-b74f5-exh', ROOT).load('src/jobs.js', anchored(JSr, ROUNDLINE, '        if (true) {', 'B-74f5 r3 control: never dropped'), 'never-dropped').JobManager, 'ex0');
+    ok(x0.rounds[2].pending !== null && x0.rounds[3].pending !== null, 'RED CONTROL (B-74f5 r3 (small)): a pair never dropped stays in the record round after round', JSON.stringify(x0.rounds.map((r) => r.pending)));
     // (b1) THE JOB'S OWN RESTART opens the grace: the hub up for 10 minutes, the service's run started just now, its port read as tcp
     const own = async (JM, tag) => {
       said.length = 0; lines.length = 0; answering.clear(); answering.add(TCP0); // a real move — the only thing held back is WHEN
-      const E = mkU(JM, tag, { urlGraceMs: 2000 }); E._bootAt = Date.now() - 600_000;
+      const E = mkU(JM, tag, { urlGraceMs: 1000 }); E._bootAt = Date.now() - 600_000;
       const oj = jobU(tag, { runs: [{ startedAt: Date.now(), trigger: 'restart' }] }); E.jobs.set(oj.id, oj);
       relay.mode = 'tcp'; await E._ensurePublish(oj);
-      await new Promise((res) => setTimeout(res, 500)); // a NEGATIVE look: inside the job's own grace nothing may be said
+      await new Promise((res) => setTimeout(res, 300)); // a NEGATIVE look: inside the job's own grace (1 s) nothing may be said
       const out = { said: said.slice(), url: oj.publishedUrl }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const o1 = await own(JobManager, 'own');
-    ok(o1.said.length === 0 && o1.url === URL0, 'B-74f5 r2 (b): a service\'s OWN restart (its run 0 s old, the hub 10 min up) opens the grace too — nothing said inside it, the https address kept', JSON.stringify(o1));
+    ok(o1.said.length === 0 && o1.url === URL0, 'B-74f5 r2 (b): a service\'s OWN restart (its run 0 s old, the hub 10 min up) opens the grace too — nothing said inside it (a 300 ms look into a 1 s grace), the https address kept', JSON.stringify(o1));
     const START = '    const start = Math.max(this._bootAt || 0, this._relayAt || 0, this._runStartOf(job));';
     const JMo = mcB('job-notice-b74f5-own', ROOT).load('src/jobs.js', anchored(JSr, START, '    const start = Math.max(this._bootAt || 0, this._relayAt || 0);', 'B-74f5 r2 control: no grace from the job\'s start'), 'no-own-grace').JobManager;
     const o0 = await own(JMo, 'ow0');
@@ -366,13 +427,13 @@ try {
       const out = { said: said.slice(), url: tj.publishedUrl, line: lines.find((l) => l.includes(tj.id) && /not said|changed/.test(l)) || null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const t1 = await twice(JobManager, 'two');
-    ok(t1.said.length === 0 && t1.url === URL0 && /the old address still answers/.test(t1.line || ''), 'B-74f5 r2 (b): one missed look at the old address is not «failed» — the second look 15 s later (40 ms here) finds it answering: nothing said, the https address kept', JSON.stringify(t1));
+    ok(t1.said.length === 0 && t1.url === URL0 && /both addresses answer/.test(t1.line || ''), 'B-74f5 r2 (b): one missed look at the old address is not «failed» — the second look 15 s later (40 ms here) finds it answering (the tcp one answers too: «both addresses answer»): nothing said, the https address kept', JSON.stringify(t1));
     const CONFIRM = '      if (v.say && !confirm) { this._checkUrlChange(job, from, to, { ...next, confirm: true }); return; } // «the old one failed» is seen twice';
     const JMt = mcB('job-notice-b74f5-two', ROOT).load('src/jobs.js', anchored(JSr, CONFIRM, '', 'B-74f5 r2 control: one look'), 'one-look').JobManager;
     const t0 = await twice(JMt, 'tw0');
     ok(t0.said.length === 1 && /public URL CHANGED/.test(t0.said[0]), 'RED CONTROL (B-74f5 r2 (b)): one look decides «failed» — the address that answered a moment later is said to be gone', JSON.stringify(t0.said));   // stale-pins: kept — the notice's words at run time (src/job-notice.js urlChangeWords now)
     // (should) A HUB RESTART INSIDE THE GRACE: the pending pair is on disk — the next engine checks the change and says it once
-    const restart = async (JM, tag) => {
+    const restart = async (JM, tag, { lookMs = 3000 } = {}) => { // (lookMs: the control's NEGATIVE look — its engine never writes the line)
       said.length = 0; lines.length = 0; answering.clear(); answering.add(URL1);
       const d = path.join(dir, 'b74f5r2-' + tag);
       const E1 = mk(JM, d, pf, { urlGraceMs: 60_000, urlCheckEveryMs: 40, urlRelookMs: 40, urlAnswers: async (u) => answering.has(u), log: (...a) => lines.push(a.join(' ')) }); cur = E1;
@@ -380,7 +441,7 @@ try {
       relay.mode = 'moved'; await E1._ensurePublish(rj); stopEngine(E1); rj._urlCheck = null; // (the first engine's pending look ends with it)
       const E2 = mk(JM, d, pf, { urlGraceMs: 0, urlCheckEveryMs: 40, urlRelookMs: 40, urlAnswers: async (u) => answering.has(u), log: (...a) => lines.push(a.join(' ')) }); cur = E2;
       const g = E2.jobs.get(rj.id); const onDisk = g ? { last: g.lastPublicUrl, pending: g.urlPending || null } : null;
-      if (g) { g.state = 'up'; await E2._ensurePublish(g); await settle(E2, rj.id); }
+      if (g) { g.state = 'up'; await E2._ensurePublish(g); await settle(E2, rj.id, undefined, lookMs); }
       const out = { onDisk, said: said.slice() }; stopEngine(E2); cur = null; relay.mode = 'ok'; return out;
     };
     const s1 = await restart(JobManager, 'rst');
@@ -388,7 +449,7 @@ try {
       'B-74f5 r2 (should): a hub restart inside the grace keeps the pending change on disk (urlPending) — the next engine checks it and says it once', JSON.stringify(s1));
     const PEND = '      if (pend && pend.to === url && pend.from !== url) {';
     const JMs = mcB('job-notice-b74f5-rst', ROOT).load('src/jobs.js', anchored(JSr, PEND, '      if (false) {', 'B-74f5 r2 control: the pending pair never read again'), 'no-pending').JobManager;
-    const s0 = await restart(JMs, 'rs0');
+    const s0 = await restart(JMs, 'rs0', { lookMs: 300 });
     ok(s0.said.length === 0, 'RED CONTROL (B-74f5 r2 (should)): an engine that never reads the pending pair loses the true change across the restart (nothing said)', JSON.stringify(s0.said));
   }
 

@@ -69,10 +69,10 @@ function noticeVerdict({ prev = null, next, url = null, at = 0 } = {}) {
   if (next && next.ok) {
     if (!p || !p.said) return { record: null, notice: null };   // nothing was said ⇒ neither is the recovery
     const to = next.url || null, since = when(p.downAt || p.sinceAt);
-    const what = to && url && to !== url   // B-74f5: never «the old link no longer works» here — the proven check says a change
-      ? `public URL is back UP at ${to} (it was published at ${url}); it was down since ${since}`
+    const what = to && url && to !== url   // B-74f5 r3: said AT ONCE, both addresses named; the later check only confirms (a journal line)
+      ? `public URL is back UP at ${to} (it was published at ${url} — not checked yet whether that link still works); it was down since ${since}`
       : `public URL ${to || url} is back UP — published again (down since ${since})`;
-    return { record: null, notice: { kind: 'recovered', cause: p.cause, what, since } };   // `since`: the change check's one notice says it (B-74f5 r2)
+    return { record: null, notice: { kind: 'recovered', cause: p.cause, what } };
   }
   const n = next || {};
   const cause = typeof n.cause === 'string' && n.cause ? n.cause : causeOf(n.error);
@@ -104,19 +104,12 @@ function urlChangeVerdict({ from = null, to = null, toAnswers = false, fromAnswe
 }
 
 /**
- * B-74f5 r2 — ONE WAKE A CHANGE: the words of the check's end (null = nothing said). `recovered` = { since } when a «DOWN» was said
- * and the relay published again at another address: the recovery waited for this check and is said HERE, once — never a «back
- * UP» and then a «CHANGED» (two turns nobody typed). Without a recovery only a proven change is said.
+ * B-74f5 r3 — the words of a change check's end, or null: only a PROVEN change is said, and not when the recovery already named
+ * both addresses (`named`: it said «back UP at B (it was published at A — not checked yet …)»; the check then only confirms, in the
+ * journal). One wake a real event: a «DOWN» is answered by its «back UP» at once, never held behind a check.
  */
-function urlChangeWords({ from, to, verdict, recovered = null } = {}) {
-  const down = recovered && recovered.since ? `; it was down since ${recovered.since}` : '';
-  if (verdict && verdict.say) return recovered
-    ? `public URL is back UP at a NEW address: ${from} → ${to} (the old link no longer works — share the new one)${down}`
-    : `public URL CHANGED: ${from} → ${to} (the old link no longer works — share the new one)`;
-  if (!recovered) return null;
-  if (verdict && verdict.again) return `public URL is published again (the relay gives ${to}; it was ${from}) — neither address answered a check yet${down}`;
-  const also = verdict && verdict.toAnswers && !keepsWebUrl(from, to) ? ` (${to} answers too)` : '';
-  return `public URL ${from} is back UP — published again${also}${down}`;
+function urlChangeWords({ from, to, verdict, named = false } = {}) {
+  return verdict && verdict.say && !named ? `public URL CHANGED: ${from} → ${to} (the old link no longer works — share the new one)` : null;
 }
 
 module.exports = { causeOf, whyOf, noticeVerdict, keepsWebUrl, urlChangeVerdict, urlChangeWords, CLASSES, VAULT_WAIT, RELAY_WAIT, SAID_PER_JOB };
