@@ -32,7 +32,7 @@
 //       waits for a passkey ⇒ HIS window shows the banner a conversation's live view shows; a real click on its Cancel ends
 //       HIS page's request (the page sees AbortError) and the banner goes.
 //   (g) B-b56d (the owner's ruling B, 2026-11-18): a profile ONLY THE PERSON browses (their press launched it — the watch is theirs) and a
-//       stand-in site on an example name (the host rule maps *.example.test to the loopback — never a real site) that asks for
+//       stand-in site on the LOOPBACK (two ports: two origins for Chrome's Basic cache — no name mapping, never a real site) that asks for
 //       an HTTP sign-in ⇒ VibeSpace's form in THE PERSON'S window, naming who asks (its realm drawn as text); their Sign in commits the
 //       page (the site saw their answer), their Cancel commits the site's own 401 body; a page with no challenge loses no request
 //       while the hook is armed (every one reaches the site once); the typed password is in no journal line and no data file;
@@ -137,8 +137,7 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.c
 fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(INST, 'node_modules'));
 // the agent's browser: the machine's own Chrome — agent-browser falls back to it with an empty scratch HOME (how U1 / U3
 // were measured); nothing of ~/.agent-browser is read (no download, no profile, no socket)
-// B-b56d (g): + the host rule that maps the stand-in site's example name to the loopback (never a real site is asked)
-fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-gpu,--disable-gpu-shader-disk-cache,--host-resolver-rules=MAP *.example.test 127.0.0.1' }));
+fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-gpu,--disable-gpu-shader-disk-cache' }));
 const SID = crypto.randomUUID();
 const hook = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID, hook_name: 'SessionStart' });
 const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: CWD, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
@@ -177,6 +176,8 @@ const col = http.createServer((req, res) => {
   res.statusCode = 404; res.end();
 });
 const CP = await freePort(); await new Promise((r) => col.listen(CP, '127.0.0.1', r));
+// B-b56d cure 3: a SECOND loopback port with the same handler — Cancel's own origin (Chrome's Basic cache is per origin); no name mapping
+const col2 = http.createServer((req, res) => col.emit('request', req, res)); const CP2 = await freePort(); await new Promise((r) => col2.listen(CP2, '127.0.0.1', r));
 const innerUrl = (n) => `http://127.0.0.1:${CP}/q?n=${encodeURIComponent(n)}`;
 const innerUntil = (n, pred, ms = 6000) => until(() => { const r = reports.get(n); return r && pred(r) ? r : null; }, ms, 40);
 const PORT = await freePort();
@@ -504,14 +505,27 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
         await A.clickAt(p.x, p.y); return true;
       };
       const typeA = async (url) => { await A.h('const i = L.el().querySelector(".browser-live-address-input"); if (!i) return false; i.focus(); i.select(); return true;'); await A.call('Input.insertText', { text: url }); await A.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); };
-      const SITE = `http://signin.example.test:${CP}`;
+      const SITE = `http://127.0.0.1:${CP}`, CANCEL = `http://127.0.0.1:${CP2}`; // B-b56d cure 3: the loopback, two origins (the box run 691f34c0b reached no mapped name)
+      // B-b56d cure 3: THE LEG PLACES ITSELF — a page that never reports is read where it stands: the «alone» tabs as Chrome itself
+      // lists them (its own DevTools port: an error page, or the load still pending), and the hub's journal lines naming the profile
+      const placeAlone = async (why) => {
+        try {
+          const hk2 = await api('GET', '/api/browser/housekeeping'); const d2 = ((hk2.json && hk2.json.profiles) || []).find((r) => r.id === PID2)?.dir || null;
+          let port = null; try { port = d2 ? Number(fs.readFileSync(path.join(d2, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null : null; } catch { port = null; }
+          let tabs = null; try { tabs = port ? (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).filter((t) => t.type === 'page').map((t) => ({ url: t.url, title: t.title })) : null; } catch { tabs = null; }
+          console.log(`    PLACE (${why}): the «alone» tabs as Chrome itself lists them (port ${port}): ${JSON.stringify(tabs)}`);
+          for (const l of journal.split('\n').filter((x) => x.includes(String(PID2))).slice(-15)) console.log(`    PLACE journal: ${l.slice(0, 300)}`);
+        } catch (e) { console.log(`    PLACE (${why}): not read — ${e && e.message}`); }
+      };
       // its read (M1): the page under the form counts every key it is sent — the person types into the FORM, never into the page
       await typeA(`${SITE}/keys?n=k1`);
       const k1 = await innerUntil('k1', () => true, 20000);
+      if (!k1) await placeAlone('the key-counting page never reported');
       const formNow = 'const b = L.el().querySelector(".browser-live-dialog"); return b && b.style.display !== "none" && b.querySelector(".browser-live-prompt-user") ? { text: b.textContent, bold: !!b.querySelector("b"), dialog: !!b.querySelector(".browser-live-prompt-pass") } : null;';
       await typeA(`${SITE}/auth?n=sign1`);
       const bar1 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
-      ok(bar1 && /The page asks you to sign in/.test(bar1.text) && bar1.text.includes(`signin.example.test:${CP}`) && bar1.text.includes('Lane <b>Realm</b>') && !bar1.bold && bar1.dialog,
+      if (!bar1) await placeAlone('no sign-in form came');
+      ok(bar1 && /The page asks you to sign in/.test(bar1.text) && bar1.text.includes(`127.0.0.1:${CP}`) && bar1.text.includes('Lane <b>Realm</b>') && !bar1.bold && bar1.dialog,
         `the site asks ⇒ VibeSpace's sign-in form in THE PERSON'S window, naming who asks — the host and the realm, the realm drawn as TEXT ("${String(bar1 && bar1.text).slice(0, 120)}")`, JSON.stringify(bar1));
       // a REAL click on each box and real keys (Input.dispatchKeyEvent into the app page), one by one
       const clickedU = await pressSel('.browser-live-prompt-user'); for (const ch of 'ann') await A.key(ch);
@@ -531,8 +545,8 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
       await typeA(`${SITE}/plain?n=plain1`);
       const plain = await innerUntil('plain1', (r) => r.loaded === true, 30000);
       ok(plain && plain.imgs === 12 && hits.get('plain1') === 13, `law 6: a page with no challenge, the sign-in hook armed on this tab (the form just came through it) — the page and its 12 images each reach the site ONCE and the page loads (${hits.get('plain1')} requests)`, JSON.stringify({ plain, hits: hits.get('plain1') }));
-      // Cancel on ANOTHER host (its read, M2: Chrome sends the answer it just used to the same site by itself — no challenge there)
-      await typeA(`http://cancel.example.test:${CP}/auth?n=sign2`);
+      // Cancel on ANOTHER ORIGIN (its read, M2: Chrome sends the answer it just used to the same origin by itself — no challenge there): the second loopback port
+      await typeA(`${CANCEL}/auth?n=sign2`);
       const bar2 = await until(() => A.h(formNow).catch(() => null), 30000, 200);
       ok(!!bar2 && await pressSel('.browser-live-prompt-cancel'), 'the next sign-in: the form again, and a real click on its Cancel');
       ok(pressedAt.length === 4 && pressedAt.every((x) => x.ok), `the close's rule (c): each of the ${pressedAt.length} raw presses found its own element on top at its point first (${pressedAt.map((x) => x.at).join(' · ')})`, JSON.stringify(pressedAt));
@@ -589,5 +603,5 @@ console.log('— (g) B-b56d: a profile only the person browses; a stand-in site 
   try { A.close(); } catch { }
 }
 try { await api('POST', `/api/browser/browse/${HK}/close`); } catch { }
-try { wsMain.close(); } catch { } try { bws.close(); } catch { } outer.close(); col.close();
+try { wsMain.close(); } catch { } try { bws.close(); } catch { } outer.close(); col.close(); col2.close();
 await done();
