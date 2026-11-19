@@ -766,7 +766,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const en = await endScene({ JobManager }, 'jobs-triage-reread-ended');
   ok(en.atBoot === 0 && en.state === 'done' && en.ended === 'jb-f2760f01' && en.told, 'B-f276 cure: a job that ENDED while the store was unread is finalized when the read answers (the boot\'s adoption, late) — its end is told', en);
   // H. A READ AGAIN THAT HANGS (cure r1, the brief's own law): said once, the tries go on, one read in flight; when it ends the next loads
-  const hangScene = async (Mod, name) => {
+  const hangScene = async (Mod, name, { waitBack = true } = {}) => {
     const d = mkDir(name), F = path.join(d, 'jobs.json'), hb = JSON.stringify([rec('jb-f2760h01')]);
     plant(F, hb, 'folder');
     const lh = [];
@@ -775,11 +775,15 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     const prf = fs.promises.readFile; let reads = 0, release = null;
     fs.promises.readFile = function (f, ...a) { if (String(f) === F) { reads++; return new Promise((res, rej) => { release = () => rej(Object.assign(new Error('EIO'), { code: 'EIO' })); }); } return prf.call(this, f, ...a); };
     let triesAt = 0;
-    try { await until(() => lh.some((l) => /a read again did not answer in 0 s/.test(l)) && J._unreadTries.store >= 4, 3000); triesAt = J._unreadTries.store; }
+    // B-f3e8: waited for by the DECISIVE fact, never a 3 s bound a control spends whole: the slow read is said AND either the tries
+    // went on (four) or they STOPPED for good — the read in flight, said, and no next try armed: nothing can arm one until the hung
+    // read answers (the engine re-arms inside its timer's own callback, so a live engine never shows that state between turns)
+    const stoppedForGood = () => !J._unreadT.store && reads === 1;
+    try { await until(() => lh.some((l) => /a read again did not answer in 0 s/.test(l)) && (J._unreadTries.store >= 4 || stoppedForGood()), 3000); triesAt = J._unreadTries.store; }
     finally { fs.promises.readFile = prf; }
     const armed = !!J._unreadT.store, inFlight = reads;
     if (release) release();   // the hung read ends (an error): the next try reads the file
-    const back = await until(() => !J._unread.store && J.jobs.has('jb-f2760h01'), 3000);
+    const back = waitBack ? await until(() => !J._unread.store && J.jobs.has('jb-f2760h01'), 3000) : null;   // (the control judges only the tries: never waited)
     const out = { said: lh.filter((l) => /did not answer in/.test(l)).length, triesAt, armed, inFlight, back };
     if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
   };
@@ -908,7 +912,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   const JP = MJ.load('src/jobs.js', jsrc.replace(preL, '      return { a, pre: null };   // MUTANT: the late load reads on the loop\n'), 'prefetch');
   const lsx = await loopScene(JP, 'jobs-triage-reread-loop-mut');
   ok(lsx.dataCalls.length > 0 && lsx.tornCalls.length > 0, 'B-f276 cure r2 CONTROL (no prefetch, in a copy): the late load makes synchronous file calls on the data folder', { data: lsx.dataCalls.length, torn: lsx.tornCalls.length });
-  const hgx = await hangScene(JC, 'jobs-triage-reread-hang-mut');
+  const hgx = await hangScene(JC, 'jobs-triage-reread-hang-mut', { waitBack: false });
   ok(!hgx.armed || hgx.triesAt < 4, 'B-f276 cure CONTROL (the next try only after an answer, in a copy): a hung read STOPS the tries', hgx);
   // ── CURE 2 (主开发 09:20Z, THE LAW): the hold is LIFTED — «nothing was lost», the note marked done, the clean-up resumed — ONLY on a
   // WHOLE read. A file GONE, or torn bytes, end the hold with THEIR own true sentence, and the clean-up stays held
