@@ -312,17 +312,39 @@ try {
   await click(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);
   check('a second click on the head does NOT toggle it closed (open only, the tap-emulation lesson)', await evalJs(isOpen('appearance')));
   const before = await evalJs(`app._fontSize`);
-  await evalJs(`window.__aplus = [...document.querySelectorAll('${POP} [data-id="appearance"] .gs-flyout .font-size-ctrl button')].find((b) => b.textContent === 'A+'); window.__aplus.id = 'gs-smoke-aplus'; true`);
-  await click('#gs-smoke-aplus');
-  check(`a click inside the panel changes termFontSize (${before} → ${before + 1}) and KEEPS the popover + panel open`, await evalJs(`app._fontSize === ${before + 1} && localStorage.getItem('termFontSize') === '${before + 1}' && !!document.querySelector('${POP}')`) && await evalJs(isOpen('appearance')));
-  // the LIVE caption (verifier r2): the head's caption follows a change made
-  // inside its own panel at once — before, it kept its build-time string
+  // THE TERMINAL FONT SIZE'S STEPS, FOUND BY THEIR ROLE (checkpoint 61's hosted red: the plain-words chain drew the three size rows'
+  // steps as the same − / + — src/lib/appearance-panel.js — and the glyph find 'A+' came back empty and THREW): the row is the one
+  // whose OWN label (its previous sibling) names the terminal font size and whose value IS app._fontSize; its decrease is the button
+  // before the value, its increase the one after. A find that comes back empty is a NAMED red, never a throw.
+  const SIZE_STEPS = (labelText) => `(() => { const panel = document.querySelector('${POP} [data-id="appearance"] .gs-flyout'); if (!panel) return { why: 'no Appearance panel' };
+    const rows = [...panel.querySelectorAll('.font-size-ctrl')];
+    const row = rows.find((r) => r.previousElementSibling && r.previousElementSibling.tagName === 'LABEL' && r.previousElementSibling.textContent.trim() === ${JSON.stringify(labelText)});
+    if (!row) return { why: 'no size row under the label ' + ${JSON.stringify(JSON.stringify(labelText))}, labels: rows.map((r) => r.previousElementSibling && r.previousElementSibling.textContent) };
+    const val = row.querySelector(':scope > span'), down = val && val.previousElementSibling, up = val && val.nextElementSibling;
+    if (!val || !down || !up || down.tagName !== 'BUTTON' || up.tagName !== 'BUTTON') return { why: 'the row is not [decrease, value, increase]' };
+    if (String(val.textContent).trim() !== String(app._fontSize)) return { why: 'its value «' + val.textContent.trim() + '» is not the terminal font size ' + app._fontSize };
+    for (const b of document.querySelectorAll('#gs-smoke-size-down, #gs-smoke-size-up')) b.removeAttribute('id');
+    down.id = 'gs-smoke-size-down'; up.id = 'gs-smoke-size-up'; return { ok: true, rows: rows.length }; })()`;
+  const steps = await evalJs(SIZE_STEPS('Terminal font size'));
+  check(`the terminal font size's steps found by their ROLE — the row its own label names, its value the live size ${before} (${steps.ok ? steps.rows + ' size rows on the panel' : steps.why})`, !!steps.ok, JSON.stringify(steps));
+  // the live caption (verifier r2): the head's caption follows a change made inside its own panel at once — before, it kept its
+  // build-time string
   const capSel = `document.querySelector('${POP} [data-id="appearance"] .gs-head-caption')?.textContent`;
-  const capAfter = await evalJs(capSel);
-  check(`the Appearance head's caption follows the change made in its own panel ("${ap.caption}" → "${capAfter}")`, new RegExp('(^|\\D)' + (before + 1) + 'px(\\D|$)').test(capAfter || '') && capAfter !== ap.caption);
-  await evalJs(`[...document.querySelectorAll('${POP} [data-id="appearance"] .gs-flyout .font-size-ctrl button')].find((b) => b.textContent === 'A-').click(); true`);
-  check('(restore) A- puts the size back', await evalJs(`app._fontSize === ${before}`));
-  check(`…and the caption back to "${ap.caption}"`, (await evalJs(capSel)) === ap.caption);
+  if (steps.ok) {
+    await click('#gs-smoke-size-up');
+    check(`a click on the terminal font size's increase changes termFontSize by exactly one (${before} → ${before + 1}) and KEEPS the popover + panel open`, await evalJs(`app._fontSize === ${before + 1} && localStorage.getItem('termFontSize') === '${before + 1}' && !!document.querySelector('${POP}')`) && await evalJs(isOpen('appearance')));
+    const capAfter = await evalJs(capSel);
+    check(`the Appearance head's caption follows the change made in its own panel ("${ap.caption}" → "${capAfter}")`, new RegExp('(^|\\D)' + (before + 1) + 'px(\\D|$)').test(capAfter || '') && capAfter !== ap.caption);
+    await click('#gs-smoke-size-down');
+    check('(restore) the terminal font size\'s decrease puts the size back', await evalJs(`app._fontSize === ${before}`));
+    check(`…and the caption back to "${ap.caption}"`, (await evalJs(capSel)) === ap.caption);
+  }
+  // CONTROLS — the finder can fail: pointed at ANOTHER size row (the UI font size: the same − / + glyphs) the role check refuses it;
+  // the base's glyph find ('A+') on this page comes back EMPTY — said by name here (on the hosted runner it threw)
+  const other = await evalJs(SIZE_STEPS('UI font size'));
+  check(`CONTROL: the finder pointed at another size row (UI font size, the same glyphs) is refused by the role check (${other.why})`, !other.ok && /is not the terminal font size/.test(other.why || ''), JSON.stringify(other));
+  const glyph = await evalJs(`[...document.querySelectorAll('${POP} [data-id="appearance"] .gs-flyout .font-size-ctrl button')].some((b) => b.textContent === 'A+') ? 'found' : 'empty'`);
+  check(`CONTROL: the base's glyph find ('A+') on this page comes back ${glyph} — the row's role, not a glyph, is what finds the step`, glyph === 'empty', glyph);
   // Language ▸ — the nested head
   await click(`${POP} [data-id="language"]`);
   const lang = await evalJs(`(() => { const s = document.querySelector('${POP} [data-id="language"] .gs-flyout'); const rows = [...s.querySelectorAll('.gs-menu-item')]; const r = s.getBoundingClientRect(); return { open: s.classList.contains('open'), n: rows.length, checked: rows.filter((x) => x.getAttribute('aria-checked') === 'true').map((x) => x.textContent.trim()), parentOpen: document.querySelector('${POP} [data-id="appearance"] .gs-flyout').classList.contains('open'), onScreen: r.left >= 0 && r.right <= innerWidth }; })()`);
@@ -409,8 +431,9 @@ try {
   await shot('phone-accordion-appearance.png');
   check('the touch steppers grew to 32 px', await evalJs(`Math.round(document.querySelector('${POP} .gs-appearance .font-size-ctrl button').getBoundingClientRect().height) >= 32`));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="tools"]`);
-  await evalJs(`window.__usage = 0; app.openUsage = () => { window.__usage++; }; [...document.querySelectorAll('${POP} [data-id="tools"] + .gs-sub .gs-menu-item')].find((r) => /Usage/.test(r.textContent)).id = 'gs-smoke-usage'; true`);
-  await tap('#gs-smoke-usage');
+  const usageRow = await evalJs(`(() => { window.__usage = 0; app.openUsage = () => { window.__usage++; }; const r = [...document.querySelectorAll('${POP} [data-id="tools"] + .gs-sub .gs-menu-item')].find((x) => /Usage/.test(x.textContent)); if (!r) return false; r.id = 'gs-smoke-usage'; return true; })()`);
+  check('the Tools group shows its Usage row (an empty find is a named red, never a throw)', usageRow === true);
+  if (usageRow) await tap('#gs-smoke-usage');
   check('a tap on a member row runs the action (stubbed openUsage once) and closes the popover — no hover was dispatched in this leg', await evalJs(`window.__usage === 1 && !document.querySelector('${POP}')`));
 } catch (e) {
   failed++;
