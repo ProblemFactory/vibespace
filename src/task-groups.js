@@ -290,7 +290,9 @@ function sanitizeStrArray(arr, cap = 200) {
 const noneFitWords = (n, gid = '') => `none fit inline — ${n} line${n === 1 ? '' : 's'}; \`vibespace-task ${gid}show\` prints the newest`;
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir, unreadNotice = null, unreadRetry = null }) {
+  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir, unreadNotice = null, unreadRetry = null, hostRealOf = null }) {
+    // B-16d7: (hostId, cwd) → the real path THAT machine resolved for a cwd it listed (src/hosts.js realCwdOf), or null
+    this._hostRealOf = typeof hostRealOf === 'function' ? hostRealOf : () => null;
     // lane grants-unify: the group's outside visibility is a ROW of the ONE grants store (door group-visibility) — the store (or
     // a getter); absent ⇒ none (every group opaque, a write refused by name)
     this._grants = typeof grants === 'function' ? grants : () => grants;
@@ -2141,10 +2143,13 @@ class TaskGroupManager {
   }
 
   /** B-df5f: the cwd's realpath — the hub's own (`_realOf`) for a conversation of THIS machine; for one of another machine
-   *  (`hostId`, task-membership onOtherMachine: 'local' is the hub) only a `realCwd` that machine resolved itself, else none
-   *  (the cwd is matched as written). */
+   *  (`hostId`, task-membership onOtherMachine: 'local' is the hub) only a `realCwd` that machine resolved itself — handed, or
+   *  the one its discovery said (B-16d7, hostRealOf) — else none (the cwd is matched as written). */
   _realHere(cwd, realCwd, hostId) {
-    return onOtherMachine(hostId) ? (realCwd || null) : this._realOf(cwd, realCwd);
+    if (!onOtherMachine(hostId)) return this._realOf(cwd, realCwd);
+    if (realCwd) return realCwd;
+    let r = null; try { r = this._hostRealOf(hostId, cwd); } catch { r = null; }
+    return typeof r === 'string' && r ? r : null;
   }
 
   // Match a folder against the cwd AND its symlink-resolved realpath (a session
@@ -2224,6 +2229,9 @@ class TaskGroupManager {
    *  or a cwd's realpath (a symlinked cwd) landed — the store's own change signal goes out ONCE (coalesced into one tick):
    *  a page that drew the «reading» answer redraws without anyone asking. A first read that moves nothing says nothing —
    *  but the settle below; a first read that FAILS calls here too (`v` undefined, cure r2), for that settle alone. */
+  /** B-16d7: another machine's real folders moved (its discovery's R facts, src/hosts.js) — the groups each one adds or takes are
+   *  named and the change fans out (onChange: the exit re-judge, the roster), as a landed realpath of this machine's own does */
+  hostRealMoved(pairs) { for (const [c, r] of Array.isArray(pairs) ? pairs : []) if (typeof c === 'string' && typeof r === 'string') this._memberMoved('realpath', c, r); }
   _memberMoved(op, p, v) {
     const pend = this._mmPending || (this._mmPending = { real: [] });
     if (op === 'realpath' && v != null && v !== p) pend.real.push([p, v]);   // a symlinked cwd: the groups its realpath ADDS are named at the flush

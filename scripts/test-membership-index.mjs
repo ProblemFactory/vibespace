@@ -331,7 +331,7 @@ const PATCHES = {
   'no-real-path': ["    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);\n    const key = ", "    const real = this._realHere(cwd, realCwd, hostId);\n    const cwds = [cwd].filter(Boolean);\n    const key = ", 'real-path', 'the cwds reduced to the cwd alone (主开发\'s mutant a)'],
   'no-real-in-key': ["const key = JSON.stringify([sessionKey || '', cwds, spawned]);", "const key = JSON.stringify([sessionKey || '', [cwd || ''], spawned]);", 'real-path', 'the result key built without the real path (主开发\'s mutant b)'],
   'cache-256': ["if (this._mresCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._mresCache.clear();", "if (this._mresCache.size > 256) this._mresCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
-  'hub-real-for-remote': ["    return onOtherMachine(hostId) ? (realCwd || null) : this._realOf(cwd, realCwd);", "    return this._realOf(cwd, realCwd);", 'other-machine', 'another machine\'s path resolved by the hub\'s realpath (the checkpoint as it was, B-df5f)'],
+  'hub-real-for-remote': ["    if (!onOtherMachine(hostId)) return this._realOf(cwd, realCwd);", "    return this._realOf(cwd, realCwd);", 'other-machine', 'another machine\'s path resolved by the hub\'s realpath (the checkpoint as it was, B-df5f)'],
   'no-fallback': ["try { ans = this._memberAnswer(args || {}); } catch { ans = null; }", 'ans = this._memberAnswer(args || {});', 'doubts', 'a throw of the index reaches the caller (the fallback out)'],
 };
 function patched(tag) {
@@ -471,7 +471,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const serverSays = (row) => tg.groupsForSession({ sessionKey: row.sessionKey, cwd: row.cwd, hostId: row.host || null }).some((t) => t.id === 'T-bd');   // as every caller asks (no caller hands a realCwd)
   const boardBy = (cwdsOf) => (row) => cwdsOf({ cwd: row.cwd, realCwd: row.realCwd, host: row.host }).some((c) => TM.insideFolder(c, rec));
   ok(typeof TM.membershipCwds === 'function' && typeof TM.onOtherMachine === 'function', 'task-membership carries the ONE rule: membershipCwds (the page\'s cwds) and onOtherMachine (none and \'local\' are the hub)');
-  ok(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, host: s\.host \}\);/.test(PAGE) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && /host: wm\?\.host \|\| null,/.test(MERGE),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
+  ok(/const cwds = membershipCwds\(\{ cwd: stripCwdHostLabel\(s\.cwd\), realCwd: s\.realCwd, hostRealCwd: s\.hostRealCwd, host: s\.host \}\);/.test(PAGE) && !/\[stripCwdHostLabel\(s\.cwd\), s\.realCwd\]/.test(PAGE) && /host: wm\?\.host \|\| null,/.test(MERGE),   // stale-pins: kept — the deliberate absence check: the old cwds line is gone
     'the page\'s folder match (sidebar-tasks _sessionFolderMatch) takes its cwds from membershipCwds with the row\'s host — the host the merge (sidebar _merge) lays over a hub row');
   ok(/const under = membershipCwds\(\{ cwd: s\.cwd, realCwd: s\.realCwd, host: s\.host \}\)\.some\(\(c\) => insideFolder\(c, rec\)\);/.test(APP) && !/insideFolder\(s\.cwd, rec\) \|\| \(s\.realCwd && insideFolder\(s\.realCwd, rec\)\)/.test(APP),   // stale-pins: kept — the deliberate absence check: the chips' own copy is gone
     'cure 2: the New Session folder chips (app.js _taskCwdSuggestions) take their cwds from the same membershipCwds — the page holds ONE copy of the rule');
@@ -489,7 +489,7 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
       `B-df5f cure: over rows built as the page's merge builds them, the board ≡ the server — another machine's conversation through the hub's link is a member of NEITHER, the hub's own of BOTH ('local' is the hub) — ${seen.join(' · ')}`);
     // RED CONTROL: the page's rule before (the hub's real path for every row)
     const TMS = fs.readFileSync(path.join(REPO, 'src/task-membership.js'), 'utf8');
-    const A = '  for (const c of [cwd, onOtherMachine(host) ? null : realCwd]) ';
+    const A = '  for (const c of [cwd, onOtherMachine(host) ? hostRealCwd : realCwd]) ';
     let red = null;
     if (ok(TMS.split(A).length === 2, 'the anchor of the control «hub-real-for-every-row» is in src/task-membership.js once')) {
       const { mutantCopies } = await import('./mutant-copy.mjs');
@@ -498,6 +498,26 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
       red = { board: boardBy(TMr.membershipCwds)(mergedFar), server: serverSays(mergedFar) };
     }
     ok(!!red && red.board === true && red.server === false, `RED CONTROL: the page's rule keeping the hub's real path for every row (the page before) — another machine's conversation: the board says member, the server not — ${JSON.stringify(red)}`);
+    // B-16d7: another machine's conversation matched by ITS OWN machine's real folder (its discovery's R fact) — the live row
+    // carries it (hostRealCwd), the store reads the same per-host map (hostRealOf): the board ≡ the server, BOTH member
+    const farLive = { ...mergedFar, hostRealCwd: realW };
+    const boardHR = (row) => TM.membershipCwds({ cwd: row.cwd, realCwd: row.realCwd, hostRealCwd: row.hostRealCwd, host: row.host }).some((c) => TM.insideFolder(c, rec));
+    const keepHR = tg._hostRealOf;
+    tg._hostRealOf = (h, c) => (h === 'host-dial-far' && c === linked ? realW : null);
+    const hr = { board: boardHR(farLive), server: serverSays(farLive) };
+    tg._hostRealOf = () => null;   // RED CONTROL: the store with no machine-resolved folder (as released)
+    const hr0 = { board: boardHR(farLive), server: tg.groupsForSession({ sessionKey: 'claude:bd-hr0', cwd: linked, hostId: 'host-dial-far' }).some((t) => t.id === 'T-bd') };
+    tg._hostRealOf = keepHR;
+    // the map moved (a sweep said the real folder): the store names the group it adds and fans the change out (onChange: the
+    // exit re-judge, the roster) — the sites that kept a «not member» answer re-judge
+    const keepNotify = tg._notify; let notified = null;
+    tg._notify = (ids) => { notified = ids; };
+    tg.hostRealMoved([[linked, realW]]);
+    for (let k = 0; k < 4 && notified === null; k++) await new Promise((r) => setImmediate(r));
+    tg._notify = keepNotify;
+    ok(Array.isArray(notified) && notified.includes('T-bd'), `B-16d7: a machine's real folder that moved names the group it adds (${JSON.stringify(notified)})`);
+    ok(hr.board === true && hr.server === true, `B-16d7: another machine's conversation at a link whose target is the group's folder, by ITS machine's real folder: the board AND the server say member — ${JSON.stringify(hr)}`);
+    ok(hr0.board === true && hr0.server === false, `RED CONTROL (the store reading no machine-resolved folder, as released): the board says member, the server not ⇒ RED — ${JSON.stringify(hr0)}`);
   }
   // the row builder's guard: a row that names another machine is never stamped with the hub's real path
   const { withSessionKey } = req(path.join(REPO, 'src/routes/sessions.js'));

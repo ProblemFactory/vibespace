@@ -630,6 +630,7 @@ class HostManager {
   }
 
   remove(id) {
+    try { if (this._realCwds) this._realCwds.delete(id); } catch { }   // B-16d7: a removed machine's real folders go with it
     const h = this.get(id);
     // uploaded per-host key files are ours to clean up
     if (h.keyPath && h.keyPath.startsWith(this._sshDir) && h.keyPath.endsWith(`${id}.key`)) {
@@ -2712,6 +2713,39 @@ class HostManager {
     try { return this.convIndex.ownerHost(sessionId, (hid) => !!this.get(hid)); } catch { return null; }
   }
 
+  /** B-16d7: THE REAL FOLDERS OF A MACHINE'S CONVERSATIONS, as THAT machine resolved them (discovery's R fact → a row's
+   *  `hostRealCwd`): ONE map per host, replaced by each discovery answer (at most 500). Read by the Task-Group store
+   *  (task-groups _realHere: another machine's conversation is matched by its own machine's path — the hub never resolves it) and
+   *  by the live row (hostRealFieldsOf). A host whose discovery never said one: none. */
+  _noteRealCwds(id, sessions) {
+    if (!this._realCwds) this._realCwds = new Map();
+    const rows = Array.isArray(sessions) ? sessions : [], prev = this._realCwds.get(id) || new Map(), m = new Map();
+    const said = rows.some((s) => s && typeof s.hostRealCwd === 'string');
+    for (const s of rows) {
+      if (!s || typeof s.cwd !== 'string' || m.size >= 500) continue;
+      if (typeof s.hostRealCwd === 'string') m.set(s.cwd, s.hostRealCwd);
+      // an answer that says NO real folder at all (a rung without the fact: the ssh one on a host with no timeout, the device's
+      // inline fallback, a probe past its budget) keeps the last one for a cwd it still lists — no membership flap between sweeps
+      else if (!said && prev.has(s.cwd)) m.set(s.cwd, prev.get(s.cwd));
+    }
+    this._realCwds.set(id, m);
+    // the Task-Group store re-judges the groups a moved real folder adds or takes (task-groups hostRealMoved)
+    const moved = [];
+    for (const [c, r] of m) if (prev.get(c) !== r) moved.push([c, r]);
+    for (const [c, r] of prev) if (m.get(c) !== r) moved.push([c, r]);
+    if (moved.length && typeof this.onRealCwdsMoved === 'function') { try { this.onRealCwdsMoved(moved); } catch { } }
+  }
+  realCwdOf(id, cwd) {
+    if (!id || typeof cwd !== 'string') return null;
+    if (!this._realCwds) this._realCwds = new Map();
+    const known = () => { try { return !!this.get(id); } catch { return false; } };   // (get throws for an unknown id: this reader never throws — the live payload calls it)
+    if (!this._realCwds.has(id) && this._persistedDisc?.[id]?.sessions && known()) this._noteRealCwds(id, this._persistedDisc[id].sessions);   // the last-known list, before the first fresh sweep
+    const m = this._realCwds.get(id);
+    return (m && m.get(cwd)) || null;
+  }
+  /** the live row's own field (server.js activeSessionsPayload): another machine's conversation carries its machine's real path */
+  hostRealFieldsOf(s) { let r = null; try { r = s && s.host ? this.realCwdOf(s.host, s.cwd) : null; } catch { r = null; } return r ? { hostRealCwd: r } : {}; }
+
   async discoverSessions(id, { ttlMs = 15000 } = {}) {
     const h = this.get(id);
     const hit = this._discoveryCache.get(id);
@@ -2731,9 +2765,15 @@ class HostManager {
     }
     // One round trip: alive lock files + all project JSONLs (path, mtime, size)
     const script = `
+      # R = B-16d7: THIS machine's real path of a cwd it lists (a symlinked folder), only when it differs — bounded (timeout 2
+      # where it exists), stdin closed; both branches written out (no command kept in a variable: zsh never splits one)
+      # (once per distinct cwd in a pipeline, only within 4 s of the scan's start (both loops share it), each under «timeout -k 1 2» — none where the
+      # host has no timeout: an unbounded cd into a dead mount would hold the whole list; a path with a control character never)
+      vs_t0=$(date +%s); vs_seen='|'; command -v timeout >/dev/null 2>&1 && vs_to=1 || vs_to=
+      vs_real() { [ -n "$1" ] && [ -n "$vs_to" ] || return 0; case "$vs_seen" in *"|$1|"*) return 0 ;; esac; vs_seen="$vs_seen$1|"; [ $(( $(date +%s) - vs_t0 )) -lt 4 ] || return 0; case "$1" in *[[:cntrl:]]*) return 0 ;; esac; vs_r=$(timeout -k 1 2 sh -c 'cd -P -- "$1" 2>/dev/null && pwd -P' _ "$1" </dev/null 2>/dev/null); case "$vs_r" in ''|*[[:cntrl:]]*) return 0 ;; esac; [ "$vs_r" != "$1" ] && printf 'R %s\\t%s\\n' "$1" "$vs_r"; return 0; }
       find "$HOME"/.claude/sessions -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
         pid=$(basename "$f" .json)
-        kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; }
+        kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; vs_real "$(grep -o '"cwd":"[^"]*"' "$f" 2>/dev/null | head -n 1 | cut -d'"' -f4)"; }
       done
       # -printf is GNU-only — on macOS/BSD ssh hosts it errored into the
       # 2>/dev/null and the WHOLE remote history silently vanished (audit
@@ -2762,7 +2802,8 @@ class HostManager {
             m=$(stat -f '%m' "$f" 2>/dev/null); [ -n "$m" ] && echo "$m $f"
           done
         fi; } | sort -rn | head -60 | while read -r _ f; do
-        printf 'H %s\\t' "$f"; head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+        vs_hc=$(head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1); printf 'H %s\\t%s\\n' "$f" "$vs_hc"
+        vs_real "$(printf '%s' "$vs_hc" | cut -d'"' -f4)"
         # up to 6 early user records (NOT just the first) — the first user turn is
         # often an injected <vibespace-task-context>/<system-reminder>; the JS side
         # skips those and takes the first REAL message (matches local naming).
@@ -2856,6 +2897,7 @@ ${codexOpenRolloutsShell()}
           }
           if (claimed) {
             this._discoveryCache.set(id, { at: Date.now(), sessions: claimed });
+            this._noteRealCwds(id, claimed);   // B-16d7
             try { this.convIndex.noteDiscovery(id, claimed); } catch { }
             this._persistDiscovery(id, claimed);
             return claimed;
@@ -2877,6 +2919,7 @@ ${codexOpenRolloutsShell()}
     }
     const sessions = interpretDiscoveryLines(out, { hostId: h.id, hostName: h.name, claimJsonls });
     this._discoveryCache.set(id, { at: Date.now(), sessions });
+    this._noteRealCwds(id, sessions);   // B-16d7
     try { this.convIndex.noteDiscovery(id, sessions); } catch { }
     this._persistDiscovery(id, sessions);
     return sessions;

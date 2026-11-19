@@ -82,6 +82,7 @@ const SESSION_POLL_STALE_AFTER = 3;
  * own churn measurement to make, not a line to slip in here.
  */
 const LIVE_SESSION_FACTS = Object.freeze({
+  hostRealCwd: { digest: (v) => v || '' },            // B-16d7: another machine's own real folder (Task Group membership, task-membership membershipCwds)
   remoteState: { digest: (v) => v || '' },            // 2.219.1 "host unreachable" chip
   accountId: { digest: null }, accountName: { digest: null }, accountTail: { digest: null },
   auth: { digest: null },                             // object (source/name/poolTarget)

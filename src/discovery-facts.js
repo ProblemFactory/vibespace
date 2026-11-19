@@ -667,6 +667,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
   const codexOpen = new Set(); // thread ids held open by a codex process (S3: CO lines)
   const codexAgent = new Map(); // rollout path -> SC tokens (sub-agent classification, 2026-09-24)
   const tailIds = new Map(); // jsonl path -> [sessionIds in tail, last = current writer]
+  const realOf = new Map(); // B-16d7: a listed cwd -> the real path THAT machine resolved (R lines; only when they differ)
   for (const line of out.split('\n')) {
     if (line.startsWith('K ')) {
       // keeper meta: '<sid>\t<json>' — index by claude session id when known
@@ -722,6 +723,11 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
         const ids = line.slice(t + 1).split(',').map(s => s.trim()).filter(s => /^[\w-]+$/.test(s));
         if (ids.length) tailIds.set(line.slice(2, t), ids);
       }
+    } else if (line.startsWith('R ')) {
+      // B-16d7: «R <cwd>\t<real>» — the machine's OWN real path of a cwd it lists (a symlinked folder); the hub never resolves
+      // another machine's path itself (task-groups _realHere): this is the only road one reaches it
+      const t = line.indexOf('\t');
+      if (t > 2) { const c = line.slice(2, t), r = line.slice(t + 1).replace(/\r$/, ''); if (c && r.startsWith('/') && r !== c && !realOf.has(c)) realOf.set(c, r); }
     } else if (line.startsWith('H ')) {
       const t = line.indexOf('\t');
       const m = t > 2 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
@@ -851,6 +857,9 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
     }
     sessions.push(card);
   }
+  // B-16d7: a row whose cwd THAT machine resolved to another real path carries it — `hostRealCwd`, never the page's `realCwd`
+  // (that one is the HUB's own stamp, src/sessions-assemble.js); task-membership membershipCwds reads it for another machine
+  for (const s of sessions) { const r = s.cwd ? realOf.get(s.cwd) : null; if (r) s.hostRealCwd = r; }
   return sessions;
 }
 
@@ -881,6 +890,7 @@ function synthesizeDiscoveryLines(snap) {
     if (r.agentTokens) lines.push(`SC ${r.path}\t${r.agentTokens}`); // sub-agent classification (2026-09-24)
   }
   for (const p of (snap?.codexOpen || [])) lines.push(`CO ${p}`); // S3: open rollouts = running threads
+  for (const e of (Array.isArray(snap?.realCwds) ? snap.realCwds : [])) { const [c, r] = Array.isArray(e) ? e : []; if (typeof c === 'string' && typeof r === 'string' && !/[\t\n\r]/.test(c + r)) lines.push(`R ${c}\t${r}`); } // B-16d7: the device's own real paths
   return lines.join('\n');
 }
 

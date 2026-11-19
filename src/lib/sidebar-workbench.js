@@ -467,6 +467,7 @@ export function installSidebarWorkbench(Sidebar) {
         cwd: s.cwd || '',
         host: s.host,
         hostName: s.hostName,
+        hostRealCwd: s.hostRealCwd || null,   // B-16d7: the real folder ITS machine resolved (task-membership membershipCwds)
         // a remote sub-agent / review thread keeps its identity (2026-09-24:
         // the SC discovery line) — the card's ↳ icon, View, and the filter
         agentKind: s.agentKind || 'primary',

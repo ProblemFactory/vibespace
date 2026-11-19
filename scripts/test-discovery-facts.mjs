@@ -183,5 +183,69 @@ ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'bui
   ok(ladderRows(NM1).some((r) => r.got !== r.want), 'CONTROL a ladder without the CLI-title rung fails the PURE table');
 }
 
+console.log('B-16d7 a remote conversation\'s real folder resolved by ITS OWN machine (the R fact → hostRealCwd → the page\'s rule)');
+{
+  const DFx = require('../src/discovery-facts.js'), TM = require('../src/task-membership.js');
+  const { mutantCopies: mc16 } = await import('./mutant-copy.mjs');
+  const MUT = mc16('df-16d7', new URL('..', import.meta.url).pathname.replace(/\/$/, ''));
+  const claimJsonls = require('../src/session-store.js').claimJsonls;
+  const fp = '/HOME/.claude/projects/-home-u-link/0f0e0d0c-0b0a-4908-8706-050403020100.jsonl';
+  const base = `J 1795000000.0000 10 ${fp}\nH ${fp}\t"cwd":"/home/u/link"`;
+  const rowOf = (out) => (DFx.interpretDiscoveryLines(out, { hostId: 'h-2', hostName: 'box', claimJsonls }) || [])[0] || {};
+  const withR = rowOf(base + '\nR /home/u/link\t/srv/nfs/proj');
+  ok(withR.cwd === '/home/u/link' && withR.hostRealCwd === '/srv/nfs/proj' && withR.realCwd === undefined, 'an R fact gives the row the path ITS machine resolved — as `hostRealCwd`, never the hub\'s `realCwd`');
+  ok(rowOf(base).hostRealCwd === undefined && rowOf(base + '\nR /home/u/link\t/home/u/link').hostRealCwd === undefined && rowOf(base + '\nR /home/u/link\trel/x').hostRealCwd === undefined && rowOf(base + '\nR /other\t/srv/x').hostRealCwd === undefined,
+    'no R, an R equal to the cwd, a relative one, or one for another folder: no hostRealCwd');
+  const synth = DFx.synthesizeDiscoveryLines({ locks: [], jsonls: [{ projDir: '-home-u-link', file: '0f0e0d0c-0b0a-4908-8706-050403020100.jsonl', size: 10, mtimeMs: 1795000000000, headCwd: '/home/u/link' }], codexRollouts: [], codexOpen: [], realCwds: [['/home/u/link', '/srv/nfs/proj'], ['/x\ty', '/z']] });
+  ok(synth.includes('R /home/u/link\t/srv/nfs/proj') && !synth.includes('/x\ty') && rowOf(synth).hostRealCwd === '/srv/nfs/proj', 'the device road: the snapshot\'s realCwds become R lines (a tab or a newline in a path never forges a line), the same interpreter reads them');
+  // the page's rule: another machine's conversation is matched by ITS machine's real path, the hub's by the hub's
+  ok(JSON.stringify(TM.membershipCwds({ cwd: '/home/u/link', hostRealCwd: '/srv/nfs/proj', realCwd: '/hub/real', host: 'h-2' })) === JSON.stringify(['/home/u/link', '/srv/nfs/proj'])
+    && JSON.stringify(TM.membershipCwds({ cwd: '/a', realCwd: '/b', hostRealCwd: '/c', host: 'local' })) === JSON.stringify(['/a', '/b'])
+    && JSON.stringify(TM.membershipCwds({ cwd: '/a', realCwd: '/b', host: 'h-2' })) === JSON.stringify(['/a']),
+    'membershipCwds: another machine → its cwd and ITS real path (never the hub\'s stamp); the hub → its cwd and the hub\'s real path');
+  const groupFolder = { path: '/srv/nfs/proj', recursive: true };
+  ok(TM.membershipCwds({ cwd: withR.cwd, hostRealCwd: withR.hostRealCwd, host: 'h-2' }).some((c) => TM.insideFolder(c, groupFolder)), 'the row\'s scene: a remote conversation at a symlink whose target is the group\'s folder is its member again (by its machine\'s own path)');
+  // RED CONTROL: the page's rule as B-df5f left it (no machine-resolved field) — the same row is no member
+  const tmSrc = fs.readFileSync(new URL('../src/task-membership.js', import.meta.url), 'utf8');
+  const TM0 = require(MUT.write('src/task-membership.js', tmSrc.replace('onOtherMachine(host) ? hostRealCwd : realCwd', 'onOtherMachine(host) ? null : realCwd'), 'no-host-real'));   // stale-pins: kept — the control plants the page's rule as released
+  ok(!TM0.membershipCwds({ cwd: withR.cwd, hostRealCwd: withR.hostRealCwd, host: 'h-2' }).some((c) => TM0.insideFolder(c, groupFolder)), 'CONTROL (the page\'s rule without the machine\'s own path, as released): the remote conversation is no member ⇒ RED');
+  // THE SSH ROAD: the script's own vs_real, in every shell here, over a scratch tree with a symlink
+  const HS = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
+  const i00 = HS.indexOf('      vs_t0=$(date +%s);'), i0 = HS.indexOf('      vs_real() {'), i1 = HS.indexOf('\n', i0);
+  ok(i00 > 0 && i0 > i00, 'the ssh discovery script defines vs_real after its budget line');
+  const fnText = HS.slice(i00, i1).replace(/\\\\/g, '\\');   // (the template literal's escapes, as the shell receives them)
+  const { spawnSync } = require('node:child_process');
+  const T16 = scratch('disc-16d7'); fs.mkdirSync(T16 + '/real dir', { recursive: true }); fs.symlinkSync(T16 + '/real dir', T16 + '/link');
+  const shells = ['sh', 'bash', 'zsh'].filter((sh) => spawnSync('sh', ['-c', `command -v ${sh}`], { encoding: 'utf8' }).status === 0);
+  const said = shells.map((sh) => spawnSync(sh, ['-c', `${fnText}\nvs_real "$1"; vs_real "$2"; vs_real "$1"`, 'x', T16 + '/link', fs.realpathSync(T16) + '/real dir'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout);
+  const T16r = fs.realpathSync(T16);   // (a scratch root under a symlinked TMPDIR resolves too)
+  ok(shells.length >= 2 && said.every((o) => o === `R ${T16}/link\t${T16r}/real dir\n`), `the ssh road: a symlinked cwd prints ONE R line with its real path (asked twice: once), a real folder none — in every shell here (${shells.join(', ')})`, said);
+  const noTo = spawnSync('sh', ['-c', `${fnText}\nvs_to=; vs_real "$1"`, 'x', T16 + '/link'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout, ctl = spawnSync('sh', ['-c', `${fnText}\nvs_real "$1"`, 'x', T16 + '/link\nLOCK {}'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } }).stdout;
+  ok(noTo === '' && ctl === '', 'a host with no timeout resolves nothing (an unbounded cd into a dead mount would hold the list); a path with a control character never prints (no forged LOCK line)', { noTo, ctl });
+  ok(HS.includes('kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; vs_real ') && HS.includes('        vs_real "$(printf \'%s\' "$vs_hc" | cut -d\'"\' -f4)"'), 'the script asks it for every live lock\'s cwd and every listed head cwd');
+  // THE DEVICE ROAD: the snapshot resolves its folders in its child, at most 200, and hands them on the result
+  const AG = fs.readFileSync(new URL('../src/agentd/agentd.js', import.meta.url), 'utf8');
+  const cds = AG.slice(AG.indexOf('function computeDiscoverySnapshot()'), AG.indexOf('async function realCwdsOf('));
+  ok(AG.includes('      snap.realCwds = await realCwdsOf(snap);') && !/realpath/.test(cds) && AG.includes('codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });') && AG.includes("fs.promises.realpath(c).catch(() => null)"), 'the device: the real folders are resolved ONLY in the snapshot\'s child, off the loop and bounded (the snapshot itself — the inline fallback — resolves none), and ride the discovery result');
+  // the hub: ONE map per host from its discovery answer, read by the store and the live row
+  const { HostManager } = require('../src/hosts.js');
+  const HM = new HostManager({ dataDir: scratch('disc-16d7-hosts') });
+  HM._noteRealCwds('h-2', [withR, { cwd: '/x', sessionId: 'b' }]);
+  ok(HM.realCwdOf('h-2', '/home/u/link') === '/srv/nfs/proj' && HM.realCwdOf('h-2', '/x') === null && HM.realCwdOf('h-3', '/home/u/link') === null && JSON.stringify(HM.hostRealFieldsOf({ host: 'h-2', cwd: '/home/u/link' })) === JSON.stringify({ hostRealCwd: '/srv/nfs/proj' }) && JSON.stringify(HM.hostRealFieldsOf({ host: null, cwd: '/home/u/link' })) === '{}',
+    'the hub keeps ONE map per host from its discovery answer: the store and the live row read a machine\'s own folder for ITS conversations only');
+  const movedSaid = []; HM.onRealCwdsMoved = (pairs) => movedSaid.push(pairs.map((p) => p.join('→')).join(','));
+  HM._noteRealCwds('h-2', [{ cwd: '/home/u/link', sessionId: 'a' }]);   // an answer from a rung that says no real folder at all
+  const kept = HM.realCwdOf('h-2', '/home/u/link');
+  HM._noteRealCwds('h-2', [{ cwd: '/home/u/link', sessionId: 'a' }, { cwd: '/y', hostRealCwd: '/srv/y', sessionId: 'c' }]);   // an answer WITH facts that omits it
+  ok(kept === '/srv/nfs/proj' && HM.realCwdOf('h-2', '/home/u/link') === null && HM.realCwdOf('h-2', '/y') === '/srv/y' && movedSaid.length === 1 && movedSaid[0].includes('/y→/srv/y') && movedSaid[0].includes('/home/u/link→/srv/nfs/proj'),
+    'an answer that says no real folder keeps the last one (no membership flap between sweeps); one with facts that omits it drops it; what moved is told to the store (both the added and the dropped)', { kept, movedSaid });
+  ok(fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8').includes("    try { if (this._realCwds) this._realCwds.delete(id); } catch { }"), 'a removed machine\'s real folders go with it');
+  let threw = null; try { HM.realCwdOf('h-gone', '/a'); HM.hostRealFieldsOf({ host: 'h-gone', cwd: '/a' }); } catch (e) { threw = e.message; }
+  ok(threw === null, 'an unknown or removed machine: the reader answers none, never throws (the live payload calls it for every remote row)', threw);
+  ok(fs.readFileSync(new URL('../src/lib/sidebar.js', import.meta.url), 'utf8').includes("  hostRealCwd: { digest: (v) => v || '' },") && fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8').includes('      host: s.host || null, hostRealCwd: hosts.hostRealFieldsOf(s).hostRealCwd,'),
+    'the live row carries the field by its own key, and the page\'s merge keeps it (LIVE_SESSION_FACTS — the drift guard reads both)');
+  fs.rmSync(T16, { recursive: true, force: true });
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -520,7 +520,7 @@ export function installSidebarTasks(SidebarClass) {
     // every remote session fails folder-match while the server's
     // groupsForSession (which sees the raw cwd) says it belongs (B-b87b:
     // board membership and injected context disagreed for remote sessions).
-    const cwds = membershipCwds({ cwd: stripCwdHostLabel(s.cwd), realCwd: s.realCwd, host: s.host });
+    const cwds = membershipCwds({ cwd: stripCwdHostLabel(s.cwd), realCwd: s.realCwd, hostRealCwd: s.hostRealCwd, host: s.host });
     for (const f of folderRecs) {
       for (const c of cwds) {
         if (insideFolder(c, f)) return true;

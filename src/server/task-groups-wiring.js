@@ -16,7 +16,7 @@
 //   ctxSync      — the remote context-folder auto-sync, its 60 s timer and the path translation  (785–792, 795–863)
 
 /** → { tasks, taskFanout } — `exitProxy`, `channelsWiring`, `sessionStatus`, `mounts` are getters (server.js defines them later) */
-function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir, exitProxy, channelsWiring, sessionStatus, mounts, userTodos = () => null }) {
+function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir, exitProxy, channelsWiring, sessionStatus, mounts, userTodos = () => null, hosts = () => null }) {
   // ── Task Groups (岗位; task system — docs/design-task-system.md + refactor) ──
   // data/task-groups.json is AUTHORITATIVE for everything the board renders (the
   // store migrates the legacy data/tasks.json forward once). The one-time legacy
@@ -52,6 +52,7 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
       lift: (id) => { const td = userTodos(); if (!td || !id) return; const open = td.idsWhere((i) => i.id === id && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); }, // only an OPEN one (a person's dismissal stays theirs)
       closeOpen: () => { const td = userTodos(); if (!td) throw new Error('the For-you store is not up yet'); const open = td.idsWhere((i) => i.sessionKey === 'task-groups-unread' && i.status === 'open'); if (open.length) td.setStatusMany(open, 'done', 'system'); },   // a held boot's notice, when a later start reads
     },
+    hostRealOf: (hostId, cwd) => { const h = hosts(); if (h && !h.onRealCwdsMoved) h.onRealCwdsMoved = (pairs) => tasks.hostRealMoved(pairs); return h && typeof h.realCwdOf === 'function' ? h.realCwdOf(hostId, cwd) : null; },   // B-16d7: another machine's own real folder (its discovery's R fact); a moved one re-judges its groups
   });
   require('./groups-hold.js').setHeld(() => tasks.isHeldUnread());   // THE STORE HELD UNREAD (lane bl-windows): the hub's fact the roster doors hand their verdicts
   const taskFanout = require('./task-fanout.js').create({ list: () => tasks.list(), send: (json) => wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }) }); // lane task-group-fanout: the ONE tasks-updated broadcaster ({epoch, base, seq} — a client off `base` re-fetches)

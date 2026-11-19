@@ -322,11 +322,33 @@ function computeDiscoverySnapshot() {
   } catch { }
   return { locks, jsonls: top, codexRollouts, codexOpen: codexOpen || [] };
 }
+/** B-16d7: THIS machine's real path of every cwd a snapshot lists (a symlinked folder — the same NFS link on two machines), only
+ *  when it differs; the hub never resolves another machine's path itself. ONLY in the snapshot's CHILD process (the inline
+ *  fallback on the agent's loop resolves nothing), off the loop and bounded: each path 1 s, all of them 3 s, at most 200
+ *  distinct folders; a folder that does not answer names none. → [[cwd, real], …] */
+async function realCwdsOf(snap, { eachMs = 1000, budgetMs = 3000 } = {}) {
+  const out = [], seen = new Set(), end = Date.now() + budgetMs;
+  for (const c of [...(snap.locks || []).map((l) => l && l.cwd), ...(snap.jsonls || []).map((j) => j.headCwd), ...(snap.codexRollouts || []).map((r) => r.headCwd)]) {
+    if (typeof c !== 'string' || !c.startsWith('/') || seen.has(c) || seen.size >= 200) continue;
+    seen.add(c);
+    const left = end - Date.now();
+    if (left <= 0) break;
+    let t = null;
+    const r = await Promise.race([fs.promises.realpath(c).catch(() => null), new Promise((res) => { t = setTimeout(() => res(null), Math.min(eachMs, left)); })]);
+    clearTimeout(t);
+    if (typeof r === 'string' && r && r !== c) out.push([c, r]);
+  }
+  return out;
+}
 if (process.argv.includes('--discovery-snapshot-child')) {
-  try {
-    process.stdout.on('error', () => process.exit(1));
-    process.stdout.write(JSON.stringify(computeDiscoverySnapshot()), () => process.exit(0));
-  } catch (e) { console.error(e.message); process.exit(1); }
+  (async () => {
+    try {
+      process.stdout.on('error', () => process.exit(1));
+      const snap = computeDiscoverySnapshot();
+      snap.realCwds = await realCwdsOf(snap);   // B-16d7: here only — the child (a hung realpath ends with this process)
+      process.stdout.write(JSON.stringify(snap), () => process.exit(0));
+    } catch (e) { console.error(e.message); process.exit(1); }
+  })();
   return;
 }
 const net = require('net');
@@ -2006,7 +2028,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               });
             }
             if (!snap) snap = computeDiscoverySnapshot();
-            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, codexOpen: snap.codexOpen || [] });
+            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, codexOpen: snap.codexOpen || [], realCwds: snap.realCwds || [] });
           } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         })();
         return;
