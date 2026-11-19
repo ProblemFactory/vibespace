@@ -353,6 +353,53 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   // the pill's bucket carries capRing's words since lane usage-two-rings r4 (ONE sentence per cap) — same bypass
   const ma3 = await patchedImport('src/lib/manage-agents.js', 'ma-pill', [['.map(([label, x0, e0, kind, words]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt });', '.map(([label, x0, e0, kind, words]) => { const v = { reading: x0, est: e0 }; /* PATCHED */']]);
   if (ma3) await red('manage-agents narrow pill', maLegs(ma3), 'narrow pill'); else ok('census RED manage-agents narrow pill: the patched line exists', false);
+  // (3) B-2d35 (主开发's ruling 2026-11-19 22:23Z, B-87fd codexkey's law): THE CLAUDE AUTO VIEW NAMES THE ACCOUNT IT SHOWS — a
+  // default set (an account, or a pool: its current member) ⇒ that account's OWN reading or «no reading yet», under its name;
+  // NO default ⇒ the machine CLI login's reading under the plain label (Auto means the CLI login then). Five worlds, drawn by the
+  // real meter; the account read from the Claude section's own title (its switcher's chips name every account); RED: an anchored
+  // copy with the CLI login's fallback put back draws B's 90 % under A
+  const nowS2d = Math.floor(Date.now() / 1000);
+  const R2d = (u) => ({ fetchedAt: Date.now() - 60e3, fiveHour: { utilization: u, resetsAt: nowS2d + 7200 }, sevenDay: { utilization: u, resetsAt: nowS2d + 3 * 86400 } });
+  const autoWorld = (UM, { def, cur = null, own = {}, linked = null }) => {
+    for (const k of Object.keys(els)) delete els[k];
+    class AppA { }
+    UM.installUsageMeter(AppA, {});
+    const app = new AppA();
+    app.settings = { get: () => undefined };
+    const ids = { A: 'sub-auto-a', B: 'sub-auto-b', P: 'pool-auto-p' };
+    app._accounts = { accounts: [{ id: ids.A, backend: 'claude', type: 'subscription', name: 'Acct A' }, { id: ids.B, backend: 'claude', type: 'subscription', name: 'Acct B' },
+      { id: ids.P, backend: 'claude', type: 'pooled', pooled: true, name: 'Pool P', members: [ids.A, ids.B], current: cur ? ids[cur] : null }], defaultAccountId: def ? ids[def] : null };
+    app._accountUsage = Object.fromEntries(Object.entries(own).map(([k, u]) => [ids[k], R2d(u)]));
+    app._rateLimit = R2d(0.9);   // the machine CLI login (account B): 90 %
+    app._usageGlobal = { loggedIn: true, email: 'cli@example.invalid', ...(linked ? { accountId: ids[linked] } : {}) };
+    app._usageAcctSel = 'auto'; app._usageEstimates = {}; app._codexAccountUsage = {};
+    let err = null;
+    try { app._renderUsage(); } catch (e) { err = e.message; }
+    const pop = String(el('usage-popup').innerHTML || ''), bar = String(el('taskbar-usage').innerHTML || '');
+    const cPop = (pop.split('<div class="usage-section-title">')[1] || '');
+    const txt = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = txt(cPop).split(' Auto ')[0];
+    const cBar = (bar.split('<div class="taskbar-usage-row">')[1] || '');
+    return { err, title, pop: txt(cPop), n90: /90% used/.test(txt(cPop)) || /: 90%/.test(cBar), n40: /40% used/.test(txt(cPop)), none: /No usage captured yet/.test(txt(cPop)) };
+  };
+  const autoLegs = (UM) => {
+    const w1 = autoWorld(UM, { def: 'A', own: { A: 0.4 } });
+    const w2 = autoWorld(UM, { def: 'A' });
+    const w3 = autoWorld(UM, { def: 'P', cur: 'A' });
+    const w3b = autoWorld(UM, { def: 'P', cur: 'B', linked: 'B' });
+    const w4 = autoWorld(UM, { def: null });
+    return { w1, w2, w3, w3b, w4 };
+  };
+  const AW2d = autoLegs(UM);
+  const showW = (w) => JSON.stringify(w && { err: w.err, title: w.title, n90: w.n90, n40: w.n40, none: w.none });
+  ok('B-2d35 Claude Auto: a default ACCOUNT with its own reading — its name over ITS numbers (40 %), never the CLI login\'s 90 %', !AW2d.w1.err && /Acct A/.test(AW2d.w1.title) && AW2d.w1.n40 && !AW2d.w1.n90, showW(AW2d.w1));
+  ok('B-2d35 Claude Auto: a default ACCOUNT with NO reading yet — its name and «no reading yet», never the CLI login\'s 90 % under it', !AW2d.w2.err && /Acct A/.test(AW2d.w2.title) && AW2d.w2.none && !AW2d.w2.n90, showW(AW2d.w2));
+  ok('B-2d35 Claude Auto: a POOL default right after a switch to A (no reading yet) — A\'s name and «no reading yet» (the plain label over the CLI login\'s numbers before)', !AW2d.w3.err && /Acct A/.test(AW2d.w3.title) && AW2d.w3.none && !AW2d.w3.n90, showW(AW2d.w3));
+  ok('B-2d35 Claude Auto: a POOL on B, the CLI login LINKED to B by email — B\'s name over that reading (it is B\'s own)', !AW2d.w3b.err && /Acct B/.test(AW2d.w3b.title) && AW2d.w3b.n90, showW(AW2d.w3b));
+  ok('B-2d35 Claude Auto: NO default — Auto means the CLI login: its 90 % under the plain «Claude» label, as before', !AW2d.w4.err && /Claude/.test(AW2d.w4.title) && !/Acct [AB]/.test(AW2d.w4.title) && AW2d.w4.n90, showW(AW2d.w4));
+  const umRed = await patchedImport('src/lib/usage-meter.js', 'claude-auto-fallback', [["      rl = !claudeDefId ? this._rateLimit : ((claudeDefKey && this._accountUsage?.[claudeDefKey]) || (claudeDefKey && gl.accountId === claudeDefKey ? this._rateLimit : null) || null);", "      rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;"]]);   // stale-pins: kept (the RED copy plants the release's fallback on purpose)
+  const AW2dr = umRed ? autoLegs(umRed) : null;
+  ok('B-2d35 RED: a copy with the CLI login\'s fallback put back draws B\'s 90 % under «Acct A» (no reading of its own) — the legs see it', !!AW2dr && /Acct A/.test(AW2dr.w2.title) && AW2dr.w2.n90, AW2dr ? showW(AW2dr.w2) : 'the patched line is not there');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, r.pass, r.detail);
 }
 console.log(`\n${pass} passed, ${fail} failed`);

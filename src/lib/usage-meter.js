@@ -136,19 +136,25 @@ export function installUsageMeter(App, ctx = {}) {
     const claudeSubs = (this._accounts?.accounts || []).filter(a => billingRow(a.backend).usage === 'accounts' && a.type === 'subscription');
     const gl = this._usageGlobal || {};
     const claudeDefId = this._accounts?.defaultAccountId;
+    // B-2d35 (主开发's ruling 2026-11-19 22:23Z, the codex cure's law): 'auto' with a default set shows THAT account's OWN reading — a
+    // pool's: its current member's (the accounts list's `current`, the slot the next conversation takes) — or none, «no reading yet»;
+    // never the machine CLI login's numbers under its name. A CLI login linked to it by email IS that account (the hub merges the two):
+    // its reading is the default's own. NO default set: Auto MEANS the CLI login — its reading, under the plain label, as before
+    const defRow = claudeDefId ? (this._accounts?.accounts || []).find(a => a.id === claudeDefId) : null;
+    const defKey = defRow && defRow.type === 'pooled' ? (defRow.current || null) : claudeDefId;
     let sel = this._usageAcctSel || 'auto';
     if (sel === '__global__' && gl.accountId) sel = gl.accountId;
     if (sel !== 'auto' && sel !== '__global__' && !claudeSubs.some(a => a.id === sel)) sel = 'auto';
     let rl;
-    if (sel === 'auto') rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;
+    if (sel === 'auto') rl = !claudeDefId ? this._rateLimit : ((defKey && this._accountUsage?.[defKey]) || (defKey && gl.accountId === defKey ? this._rateLimit : null) || null);
     else if (sel === '__global__') rl = this._rateLimit;
     else rl = this._accountUsage?.[sel] || null;
     let target = sel === 'auto'
-      ? (claudeDefId && claudeSubs.some(a => a.id === claudeDefId) ? claudeDefId : '__global__')
+      ? (defKey && claudeSubs.some(a => a.id === defKey) ? defKey : '__global__')
       : sel;
     if (target !== '__global__' && gl.accountId === target) target = '__global__';
-    // the account whose reading `rl` IS (r3, MUST 4): a claim is that account's, never the refresh's '__global__' key
-    const drawnKey = sel === 'auto' ? ((claudeDefId && this._accountUsage?.[claudeDefId]) ? claudeDefId : '__global__') : sel;
+    // the account whose reading `rl` IS (r3, MUST 4): a claim is that account's, never the refresh's '__global__' key (none drawn: none)
+    const drawnKey = sel === 'auto' ? ((defKey && this._accountUsage?.[defKey]) ? defKey : (rl ? '__global__' : null)) : sel;
     return { sel, rl, target, drawnKey };
   },
 
@@ -320,13 +326,19 @@ export function installUsageMeter(App, ctx = {}) {
     const claudeSubs = (this._accounts?.accounts || []).filter(a => billingRow(a.backend).usage === 'accounts' && a.type === 'subscription');
     const gl = this._usageGlobal || {};
     const claudeDefId = this._accounts?.defaultAccountId;
+    // B-2d35 (主开发's ruling 2026-11-19 22:23Z, the codex cure's law): 'auto' with a default set shows THAT account's OWN reading — a
+    // pool's: its current member's (the accounts list's `current`, the slot the next conversation takes) — or none, «no reading yet»;
+    // never the machine CLI login's numbers under its name. A CLI login linked to it by email IS that account (the hub merges the two):
+    // its reading is the default's own. NO default set: Auto MEANS the CLI login — its reading, under the plain label, as before
+    const claudeDefRow = claudeDefId ? (this._accounts?.accounts || []).find(a => a.id === claudeDefId) : null;
+    const claudeDefKey = claudeDefRow && claudeDefRow.type === 'pooled' ? (claudeDefRow.current || null) : claudeDefId;
     let sel = this._usageAcctSel || 'auto';
     if (sel === '__global__' && gl.accountId) sel = gl.accountId;
     if (sel !== 'auto' && sel !== '__global__' && !claudeSubs.some(a => a.id === sel)) sel = 'auto'; // account removed
     let rl, claudeUsageLabel, usageNote = '';
     if (sel === 'auto') {
-      const defAcct = claudeDefId ? claudeSubs.find(a => a.id === claudeDefId) : null;
-      rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;
+      const defAcct = claudeDefKey ? claudeSubs.find(a => a.id === claudeDefKey) : null;
+      rl = !claudeDefId ? this._rateLimit : ((claudeDefKey && this._accountUsage?.[claudeDefKey]) || (claudeDefKey && gl.accountId === claudeDefKey ? this._rateLimit : null) || null);
       claudeUsageLabel = defAcct ? defAcct.name : 'Claude';
       if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');
     } else if (sel === '__global__') {
@@ -345,7 +357,7 @@ export function installUsageMeter(App, ctx = {}) {
     // LIGHT/dashed layer over the dark confirmed reading (B-fcff v2).
     const estimates = this._usageEstimates || {};
     let estSel = null;
-    if (sel === 'auto') estSel = (claudeDefId && this._accountUsage?.[claudeDefId]) ? estimates[claudeDefId] : estimates.__global__;
+    if (sel === 'auto') estSel = !claudeDefId ? estimates.__global__ : (claudeDefKey && this._accountUsage?.[claudeDefKey]) ? estimates[claudeDefKey] || null : (rl ? estimates.__global__ || null : null);   // B-2d35: the estimate of the reading drawn, or none
     else if (sel === '__global__') estSel = estimates.__global__;
     else estSel = estimates[sel] || (gl.accountId === sel ? estimates.__global__ : null) || null;
     // the taskbar row, its rings and the phone's chip read estSel — ON lanes only; the popup's bars and words read estPop, where a
