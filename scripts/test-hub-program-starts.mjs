@@ -15,6 +15,11 @@
 //     probe that reads no answer as an exit ⇒ «error»
 //  ④d–④h THE CURE: no answer / a hang keeps an access or auth banner; a reused pid is not the held child, a live one is;
 //     one more guard while the starter lives; the old road re-armed (said once across it); a stray pipe line ignored
+//  ④i A START THAT FAILS AT ONCE NEVER ENDS THE HUB (ckpt61's hosted red): a REAL full file table in a child node ⇒ the
+//     starter's start answered «unknown» (the fault counted), the old road's «not started», the process alive; RED the tip's
+//     order (a pipe touched before the error listener) ⇒ the uncaught «spawn … EMFILE», exit 1 — at the starter, at the old road
+//  ④j THE CLASS: every async spawn / fork start under src/server and server.js has its error listener before its first
+//     unguarded pipe touch; RED each planted break (two orders, three listeners taken out) named
 //  ⑤ HYGIENE: the starter is born with the service env (a secret of the hub's env is not in it, nor in what it starts,
 //     nor on any request line); a request's secret-shaped name is dropped; the X tool gets its site's DISPLAY and PATH
 //  ⓪ THE HUB INJECTS IT: loading src/server/desktop-app-keeper.js hands desktop-display the hub's starter (a belt call then starts
@@ -288,6 +293,83 @@ try {
     fs.writeFileSync(STRAY, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write('null\\n7\\n\"x\"\\n'+JSON.stringify({id:m.id,ev:'started',pid:1})+'\\n'+JSON.stringify({id:m.id,ev:'exit',code:0,signal:null,stdout:'ok'})+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
     const SS = CS.createChildStarter({ script: STRAY }); const r = await SS.run('true', [], { timeoutMs: 2000, capture: true }); SS.closePipe();
     ok(r.stdout === 'ok' && r.code === 0, `stray lines (null, 7, "x") before the answer: ignored, the answer used («${r.stdout}»)`);
+  }
+
+  { // ④i A START THAT FAILS AT ONCE NEVER ENDS THE HUB (ckpt61's hosted red, test-restore-liveness: its minute at a FULL file
+    // table ended the hub, exit 1 — the port watch's 30 s request started the starter). Node's ChildProcess.spawn answers EMFILE /
+    // ENFILE by RETURNING with no pipes and its 'error' queued for the next tick (Node 22.23.4 and 24.22.1 read); the tip touched a
+    // pipe before its error listener: a TypeError run() caught as a fault, then the queued error found no listener — an uncaught
+    // exception. A REAL full table: a child node under `ulimit -n 128` fills its own table (/dev/null) and asks the starter twice
+    // — ⇒ unknown, the fault counted, the starter to be replaced; ⇒ the old road, whose start fails the same way ⇒ «not started»
+    // (EMFILE) — then frees its table and says it is alive. RED CONTROLS, the tip's order: the starter's pipe touched before its
+    // listener ⇒ the child dies before its first answer (exit 1, the uncaught «spawn … EMFILE»); the old road's capture pipes
+    // touched before its listener ⇒ it dies after the first, before the second
+    const FULL = path.join(T, 'full-table.cjs');
+    fs.writeFileSync(FULL, [
+      "const fs = require('fs'); const CS = require(process.argv[2]); const S = CS.createChildStarter({ log: { warn: () => { } } });",
+      "const held = []; let full = null; try { for (let i = 0; i < 100000; i++) held.push(fs.openSync('/dev/null', 'r')); } catch (e) { full = e.code; }",
+      "(async () => {",
+      "  const r1 = await S.run('true', [], { timeoutMs: 2000 }); const st1 = S.stats(); process.stderr.write('ASKED-1\\n');",
+      "  let r2; try { r2 = await S.run('true', [], { timeoutMs: 2000, capture: true }); } catch (e) { r2 = { threw: String(e && e.message) }; } const st2 = S.stats(); process.stderr.write('ASKED-2\\n');",
+      "  await new Promise((r) => setTimeout(r, 300));   // every queued error has had its turn",
+      "  for (const fd of held) fs.closeSync(fd);",
+      "  process.stdout.write(JSON.stringify({ full, held: held.length, r1, st1, r2, st2 }) + '\\n'); S.closePipe(); process.exit(0);",
+      "})();",
+    ].join('\n'));
+    const fullRun = (csPath) => new Promise((resolve) => {
+      let out = '', err = '', c;
+      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, FULL, csPath], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
+      c.on('error', (e) => { err += String(e); });
+      if (c.stdout) c.stdout.on('data', (d) => { out += d; });
+      if (c.stderr) c.stderr.on('data', (d) => { err += d; });
+      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 20000);
+      c.on('close', (code, signal) => { clearTimeout(t); let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { } resolve({ code, signal, j, asked: (err.match(/ASKED-\d/g) || []).length, emfile: /spawn \S+ EMFILE/.test(err), err: err.slice(-500) }); });
+    });
+    const csE = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8');
+    const LIS = "    p.on('error', () => { if (p === proc) fault('the starter could not be started'); });\n", PIPE_IN = "    p.stdin.on('error', () => { });\n";
+    const DLIS = "      c.on('error', (e) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: false, code: null, error: String((e && e.code) || e), stdout: out, stderr: err }); } });\n";
+    const CAPG = '      if (o.capture && c.stdout && c.stderr) {', CLOSE = "      c.on('close', (code, signal) => {";
+    const redStartSrc = anchored(anchored(csE, LIS, '', 'emfile-start-off'), PIPE_IN, PIPE_IN + LIS, 'emfile-start-late');
+    const redDirectSrc = anchored(anchored(anchored(csE, DLIS, '', 'emfile-direct-off'), CAPG, '      if (o.capture) {', 'emfile-direct-unguarded'), CLOSE, DLIS + CLOSE, 'emfile-direct-late');
+    const g = await fullRun(path.join(REPO, 'src/server/child-starter.js'));
+    const rA = await fullRun(MC.write('src/server/child-starter.js', redStartSrc, 'red-emfile-start'));
+    const rB = await fullRun(MC.write('src/server/child-starter.js', redDirectSrc, 'red-emfile-direct'));
+    const j = g.j || {};
+    ok(g.code === 0 && j.full === 'EMFILE' && j.r1 && j.r1.unknown === true && j.st1.faults === 1 && j.st1.restarted && !j.st1.direct && j.st1.unknown === 1
+      && j.r2 && j.r2.started === false && /EMFILE|ENFILE/.test(String(j.r2.error)) && j.st2.faults === 2 && j.st2.direct && j.st2.starts === 2
+      && rA.code === 1 && rA.emfile && rA.asked === 0 && rB.code === 1 && rB.emfile && rB.asked === 1,
+      `a FULL file table (${j.held} handles held, the next open «${j.full}»): the starter's start fails at once ⇒ answered «unknown», ${j.st1 && j.st1.faults} fault counted, ${j.st1 && j.st1.unknown} unknown; the second ⇒ the old road, its start failing the same way ⇒ «not started» (${j.r2 && j.r2.error}), ${j.st2 && j.st2.faults} faults — the process ALIVE after (exit ${g.code}); RED the tip's order: the starter's pipe first ⇒ exit ${rA.code} before any answer (the uncaught spawn EMFILE: ${rA.emfile}), the old road's pipes first ⇒ exit ${rB.code} after ${rB.asked} answer`,
+      { g: { code: g.code, j: g.j, err: g.err }, rA: { code: rA.code, asked: rA.asked, err: rA.err }, rB: { code: rB.code, asked: rB.asked, err: rB.err } });
+
+    // ④j THE CLASS: every async spawn / fork start under src/server and server.js attaches its 'error' listener BEFORE its first
+    // unguarded pipe touch — and has one (a start that fails at once queues its error; with no listener the hub ends:
+    // process.on('uncaughtException') exits 1). node-pty's spawn (claude-signin, oat-mint) throws instead: not this class; an
+    // execFile holds its own listener. RED: the two orders above, and the listener taken out of the three other sites cured here
+    const NODE_PTY = new Set(['src/server/claude-signin.js', 'src/server/oat-mint.js']);
+    const sitesOf = (rel, src) => {
+      const out = [], re = /\b([A-Za-z_$][\w$]*)\s*=\s*(?:[^;]{0,300}?[?:]\s*)?(?<![.\w$])(spawn|fork)\(/g; let m;
+      while ((m = re.exec(src))) {
+        const v = m[1], win = src.slice(m.index, m.index + 2500), line = src.slice(0, m.index).split('\n').length;
+        const lis = win.search(new RegExp(`\\b${v}\\.(?:on|once|addListener)\\('error'`));
+        const touch = new RegExp(`\\b${v}\\.(stdout|stdin|stderr)\\.`, 'g'), guard = new RegExp(`if \\(!?${v}\\.std|${v}\\.std\\w+ &&`); let t, first = -1;
+        while ((t = touch.exec(win))) { if (guard.test(win.slice(Math.max(0, t.index - 80), t.index).split('\n').pop())) continue; first = t.index; break; }
+        out.push({ site: `${rel}:${line}`, bad: lis < 0 || (first >= 0 && first < lis) });
+      }
+      return out;
+    };
+    const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : e.name.endsWith('.js') ? [`${d}/${e.name}`] : []));
+    const rels = ['server.js', ...walk('src/server')].filter((r) => !NODE_PTY.has(r));
+    const sites = rels.flatMap((r) => sitesOf(r, fs.readFileSync(path.join(REPO, r), 'utf8'))), bad = sites.filter((x) => x.bad);
+    const rd = (r) => fs.readFileSync(path.join(REPO, r), 'utf8');
+    const OPS_LIS = /\n {4}child\.on\('error', \(e\) => \{ console\.warn\(`\[update\] the update could not be started[^\n]*/, DA_LIS = /\n {10}child\.on\('error', \(e\) => \{ relay\([^\n]*/, PROC_LIS = /\n {2}c\.on\('error', \(e\) => end\([^\n]*/;
+    const reds = [
+      ['the starter (its pipe first)', 'src/server/child-starter.js', redStartSrc], ['the old road (its pipes first)', 'src/server/child-starter.js', redDirectSrc],
+      ['the self-update (no listener)', 'src/server/ops-routes.js', anchored(rd('src/server/ops-routes.js'), OPS_LIS, '', 'class-ops')],
+      ['the desktop launch (no listener)', 'src/server/desktop-access.js', anchored(rd('src/server/desktop-access.js'), DA_LIS, '', 'class-desktop')],
+      ['the starter process (no listener)', 'src/server/child-starter-proc.js', anchored(rd('src/server/child-starter-proc.js'), PROC_LIS, '', 'class-proc')],
+    ].map(([what, r, src]) => [what, sitesOf(r, src).filter((x) => x.bad).length]);
+    ok(sites.length >= 12 && !bad.length && reds.every(([, n]) => n === 1),
+      `every async spawn / fork start under src/server and server.js has its error listener before its first unguarded pipe touch (${sites.length} sites read${bad.length ? '; NOT: ' + bad.map((x) => x.site).join(', ') : ''}); RED each planted break is named: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { bad, reds });
   }
 
   console.log('⑤ hygiene: the service env, no secret on a request line, the site\'s own names');

@@ -56,10 +56,15 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   function start() {
     stats.starts++;
     const p = spawn(process.execPath, [script], { env: serviceEnv(process.env), stdio: ['pipe', 'pipe', 'inherit'] });
+    // THE ERROR LISTENER FIRST (ckpt61's hosted red: test-restore-liveness's minute at a FULL file table ended the hub, exit 1).
+    // A start that fails at once — EMFILE / ENFILE: node's ChildProcess.spawn queues the 'error' for the next tick and RETURNS
+    // with no pipes (stdout, stdin null) — is the starter's fault, answered by run(): a pipe touched before this line threw, and
+    // the queued 'error' then found no listener — an uncaught exception, and the hub ended. STARTING A HELPER NEVER ENDS THE HUB.
+    p.on('error', () => { if (p === proc) fault('the starter could not be started'); });
+    if (!p.stdout || !p.stdin) throw new Error('the starter has no pipes: its start failed at once');
     p.stdout.setEncoding('utf8');
     p.stdout.on('data', (d) => { if (p !== proc) return; buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (line) onLine(line); } });
     p.stdin.on('error', () => { });
-    p.on('error', () => { if (p === proc) fault('the starter could not be started'); });
     p.on('exit', () => { if (p === proc) fault('the starter ended'); });
     p.unref(); p.stdout.unref?.(); p.stdin.unref?.();
     proc = p; buf = '';
@@ -100,7 +105,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     if (o.wholeEnv) o = { ...o, env: wholeOf(o.env) };   // B-323e: the same refused names on both roads (the starter's and the old one)
     if (direct && mono() - directAt >= rearmMs) { direct = false; restarted = true; stats.rearmed++; }   // a fresh starter, tried again (a whole-box stall is not for good) — ONE: a fault after the re-arm falls back for the hour
     if (direct) return runDirect(cmd, args, o);
-    if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); return direct ? runDirect(cmd, args, o) : Promise.resolve({ unknown: true, why: 'no starter' }); } }
+    if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); if (direct) return runDirect(cmd, args, o); stats.unknown++; return Promise.resolve({ unknown: true, why: 'no starter' }); } }   // the request answers unknown, counted as one
     const id = ++seq, add = o.wholeEnv ? o.env : {};
     if (!o.wholeEnv) for (const [k, v] of Object.entries(o.envAdd || {})) if ((typeof v === 'string' || v === null) && !SECRET_NAME.test(k)) add[k] = v;   // null = the site's env lacks it (removed)
     return new Promise((resolve) => {
@@ -123,14 +128,15 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   function runDirect(cmd, args, o) {
     stats.direct++;
     return new Promise((resolve) => {
-      let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false;
+      let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false, t = null;
       const max = o.maxBuffer || 1048576;
       const over = () => { if (overflow) return; overflow = true; try { c.stdout?.destroy(); c.stderr?.destroy(); c.kill('SIGTERM'); } catch { } };   // past the bound: ended, as execFile did (the pipes first)
       try { c = spawn(cmd, args, { env: o.env, stdio: ['ignore', o.capture ? 'pipe' : 'ignore', o.capture ? 'pipe' : 'ignore'] }); }
       catch (e) { resolve({ started: false, code: null, error: String((e && e.code) || e) }); return; }
-      if (o.capture) { c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8'); c.stdout.on('data', (d) => { if (out.length < max) out += d; outN += Buffer.byteLength(d); if (outN > max) over(); }); c.stderr.on('data', (d) => { if (err.length < max) err += d; errN += Buffer.byteLength(d); if (errN > max) over(); }); }
-      const t = o.timeoutMs > 0 ? setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } if (!done) { done = true; try { o.onTimeout?.(c.pid || 0); } catch { } resolve({ started: true, timedOut: true, overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '', pid: c.pid || 0 }); } }, o.timeoutMs) : null;
+      // the error listener FIRST, as the starter's own (ckpt61): a start that fails at once has no pipes and its 'error' queued
       c.on('error', (e) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: false, code: null, error: String((e && e.code) || e), stdout: out, stderr: err }); } });
+      if (o.capture && c.stdout && c.stderr) { c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8'); c.stdout.on('data', (d) => { if (out.length < max) out += d; outN += Buffer.byteLength(d); if (outN > max) over(); }); c.stderr.on('data', (d) => { if (err.length < max) err += d; errN += Buffer.byteLength(d); if (errN > max) over(); }); }
+      t = o.timeoutMs > 0 ? setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } if (!done) { done = true; try { o.onTimeout?.(c.pid || 0); } catch { } resolve({ started: true, timedOut: true, overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '', pid: c.pid || 0 }); } }, o.timeoutMs) : null;
       c.on('close', (code, signal) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); } else if (timedOut) { try { o.onLateExit?.(); } catch { } } });
     });
   }

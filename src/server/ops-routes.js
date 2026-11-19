@@ -55,7 +55,7 @@ async function canonicalFile(name, timeoutMs) {
 // polling across the restart (KillMode=process / the container supervisor
 // leave the detached script alive), and reloads when /api/version changes.
 // Replaced the "suddenly opens a terminal that just sits there" flow.
-let _selfUpdate = null; // { pid, startedAt }
+let _selfUpdate = null; // { pid, startedAt, child }
 const _updateLogPath = path.join(rootDir, 'data', 'update.log');
 app.post('/api/self-update', (req, res) => {
   try {
@@ -93,9 +93,12 @@ app.post('/api/self-update', (req, res) => {
       cwd: rootDir, detached: true, stdio: ['ignore', fd, fd],
       env: { ...process.env, VIBESPACE_SUPERVISED: process.env.VIBESPACE_SUPERVISED || '1' },
     });
+    // ckpt61: its error listener at once — a start that fails (a full file table, no bash) queues an 'error' for the next tick, and
+    // with no listener that is an uncaught exception: the hub ended. The update did not start: said in the journal, its mark cleared
+    child.on('error', (e) => { console.warn(`[update] the update could not be started: ${(e && e.code) || e}`); if (_selfUpdate && _selfUpdate.child === child) _selfUpdate = null; });
     fs.closeSync(fd);
     child.unref();
-    _selfUpdate = { pid: child.pid, startedAt: Date.now() };
+    _selfUpdate = { pid: child.pid, startedAt: Date.now(), child };
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
