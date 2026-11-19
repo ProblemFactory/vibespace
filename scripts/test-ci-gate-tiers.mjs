@@ -775,7 +775,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   }
   // the annotation's message escapes %, CR and LF (GitHub's workflow-command rule); control: the unescaped line is not what it prints
   const escR = fastClosing({ reds: ['a%b\nc\rd'], env: { GITHUB_ACTIONS: 'true' } });
-  ok(annOf(escR).length === 1 && annOf(escR)[0] === '::error title=fast::1 red: a%25b%0Ac%0Dd' && annOf(escR)[0] !== '::error title=fast::1 red: a%b\nc\rd',
+  ok(annOf(escR).length === 1 && annOf(escR)[0] === '::error title=fast::1 red: a%25b%0Ac%0Dd',
     'the ::error message escapes % → %25, LF → %0A, CR → %0D (a name can never break the workflow command)', annOf(escR));
 }
 
@@ -1014,11 +1014,18 @@ console.log('\n§8h a green suite\'s SKIP lines are counted on its row and named
   // WIRING: both tiers' closing lines carry the count; the heavy tier records every green that skipped (try 1 or the retry)
   // (the fast closing's two skip lines live in fastClosing since the keep-going cure moved onto 2.369.411 — read by behaviour:
   // a planted green with a skipped leg prints its SKIPPED LEG(S) line and no exit code; a planted red carries the count)
-  const skSaid = ci.fastClosing({ skippedLegs: [{ name: 'test-sk-mid', n: 2, first: 'the real road', file: '' }], env: {} });
-  const skRed = ci.fastClosing({ reds: ['test-sk-red'], skippedLegs: [{ name: 'test-sk-mid', n: 2, first: 'the real road', file: '' }], env: {} });
+  // (exact SEQUENCES — the old source pin refused a guard dropped or a skip line gated on no red; the adversarial read: compare
+  // the whole output, two skipping suites — the join and the kept-output suffix — and nothing printed for nothing)
+  const SK2 = [{ name: 'test-sk-mid', n: 2, first: 'the real road', file: '' }, { name: 'test-sk-end', n: 1, first: 'no sshd', file: '/x/sk.log' }];
+  const SKLINE = '\n[ci] SKIPPED LEG(S) test-sk-mid (2): the real road\n[ci] SKIPPED LEG(S) test-sk-end (1): no sshd — its whole output: /x/sk.log';
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const skSaid = ci.fastClosing({ reds: [], skippedLegs: SK2, env: {} });
+  const skRed = ci.fastClosing({ reds: ['test-sk-red'], skippedLegs: SK2, env: {} });
+  let noReds = ''; try { ci.fastClosing({ env: {} }); } catch (e) { noReds = e && e.name; }
   ok(/ suites ran; \$\{absent\.length\} not present at that commit` : ''\}\$\{skipCount\(skippedLegs\)\}`\);/.test(src)
-    && skSaid.code === null && skSaid.out.some(([w, l]) => w === 'log' && l === '\n[ci] SKIPPED LEG(S) test-sk-mid (2): the real road')
-    && skRed.code === 1 && skRed.out.some(([w, l]) => w === 'err' && l === '\n✗ test-sk-red — release gate is RED, do not push · SKIP 2 leg(s) in 1 suite(s): test-sk-mid (2)\n')
+    && skSaid.code === null && same(skSaid.out, [['log', SKLINE]])
+    && skRed.code === 1 && same(skRed.out, [['log', SKLINE], ['err', '\n✗ test-sk-red — release gate is RED, do not push · SKIP 3 leg(s) in 2 suite(s): test-sk-mid (2), test-sk-end (1)\n']])
+    && same(ci.fastClosing({ reds: [], env: {} }).out, []) && noReds === 'TypeError'
     && /release gate is RED, do not push\$\{skipCount\(skippedLegs\)\}/.test(src)
     && /failed: \$\{failed\.join\(', '\)\}\$\{skipCount\(skippedLegs\)\}`/.test(src) && /not present at that commit` : ''\}\)\$\{skipCount\(skippedLegs\)\}`;/.test(src)
     && /if \(r\.ok && r\.skips\) skippedLegs\.push\(\{ name: s\.name, n: r\.skips\.n, first: r\.skips\.first, file: keepSkipLog\(s, r, tried\) \}\);/.test(src)

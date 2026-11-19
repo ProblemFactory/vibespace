@@ -2526,7 +2526,8 @@ export const FAST_NO_RETRY = Object.freeze([
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
  *  → { out: [['log' | 'err', line]], code: 1 | null } (null: no red — the caller goes on to its other checks) */
-export function fastClosing({ reds = [], flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env } = {}) {
+export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env } = {}) {
+  if (!Array.isArray(reds)) throw new TypeError('fastClosing: reds is not a list — a closing never reads a missing fact as «no red»');   // (the verdict's own fact has no default: the run crashes, exit 1)
   const out = [];
   if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
   if (flaky.length) out.push(['log', `\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`]);
