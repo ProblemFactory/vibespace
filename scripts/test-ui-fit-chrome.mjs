@@ -214,17 +214,26 @@ try {
       const glued = await evalJs(`[...document.querySelectorAll('#all-sessions-list .rail-row-main')].flatMap((m) => { const kids = [...m.children].filter((k) => getComputedStyle(k).display.startsWith('inline') || k.tagName === 'SPAN'); const out = []; for (let i = 1; i < kids.length; i++) { const a = kids[i - 1].getBoundingClientRect(), b = kids[i].getBoundingClientRect(); if (!a.width || !b.width) continue; const same = Math.abs(a.top - b.top) < 3; if (same && b.left - a.right < 4) out.push(kids[i - 1].textContent.slice(0, 20) + '|' + kids[i].textContent.slice(0, 12)); } return out; }).slice(0, 5)`);
       if (id === 'jobs' || glued.length) check(`① «${id}» at ${w}: a row's parts never run together (${glued.length ? glued.join(' · ') : 'name · state apart'})`, glued.length === 0, glued);
     }
-    if (w === 200) { // CONTROLS (checkpoint 61): a census fold squeezed by a PLANT (2 em wide) — OPEN it faults (squeezed), CLOSED the walk never judges its words
+    if (w === 200) { // CONTROLS (checkpoint 61): the census fold's own row planted away; its BODY squeezed by a plant — CLOSED its words are never judged, OPEN they are
       await openRail('agents'); await sleep(1500);
       // …and the own-row rule planted AWAY: the closed fold is then no full row (the pin above can fail)
       const away = await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-no-fold-row'; s.textContent = '.ob-backend-id > .ob-cli-where-fold { flex: 0 1 auto !important; min-width: auto !important; }'; document.head.appendChild(s); const r = ${FOLD_ROWS}; s.remove(); return r; })()`);
       check(`① CONTROL: the census fold's own-row rule planted away — the CLOSED fold is no full row (${away.bad.length} of ${away.n} off its id row's box)`, away.n > 0 && away.bad.length === away.n, away);
-      await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-undo-fold'; s.textContent = '.ob-backend-id > .ob-cli-where-fold { flex: 0 0 2em !important; max-width: 2em !important; min-width: 0 !important; }'; document.head.appendChild(s); return true; })()`);
+      // the fold's BODY planted 2 em wide (its summary keeps its width: a closed fold shows its summary, which the walk rightly reads —
+      // the hosted pre-run's red on round 2's control, whose plant narrowed the summary too). THE LAW: the walk never judges the words
+      // INSIDE a closed fold and judges them once it is open — the body's and the summary's words taken from the page (the fold's
+      // summary element against its other children). What makes it RED: the walk judging a closed fold's body (a squeezed text that is
+      // a body's words while the fold is closed), or not judging an open one (no body text squeezed while it is open).
+      await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-undo-fold'; s.textContent = '.ob-backend-id > .ob-cli-where-fold > .tech-fold-body { width: 2em !important; max-width: 2em !important; }'; document.head.appendChild(s); return true; })()`);
+      const FOLD_TEXTS = `(() => { const fs = [...document.querySelectorAll('#all-sessions-list .ob-cli-where-fold')].filter((d) => d.getClientRects().length); return { body: fs.flatMap((d) => [...d.children].filter((c) => c.tagName !== 'SUMMARY').map((c) => c.textContent.trim())).filter(Boolean), summary: fs.map((d) => (d.querySelector(':scope > summary') || {}).textContent || '').map((x) => x.trim()) }; })()`;
+      const texts = await evalJs(FOLD_TEXTS);
+      const ofBody = (q) => texts.body.some((b) => b.includes(q));
       const closedF = await evalJs(FIT_FACTS('#all-sessions-list'));
       const fo = await openCliFolds();
       const openF = await evalJs(FIT_FACTS('#all-sessions-list'));
       await evalJs(`document.getElementById('zz-undo-fold')?.remove(); true`);
-      check(`① CONTROL: «agents» at 200 with the census fold planted 2 em wide — OPEN (${fo.opened} of ${fo.n}) it faults (squeezed: ${openF && openF.squeezed.slice(0, 2).join(' · ')}), CLOSED the walk never judges its words (${closedF && closedF.squeezed.length} squeezed)`, fo.n > 0 && fo.opened === fo.n && !!openF && openF.squeezed.length > 0 && !!closedF && closedF.squeezed.length === 0, { fo, open: openF && openF.squeezed, closed: closedF && closedF.squeezed });
+      const closedBody = closedF ? closedF.squeezed.filter(ofBody) : null, openBody = openF ? openF.squeezed.filter(ofBody) : null;
+      check(`① CONTROL: «agents» at 200 with the census fold's BODY planted 2 em wide — CLOSED no squeezed text is a fold's body words (${closedBody && closedBody.length}; squeezed there: ${closedF && (closedF.squeezed.join(' · ') || 'none')}), OPEN (${fo.opened} of ${fo.n}) the body's words ARE judged (${openBody && openBody.slice(0, 2).join(' · ')})`, texts.body.length > 0 && fo.n > 0 && fo.opened === fo.n && !!closedBody && closedBody.length === 0 && !!openBody && openBody.length > 0, { texts, fo, closed: closedF && closedF.squeezed, open: openF && openF.squeezed });
     }
     if (w === 200) { // CONTROL: the row's and the bar's wrap undone
       for (const id of ['agents', 'jobs']) {
