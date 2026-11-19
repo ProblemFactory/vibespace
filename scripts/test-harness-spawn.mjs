@@ -352,16 +352,16 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // 20:45Z): server.js's OWN two lines run with stand-in accounts — the account's name first, then the provider's record, then
   // the fallback word; a session with no account says nothing
   const SJ2 = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  const ACCT_LINES = SJ2.split('\n').filter((l) => /^\s*account(Name|Tail): s\._accountId \?/.test(l));
+  const ACCT_LINES = SJ2.split('\n').filter((l) => /^\s*account(Name: s\._accountId \?|Tail: )/.test(l));   // (B-ba7d: accountTail is null — no key tail in the live payload)
   if (ACCT_LINES.length !== 2) throw new Error('the anchor of the account-name leg (server.js\'s live payload: accountName / accountTail) is not in the source as two lines');
   const acctOf = (lines) => new Function('s', 'accounts', 'return {\n' + lines.map((l) => l.replace(/,\s*\/\/.*$/, ',')).join('\n') + '\n};');
-  const ACCTS = { get: (id) => (id === 'acct-w1' ? { name: 'Work', tail: 'ab12' } : null), providerRecordOf: (id) => (id === 'pv-ds1' ? { label: 'DeepSeek', tail: '7c2e' } : null) };
+  const ACCTS = { get: (id) => (id === 'acct-w1' ? { name: 'Work', tail: 'ab12' } : null), nameShownOf: (id) => (id === 'acct-w1' ? 'Work' : null), providerRecordOf: (id) => (id === 'pv-ds1' ? { label: 'DeepSeek', tail: '7c2e' } : null) };
   const live = acctOf(ACCT_LINES);
   const rows = ['pv-ds1', 'acct-w1', 'acct-gone', null].map((id) => live({ _accountId: id }, ACCTS));
-  ok(eq(rows, [{ accountName: 'DeepSeek', accountTail: '7c2e' }, { accountName: 'Work', accountTail: 'ab12' }, { accountName: 'API key', accountTail: null }, { accountName: null, accountTail: null }]), 'the live payload names a provider conversation by its record (DeepSeek ••••7c2e), an account by its own name, an id that is gone by the fallback word — both meanings of the meeting kept, in that order', rows);
-  const OLD_NAME = "accounts.get(s._accountId)?.name || accounts.providerRecordOf?.(s._accountId)?.label || 'API key'";
+  ok(eq(rows, [{ accountName: 'DeepSeek', accountTail: null }, { accountName: 'Work', accountTail: null }, { accountName: 'API key', accountTail: null }, { accountName: null, accountTail: null }]), 'the live payload names a provider conversation by its record (DeepSeek — and NO key tail, B-ba7d: the page lays the person\'s read on), an account by its own name, an id that is gone by the fallback word — both meanings of the meeting kept, in that order', rows);
+  const OLD_NAME = "accounts.nameShownOf(s._accountId) || accounts.providerRecordOf?.(s._accountId)?.label || 'API key'";
   if (ACCT_LINES[0].split(OLD_NAME).length !== 2) throw new Error('the anchor of the account-name control is not in the source once');
-  const rows0 = acctOf([ACCT_LINES[0].replace(OLD_NAME, "accounts.get(s._accountId)?.name || 'API key'"), ACCT_LINES[1]])({ _accountId: 'pv-ds1' }, ACCTS);   // stale-pins: kept — the control's REPLACEMENT is the checkpoint's line, gone from the product on purpose
+  const rows0 = acctOf([ACCT_LINES[0].replace(OLD_NAME, "accounts.nameShownOf(s._accountId) || 'API key'"), ACCT_LINES[1]])({ _accountId: 'pv-ds1' }, ACCTS);   // stale-pins: kept — the control's REPLACEMENT is the checkpoint's line, gone from the product on purpose
   ok(rows0.accountName === 'API key', 'CONTROL: the line with the fallback word alone (the checkpoint\'s) calls a provider conversation «API key» ⇒ the leg goes RED', rows0);
   // the probe record covers every real plan: for every shipped preset on every harness it fits, the plan's names ⊆ the probed
   const probed = Object.fromEntries(MP.SPAWN_HARNESSES.map((h) => { const q = PSP.planNamesOf(H.get(h)); return [h, new Set([...q.names, ...q.homes])]; }));
@@ -715,7 +715,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // (MAJOR 3) the badge names the provider, billed by use — never «API key» / «ChatGPT»
   const badgeC = H.get('claude').billingIdentity({ _accountId: ds.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
   const badgeX = H.get('codex').billingIdentity({ _accountId: lab.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
-  ok(badgeC.source === 'api-other' && badgeC.name === 'DeepSeek' && badgeC.tail === KEY.slice(-4) && badgeX.source === 'api-other' && badgeX.name === 'Lab', 'the badge of a provider session: its name and tail, pay-per-use (api-other) — on Claude Code AND on Codex (the first cut said «API key» / «ChatGPT»)', { badgeC, badgeX });
+  ok(badgeC.source === 'api-other' && badgeC.name === 'DeepSeek' && !('tail' in badgeC) && badgeC.accountId === ds.id && badgeX.source === 'api-other' && !('tail' in badgeX) && badgeX.name === 'Lab', 'the badge of a provider session: its name and its account id (NO key tail — B-ba7d: the page lays the person\'s read on), pay-per-use (api-other) — on Claude Code AND on Codex (the first cut said «API key» / «ChatGPT»)', { badgeC, badgeX });
   // (MAJOR 4) codex's home is seeded ONCE: a real sessions folder found there (a link that once failed) keeps its transcripts
   fs.rmSync(path.join(homeX, 'sessions'), { force: true });
   fs.mkdirSync(path.join(homeX, 'sessions')); fs.writeFileSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl'), '{}');

@@ -577,7 +577,7 @@ function rosterRowsOf(records, { usable = true } = {}) {   // usable = the key c
     const ready = !!can(p);
     for (const h of FIT_HARNESSES) {
       if (!f[h] || !f[h].ok) continue;
-      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: ready, localOnly: true, tail: p.tail || null,
+      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: ready, localOnly: true,   // NO key tail (B-ba7d: the accounts list and its push reach every agent-readable mirror — the person's roster reads it through POST /api/providers/list)
         model: resolveModel(p, '') || '', preset: p.preset || null, kind: p.kind, providerId: p.id, tested: (p.tested && p.tested[h]) || null, lastTestAt: p.lastTestAt || null, createdAt: p.createdAt || null });
     }
   }

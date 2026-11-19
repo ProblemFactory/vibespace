@@ -22,7 +22,7 @@ function registerAccountModelRoutes(app, { accounts, providers }) {
   // the target: a roster account, or a projected third-party row (no account record yet: the wizard is Train 2)
   const targetOf = (id) => {
     const a = accounts && typeof accounts.get === 'function' ? accounts.get(id) : null;
-    if (a) return { account: { id: a.id, name: a.name || a.id, backend: a.backend || 'claude', type: a.type || 'api' }, provider: providers.forAccount(a) };
+    if (a) return { account: { id: a.id, name: (typeof accounts.nameShownOf === 'function' ? accounts.nameShownOf(a.id) : a.name) || a.id, backend: a.backend || 'claude', type: a.type || 'api' }, provider: providers.forAccount(a) };
     const p = /^pv-/.test(id) ? providers.get(id) : null;
     return p ? { account: { id: p.id, name: p.label, backend: null, type: 'provider' }, provider: p } : null;
   };

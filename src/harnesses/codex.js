@@ -108,7 +108,7 @@ const CONFIG_TOML = cliConfigFile(HARNESS_SETTINGS.codex.files.config, { createI
 function codexBillingIdentity(s, { accounts, withHost, poolAuth }) {
   if (s._accountId) {
     const a = accounts.get(s._accountId);
-    if (!a && /^pv-/.test(String(s._accountId))) { const p = typeof accounts.providerRecordOf === 'function' ? accounts.providerRecordOf(s._accountId) : null; return withHost({ source: 'api-other', name: (p && p.label) || 'Third-party model', tail: (p && p.tail) || null, provider: true }); }   // lane lg-providers: a third party, billed by use — never «ChatGPT»
+    if (!a && /^pv-/.test(String(s._accountId))) { const p = typeof accounts.providerRecordOf === 'function' ? accounts.providerRecordOf(s._accountId) : null; return withHost({ source: 'api-other', name: (p && p.label) || 'Third-party model', accountId: s._accountId /* NO key tail (B-ba7d) */, provider: true }); }   // lane lg-providers: a third party, billed by use — never «ChatGPT»
     if (a && a.type === 'pooled') return poolAuth(a);
     return withHost({ source: 'codex-subscription', name: a?.name || 'ChatGPT' });
   }

@@ -24,6 +24,7 @@ import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
+import { askTails, withTails } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
@@ -373,7 +374,10 @@ class App {
       }
       if (msg.type === 'setting-holds' && Array.isArray(msg.holds)) this._setSettingHolds(msg.holds);   // lane setting-doors pick 2: a press, an «End now», a return
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(msg), ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
+        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg) };
+        // B-ba7d: the push carries no key tail — the person's last read is laid on, and asked again (coalesced: one ask in flight) — a
+        // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one
+        askTails().then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts }; try { this._agentsRefreshHook?.(); } catch {} }); // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
         // Live-re-render an OPEN Manage Agents surface — without this the
         // roster only updated on the next manual reopen, so adding an account
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
@@ -2197,7 +2201,7 @@ class App {
             if (verdictsCold) uncertainIds.add(a.id);
             opts.push([a.id, a.name + ' — ' + (verdictsCold ? unknownLabel : t('not logged in on {host}', { host: hostName })), true]);
           }
-        } else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
+        } else opts.push([a.id, a.tail ? t('{name} — API key …{tail}', { name: a.name, tail: a.tail }) : a.name]);   // B-ba7d: no tail known yet (the person's read not answered) ⇒ the name alone
       }
       for (const [v, label, disabled] of opts) {
         const o = document.createElement('option');
@@ -2553,7 +2557,8 @@ class App {
   // login state + importable CLI key; the accounts-updated broadcast keeps the
   // list fresh between refreshes.
   refreshAccounts() {
-    return fetchJson('/api/accounts').then(d => {
+    return Promise.all([fetchJson('/api/accounts'), askTails()]).then(([d0, tl]) => {
+      const d = withTails(d0, tl);   // B-ba7d: the list carries no key tail; the person's own read (POST /api/accounts/tails) lays it on
       if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;

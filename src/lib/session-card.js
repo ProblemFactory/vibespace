@@ -12,6 +12,7 @@ import { chipWords as stoppedChipWords } from '../stopped-by.js'; // lane auto-r
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
 import { stoppedWhyOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a stopped row says WHY (its process ended while the server was down)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
+import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 const stopClock = (ms, now) => whenAt(ms, { now });   // the stop mark's time through the ONE formatter (page-time)
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
@@ -330,7 +331,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           const KEY = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
           if (a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other') {
             const who = a.source === 'api-console' ? tr('Console login')
-              : a.name ? `${a.name}${a.tail ? ' (…' + a.tail + ')' : ''}` : (a.detail || tr('API key'));
+              : a.name ? `${a.name}${badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''}` : (a.detail || tr('API key'));
             return `<span class="session-card-badge badge-account" data-tip="${escHtml(tr('API billing (pay per use) — {who}', { who }))}${a.guessed ? escHtml(tr(' · estimated from the login state at spawn')) : ''}">${KEY}</span>`;
           }
           if (a.source === 'unknown' && (s.status === 'live' || s.status === 'tmux')) {

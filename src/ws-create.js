@@ -1740,7 +1740,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // the paired machine by the name the person reads (the hosts store's record), never its id
             const hostName = data.hostId ? (() => { try { const h = (hosts && hosts.get(data.hostId)) || {}; return h.name || h.host || null; } catch { return null; } })() : null;
             const said = BILLPICK.helperNotice({ name: session.name || data.name, accountId: acctId, host: hostName, hostId: data.hostId || null, provider: onProvider,
-              account: (() => { try { return accounts?.get?.(acctId)?.name || accounts?.providerRecordOf?.(acctId)?.label || acctId; } catch { return acctId; } })() });   // a provider conversation: its record's name, never its pv- id
+              account: (() => { try { return (typeof accounts?.nameShownOf === 'function' ? accounts.nameShownOf(acctId) : accounts?.get?.(acctId)?.name) || accounts?.providerRecordOf?.(acctId)?.label || acctId; } catch { return acctId; } })() });   // a provider conversation: its record's name, never its pv- id
             // a key this hub already said asks the machine nothing more — the notice channel says a key once per hub run
             if (said && !helperSaidKeys.has(said.key)) try { helperFact().then((on) => {
               if (on === true && serverNotice && serverNotice(said.key, said.text, { level: 1, i18n: { key: said.words, params: said.params } }) > 0) helperSaidKeys.add(said.key);

@@ -25,6 +25,7 @@ import { dateOf, stampAt as when, durationMark } from './page-time.js';
 import { needLine, pairDoor, needDoorButton, settingsDoor, sayOnLine } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
+import { accountsWithTails } from './account-tails.js'; // B-ba7d: the roster's own read of the accounts, the person's tails laid on
 import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
@@ -3177,7 +3178,7 @@ export function installManageAgents(App, ctx = {}) {
     // answers "if I pick the devbox, where does a login land?" — the peer row's
     // login lands ON the devbox; the Add… buttons always land in VibeSpace.
     let acct = null;
-    try { acct = await fetchJson('/api/accounts'); } catch {}
+    try { acct = await accountsWithTails(); } catch {}   // B-ba7d: the list carries no key tail — the person's read lays it on (the rows' «API …», the CLI key's import)
     if (!acct) return;
     // Prime per-account usage so the rows show current quota on open (the
     // 30s poll also keeps it fresh). Best-effort — rows render regardless.

@@ -886,7 +886,7 @@ console.log('⑯ the wizard and the roster: rows per harness beside the accounts
   const cxRec = M.normalizeProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm-1', wire: 'openai-responses' }), id: 'pv-r2', keyRef: M.keyRefOf('pv-r2'), tested: { codex: { verdict: 'ok', at: 5 } } });
   const noneRec = M.normalizeProvider({ ...M.draftOf('other', { baseUrl: 'https://llm.example.test/v1', model: 'm-1' }), id: 'pv-r3', keyRef: M.keyRefOf('pv-r3') });
   const rows = M.rosterRowsOf([dsRec, cxRec, noneRec, M.presetOf('pv-anthropic-api')]);
-  ok(eq(rows.map((r) => `${r.id}:${r.backend}`), ['pv-r1:claude', 'pv-r2:codex']) && rows[0].localOnly === true && M.rosterRowsOf([dsRec], { usable: false })[0].loggedIn === false && rows[0].loggedIn === true && rows[0].type === 'provider' && rows[0].name === 'DeepSeek' && rows[0].tail === 'ab12' && rows[0].model === 'deepseek-chat' && rows[0].provenance === 'third-party' && eq(rows[1].tested, { verdict: 'ok', at: 5 }) && !JSON.stringify(rows).includes('secrets:provider'), 'rosterRowsOf: ONE row per harness a provider fits (DeepSeek → Claude Code, a Responses service → Codex; a self-hosted one that said nothing → none; a built-in → none), type provider, its tail and model and last test — never where its key is');
+  ok(eq(rows.map((r) => `${r.id}:${r.backend}`), ['pv-r1:claude', 'pv-r2:codex']) && rows[0].localOnly === true && M.rosterRowsOf([dsRec], { usable: false })[0].loggedIn === false && rows[0].loggedIn === true && rows[0].type === 'provider' && rows[0].name === 'DeepSeek' && !('tail' in rows[0]) && rows[0].model === 'deepseek-chat' && rows[0].provenance === 'third-party' && eq(rows[1].tested, { verdict: 'ok', at: 5 }) && !JSON.stringify(rows).includes('secrets:provider'), 'rosterRowsOf: ONE row per harness a provider fits (DeepSeek → Claude Code, a Responses service → Codex; a self-hosted one that said nothing → none; a built-in → none), type provider, its model and last test, NO key tail (B-ba7d: the list reaches every agent-readable mirror) — never where its key is');
   ok(eq(M.rosterRowsOf([dsRec, cxRec], { usable: (p) => p.id === 'pv-r2' }).map((r) => r.loggedIn), [false, true]) && read('src/server/account-usage-routes.js').includes('usable: ((open) => (p) => open && providers.hasKey(p.id))('), 'a row is usable when the vault is open AND its record\'s entry is in it (read off the vault\'s names — U1 cure: a vault reset no longer leaves a row that says it can run); the hub hands that test');
   const RDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pvrows-'));
   const am2 = new AccountManager({ dataDir: RDIR });
@@ -912,7 +912,7 @@ console.log('⑯ the wizard and the roster: rows per harness beside the accounts
   ok(wiz.includes('${escHtml(t(s.label))}</b><span>${escHtml(t(s.blurb))}</span>') && wiz.includes("createModalShell({ id: 'provider-wizard', key: backend,") && wiz.includes('if (!live()) return;\n      st.tests[h] = { busy: true };'), 'the cards draw each preset\'s name and sentence; the form is keyed by its SUBJECT (the harness it was opened for — §103: never a literal key); no test is started once the form is closed');
   ok(['/api/providers\', { preset: s.id, key', '/api/providers/${encodeURIComponent(p.id)}/test`, { harness: h }', "/api/accounts/${encodeURIComponent(p.id)}/models`, { models:", '/api/providers/${encodeURIComponent(p.id)}`, { defaultModel: pick }, \'PATCH\''].every((x) => wiz.includes(x)) && wiz.includes('type="password"') && /<details class="pw-tech">/.test(wiz), 'the wizard asks only the doors that exist (add, the test per harness, the models save, the default) — the key in a password field, the technical details folded');
   ok(ma2.includes("...(!selectedHost ? [{ label: t('Add a third-party model…'), action: () => { done(); openProviderWizard({ backend: 'claude', onDone: refresh }); } }] : []),") && ma2.includes("openProviderWizard({ backend: 'codex', onDone: refresh })") && (ma2.match(/if \(!selectedHost\) renderProviderRows\(body, '(claude|codex)', \{ refresh, sessions: \(\) => namedLiveRows\(this\) \}\)/g) || []).length === 2 && ma2.includes("a.backend === 'codex' && a.type !== 'provider'") && ma2.includes("(x.backend || 'claude') === 'claude' && x.type !== 'provider'") && ma2.includes("a.backend === be && a.type !== 'provider'"), 'Manage agents: ONE «Add a third-party model…» door per roster and the providers\' rows under each — this machine only; NO roster (Claude Code, Codex, the others) draws a provider row as one of its own accounts');
-  ok((app2.match(/accounts: accountRowsOf\((msg|d)\)/g) || []).length === 2 && meta.includes('export function accountRowsOf(answer)') && /answer\.providerRows/.test(meta), 'the page\'s account cache merges the providers\' rows at BOTH places it is set (the push and the read) — New Session, Billing and the badge list them');
+  ok((app2.match(/accounts: accountRowsOf\((msg|d|withTails\(msg\))\)/g) || []).length === 2 && meta.includes('export function accountRowsOf(answer)') && /answer\.providerRows/.test(meta), 'the page\'s account cache merges the providers\' rows at BOTH places it is set (the push — the person\'s tails laid on first, B-ba7d — and the read) — New Session, Billing and the badge list them');
   ok(ros.includes("t('No usage reading'), t('paid by use')") && ['Test', 'Models…', 'Rename…', 'New key…', 'Remove…'].every((w) => ros.includes(`label: t('${w}')`)) && ros.includes("if (!rows.length || !sec.isConnected) { sec.remove(); return; }") && ros.indexOf('body.appendChild(sec);') > 0 && ros.indexOf('body.appendChild(sec);') < ros.indexOf("await fetchJson('/api/providers/list', { method: 'POST'") && !ros.includes("t('Add a third-party model…')") && ros.includes("key: id, title") && /\$\{DOTS\}/.test(ros), 'a roster row: «no usage reading · paid by use · tested …» and ⋯ (the roster\'s DOTS SVG) Test · Models… · Rename… · New key… · Remove…; its section takes its PLACE before the read (never drifts under another heading), leaves when no provider serves the harness, and adds no second add door; the new-key form is keyed by the provider\'s id');
   ok(wiz.includes("if (!other && !pick && !rows.length && !hasModel(st.provider)) { st.error = listed ? (st.listFetched ? t('{provider} answered an empty model list") && wiz.includes(": t('Get the model list first — {provider} has no model yet', { provider: p.label })") && read('src/lib/session-card.js').includes(": a.type === 'provider' ? tr('{name} (third party)', { name: a.name })   // lane lg-providers chain cure") && read('src/lib/account-models.js').includes("typeof p.refreshable === 'boolean' ? p.refreshable : refreshable(p)"), 'the chain cure\'s page words: the model step\'s Done with nothing chosen says what is missing (never «ready»); the stopped conversation\'s resume popover names a provider row «(third party)», never «API …null» (on another machine it is left out — the next leg); the models dialog\'s Refresh is decided by the server off the whole record');
   // THE REMAINDERS (the coordinator's 20:45Z): the remove confirm names the conversations on that provider; a fetched list that came
@@ -927,6 +927,118 @@ console.log('⑯ the wizard and the roster: rows per harness beside the accounts
   const ap = read('src/lib/app.js'), sp = read('src/lib/session-props.js'), sl = read('src/lib/session-lifecycle.js'), ra = read('src/resume-account.js');
   ok(ap.includes("if (a.type === 'provider') { opts.push(onHost ? [a.id, t('{name} (third party)', { name: a.name }) + ' — ' + t('this machine only'), true]") && sp.includes("if (x.type === 'provider') return !!rHost;") && sl.includes("if (a.type === 'provider') return rHostId ? t('A third-party model runs on this machine only for now") && ra.includes("if (a.type === 'provider') return { ok: false, why: 'remote-cannot-ship', since: null };"), 'on ANOTHER machine a provider row is never offered as usable — New Session (disabled, «this machine only»), Session Properties, the billing switcher (it would end the session and the create refuse) and the resume bar');
 
+}
+
+// ── ⑳ THE KEY TAILS ARE THE PERSON'S (B-ba7d — the owner's decision 2026-11-18 14:48 PT) ─────────────────────────────────
+// GET /api/accounts and the accounts-updated push carry NO key tail (an API-key account's, a provider row's, the CLI's own key's);
+// the person's own read (POST /api/accounts/tails, behind the person verdict) answers them. The REAL accounts store, the REAL
+// answer and door (src/routes/account-tails.js — account-usage-routes wires exactly these two), a stand-in express.
+console.log('⑳ the key tails: the person\'s read only');
+{
+  const AT = require(path.join(ROOT, 'src/routes/account-tails.js'));
+  const TD = path.join(dir, 'tails'); fs.mkdirSync(TD, { recursive: true });
+  const HOME0 = process.env.HOME; const TH = path.join(TD, 'home'); fs.mkdirSync(TH, { recursive: true });
+  const T_API = ['Zt7x', '9Q2w'].join(''), T_CLI = ['Kc4m', 'R8vn'].join(''), T_PV = ['Xq', '7Z'].join('');   // built at runtime, distinct
+  fs.writeFileSync(path.join(TH, '.claude.json'), JSON.stringify({ primaryApiKey: ['sk-ant-', 'api03-', 'c'.repeat(30), T_CLI].join('') }));
+  const pushed = [];
+  const build = (AM, rowsOf = M.rosterRowsOf) => {
+    const a = new AM({ dataDir: fs.mkdtempSync(path.join(TD, 'am-')), onChange: (l) => pushed.push(JSON.stringify(l)) });
+    a.setProviderRows(() => rowsOf([{ ...M.draftOf('deepseek'), id: 'pv-tails1', label: 'DeepSeek', tail: T_PV }]));
+    const id = a.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'k'.repeat(30), T_API].join('') }).id;
+    return { a, id };
+  };
+  const AGENT = { Authorization: 'Bearer ' + ['vs-sess-', 'a1b2', 'c3d4'].join('') };   // the kind of credential a conversation holds
+  const ask = async (base, method, url, headers = {}) => { const r = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(method === 'POST' ? { body: '{}' } : {}) }); return [r.status, await r.text()]; };
+  const anyTail = (s) => [T_API, T_CLI, T_PV].filter((x) => String(s).includes(x));
+  const run = async (AM, ATm, rowsOf) => {
+    process.env.HOME = TH;
+    try {
+      pushed.length = 0;
+      const { a, id } = build(AM, rowsOf);
+      const A = ATm || AT;
+      const app = express(); app.use(express.json());
+      A.registerAccountTailRoutes(app, { accounts: a, providers: { thirdParty: () => [{ id: 'pv-tails1', tail: T_PV }] } });
+      app.get('/api/accounts', (req, res) => res.json(A.accountsAnswer({ accounts: a, hosts: null })));
+      const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+      const base = `http://127.0.0.1:${s.address().port}`;
+      try {
+        const [gs, gb] = await ask(base, 'GET', '/api/accounts', AGENT);
+        const [ps, pb] = await ask(base, 'POST', '/api/accounts/tails', AGENT);
+        const [xs, xb] = await ask(base, 'POST', '/api/accounts/tails', { 'Sec-Fetch-Site': 'cross-site' });
+        const [ms, mb] = await ask(base, 'POST', '/api/accounts/tails', { 'Sec-Fetch-Site': 'same-origin' });   // the person on this page
+        const [ls, lb] = await ask(base, 'POST', '/api/accounts/tails');   // no Origin, no Sec-Fetch-Site: a script on this machine (an agent on an open instance), not a page
+        return { id, gs, gb, ps, pb, xs, xb, ls, lb, ms, mine: (() => { try { return JSON.parse(mb); } catch { return null; } })(), push: pushed.join('\n'), cliImported: a.cliPrimaryKey() };
+      } finally { s.close(); }
+    } finally { process.env.HOME = HOME0; }
+  };
+  const r = await run(AccountManager);
+  ok(r.gs === 200 && anyTail(r.gb).length === 0 && JSON.parse(r.gb).accounts.some((x) => x.id === r.id) && JSON.parse(r.gb).providerRows.some((x) => x.id === 'pv-tails1') && JSON.parse(r.gb).cliKey.present === true,
+    'a conversation\'s own credential asks for the accounts list: the API-key row, the provider row and the CLI key are all there — and NO key tail anywhere in the reply', anyTail(r.gb));
+  ok(pushed.length > 0 && anyTail(r.push).length === 0, 'the accounts-updated push (every client, every agent-readable mirror) carries no key tail', anyTail(r.push));
+  ok(r.ps === 403 && anyTail(r.pb).length === 0 && /person/.test(r.pb) && r.xs === 403 && anyTail(r.xb).length === 0 && r.ls === 403 && anyTail(r.lb).length === 0, 'the tails door refuses the conversation\'s credential, a page of another site and a header-less script on this machine (403), no tail in any reply', [r.ps, r.xs]);
+  ok(r.ms === 200 && r.mine && r.mine.ok && r.mine.tails.accounts[r.id] === T_API && r.mine.tails.cliKey === T_CLI && !Object.prototype.hasOwnProperty.call(r.mine.tails.accounts, 'pv-tails1') && r.mine.tails.providers['pv-tails1'] === T_PV,
+    'the PERSON\'s own read answers the tails: the API-key account\'s, the CLI key\'s and the providers\' (the conversation badges carry none)', r.mine);
+  ok(r.cliImported.present === true && r.cliImported.imported === false && !('tail' in r.cliImported), 'the CLI key\'s facts keep what the page compares them for (imported) without the tail', r.cliImported);
+  // RED CONTROLS: a patched copy compiled in memory beside the real file (never written into the tree)
+  const patched = (rel, pairs) => {
+    const f = path.join(ROOT, rel); let s = fs.readFileSync(f, 'utf-8');
+    for (const [from, to] of pairs) { if (s.split(from).length !== 2) throw new Error('control anchor not in ' + rel + ' once: ' + from.slice(0, 70)); s = s.replace(from, to); }
+    const m = new Module(f); m.filename = f; m.paths = Module._nodeModulePaths(path.dirname(f)); m._compile(s, f); return m.exports;
+  };
+  const LIST = "        return base;   // NO key tail (B-ba7d";
+  const cl = await run(patched('src/accounts.js', [[LIST, "        return { ...base, tail: a.tail };   // CONTROL (B-ba7d"]]).AccountManager);
+  ok(anyTail(cl.gb).includes(T_API) && anyTail(cl.push).includes(T_API), 'CONTROL: the list with the API key\'s tail (as before this row) hands it to the conversation\'s credential AND the push ⇒ the legs above go RED', anyTail(cl.gb));
+  const DOOR = "    const who = personVerdict(req);\n    if (!who.ok) return res.status(403)";
+  const cd = await run(AccountManager, patched('src/routes/account-tails.js', [[DOOR, "    const who = { ok: true };\n    if (!who.ok) return res.status(403)"]]));
+  ok(cd.ps === 200 && anyTail(cd.pb).includes(T_API), 'CONTROL: the tails door without the person verdict answers the conversation\'s credential ⇒ the refusal leg goes RED', [cd.ps, anyTail(cd.pb)]);
+  const cpv = await run(AccountManager, null, mutant([["localOnly: true,   // NO key tail", "localOnly: true, tail: p.tail || null,   // CONTROL"]]).rosterRowsOf);
+  ok(anyTail(cpv.gb).includes(T_PV) && anyTail(cpv.push).includes(T_PV), 'CONTROL: a provider row with its tail (as before this row) hands it to the conversation\'s credential AND the push ⇒ the provider-row leg goes RED', anyTail(cpv.gb));
+  const CLI = "the person's read is keyTails().cliKey\n          present: true,\n";
+  const ccl = await run(patched('src/accounts.js', [[CLI, "the person's read is keyTails().cliKey\n          present: true, tail,\n"]]).AccountManager);
+  ok(anyTail(ccl.gb).includes(T_CLI), 'CONTROL: the CLI key\'s facts with its tail (as before this row) hand it to the conversation\'s credential ⇒ the CLI-key leg goes RED', anyTail(ccl.gb));
+  // a key added WITHOUT a name: never «API key …<tail>» (its reader's M2) — and a record stored under that old default name is SHOWN as «API key»
+  process.env.HOME = TH;
+  try {
+    const nm = new AccountManager({ dataDir: fs.mkdtempSync(path.join(TD, 'am-noname-')) });
+    const nid = nm.add({ name: '', key: ['sk-ant-', 'api03-', 'n'.repeat(30), T_API].join('') }).id;
+    nm._state.accounts.push({ id: 'acct-old-default', name: 'API key …' + ['Pz8', 'Lq2', 'Wv'].join(''), type: 'api', tail: ['Pz8', 'Lq2', 'Wv'].join(''), createdAt: 1 });
+    const lj = JSON.stringify(nm.list());
+    ok(nm.get(nid).name === 'API key' && !lj.includes(T_API) && !lj.includes('Pz8Lq2Wv') && nm.nameShownOf('acct-old-default') === 'API key',
+      'a key added without a name is named «API key» (never its tail); a record under the old default name «API key …<tail>» is SHOWN as «API key» in the list and every name that leaves the store', { name: nm.get(nid).name, shown: nm.nameShownOf('acct-old-default') });
+    // the ONE-SHOT RENAME (migration 2026-11-default-key-names): the stored old default names become «API key», idempotently; a name the
+    // usage ledger stored before it (an event's aname) is masked where it is answered
+    const ACC = require(path.join(ROOT, 'src/accounts.js'));
+    const rr = nm.renameDefaultKeyNames(), rr2 = nm.renameDefaultKeyNames();
+    const MIG = read('src/server/migrations.js'), AUR = read('src/server/account-usage-routes.js'), UH = read('src/usage-history.js');
+    ok(rr.length === 1 && rr[0].id === 'acct-old-default' && nm.get('acct-old-default').name === 'API key' && rr2.length === 0
+      && ACC.maskDefaultKeyName('API key …' + ['Pz8', 'Lq2', 'Wv'].join('')) === 'API key' && ACC.maskDefaultKeyName('Work') === 'Work'
+      && MIG.includes("id: '2026-11-default-key-names',") && MIG.includes('const rep = am.renameDefaultKeyNames();')
+      && AUR.includes("aname: ev.aname ? require('../accounts').maskDefaultKeyName(ev.aname) : null,") && UH.includes("tail: null,   // B-ba7d"),
+      'the one-shot rename makes every stored «API key …<tail>» name «API key» (idempotent; a boot migration); the ledger\'s stored names are masked where answered (rid-info, the usage rows carry no tail)', { rr, rr2 });
+    // THE MIGRATION ITSELF (its reader's S3): the registry's own entry run over a real store; a store-less boot with an old default
+    // name on disk FAILS by name (retried next boot); CONTROL: a store whose rename does nothing leaves the tail in the name
+    const OLD = 'API key …' + ['Pz8', 'Lq2', 'Wv'].join('');
+    const migOf = (accounts, root) => require(path.join(ROOT, 'src/server/migrations.js')).create({ rootDir: root, serverNotice: () => {}, accounts }).MIGRATIONS.find((m) => m.id === '2026-11-default-key-names');
+    const root1 = fs.mkdtempSync(path.join(TD, 'mig-')); fs.mkdirSync(path.join(root1, 'data'));
+    const m1 = new AccountManager({ dataDir: path.join(root1, 'data') });
+    m1._state.accounts.push({ id: 'acct-old-1', name: OLD, type: 'api', tail: ['Pz8', 'Lq2', 'Wv'].join(''), createdAt: 1 });
+    const ran = migOf(m1, root1).run();
+    const root2 = fs.mkdtempSync(path.join(TD, 'mig-')); fs.mkdirSync(path.join(root2, 'data'));
+    fs.writeFileSync(path.join(root2, 'data', 'accounts.json'), JSON.stringify({ accounts: [{ id: 'acct-old-2', name: OLD, type: 'api', tail: ['Pz8', 'Lq2', 'Wv'].join('') }] }));
+    const noStore = (() => { try { migOf(null, root2).run(); return 'ran'; } catch (e) { return String(e && e.message); } })();
+    ok(ran.length === 1 && m1.get('acct-old-1').name === 'API key' && /no live account store to rename 1 default key name/.test(noStore),
+      'the migration 2026-11-default-key-names, run from the registry over a real store, renames the stored old default name; a boot with no live store and such a name on disk fails by name (retried next boot)', { ran, noStore });
+    const NOP = patched('src/accounts.js', [["    for (const a of this._state.accounts) if (a && a.tail && a.name === 'API key …' + a.tail) { a.name = 'API key'; out.push({ id: a.id }); }", "    // CONTROL: the rename does nothing"]]).AccountManager;
+    const root3 = fs.mkdtempSync(path.join(TD, 'mig-')); fs.mkdirSync(path.join(root3, 'data'));
+    const m3 = new NOP({ dataDir: path.join(root3, 'data') });
+    m3._state.accounts.push({ id: 'acct-old-3', name: OLD, type: 'api', tail: ['Pz8', 'Lq2', 'Wv'].join(''), createdAt: 1 });
+    migOf(m3, root3).run();
+    ok(m3.get('acct-old-3').name === OLD, 'CONTROL: a store whose rename does nothing keeps «API key …<tail>» as the NAME after the migration ⇒ the migration leg goes RED', m3.get('acct-old-3').name);
+  } finally { process.env.HOME = HOME0; }
+  const aur = read('src/server/account-usage-routes.js');
+  ok(aur.includes("require('../routes/account-tails.js').registerAccountTailRoutes(app, { accounts, providers });") && aur.includes("app.get('/api/accounts', (req, res) => res.json(require('../routes/account-tails.js').accountsAnswer({ accounts, hosts })));")
+    && aur.indexOf("registerAccountTailRoutes(app, { accounts, providers })") < aur.indexOf("app.post('/api/accounts', (req, res) => {"),
+    'the hub serves exactly these two: the accounts list through accountsAnswer, the tails through the person\'s door');
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

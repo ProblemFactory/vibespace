@@ -341,7 +341,7 @@ console.log('§5 resolveAccount reads the record, not list()');
   const resolveNew = m && new Function('accounts', 'require', `return (id) => {\n${m[1]}\n};`); // dc-ws-create: the ledger type is the descriptor's creds.ledgerType (require'd like server.js does)
   const w = mkWorld({ members: 3, pooled: 0 });
   w.am._state.accounts.push({ id: 'acct-k', name: 'key', type: 'api', tail: 'abcd1234', createdAt: 1 }, { id: 'acct-legacy', name: 'legacy', tail: 'zz' }, { id: 'cxs-1', name: 'codex', type: 'subscription', backend: 'codex', createdAt: 1 }, { id: 'oat-1', name: 'oat', type: 'oat', tail: 'q', createdAt: 1 });
-  const resolveOld = (id) => { const a = (w.am.list().accounts || []).find((x) => x.id === id); if (!a) return null; return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name, tail: a.tail }; };
+  const resolveOld = (id) => { const a = (w.am.list().accounts || []).find((x) => x.id === id); if (!a) return null; return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name }; };   // B-ba7d: neither the list nor the resolver carries a key tail
   const fn = resolveNew && resolveNew(w.am, createRequire(path.join(REPO, 'server.js')));
   const probes = [...w.ids, w.P, 'acct-k', 'acct-legacy', 'cxs-1', 'oat-1', 'nope', null];
   const bad = probes.filter((id) => !isDeepStrictEqual(settle(() => fn(id)), settle(() => resolveOld(id))));

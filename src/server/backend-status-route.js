@@ -43,7 +43,7 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
     try {
       const l = accounts.list();
       out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
-        (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type !== 'subscription' && a.tail))).length;
+        (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type === 'api'))).length;   // an API-key account by its TYPE (B-ba7d: the list carries no key tail)
       if (out.codex) out.codex.namedLoggedIn = (l.accounts || []).filter((a) => a.backend === 'codex' && a.loggedIn).length; // onboarding readiness per backend (2.369.21)
     } catch {}
     // A harness whose DESCRIPTOR answers its own machine facts (creds.machineStatus — antigravity, lane

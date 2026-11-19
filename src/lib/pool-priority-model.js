@@ -133,7 +133,7 @@ export function placementNote(auth, t) {
 export function billingAuthKey(auth, t) {
   if (!auth) return '';
   return JSON.stringify([auth.source || '', auth.name || '', auth.poolTarget || '', auth.poolTargetId || '',
-    auth.hostName || '', auth.guessed ? 1 : 0, auth.tail || '', auth.detail || '', placementNote(auth, t)]);
+    auth.hostName || '', auth.guessed ? 1 : 0, auth.accountId || auth.tail || '', auth.detail || '', placementNote(auth, t)]);   // B-ba7d: the account id, never a key tail (the badge carries none; two unnamed keys are two ids)
 }
 
 /** A MEMBER LEFT THE POOL — what the act's own answer says about the conversations that could

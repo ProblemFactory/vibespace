@@ -1727,7 +1727,7 @@ class UsageHistory {
   /** The worker folded with no account / session tables: name what it could not on the answer's rows,
    *  exactly as _aggRow would have (live?.name || the row's own, live?.tail, !live; the session's meta name). */
   _fixLabels(ans) {
-    for (const r of ans.groups.account || []) if (r.deleted) { const live = this._resolveAccount(r.key); if (live) { if (live.name) r.name = live.name; r.tail = live.tail || null; r.deleted = false; } }
+    for (const r of ans.groups.account || []) if (r.deleted) { const live = this._resolveAccount(r.key); if (live) { if (live.name) r.name = live.name; r.tail = null; r.deleted = false; } }
     for (const r of ans.groups.pool || []) if (r.deleted) { const p = this._resolveAccount(r.key); if (p) { r.name = p.name || r.key; r.deleted = false; } }
     for (const r of ans.groups.session || []) { const sm = this._lastMetaMap ? this._lastMetaMap[r.key] : null; r.name = sm?.name || null; }
   }
@@ -2264,10 +2264,10 @@ class UsageHistory {
       if (!dimMeta.account[acctKey]) {
         const live = ev.acct ? this._resolveAccount(ev.acct) : null;
         dimMeta.account[acctKey] = {
-          name: ev.acct ? (live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),
+          name: ev.acct ? ((x) => (/^API key …\S{8}$/.test(String(x)) ? 'API key' : x))(live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),   // B-ba7d: an event stored under the old default name «API key …<tail>» never answers it
           type: ev.atype || (ev.acct ? 'unknown' : 'global'),
           be: ev.be || 'claude',
-          tail: live?.tail || null,
+          tail: null,   // B-ba7d: no key tail in a usage row (the page lays the person's read on)
           deleted: ev.acct ? !live : false,
         };
       }

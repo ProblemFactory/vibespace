@@ -782,13 +782,13 @@ const usageHistory = new UsageHistory({
   // THE RECORD, not list() (prod-stall-202): list() reads every account's login files and the
   // walker asks this once per ledger line — seconds of synchronous NFS reads per walk step on
   // production. The same three fields list()'s row carries: its type/backend defaults, and a
-  // tail only on the key rows (a pool or subscription row has none).
+  // NO key tail (B-ba7d: a usage row reaches every reader of /api/usage-stats; the page lays the person's read on).
   resolveAccount: (id) => {
     const a = accounts.get(id);
     if (!a) return null;
     const type = a.type || 'api', backend = a.backend || 'claude';
     let ledgerType = null; try { ledgerType = require('./src/harnesses').get(backend).creds?.ledgerType || null; } catch { } // codex: every account is 'codex-subscription'
-    return { type: ledgerType || type, name: a.name, tail: type === 'pooled' || type === 'subscription' ? undefined : a.tail };
+    return { type: ledgerType || type, name: accounts.nameShownOf(id) };
   },
 });
 // OTel receiver (2.361.0, B-345b; DEMOTED TO CORROBORATION 2026-09-07 — the
@@ -1375,8 +1375,8 @@ function activeSessionsPayload() {
       // Billing identity badge: which account this session's env was spawned
       // with (null = the CLI's global login / subscription).
       accountId: s._accountId || null,
-      accountName: s._accountId ? (accounts.get(s._accountId)?.name || accounts.providerRecordOf?.(s._accountId)?.label || 'API key') : null,   // a provider conversation: its record's name (lane lg-providers U2 cure — as its badge and the REST list)
-      accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || accounts.providerRecordOf?.(s._accountId)?.tail || null) : null,
+      accountName: s._accountId ? (accounts.nameShownOf(s._accountId) || accounts.providerRecordOf?.(s._accountId)?.label || 'API key') : null,   // a provider conversation: its record's name (lane lg-providers U2 cure — as its badge and the REST list)
+      accountTail: null,   // B-ba7d: NO key tail in the live payload (it reaches every client) — the page lays the person's read on by accountId
       todo: s._todos || null, autoAllowed: s._autoAllowed || 0, cpuNice: s._cpuNice || null, stoppedBy: s._stoppedBy ? (() => { try { return require('./src/stopped-by.js').liveFactOf(s._stoppedBy, autoResume.statusFor(id)); } catch { return require('./src/stopped-by.js').liveFactOf(s._stoppedBy, null); } })() : null, // (a list built before the routes exist in boot order says nothing — TDZ) · {done, total, current} — the agent's own TodoWrite/plan · lane auto-resume-bulk: WHY it stopped (a usage wall / an overloaded model) + its auto-resume state — the card's chip and the filter's count
       poolPin: poolPinFactOf(s), // THE CONVERSATION'S PIN (2026-09-28): the billing submenu's ✓ "pinned" row + Session Properties
       stash: stashFactOf(s), // 2026-09-27: what waits for this agent's next turn (both stashes, src/stash-summary.js) — the strip above its composer + the card's hint

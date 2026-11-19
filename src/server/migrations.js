@@ -1023,6 +1023,23 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-11-default-key-names',
+      note: "B-ba7d (the owner's decision 2026-11-18: a key's last characters are the person's own read only): a key added without a name was named «API key …<its tail>», a name that travels in every list, push, payload and usage row — renamed «API key» (the person reads the tail through POST /api/accounts/tails)",
+      run() {
+        const am = typeof accounts === 'function' ? accounts() : accounts;
+        if (!am || typeof am.renameDefaultKeyNames !== 'function') {
+          // no store on this boot: a stored default name is a FAILURE by name (retried next boot); none is a success
+          let doc = null; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8')); } catch { return []; }
+          const left = (doc && Array.isArray(doc.accounts) ? doc.accounts : []).filter((a) => a && a.tail && a.name === 'API key …' + a.tail).length;
+          if (left) throw new Error(`no live account store to rename ${left} default key name(s) through`);
+          return [];
+        }
+        const rep = am.renameDefaultKeyNames();
+        console.log('[migrate] default-key-names:', JSON.stringify({ renamed: rep.length }));
+        return rep;
+      },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`

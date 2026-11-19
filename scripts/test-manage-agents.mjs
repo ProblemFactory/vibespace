@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -61,6 +61,7 @@ globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
   const answer = (body, status = 200) => ({ ok: status < 400, status, statusText: '', json: async () => body });
   if (u === '/api/accounts' && (!opts.method || opts.method === 'GET')) return answer({ ...am.list(), subscription: {}, cliKey: {} });
+  if (u === '/api/accounts/tails' && opts.method === 'POST') return globalThis.__tailsRefused ? answer({ ok: false, code: 'human_only' }, 403) : answer({ ok: true, tails: am.keyTails() });   // B-ba7d: the person's read (src/routes/account-tails.js)
   if (u === '/api/accounts/default' && opts.method === 'POST') {
     const b = JSON.parse(opts.body || '{}'); posted.push(b);
     try { am.setDefault(b.id || null, b.backend || 'claude'); return answer({ success: true }); } catch (e) { return answer({ error: e.message }, 400); }
@@ -68,12 +69,13 @@ globalThis.fetch = async (url, opts = {}) => {
   return answer({ error: 'unexpected ' + u }, 404);
 };
 const { fetchJson } = await import(path.join(REPO, 'src/lib/utils.js'));
+const ATL = await import(path.join(REPO, 'src/lib/account-tails.js'));   // B-ba7d: the refresh body and the push line lay the person's tails on
 
 // ── THE REAL refreshAccounts body, lifted from app.js (a control swaps in the pre-fix line) ──
 const APP = read('src/lib/app.js');
 const RA = /\n  refreshAccounts\(\) \{\n([\s\S]*?)\n  \}\n/.exec(APP);
 const PRE_LINE = "      if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, defaultCodexAccountId: d.defaultCodexAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };";
-const refreshFrom = (body) => new Function('fetchJson', 'accountDefaultsOf', 'accountRowsOf', `return function refreshAccounts() {\n${body}\n}`)(fetchJson, AM.accountDefaultsOf, AM.accountRowsOf);   // accountRowsOf: lane lg-providers U5 (the providers' rows beside the accounts)
+const refreshFrom = (body) => new Function('fetchJson', 'accountDefaultsOf', 'accountRowsOf', 'askTails', 'withTails', `return function refreshAccounts() {\n${body}\n}`)(fetchJson, AM.accountDefaultsOf, AM.accountRowsOf, ATL.askTails, ATL.withTails);   // accountRowsOf: lane lg-providers U5 (the providers' rows beside the accounts)
 const PUSH = /if \(msg\.type === 'accounts-updated' && Array\.isArray\(msg\.accounts\)\) \{\n\s*(this\._accounts = [^\n]*)\n/.exec(APP);
 
 /** ② ③ ④ as rows, over a roster module and a refreshAccounts body. */
@@ -125,7 +127,7 @@ async function starLegs(Mod, raBody) {
   if (PUSH) {
     const self = { _accounts: { accounts: [], subscription: { x: 1 } } };
     const msg = { type: 'accounts-updated', ...am.list() };
-    new Function('msg', 'accountDefaultsOf', 'accountRowsOf', PUSH[1]).call(self, msg, AM.accountDefaultsOf, AM.accountRowsOf);   // accountRowsOf: lane lg-providers U5 (the push carries the providers' rows too)
+    new Function('msg', 'accountDefaultsOf', 'accountRowsOf', 'withTails', PUSH[1]).call(self, msg, AM.accountDefaultsOf, AM.accountRowsOf, ATL.withTails);   // accountRowsOf: lane lg-providers U5 (the push carries the providers' rows too)
     leg('the accounts-updated push keeps antigravity\'s field (and the fields it does not carry)', self._accounts.defaultAntigravityAccountId === g1.id && self._accounts.subscription?.x === 1, JSON.stringify(self._accounts));
   } else leg('the accounts-updated push line is found in app.js', false);
   am.setDefault(null, 'antigravity');
@@ -202,11 +204,55 @@ console.log('⑤ negative controls');
   const NAME = "(names && (() => { try { return names.nameOfLive(s); } catch { return ''; } })()) || (s && s.name) || ''";
   const MORE = " + (on.more ? ' ' + t('and {n} more', { n: on.more }) : '')";
   ok('controls: each anchor is in provider-roster.js once', RS.split(NAME).length === 2 && RS.split(MORE).length === 2);
-  const raw = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', RS.replace(NAME, "(s && s.name) || ''"), 'raw-name')).href));
+  const raw = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', anchored(RS, NAME, "(s && s.name) || ''", 'the live payload\'s raw name'), 'raw-name')).href));
   ok('CONTROL: the live payload\'s raw name in place of the sidebar\'s («Session 7») ⇒ the leg goes RED', !raw.vault.message.endsWith(WANT) && raw.vault.message.includes('Session 7'), raw.vault.message.slice(-120));
-  const cut = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', RS.replace(MORE, ''), 'no-more')).href));
+  const cut = drive(await import(pathToFileURL(PM.write('src/lib/provider-roster.js', anchored(RS, MORE, '', 'the join without «and N more»'), 'no-more')).href));
   ok('CONTROL: the join without «and N more» (three conversations go unsaid) ⇒ the leg goes RED', !cut.vault.message.endsWith(WANT) && !cut.vault.message.includes('more'), cut.vault.message.slice(-80));
   for (const r of copiesCensus(PM.files, PM.dir, REPO, { minCopies: 2 })) ok(r.name, r.pass, r.detail);
+}
+
+// ── THE KEY TAILS ON THE PAGE (B-ba7d — the owner's decision 2026-11-18): the accounts list carries no tail; the page lays the
+// person's own read (POST /api/accounts/tails) onto the rows it holds — the roster's «API …<tail>» and the CLI key's import
+// compare read it. The REAL src/lib/account-tails.js over the fetch stand-in above (it answers as the routes do)
+{
+  const T = await import(path.join(REPO, 'src/lib/account-tails.js'));
+  const TAIL = ['Wm3', 'k8Pz', 'Q'].join('');   // the last 8 of a key built at runtime
+  const kid = am.add({ name: 'Console', key: ['sk-ant-', 'api03-', 'j'.repeat(30), TAIL].join('') }).id;
+  const want = am.keyTails().accounts[kid];
+  const bare = await fetchJson('/api/accounts');
+  const laid = await T.accountsWithTails();
+  const row = (d) => (d.accounts || []).find((a) => a.id === kid) || {};
+  ok('the page\'s own read: the list it fetches holds no tail; the person\'s read lays it on the API-key row (the roster\'s «API …» and the import compare read it)',
+    !!want && !('tail' in row(bare)) && row(laid).tail === want && T.tailsMissing(bare, { accounts: {} }) && !T.tailsMissing(bare, { accounts: { [kid]: want } }), { want, laid: row(laid).tail });
+  globalThis.__tailsRefused = true;
+  const T2 = await import(pathToFileURL(path.join(REPO, 'src/lib/account-tails.js')).href + '?refused');   // a fresh page (no earlier read)
+  const refused = await T2.accountsWithTails();
+  globalThis.__tailsRefused = false;
+  ok('a refused read (not the person: 403) lays nothing — the row reads «API key» with no characters, never a wrong one', !('tail' in row(refused)), row(refused));
+  const pushLaid = T.withTails({ type: 'accounts-updated', ...am.list() });
+  const provLaid = T.withTails({ providerRows: [{ id: 'pv-x1', type: 'provider', name: 'DeepSeek' }] }, { accounts: {}, cliKey: null, providers: { 'pv-x1': '7c2e' } });
+  ok('the providers\' rows get their tail from the same read (the pickers\' «DeepSeek — API …7c2e»)', provLaid.providerRows[0].tail === '7c2e', provLaid.providerRows);
+  // a RE-KEYED provider on another tab: the cache's merged row (first laid «7c2e») re-laid at the next push takes the NEW tail
+  const merged = T.withTails({ accounts: [{ id: 'pv-x1', type: 'provider', name: 'DeepSeek', tail: '7c2e' }] }, { accounts: {}, cliKey: null, providers: { 'pv-x1': '9b1f' } });
+  ok('a re-keyed provider\'s row in the merged cache takes the NEW tail at the next re-lay (never the first lay\'s)', merged.accounts[0].tail === '9b1f', merged.accounts);
+  ok('the accounts-updated push (no tail) gets the person\'s last read laid on by the page — the cache keeps showing it', row(pushLaid).tail === want && !JSON.stringify(am.list()).includes(want), row(pushLaid).tail);
+  const AP = read('src/lib/app.js'), MAs = read('src/lib/manage-agents.js');
+  ok('the page wiring: the app\'s refresh asks the list and the person\'s read together and lays them; its push handler lays the last read and asks again at every push (a re-keyed provider\'s new tail, never the old); the roster\'s own read goes through the same',
+    AP.includes("return Promise.all([fetchJson('/api/accounts'), askTails()]).then(([d0, tl]) => {") && AP.includes('const d = withTails(d0, tl);') && AP.includes('accounts: accountRowsOf(withTails(msg))') && AP.includes('        askTails().then(() => { if (this._accounts && Array.isArray(this._accounts.accounts)) this._accounts = { ...this._accounts, accounts: withTails({ accounts: this._accounts.accounts }).accounts };')
+    && MAs.includes('    try { acct = await accountsWithTails(); } catch {}'));
+  const SC2 = read('src/lib/session-card.js'), CV = read('src/lib/chat-view.js'), SPp = read('src/lib/session-props.js'), WN = read('src/lib/window.js');
+  ok('the conversation badges carry no key tail (the live payload reaches every client): the page reads the person\'s read by the badge\'s account id — the card, the chat header, Session Properties, the window chip',
+    T.tailOf(kid) === want && T.tailOf('acct-unknown') === null
+    && SC2.includes("${badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''}") && CV.includes("(badgeTail(a) ? ' (…' + badgeTail(a) + ')' : '')")
+    && SPp.includes("tail: badgeTail(a) ? ' (…' + badgeTail(a) + ')' : ''") && WN.includes("(badgeTail(auth) ? ' (…' + badgeTail(auth) + ')' : '')")
+    && [SC2, CV, SPp, WN].every((s) => s.includes("import { badgeTail } from './account-tails.js';")) && T.badgeTail({ accountId: kid }) === want && T.badgeTail({ tail: 'abcd' }) === 'abcd');
+  const TM = mutantCopies('manage-agents-tails', REPO);
+  const TS = read('src/lib/account-tails.js');
+  const LAY = "  if (Array.isArray(d.accounts)) out.accounts = d.accounts.map((a) => { if (!a) return a; const v = a.type === 'provider' ? prov[a.id] : tails[a.id]; return typeof v === 'string' ? { ...a, tail: v } : a; });";
+  ok('control: the lay-on is one line of account-tails.js', TS.split(LAY).length === 2);
+  const Tx = await import(pathToFileURL(TM.write('src/lib/account-tails.js', anchored(TS, LAY, '  // CONTROL: the lay-on cut', 'the page without the lay-on'), 'no-lay')).href);
+  ok('CONTROL: the page without the lay-on shows no tail on the API-key row though the person\'s read answered it ⇒ the legs above go RED', !('tail' in row(await Tx.accountsWithTails())));
+  for (const r of copiesCensus(TM.files, TM.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);

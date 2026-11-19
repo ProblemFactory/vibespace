@@ -56,6 +56,7 @@ import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // 
 import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: the read-only window says why its session stopped
 import { fineScrollEntry, pushFine, FINE_SCROLL_MS } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the FINE scroll trace after a run toggle / the ↓ (PURE)
 import { NeedsCards, hiddenRecord } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
+import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -2563,7 +2564,7 @@ class ChatView {
       if (a.source === 'login-cli') return t(a.label || 'CLI login') + onHost;
       if (a.source === 'subscription') return (a.name || t('CLI login')) + onHost;
       if (a.source === 'api-console') return t('Console login') + onHost;
-      if (a.source === 'api-key' || a.source === 'api-other') return (a.name ? a.name + (a.tail ? ' (…' + a.tail + ')' : '') : (a.detail || t('API key'))) + onHost;
+      if (a.source === 'api-key' || a.source === 'api-other') return (a.name ? a.name + (badgeTail(a) ? ' (…' + badgeTail(a) + ')' : '') : (a.detail || t('API key'))) + onHost;
       return null;
     };
     const isRemote = !!(this.winInfo?._openSpec?.hostId);

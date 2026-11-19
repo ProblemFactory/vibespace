@@ -16,6 +16,7 @@ import { ownedJobsView } from '../job-model.js'; // B-70f9 ② (PURE): the jobs 
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
 import { cpuPriorityWords } from './cpu-priority-words.js'; // B-460d (PURE): the CPU priority the conversation started at
 import { mountMayUse } from './may-use-section.js'; // unit what-it-may-use: «What it may use» — every door, by what (GET /api/may-use)
+import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 
 /** 2026-09-27: how many browser sessions a conversation has, per ask (the window re-renders on every broadcast, so the
  *  count is remembered here and re-asked at most every 15 s; the row appears once the answer says there are some). */
@@ -299,7 +300,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     const bilSec = section(t('Billing'));
     const a = s.auth;
     const authLabel = !a || a.source === 'subscription' ? (a?.guessed ? t('Subscription (estimated from login state at spawn)') : t('Subscription (Pro/Max plan)'))
-      : a.source === 'api-key' ? t('API key — {name}{tail} · pay per use{est}', { name: a.name || 'key', tail: a.tail ? ' (…' + a.tail + ')' : '', est: a.guessed ? t(' (estimated)') : '' })
+      : a.source === 'api-key' ? t('API key — {name}{tail} · pay per use{est}', { name: a.name || 'key', tail: badgeTail(a) ? ' (…' + badgeTail(a) + ')' : '', est: a.guessed ? t(' (estimated)') : '' })
       : a.source === 'api-console' ? t('API — Console login · pay per use{est}', { est: a.guessed ? t(' (estimated)') : '' })
       : a.source === 'api-other' ? t('API — {detail} · pay per use', { detail: a.detail || t('other key source') })
       // pooled (claude or codex) + the two codex shapes fell through to
@@ -384,7 +385,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       }
       return [t('blocked on this host'), t('Subscription logins don’t ship to this machine — log in there, or use an API-key account')];
     };
-    for (const [v, label, blocked, acctRec] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`, subBlocked(x), x])]) {
+    for (const [v, label, blocked, acctRec] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : (x.tail ? `${x.name} — API …${x.tail}` : x.name), subBlocked(x), x])]) {   // B-ba7d: no tail known ⇒ the name alone
       const o = document.createElement('option'); o.value = v;
       if (blocked) {
         const [why, tip] = blockedNote(acctRec || {});

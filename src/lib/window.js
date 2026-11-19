@@ -20,6 +20,7 @@ import { STAGE_ID } from './stage-manager.js';
 import { displayedPanes, revealTab, pressTab } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { headName } from '../phone-head.js'; // lane phone-six r2: a phone head's name (a path → its last segment)
+import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 
 /** Show one of the billing chip's three forms (lane G): a class per form + data-mode. */
 function setChipMode(chip, mode) {
@@ -2191,7 +2192,7 @@ class WindowManager {
         const nm = auth.name || (auth.source === 'api-console' ? 'Console' : 'API');
         words = chipWords({ name: nm });
         el.innerHTML = glyph(KEY_SVG) + `<span class="wab-name">${escHtml(nm)}</span><span class="wab-short">${escHtml(words.short)}</span>`;
-        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || t('API key')))}${hn ? ' · ' + t('on "{name}"', { name: hn }) : ''}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
+        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (badgeTail(auth) ? ' (…' + badgeTail(auth) + ')' : '') : (auth.detail || t('API key')))}${hn ? ' · ' + t('on "{name}"', { name: hn }) : ''}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
       } else if (isUnknown) {
         words = { full: '', short: '' };
         el.innerHTML = glyph(KEY_SVG) + '?';

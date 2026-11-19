@@ -81,6 +81,12 @@ function localFacetOf(caps, now = Date.now()) {
   return { local: { state: l.state, ...(startedAt ? { elapsedMin: Math.max(0, Math.floor((now - startedAt) / 60e3)) } : {}), ...(l.state === 'checking' && Number(l.lateAt) && now >= Number(l.lateAt) ? { late: true } : {}), typicalMin: Math.max(1, Math.round((Number(l.typicalMs) || 300e3) / 60e3)), ...(Number(l.killAt) && startedAt ? { boundMin: Math.round((Number(l.killAt) - startedAt) / 60e3) } : {}), ...(l.reason && l.reason.code ? { reason: String(l.reason.code), observation: String(l.reason.observation || ''), ...(l.reason.version ? { reasonVersion: String(l.reason.version).slice(0, 20) } : {}), ...(l.reason.machine ? { reasonMachine: String(l.reason.machine) } : {}) } : {}) } };
 }
 
+/** (B-ba7d) the name an account is SHOWN by: a key added without a name was once named «API key …<its tail>» (add()) — that tail never
+ *  leaves in a NAME (a name travels in every list, push, session payload and usage row): such a stored name reads «API key» */
+function publicNameOf(a) { const n = String((a && a.name) || ''); return a && a.tail && n === 'API key …' + a.tail ? 'API key' : n; }
+/** (B-ba7d) a name STORED elsewhere (the usage ledger's events, written before the rename) in the old default shape «API key …<8>» → «API key» */
+function maskDefaultKeyName(name) { const n = String(name == null ? '' : name); return /^API key …\S{8}$/.test(n) ? 'API key' : n; }
+
 class AccountManager {
   constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null }) {
     this.dataDir = dataDir;
@@ -359,7 +365,7 @@ class AccountManager {
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
-        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a), ...(a.serve ? { serve: { ...a.serve }, inPools: this.poolsWithMember(a.id).length > 0 } : {}) }; // inPools: a lapse's words differ for an account no pool lists (verify r2 ③)
+        const base = { id: a.id, name: publicNameOf(a), type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a), ...(a.serve ? { serve: { ...a.serve }, inPools: this.poolsWithMember(a.id).length > 0 } : {}) }; // inPools: a lapse's words differ for an account no pool lists (verify r2 ③)
         // POOLED FIRST, for every backend (2.369.18): the codex branch used to
         // run before this one, so a codex pool listed as a bare ChatGPT login
         // — no `pooled`/`current`/`memberOptions`/`auto` — and every client
@@ -414,9 +420,27 @@ class AccountManager {
           if (pr) row.probe = pr;
           return row;
         }
-        return { ...base, tail: a.tail };
+        return base;   // NO key tail (B-ba7d, the owner's decision 2026-11-18): this list and its push reach every client and every agent-readable mirror — the person's read is keyTails() (POST /api/accounts/tails)
       }),
     };
+  }
+  /** (B-ba7d) the name an account is SHOWN by (publicNameOf) — null for an unknown id */
+  nameShownOf(id) { const a = this.get(id); return a ? publicNameOf(a) : null; }
+  /** THE KEY TAILS — THE PERSON'S READ ONLY (B-ba7d, the owner's decision 2026-11-18 14:48 PT): every API-key account's tail and the
+   *  CLI's own primary key's, answered ONLY through POST /api/accounts/tails behind the person verdict (src/routes/account-tails.js);
+   *  list(), cliPrimaryKey() and the accounts-updated push carry none. A provider's tail is the provider list's (POST
+   *  /api/providers/list, the same verdict). → { accounts: { [id]: tail }, cliKey: tail | null } */
+  keyTails() {
+    const accounts = {};
+    for (const a of this._state.accounts) if (a && a.tail && this._acctType(a) === 'api') accounts[a.id] = String(a.tail);
+    return { accounts, cliKey: this._cliPrimaryTail() };
+  }
+  /** the CLI's own primary API key's tail (~/.claude.json primaryApiKey) — null when none; never answered beside the list */
+  _cliPrimaryTail() {
+    try {
+      const pk = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8'))?.primaryApiKey;
+      return typeof pk === 'string' && /^sk-ant-/.test(pk) ? pk.slice(-8) : null;
+    } catch { return null; }
   }
 
   // ── Subscription accounts (each = its own securestorage creds dir) ──
@@ -698,7 +722,7 @@ class AccountManager {
       if (this._state.accounts.some((a) => a.id === rec.id)) { skipped++; continue; } // never clobber an existing account
       const a = {
         id: rec.id,
-        name: String(rec.name || '').slice(0, 60) || rec.id,
+        name: maskDefaultKeyName(String(rec.name || '').slice(0, 60)) || rec.id,   // B-ba7d: an export made before the rename brings back no «API key …<tail>»
         source: rec.source || 'import',
         createdAt: rec.createdAt || Date.now(),
       };
@@ -1030,12 +1054,12 @@ class AccountManager {
     // Idempotent: re-adding the same key returns the existing record.
     for (const a of this._state.accounts) {
       if (a.tail === tail) {
-        try { if (this._dec(a.keyEnc) === key) return { id: a.id, name: a.name, tail: a.tail, existing: true }; } catch { }
+        try { if (this._dec(a.keyEnc) === key) return { id: a.id, name: publicNameOf(a), existing: true }; } catch { }   // no tail in an answer, nor in its name (B-ba7d: any caller reads it)
       }
     }
     const a = {
       id: 'acct-' + crypto.randomBytes(6).toString('hex'),
-      name: String(name || '').trim().slice(0, 60) || ('API key …' + tail),
+      name: String(name || '').trim().slice(0, 60) || 'API key',   // never the tail in a NAME (B-ba7d: a name travels in every list, push and payload)
       keyEnc: this._enc(key),
       tail,
       source,
@@ -1047,7 +1071,7 @@ class AccountManager {
     this._state.accounts.push(a);
     this._save();
     this._notify();
-    return { id: a.id, name: a.name, tail: a.tail };
+    return { id: a.id, name: publicNameOf(a) };   // no tail in an answer, nor in its name (B-ba7d)
   }
 
   rename(id, name) {
@@ -1056,7 +1080,7 @@ class AccountManager {
     a.name = String(name || '').trim().slice(0, 60) || a.name;
     this._save();
     this._notify();
-    return { id: a.id, name: a.name, tail: a.tail };
+    return { id: a.id, name: publicNameOf(a) };   // no tail in an answer, nor in its name (B-ba7d)
   }
 
   // Manual identity backfill: some login flows leave a subscription's creds dir
@@ -1070,7 +1094,7 @@ class AccountManager {
     a.email = String(email || '').trim().slice(0, 120) || undefined;
     this._save();
     this._notify();
-    return { id: a.id, name: a.name, email: a.email || null };
+    return { id: a.id, name: publicNameOf(a), email: a.email || null };   // B-ba7d: never a tail in a name
   }
 
   // `opts.chooseDefault(poolId, fromId)` / `opts.chooseLink(poolId, fromId, sessKey)` = the ENGINE's decision for a
@@ -2288,6 +2312,16 @@ class AccountManager {
     return this.get(id);
   }
 
+  /** THE ONE-SHOT RENAME (migration `2026-11-default-key-names`, B-ba7d — the owner's decision 2026-11-18): a key added without a name
+   *  was named «API key …<its tail>», and that name travels in every list, push, payload, notice, refusal and usage row — it becomes
+   *  «API key». Idempotent (a renamed record no longer matches). → [{ id }] */
+  renameDefaultKeyNames() {
+    const out = [];
+    for (const a of this._state.accounts) if (a && a.tail && a.name === 'API key …' + a.tail) { a.name = 'API key'; out.push({ id: a.id }); }
+    if (out.length) { this._save(); this._notify(); }
+    return out;
+  }
+
   /** THE ONE-SHOT RESHAPE of the retired whole-pool manual switch (migration
    *  `2026-09-pool-manual-priority`, 2026-09-28): a pool with `auto:false` was
    *  pinned by hand to its current target — that intent becomes the TOP of a
@@ -2494,7 +2528,7 @@ class AccountManager {
     }
     let key = null, keyNo = null;
     try { key = this._dec(a.keyEnc); } catch (e) { if (isKeyRefusal(e)) keyNo = e; }
-    if (!key) throw keyNo ? Object.assign(new Error(`account key unavailable (${a.name}) — ${keyNo.message}`), { code: keyNo.code }) : new Error('account key unavailable (decryption failed): ' + a.name); // O1: the key file's refusal, said
+    if (!key) throw keyNo ? Object.assign(new Error(`account key unavailable (${publicNameOf(a)}) — ${keyNo.message}`), { code: keyNo.code }) : new Error('account key unavailable (decryption failed): ' + a.name); // O1: the key file's refusal, said
     return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
   }
 
@@ -2627,9 +2661,8 @@ class AccountManager {
       const pk = cfg?.primaryApiKey;
       if (typeof pk === 'string' && /^sk-ant-/.test(pk)) {
         const tail = pk.slice(-8);
-        return {
+        return {   // NO tail beside the list (B-ba7d): `imported` says what the page compared it for; the person's read is keyTails().cliKey
           present: true,
-          tail,
           org: cfg?.oauthAccount?.organizationName || null,
           imported: this._state.accounts.some((a) => a.tail === tail),
         };
@@ -2674,4 +2707,4 @@ for (const [name, namers] of LOOK_AGAIN_SLOT_WRITERS) {
   AccountManager.prototype[name] = { [name](...args) { for (const nameOf of namers) { let d = null; try { d = nameOf.apply(this, args); } catch { RR.dropRun(); continue; } if (d) RR.forget(d); } return writer.apply(this, args); } }[name];
 }
 
-module.exports = { AccountManager };
+module.exports = { AccountManager, publicNameOf, maskDefaultKeyName };

@@ -10,6 +10,7 @@ import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
+import { tailOf } from './account-tails.js'; // B-ba7d: a usage row carries no key tail — the person's read does
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -436,7 +437,7 @@ function renderControls(app, state, load, rerender) {
         mergedGlobals.add(g.key);
         opts.push({ key: `${r.key},${g.key}`, label: (r.name || r.key) + ' ✦', iconHtml: beIc(bucketBe(r)), tip: t('Same account as the machine CLI login — includes its (unattributed) usage too') });
       } else {
-        opts.push({ key: r.key, label: r.name || r.key, iconHtml: beIc(bucketBe(r)), tip: r.deleted ? t('Account was removed from VibeSpace — history kept') : (r.tail ? `…${r.tail}` : '') });
+        opts.push({ key: r.key, label: r.name || r.key, iconHtml: beIc(bucketBe(r)), tip: r.deleted ? t('Account was removed from VibeSpace — history kept') : (tailOf(r.key) ? `…${tailOf(r.key)}` : '') });   // B-ba7d: the person's read, never the usage row
       }
     }
     for (const G of GLOBALS) {

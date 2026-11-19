@@ -265,7 +265,7 @@ app.get('/api/usage-stats/rid-info', async (req, res) => {
     // be/model/effort (additive): the popup names the RIGHT machine login for a
     // global-bucket event (codex = the ChatGPT login, not "CLI login") and can
     // show the ledger's served model / codex effort when the record has none.
-    res.json({ found: true, acct: ev.acct || null, aname: ev.aname || null, atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null, hostName, be: ev.be || 'claude', model: ev.model || null, effort: ev.effort || null });
+    res.json({ found: true, acct: ev.acct || null, aname: ev.aname ? require('../accounts').maskDefaultKeyName(ev.aname) : null,   /* B-ba7d: an event under the old default name never answers the tail */ atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null, hostName, be: ev.be || 'claude', model: ev.model || null, effort: ev.effort || null });
   } catch (e) { if (e && e.code === 'LOADING') return res.json({ found: false, loading: true }); res.status(500).json({ error: e.message }); } // lane ledger-boot-load: a first load that failed is «still loading», never «not in the ledger yet»
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() })); // the editor: the effective table + its sources (lane cli-update-needs-nothing)
@@ -273,25 +273,10 @@ app.post('/api/usage-stats/pricing', (req, res) => {
   try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/accounts', (req, res) => {
-  const out = {
-    ...accounts.list(),
-    subscription: accounts.subscriptionStatus(),
-    cliKey: accounts.cliPrimaryKey(),
-  };
-  // Host id → display name map (2.244.1, real screenshot: the roster's
-  // "logged in on host-9a86e4fb" — raw ids leaked whenever the sidebar's
-  // hosts data wasn't loaded yet; the server always knows the names)
-  try { out.hostNames = Object.fromEntries((hosts.list?.() || []).map((h) => [h.id, h.name || h.id])); } catch { }
-  // LOCAL verdicts (B-f531): same authority as the per-host ones
-  try {
-    out.verdicts = {};
-    for (const a of (out.accounts || [])) {
-      try { out.verdicts[a.id] = accounts.evaluateOnHost(accounts.get(a.id), null, {}); } catch { }
-    }
-  } catch { }
-  res.json(out);
-});
+// B-ba7d: the accounts list carries NO key tail (the owner's decision 2026-11-18); the person's read of the tails is POST
+// /api/accounts/tails (src/routes/account-tails.js — behind the person verdict)
+require('../routes/account-tails.js').registerAccountTailRoutes(app, { accounts, providers });
+app.get('/api/accounts', (req, res) => res.json(require('../routes/account-tails.js').accountsAnswer({ accounts, hosts })));
 app.post('/api/accounts', (req, res) => {
   try { res.json({ success: true, account: accounts.add(req.body || {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }

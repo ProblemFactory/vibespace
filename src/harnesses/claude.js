@@ -153,7 +153,7 @@ function claudeBillingIdentity(s, { accounts, withHost, poolAuth }) {
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
     // name, no amber key warning.
     if (a && (a.type || 'api') === 'subscription') return withHost({ source: 'subscription', name: a.name });
-    return withHost({ source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null });
+    return withHost({ source: 'api-key', name: (typeof accounts.nameShownOf === 'function' ? accounts.nameShownOf(s._accountId) : a?.name) || 'API key', accountId: s._accountId });   // NO key tail (B-ba7d: the live payload reaches every client; the page lays the person's read on by id)
   }
   const src = s._apiKeySource;
   if (src === 'none') return withHost({ source: 'subscription' });
@@ -198,7 +198,7 @@ function claudeProviderSpawn({ provider, key, home }) {
  *  ('api-other': the page draws it as pay-per-use with the name) — never «API key» / «ChatGPT» */
 function providerBillingIdentity(s, accounts, withHost) {
   const p = accounts && typeof accounts.providerRecordOf === 'function' ? accounts.providerRecordOf(s._accountId) : null;
-  return withHost({ source: 'api-other', name: (p && p.label) || 'Third-party model', tail: (p && p.tail) || null, provider: true });
+  return withHost({ source: 'api-other', name: (p && p.label) || 'Third-party model', provider: true, accountId: s._accountId });   // NO key tail (B-ba7d)
 }
 
 module.exports = {
