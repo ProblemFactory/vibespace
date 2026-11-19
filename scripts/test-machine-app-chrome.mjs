@@ -10,7 +10,8 @@
 //   ① "Run as its own window…" is the default for `start "" blender`; the run → the launch report → the app's window found
 //   ② the pane shows the CROP (the green window never shows) and pins the app on top; a click at the pane's centre arrives
 //      at the app's centre on the machine; a click in the letterbox sends nothing; a drag out of the crop is held at its edge
-//   ③ the app moves: the crop follows; the next click lands at the new centre    ④ the app closes: the words + the two buttons
+//   ③ the app moves: the crop follows; the next click lands at the new centre (②③: within the pointer's quantization at the
+//      LIVE crop scale, |off| < 1/s + 1 — ② proves it at this scale and at the whole one: a drift growing with 1 − s is red)    ④ the app closes: the words + the two buttons
 //   ⑤ Run again → a new window; closing it ends the watch and UNPINS the app     ⑥ the phone: the crop fits 390 px
 //   ⑦ an old agent: "update the agent" at once, the device never asked
 //   ⑧ (lane speaker-passthrough-v1) the Machines card says the sound's permission: a Windows machine asks none; a Mac's sound
@@ -245,7 +246,12 @@ const ROW = (id, label) => JSON.stringify({ hostId: id, label, code: 'desktop_re
 const GEO = `(() => { const w = [...document.querySelectorAll('.vs-win[data-type="machine-app"]')].pop(); if (!w) return null; const pane = w.querySelector('.machine-app-pane'), box = w.querySelector('.machine-app-box'), st = w.querySelector('.machine-app-stage'), cv = st && st.querySelector('canvas'); const p = pane.getBoundingClientRect(), b = box.getBoundingClientRect(); return { shown: box.style.display !== 'none', pane: [p.left, p.top, p.width, p.height], box: [b.left, b.top, b.width, b.height], stage: [parseFloat(st.style.left), parseFloat(st.style.top), parseFloat(st.style.width)], fb: cv ? [cv.width, cv.height] : null, title: w.querySelector('.vs-win-title').textContent, say: w.querySelector('.machine-app-say').style.display === 'none' ? '' : w.querySelector('.machine-app-say').textContent, share: w.querySelector('.machine-app-share').style.display === 'none' ? '' : w.querySelector('.machine-app-share').textContent }; })()`;
 const pins = () => fs.readFileSync(PINS, 'utf8').trim().split('\n').filter(Boolean);
 const pointerAfter = async (n, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const p = vnc.seen.pointers.slice(n); if (p.some((e) => e.mask & 1)) return p; await sleep(50); } return vnc.seen.pointers.slice(n); };
-const near = (e, x, y) => e && Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1;
+// ckpt61 hosted cure (主开发 20:5xZ): a press lands within the POINTER'S QUANTIZATION at THIS crop's scale s (one CSS pixel = 1/s
+// machine px): Chrome hands noVNC an integer clientX / clientY (under one CSS pixel off) and noVNC cuts the machine coordinate with
+// `|0` (under one machine pixel) — so |off| < 1/s + 1, computed from the LIVE geometry, never a fixed number. The old ±1 held only
+// while the crop sat at a whole scale on integer offsets; the command's fold (ui-plain-words pick 2) made the pane shorter, s ≈ 0.974.
+const quant = (s) => 1 / s + 1;
+const near = (e, x, y, s) => !!e && Math.abs(e.x - x) < quant(s) && Math.abs(e.y - y) < quant(s);
 async function runAsWindow(p) {
   await p.ev(`window.__open(${ROW('win-a', 'WIN-DESK1')})`);
   await p.ev(`(() => { const i = document.querySelector('.machine-desktop-cmd'); i.value = 'start "" blender'; i.dispatchEvent(new Event('input')); })()`);
@@ -275,10 +281,28 @@ console.log('① – ⑤ desk 1100 px');
   await p.shot('desk.png');
   await p.click(5, 5); // the page's own first press (outside the window)
   g = await p.ev(GEO);
+  // the press at TWO scales (主开发's law): this crop's (s < 1 — the fold made the pane shorter) and the WHOLE one (the window made
+  // taller, the crop re-fitted by its ResizeObserver) — each within ITS quantization, so a drift that grows with the scale's distance
+  // from 1 is red; both offsets printed (the measure that decides quantization vs drift)
+  const pressAt = async (gg) => { const k = vnc.seen.pointers.length; await p.click(gg.box[0] + gg.box[2] / 2, gg.box[1] + gg.box[3] / 2); return (await pointerAfter(k)).find((e) => e.mask & 1); };
+  const sNow = g.box[2] / 800, here = await pressAt(g);
+  ok(near(here, 700, 450, sNow), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) within this crop's pointer quantization (s ${sNow.toFixed(4)}: |off| < ${quant(sNow).toFixed(3)}) — got ${JSON.stringify(here)}`, { here, sNow, g });
+  const winEl = `[...document.querySelectorAll('.vs-win[data-type="machine-app"]')].pop()`;
+  const h0 = await p.ev(`${winEl}.style.height`);
+  await p.ev(`(() => { ${winEl}.style.height = '680px'; return true; })()`);
+  await p.until(`(() => { const g = ${GEO}; return g && g.box[2] / 800 >= 1; })()`, 5000);
+  await sleep(300);
+  const gW = await p.ev(GEO), sW = gW.box[2] / 800, whole = await pressAt(gW);
+  console.log(`    · measured: s ${sNow.toFixed(4)} → off (${here ? here.x - 700 : '?'}, ${here ? here.y - 450 : '?'}) of < ${quant(sNow).toFixed(3)}; s ${sW.toFixed(4)} → off (${whole ? whole.x - 700 : '?'}, ${whole ? whole.y - 450 : '?'}) of < ${quant(sW).toFixed(3)}`);
+  ok(sNow < 1 && sW >= 1 && near(whole, 700, 450, sW), `② the same press at the WHOLE scale (s ${sW.toFixed(4)}: |off| < ${quant(sW).toFixed(3)}) — got ${JSON.stringify(whole)}`, { whole, sW, gW });
+  ok(!near({ x: 300 + Math.trunc(g.box[2] / 2), y: 200 + Math.trunc(g.box[3] / 2) }, 700, 450, sNow),
+    `CONTROL (RED): a press mapped WITHOUT the crop's scale (one CSS pixel taken as one machine pixel — a drift) lands ~${(700 - 300 - Math.trunc(g.box[2] / 2)).toFixed(0)} px off: outside this scale's quantization`);
+  await p.ev(`(() => { ${winEl}.style.height = ${JSON.stringify(h0)}; return true; })()`);
+  await p.until(`(() => { const g = ${GEO}; return g && Math.abs(g.box[2] / 800 - ${sNow}) < 0.002; })()`, 5000);
+  await sleep(300);
+  g = await p.ev(GEO);
   let n = vnc.seen.pointers.length;
-  await p.click(g.box[0] + g.box[2] / 2, g.box[1] + g.box[3] / 2);
-  let got = await pointerAfter(n);
-  ok(near(got.find((e) => e.mask & 1), 700, 450), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) — got ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
+  let got = null;
   if (g.box[0] - g.pane[0] > 6) {
     await sleep(300); // int304: pointerAfter answers at the centre click's PRESS; its release (mask 0) can land a ms later — count after it, or it reads as a letterbox event (red 1 in 3 on the p2w head)
     n = vnc.seen.pointers.length;
@@ -301,7 +325,7 @@ console.log('① – ⑤ desk 1100 px');
   n = vnc.seen.pointers.length;
   await p.click(g.box[0] + g.box[2] / 2, g.box[1] + g.box[3] / 2);
   got = await pointerAfter(n);
-  ok(near(got.find((e) => e.mask & 1), 850, 500), `③ the next click lands at the app's NEW centre (850, 500) — got ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
+  ok(near(got.find((e) => e.mask & 1), 850, 500, s), `③ the next click lands at the app's NEW centre (850, 500) within this crop's pointer quantization (s ${s.toFixed(4)}: |off| < ${quant(s).toFixed(3)}) — got ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
 
   console.log('④ the app closes on the machine');
   setApp(null); vnc.repaint();
