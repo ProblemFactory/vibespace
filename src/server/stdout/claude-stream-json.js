@@ -27,6 +27,7 @@
 const { notifyCompactionEnd } = require('../../server/compaction-watch.js');
 const { liveWallOf } = require('../../signin-model.js'); // PURE (lane signin-card-real-screen): the CLI's live login refusal, a table row   // lane worker-dispatch: endCompaction notifies the ONE observer (spelled from src/ like every require here — patched copies rebase '../../')
 const fs = require('fs');
+const WD = require('../../watch-door.js');   // 主开发 2026-11-19: every file watch through the one door (a refused watch is a poll, never a throw)
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
@@ -302,7 +303,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
         const delay = Math.min(10000, 1000 * Math.pow(1.3, attempt));
         // Belt-and-braces liveness: a killed session must not keep re-scanning
         // the projects dir through this retry chain (audit round-2)
-        const retry = setTimeout(() => { session.subagentWatchers.delete(toolUseId); if (!activeSessions.has(id)) return; startSubagentWatcher(toolUseId, agentId, attempt + 1); }, delay);
+        // 主开发 2026-11-19 01:17Z: THIS TIMER ended the production hub (its watch threw ENOSPC, nothing caught it) — no throw leaves it
+        const retry = setTimeout(() => { try { session.subagentWatchers.delete(toolUseId); if (!activeSessions.has(id)) return; startSubagentWatcher(toolUseId, agentId, attempt + 1); } catch (e) { console.warn(`[stream] a helper's transcript watch could not start (${e && e.message}) — caught`); } }, delay);
         session.subagentWatchers.set(toolUseId, { watcher: null, retry, lastActivity: Date.now() });
         return;
       }
@@ -347,7 +349,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
         } catch {}
       };
       readNewLines(); // read any existing content
-      const watcher = fs.watch(watchFile, () => { const e = session.subagentWatchers.get(toolUseId); if (e) e.lastActivity = Date.now(); readNewLines(); });
+      // THE ONE DOOR (src/watch-door.js): a watch the system refuses (ENOSPC — the machine's limit of watches) is followed by a
+      // bounded poll instead, said once; the helper's records keep arriving; nothing here can throw
+      const watcher = WD.watch(watchFile, () => { const e = session.subagentWatchers.get(toolUseId); if (e) e.lastActivity = Date.now(); readNewLines(); });
       session.subagentWatchers.set(toolUseId, { watcher, lastActivity: Date.now() });
     };
 
@@ -1317,7 +1321,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           if (msg.type === 'result') maybeRepinLockedModel(session);
           if (msg.type === 'result' && session._goal) {
             checkClaudeGoalStatus(session, id);
-            setTimeout(() => { if (activeSessions.has(id)) checkClaudeGoalStatus(session, id); }, 2000);
+            setTimeout(() => { try { if (activeSessions.has(id)) checkClaudeGoalStatus(session, id); } catch (e) { console.warn(`[stream] the goal check threw (${e && e.message}) — caught`); } }, 2000);   // 主开发 2026-11-19 (3): no timer of the parser ends the process
           }
 
           // PERSIST THE TASK RECORDS (2.369.140, inc-muc2fmtt-5jat "还是上面的俩workflow都没展示细节"):

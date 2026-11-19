@@ -43,6 +43,7 @@
  * instead of scattered `if (type === …)` at the call sites.
  */
 const fs = require('fs');
+const WD = require('./watch-door.js');   // the one door for a file watch (2026-11-19)
 const os = require('os');
 const path = require('path');
 
@@ -255,7 +256,7 @@ function createEventStream({
  *  therefore recorded in `failed` and NOT watched: not-a-store degrades to
  *  "unknown", which keeps the timer fallback on, and the next reconnect
  *  re-arms (the serve creates the db at boot). */
-function createStoreWatch({ dirs = [], onDirty = null, debounceMs = STORE_DEBOUNCE_MS, log = console, watchImpl = fs.watch, existsImpl = fs.existsSync } = {}) {
+function createStoreWatch({ dirs = [], onDirty = null, debounceMs = STORE_DEBOUNCE_MS, log = console, watchImpl = WD.watch, existsImpl = fs.existsSync } = {}) {
   const watchers = [];
   const state = { watching: [], failed: [], hits: 0, lastAt: 0 };
   let timer = null;
@@ -330,7 +331,7 @@ function storeDirsFor({ env = process.env, home = null, serveHome = null } = {})
  *  watchers. A serve that never comes up simply leaves the watch inactive
  *  (which laneHealthy() reads as "not healthy" -> the timer fallback stays on). */
 function createLiveLane({ locator, onEvent = null, onExternal = null, onState = null, log = console,
-  storeDirs = null, env = process.env, fetchImpl = null, watchImpl = fs.watch, existsImpl = fs.existsSync,
+  storeDirs = null, env = process.env, fetchImpl = null, watchImpl = WD.watch, existsImpl = fs.existsSync,
   debounceMs = STORE_DEBOUNCE_MS, idleTimeoutMs = SSE_IDLE_TIMEOUT_MS } = {}) {
   let watch = null;
   let watchTried = false;

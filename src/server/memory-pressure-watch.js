@@ -66,6 +66,8 @@ async function tmpRoots(dir = '/tmp') {
 }
 
 function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, sessionStatusKey, jobsWiringOf = () => null, getKeeper = () => null, getApps = () => [], log = console } = {}) {
+  // 主开发 2026-11-19: the watch limit is a system resource like memory — this module hands the one watch door its For-you store
+  try { require('../watch-door.js').configure({ getUserTodos, log: (line) => { try { (log.warn || log.log).call(log, line); } catch { } } }); } catch { }
   let state = { on: false, episode: 0, since: null, peak: 0 };
   let itemId = null;
   const told = new Map(); // conversation id → { pids:Set, at }
