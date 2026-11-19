@@ -296,6 +296,21 @@ function create(engineCtx) {
     }
     return out;
   }
+  /** B-1e96: the VISIBLE grants that reach a conversation as ROWS — the principal with its «仅本组», the row's own «除了», where
+   *  it came from (the account / a grant here) — THE one shape the Notify… page (eligibleAboveView) and the server's judge read
+   *  (convInheritedOf → the save; wakeEffOf → the wake's re-judge): a grant row is judged with the lineage on all three, never
+   *  by own groups on the server while the page says yes. `skipOwnScope` as visibleKeysOf. */
+  function visibleRowsOf(grants, { skipOwnScope = null } = {}) {
+    const out = [];
+    for (const g of Array.isArray(grants) ? grants : []) {
+      if (!g || !g.principal || g.level !== 'visible') continue;
+      if (skipOwnScope && g.scope && g.scope.kind === skipOwnScope.kind && g.scope.id === skipOwnScope.id && (g.origin === 'access' || g.origin === 'assignment')) continue;
+      const p = g.principal;
+      if (!pkOf(p.kind === 'everyone' ? { kind: 'everyone', id: '*' } : p)) continue;
+      out.push({ principal: { kind: p.kind, id: p.kind === 'everyone' ? '*' : p.id, name: p.name || null, ...(p.kind === 'group' && p.only === true ? { only: true } : {}) }, via: g.scope && g.scope.kind === 'adapter' ? 'account' : 'grant', except: Array.isArray(g.except) ? g.except : [] });   // the store's arrays, read only
+    }
+    return out;
+  }
   /** The account-scope grants of one account, as keys (`skipAccess` = leave out the account grain's own access rows). */
   function accountGrantKeys(adapterId, { skipAccess = false } = {}) {
     const acct = accountScopeGrants(adapterId).filter((g) => !skipAccess || (g.origin !== 'access' && g.origin !== 'assignment'));
@@ -308,7 +323,7 @@ function create(engineCtx) {
     const acc = skipAccount ? [] : CG.accessOf(CG.RES.account(en.adapterId));
     const pats = [];
     for (const pa of rankedPatternsOf(en.adapterId)) if (pa && pa.pattern && pa.id !== skipRule && F.matchConversation(pa.pattern, convFacts(en)).hit) pats.push(...CG.accessOf(CG.RES.rule(pa.id)));
-    const grants = visibleKeysOf(grantsOfConversation(en, undefined, { skipAccount, skipRule }), skipOwn ? { skipOwnScope: { kind: 'conversation', id: en.key } } : {});
+    const grants = visibleRowsOf(grantsOfConversation(en, undefined, { skipAccount, skipRule }), skipOwn ? { skipOwnScope: { kind: 'conversation', id: en.key } } : {});   // B-1e96: ROWS (the lineage judged), as the page
     return [...pats, ...acc, ...grants];   // cure 3: the store's precedence — a matching rule's rows before the account's
   }
   /** Who holds access above a grain being WRITTEN (setGrain's watcher check): a conversation's ancestors, an account's
@@ -316,8 +331,10 @@ function create(engineCtx) {
   function siteInheritedOf(site) {
     if (site.kind === 'conversation') return site.holder ? convInheritedOf(site.holder, { skipOwn: true }) : [];
     const aid = site.rec && site.rec.id;
-    if (site.kind === 'account') return accountGrantKeys(aid, { skipAccess: true });
-    return [...CG.accessOf(CG.RES.account(aid)), ...accountGrantKeys(aid)];
+    // B-1e96: the account's grants as ROWS here too (the lineage judged at an account / rule save, as at a conversation's)
+    const acctRows = (skipAccess) => visibleRowsOf(accountScopeGrants(aid).filter((g) => !skipAccess || (g.origin !== 'access' && g.origin !== 'assignment')));
+    if (site.kind === 'account') return acctRows(true);
+    return [...CG.accessOf(CG.RES.account(aid)), ...acctRows(false)];
   }
   /** The facts a pattern matches over (PURE input). */
   function convFacts(en) { return { title: (en && en.title) || '', participants: (en && en.participants) || '', kind: (en && en.kind) || '', authors: (en && Array.isArray(en.authors)) ? en.authors : [] }; }
@@ -344,7 +361,8 @@ function create(engineCtx) {
     const hasVia = e0.watchers.some((it) => it && it.watcher && it.watcher.via);
     const anyExcept = CG.hasAnyExcept();
     const members = hasVia || anyExcept ? membersNow() : null;
-    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: e0.access })) } : e0;   // the chain's cure (D): the grain's access rows (a via row's «仅本组», the lineage)
+    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en))] : null;   // B-1e96: + the grant rows (after the grains' rows: the store's precedence) — the save judged them, so does the wake
+    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: viaRows })) } : e0;   // the chain's cure (D): the grain's access rows (a via row's «仅本组», the lineage)
     // lane grants-unify: with an exception anywhere, a NAMED watcher that is running is re-judged too (wakeAdmitOf: may it
     // still see this conversation) — one not running is judged when it runs (its held hits wait, never dropped here)
     const admitOf = new Map();
@@ -484,7 +502,7 @@ function create(engineCtx) {
     const add = (p, via, ex) => { const k = p && pkOf(p.kind === 'everyone' ? { kind: 'everyone', id: '*' } : p); if (k && !out.has(k)) out.set(k, { principal: { kind: p.kind, id: p.kind === 'everyone' ? '*' : p.id, name: p.name || null, ...(p.kind === 'group' && p.only === true ? { only: true } : {}) }, via, ...(Array.isArray(ex) ? { except: [...ex] } : {}) }); };
     for (const pa of rankedPatternsOf(en.adapterId)) if (pa && pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit) for (const r of CG.accessOf(CG.RES.rule(pa.id))) add(r.principal, 'pattern', r.except);
     for (const r of CG.accessOf(CG.RES.account(en.adapterId))) add(r.principal, 'account', r.except);
-    for (const g of grantsOfConversation(en)) if (g && g.level === 'visible' && g.principal && !(g.scope && g.scope.kind === 'conversation' && (g.origin === 'access' || g.origin === 'assignment'))) add(g.principal, g.scope && g.scope.kind === 'adapter' ? 'account' : 'grant');
+    for (const r of visibleRowsOf(grantsOfConversation(en), { skipOwnScope: { kind: 'conversation', id: en.key } })) add(r.principal, r.via, r.except);   // B-1e96: THE one shape (the server's judge reads it too)
     return [...out.values()];
   }
   /** A grain's two lists as the card and the dialogs read them, + the FIRST

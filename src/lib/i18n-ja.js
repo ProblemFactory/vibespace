@@ -8973,6 +8973,7 @@ export default {
   "matches the regular expression": "正規表現に一致",
   "regular expression, e.g. invoice\\s*#?\\d+": "正規表現（例: invoice\\s*#?\\d+）",
   "Agent · {name} (in {group})": "エージェント · {name}（{group} のメンバー）",
+  "Agent · {name} (in {group}, under {parent})": "エージェント · {name}（{group} のメンバー、{parent} の下）",
   "Sessions of {groups} inherit its access — pick one to wake it as itself, under its own daily cap.": "{groups} のセッションはグループのアクセス権を引き継ぎます。選んだセッションはそれ自身として、自分の 1 日の上限内で起こされます。",
   "Matching messages stored here, newest first — showing {n} of {total}": "保存済みの一致メッセージ（新しい順）— {total} 件中 {n} 件を表示",
   "No stored message matches yet.": "保存済みのメッセージに一致するものはまだありません。",

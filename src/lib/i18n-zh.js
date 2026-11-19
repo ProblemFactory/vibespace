@@ -8974,6 +8974,7 @@ export default {
   "matches the regular expression": "匹配正则表达式",
   "regular expression, e.g. invoice\\s*#?\\d+": "正则表达式，例如 invoice\\s*#?\\d+",
   "Agent · {name} (in {group})": "代理 · {name}（{group} 成员）",
+  "Agent · {name} (in {group}, under {parent})": "代理 · {name}（{group} 成员，在 {parent} 之下）",
   "Sessions of {groups} inherit its access — pick one to wake it as itself, under its own daily cap.": "{groups} 的会话继承该组的访问权限——选中某个会话即以它自己的身份唤醒，按它自己的每日上限计。",
   "Matching messages stored here, newest first — showing {n} of {total}": "本地已存的匹配消息，最新在前——显示 {n} / {total} 条",
   "No stored message matches yet.": "本地已存的消息中暂无匹配。",

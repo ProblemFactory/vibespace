@@ -196,7 +196,7 @@ const { makeRecord, makeConversation } = require('../src/channel-record.js');
 const CH = require('../src/channels/index.js');
 const ENG = require('../src/server/channels-engine.js');
 let worldN = 0;
-async function world({ live: liveIn = null } = {}) {   // lane lg-group-parents (cure 3's read): + the live sessions a leg needs
+async function world({ live: liveIn = null, eng = ENG, seed = null } = {}) {   // B-1e96: + `eng` (a red control's engine copy), `seed(store)` (rows written before the boot)   // lane lg-group-parents (cure 3's read): + the live sessions a leg needs
   const A = 'gsx', OPS = 'ops';
   const recs = []; let seq = 0;
   const mint = (text) => makeRecord({ adapterId: A, convId: OPS, vendorId: `gsx-${++seq}`, at: Date.now() + seq, author: { id: 'u-ada', name: 'Ada', isSelf: false, isBot: false }, text, mentions: [], attachments: [], replyTo: null, threadKey: OPS, raw: {} });
@@ -213,7 +213,9 @@ async function world({ live: liveIn = null } = {}) {   // lane lg-group-parents 
   const registry = CH.createChannelRegistry(); registry.register(mod);
   const live = liveIn || [{ cid: 'm1', name: 'One', groups: ['g1'] }, { cid: 'm2', name: 'Two', groups: ['g1'] }];
   const base = Date.now(); let offset = 0;
-  const e = ENG.create({ dataDir, env: {}, registry, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: ladder, userTodos: { add() { return { id: 't' }; }, get() { return null; }, setStatus() {} }, serverSetting: () => undefined, liveSessions: () => live, now: () => base + offset });
+  const gsSeed = seed ? GS.create({ dataDir }) : null;
+  if (gsSeed) seed(gsSeed);
+  const e = eng.create({ ...(gsSeed ? { grants: gsSeed } : {}), dataDir, env: {}, registry, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: ladder, userTodos: { add() { return { id: 't' }; }, get() { return null; }, setStatus() {} }, serverSetting: () => undefined, liveSessions: () => live, now: () => base + offset });
   await e.pass(A, { force: true });
   const ingest = async (n) => { for (let i = 0; i < n; i++) { offset += 61e3; recs.push(mint(`GPU ${i}`)); await e.pass(A, { force: true }); await e.settleWakes(); } };
   return { e, A, C: { kind: 'conversation', convId: OPS }, ladder, ingest };
@@ -844,7 +846,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const keyOnly = CFD.validateWatchers([wD('k3')], accP, { inherited: ['group:tg-q'], members: [...membersD, { cid: 'k3', groups: ['tg-q'], inherited: [] }] });
     ok(CFD.memberStill(viaRow, membersD, { rows: wrapped }) === true && !exP.ok && /left out through its parent Task Group "Parent"/.test(exP.error) && keyOnly.ok && keyOnly.watchers[0].via === 'tg-q', 'channels (the cure (D), its read): the wake\'s wrapped rows are read through; a parent left out of the access list leaves the child out (said so); a key-only group stays a via group beside the rows', [exP.error, keyOnly.ok && keyOnly.watchers[0].via]);
     const caD = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
-    ok(/F\.memberStill\(it\.watcher, members, \{ rows: e0\.access \}\)/.test(caD), 'channels (the cure (D)): the wake hands the grain\'s access rows to the re-judge');
+    ok(/F\.memberStill\(it\.watcher, members, \{ rows: viaRows \}\)/.test(caD) && /const viaRows = hasVia \? \[\.\.\.e0\.access, \.\.\.visibleRowsOf\(grantsOfConversation\(en\)\)\] : null;/.test(caD), 'channels (the cure (D)): the wake hands the grain\'s access rows to the re-judge (B-1e96: and the grant rows after them)');
     // CONTROL: the release's via judge (own groups only, from key strings) refuses the child — the leg above would be red
     const MD = mutantCopies('cure-d-via', REPO);
     try {
@@ -939,6 +941,68 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     await w8.ingest(2);
     ok(!!a8 && a8.ok === true && !!c8 && c8.ok === true && !!sx8 && sx8.ok === false && /left out through its parent Task Group "Parent"|has no access here/.test(String(sx8.error || '')) && !!sy8 && sy8.ok === true && w8.ladder.calls.includes('ky') && !w8.ladder.calls.includes('kx'), 'cure 3 (the save and the wake on ONE real engine): P on the account and on the conversation with X left out — a member of X is refused at the save by name; a member of Y is saved via P and woken', { a8: a8 && a8.ok, c8: c8 && c8.ok, sx8, sy8: sy8 && sy8.ok, calls: w8.ladder.calls });
     try { w8.e.stop(); } catch { }
+  }
+  // B-1e96: a GRANT row (a hand-written visible grant here; an approved request is a row of the same store; a pre-unify
+  // account grant) is judged the same way on the page, at the save and at the wake — ONE shape (channels-access visibleRowsOf):
+  // the principal with its «仅本组», the row's OWN «除了», judged with the member's lineage. Over the real engine; every red
+  // control an engine copy through the anchored helper (it fails by name when its line moved)
+  {
+    const CF9 = require('../src/channel-filter.js');
+    const P9 = { kind: 'group', id: 'tg-p', name: 'Parent' };
+    const KIDY = { cid: 'ky', name: 'KidY', groups: ['tg-y'], inherited: ['tg-p'] }, DIRECT = { cid: 'kd', name: 'Direct', groups: ['tg-p'], inherited: [] };
+    const wOf9 = (m) => ({ principal: { kind: 'agent', id: m.cid, name: m.name }, notify: 'wake', mode: 'all', dailyWakeCap: 50 });
+    // ONE scene: the rows written, the PAGE's judgement (the conversation view's own rows + rows above, as the editor hands them),
+    // the SAVE, two passes (the WAKE) → what each said
+    const scene = async (eng, { m, grant = P9, access = null, accountUser = null, grain = null, after = null }) => {
+      const seed = accountUser ? (gs) => gs.set('channel-reach', 'account:gsx#user', { to: [accountUser], except: [] }, 'user') : null;
+      const w = await world({ live: [m], eng, seed });
+      const a = access ? await w.e.setAccess(w.A, w.C, access.rows, { except: access.except }) : { ok: true };
+      const g = grant ? await w.e.setReach(w.A, 'ops', { principal: grant, level: 'visible' }) : { ok: true };
+      const v = w.e.conversationView(w.A, 'ops') || {}, own = v.own || {};
+      const page = CF9.validateWatchers([wOf9(m)], own.access || [], { inherited: v.eligibleAbove || [], members: [{ cid: m.cid, groups: m.groups, inherited: m.inherited }], except: own.except || [] });
+      const save = await w.e.setWatchers(w.A, grain || w.C, [wOf9(m)]);
+      if (after) await after(w);   // a write between the save and the passes (the wake judges what is there THEN)
+      await w.ingest(2);
+      const out = { wrote: !!a && a.ok === true && !!g && g.ok === true, page: page.ok === true ? (page.watchers[0].via || 'own') : 'refused', save: save && save.ok === true ? 'ok' : String((save && save.error) || 'refused'), woke: w.ladder.calls.includes(m.cid) };
+      try { w.e.stop(); } catch { }
+      return out;
+    };
+    const ACC_A = { rows: [{ principal: { kind: 'group', id: 'tg-z', name: 'Other' }, authority: 'draft' }], except: [{ kind: 'conversation', key: 'kd' }] };
+    const S_LIN = { m: KIDY }, S_OWNEX = { m: DIRECT, access: ACC_A }, S_ONLY = { m: KIDY, grant: { ...P9, only: true } }, S_ACCT = { m: KIDY, grant: null, accountUser: { kind: 'group', id: 'tg-p' }, grain: { kind: 'account' } };
+    const S_ONLY_LATER = { m: KIDY, after: (w) => w.e.setReach(w.A, 'ops', { principal: { ...P9, only: true }, level: 'visible' }) };   // saved through the plain grant; the grant then marked «仅本组»
+    const lin = await scene(ENG, S_LIN), ownEx = await scene(ENG, S_OWNEX), only = await scene(ENG, S_ONLY), acct = await scene(ENG, S_ACCT), onlyLater = await scene(ENG, S_ONLY_LATER);
+    ok(lin.wrote && lin.page === 'tg-p' && lin.save === 'ok' && lin.woke, 'B-1e96: a parent\'s visible grant here — a member of its CHILD group is admitted on the page (via the parent), at the SAVE and at the WAKE: one shape of grant row, judged with the lineage', lin);
+    ok(ownEx.wrote && ownEx.page === 'tg-p' && ownEx.save === 'ok' && ownEx.woke, 'B-1e96 (a) (a regression of the chain\'s cure (D), cured before release): a session of the granted group is not refused because THIS chat\'s access row leaves it out of ANOTHER group — a grant row is judged by its own «除了», as the read door judges it', ownEx);
+    ok(only.wrote && only.page === 'refused' && /has no access here|left out/.test(only.save) && !only.woke, 'B-1e96 (b): the parent\'s grant marked «仅本组» — its child group\'s member refused on the page and at the save (the flag rides the row)', only);
+    ok(onlyLater.wrote && onlyLater.save === 'ok' && !onlyLater.woke, 'B-1e96 (b) at the WAKE: saved through the parent\'s plain grant, the grant then marked «仅本组» — the wake re-judges the row and does not wake the child\'s member', onlyLater);
+    ok(acct.wrote && acct.save === 'ok' && acct.woke, 'B-1e96: an ACCOUNT save reads the account\'s grants as rows too — a pre-unify account grant to the parent: its child\'s member saved on the account and woken', acct);
+    // RED CONTROLS
+    const M9 = mutantCopies('b1e96-grant-rows', REPO);
+    try {
+      const ES9 = engineSource(REPO);
+      const copy = (anchor, to, name) => M9.load('src/server/channels-engine.js', anchored(ES9, anchor, to, name), name.replace(/\W+/g, '-'));
+      const keys9 = await scene(copy('    const grants = visibleRowsOf(grantsOfConversation(en, undefined, { skipAccount, skipRule }), skipOwn ?', '    const grants = visibleKeysOf(grantsOfConversation(en, undefined, { skipAccount, skipRule }), skipOwn ?', 'B-1e96 the save reads the grants as keys'), S_LIN);   // stale-pins: kept (the control restores the release's line)
+      ok(keys9.page === 'tg-p' && /has no access here|left out/.test(keys9.save) && !keys9.woke, 'B-1e96 RED CONTROL: the save reading the grants as KEYS (the release: own groups only) — the page says yes, the save refuses by name', keys9);
+      const wake9 = await scene(copy('{ rows: viaRows }', '{ rows: e0.access }', 'B-1e96 the wake without the grant rows'), S_LIN);   // stale-pins: kept (the control restores the chain's line before this unit)
+      ok(wake9.save === 'ok' && !wake9.woke, 'B-1e96 RED CONTROL: the wake re-judging without the grant rows — saved via the parent, never woken (the save and the wake judge the same row)', wake9);
+      const ex9 = await scene(copy(", except: Array.isArray(g.except) ? g.except : [] });", ' });', 'B-1e96 a grant row without its own except'), S_OWNEX);
+      ok(/has no access here|left out/.test(ex9.save) && !ex9.woke, 'B-1e96 RED CONTROL (a): a grant row without its OWN «除了» falls back to this grain\'s — the session left out of another group is refused (the chain\'s regression)', ex9);
+      const onlyWake9 = await scene(copy('    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en))] : null;', '    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en)).map((r) => ({ ...r, principal: { ...r.principal, only: false } }))] : null;', 'B-1e96 the wake drops the only flag'), S_ONLY_LATER);
+      ok(onlyWake9.save === 'ok' && onlyWake9.woke, 'B-1e96 RED CONTROL (b) at the wake: the wake\'s grant rows without their «仅本组» — the child\'s member is woken through a grant now for the parent\'s own members only', onlyWake9);
+      const only9 = await scene(copy("...(p.kind === 'group' && p.only === true ? { only: true } : {}) }, via: g.scope", '}, via: g.scope', 'B-1e96 a grant row without its only flag'), S_ONLY);
+      ok(only9.save === 'ok' && only9.woke, 'B-1e96 RED CONTROL (b): a grant row that drops its «仅本组» — the child\'s member is saved and woken through a parent that reaches its own members only', only9);
+      const acct9 = await scene(copy('    if (site.kind === \'account\') return acctRows(true);', "    if (site.kind === 'account') return accountGrantKeys(aid, { skipAccess: true });", 'B-1e96 the account save reads keys'), S_ACCT);   // stale-pins: kept (the control restores the release's line)
+      ok(/has no access here|left out/.test(acct9.save) && !acct9.woke, 'B-1e96 RED CONTROL: the account save reading the account\'s grants as KEYS (the release) — the child\'s member refused there', acct9);
+    } finally { try { fs.rmSync(M9.dir, { recursive: true, force: true }); } catch { } }
+    // (c) the Notify… editor offers a member only where the SAVE admits it — F.memberVia over the save's keys, rows and «除了»,
+    // the facts the server's (own groups + the copy's `ancestors`, the store's own walk), a child labelled under its parent
+    const ed = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8');
+    const tgv = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf-8');
+    ok(/const via = F\.memberVia\(offerKeys, s\.id, \[\{ cid: s\.id, groups: own, inherited: up \}\], \{ rows: offerRows, except: st\.except \|\| \[\] \}\);/.test(ed)
+      && /const offerKeys = F\.eligibleKeys\(\{ access: st\.access, inherited: st\.eligibleAbove \|\| \[\] \}\);/.test(ed)
+      && /const offerRows = \[\.\.\.st\.access\.map\(\(row\) => \(\{ row, except: st\.except \|\| \[\] \}\)\), \.\.\.\(st\.eligibleAbove \|\| \[\]\)\];/.test(ed)
+      && /const members = principals\.filter\(\(p\) => p\.via\)\.map\(\(p\) => \(\{ cid: p\.id, groups: p\.groupIds \|\| \[p\.via\], inherited: p\.inherited \|\| \[\] \}\)\);/.test(ed)
+      && /ancestors: this\.ancestorsOf\(\[t\.id\]\)/.test(tgv), 'B-1e96 (c): the Notify… editor offers a member through F.memberVia over the save\'s keys, rows and «除了», with the server\'s member facts (the copy\'s `ancestors` — the store\'s own walk, never a second one)');
   }
   // restack 411 (主开发 20:18Z, the meeting ruled (A)): the release's web-login «by what» facts carry the ancestors — a child's
   // conversation and a child group are drawn admitted by the parent's row; a row for «this group only» does not admit them

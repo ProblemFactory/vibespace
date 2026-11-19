@@ -1063,13 +1063,29 @@ export async function showNotifyDialog(app, target) {
   for (const r of st.eligibleAbove || []) if (r && r.principal && !principals.some((x) => x.value === pkOf(r.principal))) principals.push({ value: pkOf(r.principal), label: `${principalText(r.principal)} ${r.via === 'pattern' ? t('(rule)') : r.via === 'grant' ? t('(approved request)') : t('(account)')}`, kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: null });
   // lane notify-rules-r2 (owner inc-muxt96t5-pk42): a group that holds access reaches its MEMBER SESSIONS — each is
   // offered as itself (its own row, cap and ledger); the server re-judges the membership at save and on every wake
+  // B-1e96: a member session is offered when the SAVE would admit it — F.memberVia over the same keys, rows and «除了» the
+  // save's validateWatchers reads (its own group's row, or a parent's row that is not «仅本组», each row's «除了» applied), with
+  // the facts the server hands it (membersNow: own groups + their ancestors — read from the sidebar's copy, whose `ancestors`
+  // is the store's own walk, never a second one)
   const memberOf = new Map();
-  for (const g of principals.filter((p) => p.kind === 'group')) {
-    for (const s of rosterFromApp(app, { groups: false })) {
-      if (!(s.groupIds || []).includes(g.id) || principals.some((x) => x.value === s.key)) continue;
-      principals.push({ value: s.key, label: t('Agent · {name} (in {group})', { name: s.name, group: g.name || g.id }), kind: 'agent', id: s.id, name: s.name || null, authority: g.authority, via: g.id });
-      memberOf.set(g.id, g.name || g.id);
-    }
+  const groupsCopy = (app && app.sidebar && Array.isArray(app.sidebar._tasks)) ? app.sidebar._tasks : [];
+  const groupById = new Map(groupsCopy.filter((x) => x && x.id).map((x) => [String(x.id), x]));
+  const ancestorsOfGroup = (id) => { const x = groupById.get(String(id)); return x && Array.isArray(x.ancestors) ? x.ancestors.map(String) : []; };
+  const titleOf = (id) => { const x = groupById.get(String(id)); return (x && (x.title || x.name)) || String(id); };
+  const offerKeys = F.eligibleKeys({ access: st.access, inherited: st.eligibleAbove || [] });
+  const offerRows = [...st.access.map((row) => ({ row, except: st.except || [] })), ...(st.eligibleAbove || [])];
+  for (const s of rosterFromApp(app, { groups: false })) {
+    if (principals.some((x) => x.value === s.key)) continue;
+    const own = (s.groupIds || []).map(String);
+    const up = [...new Set(own.flatMap(ancestorsOfGroup))].filter((id) => !own.includes(id));
+    const via = F.memberVia(offerKeys, s.id, [{ cid: s.id, groups: own, inherited: up }], { rows: offerRows, except: st.except || [] });
+    if (!via) continue;
+    const g = principals.find((x) => x.kind === 'group' && String(x.id) === String(via)) || { name: null, authority: null };
+    const gName = g.name || titleOf(via);
+    const child = own.includes(String(via)) ? null : own.find((id) => ancestorsOfGroup(id).includes(String(via)));
+    const label = child ? t('Agent · {name} (in {group}, under {parent})', { name: s.name, group: titleOf(child), parent: gName }) : t('Agent · {name} (in {group})', { name: s.name, group: gName });
+    principals.push({ value: s.key, label, kind: 'agent', id: s.id, name: s.name || null, authority: g.authority, via, groupIds: own, inherited: up });
+    memberOf.set(String(via), gName);
   }
   if (!principals.length) {
     const empty = el('div', 'chan-notify-empty');
@@ -1152,7 +1168,7 @@ export async function showNotifyDialog(app, target) {
     const watchers = [];
     let clamped = false;
     for (const r of rows) { const v = r.read(); if (v.error) { showToast(v.error, { type: 'error' }); return; } watchers.push(v.watcher); clamped = clamped || v.clamped; }
-    const members = principals.filter((p) => p.via).map((p) => ({ cid: p.id, groups: [p.via] }));
+    const members = principals.filter((p) => p.via).map((p) => ({ cid: p.id, groups: p.groupIds || [p.via], inherited: p.inherited || [] }));   // B-1e96: the server's membersNow shape (own groups + their ancestors)
     const vw = F.validateWatchers(watchers.map((w) => ({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) })), st.access, { inherited: st.eligibleAbove || [], members, except: st.except || [] });   // the chain's cure (D): + the access list's «除了»
     if (!vw.ok) { showToast(routeErrorText({ code: vw.code, error: vw.error, why: vw.why, principal: vw.principal }), { type: 'error' }); return; }
     save.disabled = true;
