@@ -14,6 +14,13 @@ const JSON_HDR = { 'Content-Type': 'application/json' };
 // the tier as the dialog words it (the record carries its id: read / write-ask / write-auto / write-all; under an `everyone` row it is Read unless the user ticked write for All agents)
 const TIER_WORD = { read: 'Read', 'write-ask': 'Read + write, ask each', 'write-auto': 'Read + write, auto (sensitive still asks)', 'write-all': 'Full trust (sensitive runs without asking)' };
 
+/** the follow-owed read: a decision refused because the agent's Task Groups are UNKNOWN (held now, or recorded while held) — the
+ *  page's words by its CODE, never the server's English `error`; null for any other code */
+export function heldRefusalText(code) {
+  if (code === 'groups_unreadable') return t('Task Groups cannot be read right now, and this access comes through a Task Group — nothing ran; the card stays. Decide it again once they read.');
+  if (code === 'groups_unknown_filed') return t('This was filed while Task Groups could not be read, and this access comes through a Task Group — nothing ran. Reject it and let the agent ask again.');
+  return null;
+}
 /** Approve / Reject / 重新提交 — the same route from every surface; Approve and Resubmit name the frozen digest they were
  *  pressed on (Resubmit files the vendor's redirect target as a NEW card — nothing runs, B-fc37). */
 export async function answerApiProposal(id, answer, { shown = null, always = false, reason = null } = {}) {
@@ -23,7 +30,7 @@ export async function answerApiProposal(id, answer, { shown = null, always = fal
     : answer === 'resubmit'
       ? await fetchJson(`/api/channels/api/proposals/${pid}/resubmit`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown }) }).catch(no)
       : await fetchJson(`/api/channels/api/proposals/${pid}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown, always }) }).catch(no);
-  if (!r || !r.ok) showToast(r && r.code === 'not-pending' ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
+  if (!r || !r.ok) showToast(r && r.code === 'not-pending' ? t('That request was already decided') : heldRefusalText(r && r.code) || (r && r.error) || t('server unreachable'), { type: 'error' });
   refreshApiCards({ changed: true });   // the answer changed the records: a read already in flight is read once more
   return !!(r && r.ok);
 }

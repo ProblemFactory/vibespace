@@ -336,11 +336,12 @@ function fileSites(src, rel) {
   });
   return { sites, helpers, ast };
 }
+const TREE_AST = new Map();   // file → { src, ast } of this tree, filled by scan(REPO) (one parse a file a run)
 function scan(repo) {
   const out = [], files = censusFiles(repo), parsed = new Map(), helperDefs = new Map();
   for (const f of files) {
-    let r; try { r = fileSites(fs.readFileSync(path.join(repo, f), 'utf8'), f); } catch { continue; }
-    parsed.set(f, r);
+    let r, src; try { src = fs.readFileSync(path.join(repo, f), 'utf8'); r = fileSites(src, f); } catch { continue; }
+    parsed.set(f, r); if (repo === REPO) TREE_AST.set(f, { src, ast: r.ast });   // ⑨ follow (2)'s principal-builder census walks the same trees
     for (const s0 of r.sites) out.push({ file: f, scope: (SCOPED[f] || []).find((x) => s0.scope === x || s0.scope.endsWith(' > ' + x)) || '*', what: `${f}:${s0.line} «${s0.scope}» ${s0.fn}${s0.via ? ` (${s0.via})` : ''}` });
     for (const h of r.helpers) if (!KNOWN_HELPERS.has(h.name) && !GENERIC.has(h.name)) helperDefs.set(`${f}#${h.name}`, h);
   }
@@ -1128,6 +1129,240 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       ok(cnt('src/server/channels-access.js', FACT) === 3 && cnt('src/server/channels-engine.js', FACT) === 2 && cnt('src/server/channels-outbound.js', FACT) === 2 && cnt('src/server/conversation-ops.js', FACT) === 2 && cnt('src/agent-routes.js', FACT_AR) === 2
         && /function wakeAdmits\(res, principal, \{ cid, groups = \[\], groupsUnreadable = false \} = \{\}\)/.test(readSrc('src/server/channels-grants.js')),
         '⑨ …the hub\'s doors that judge a live agent from the roster HAND the fact: the channel principals (channelPrincipal ×2, the engine\'s hear / wake ctx ×2, outbound ×2, access ×1), the two watch wakes, the automation reach\'s two targets');
+      // (2) THE PRINCIPAL BUILDERS (主开发 05:42Z (2) — the doors were pinned by COUNT, so a future door that builds an agent
+      // principal from the roster's groups and forgets the fact stayed green; the follow-owed read: a ONE-LINE regex missed
+      // `taskIds:`, `{ cid, groups }`, `reach({ conversationId, groups })`, a principal spread over lines, `groups: caller.groups`):
+      // every OBJECT LITERAL in the hub's code with a Task Group key (`groups` / `groupIds` / `taskIds` / `subjectGroups`), read
+      // on acorn's tree (the trees the sync-fs census above parsed — a subtree with no such word is skipped), is a site. A site
+      // that HANDS the hold's fact — a `groupsUnreadable` / `unreadable` / `held` key, a value or spread naming groups-hold's
+      // fact(), groupsUnreadable, unreadable or B-55dc's `.unread`, an Object.assign whose other argument does — needs no row;
+      // every other site is a row whose class says why it needs none. A new site with no row is RED; a count that moved is
+      // RED; a site that LOST its fact is a site with no row — RED; a row naming nothing (or whose sites all hand the fact
+      // now) is DEAD. THE CENSUS'S LIMITS, stated: a context built by assignment (`ctx.groups = g`), under another key name,
+      // or in a file outside BFILE is not seen; a class is a reader's word, not proven (the judges are pinned by their own legs).
+      // (The first row of the follow-owed unit beside it: the group's browser CAP read for a new conversation — its own leg below.)
+      {
+        const GKEYS = new Set(['groups', 'groupIds', 'taskIds', 'subjectGroups']), FKEYS = new Set(['groupsUnreadable', 'unreadable', 'subjectGroupsUnreadable', 'held']);
+        const FACTV = /groups-hold\.js'\)\.fact\(\)|groupsUnreadable|\bunreadable\b|\.unread\b/, GKEY_AT = /\b(?:groups|groupIds|taskIds|subjectGroups)\b/g;
+        const BFILE = /^(server\.js|src\/server\/|src\/routes\/|src\/agent-routes|src\/ws-|src\/exit-|src\/window-|src\/msg-acl\.js$|src\/browser-login\.js$)/;
+        const uncomment = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|\s)\/\/[^\n]*/g, '$1');   // a comment naming the hold is no hand of it («https://» stays)
+        const keyOf = (p) => (p.type === 'Property' && !p.computed ? p.key.name || p.key.value : null);
+        const WHY = {
+          roster: 'a roster or target row (a conversation\'s groups as LISTED): the judge that reads it is a site of its own — it hands the fact or only narrows',
+          answer: 'an answer, a page\'s listing, a broadcast or its words: the groups SHOWN, never judged',
+          record: 'a stored record, a memo or a write: judged, if ever, later — by a live read again, or with its own held mark (recorded while held ⇒ unknown for good) — never «in no group» (a birth bind WAITS while held)',
+          other: 'another meaning of «groups» (search hits, memory, spend batches, retention, a count, an option, a module\'s parts): no Task Group ids',
+          narrows: 'group visibility or to-group rows with no except judged: an empty (held) list can only narrow — refuse — never widen',
+          named: 'the ids are NAMED (a create\'s own pick from the request, a group subject probed by itself): known, never read from the held store',
+          user: 'the PERSON\'s own act (by: \'user\') or the person as a caller: no agent judged by its groups',
+          fixed: 'a fixed principal (the maintainer): no Task Groups by construction, never read from the store',
+          afterHold: 'reached only after the hold\'s own branch returned (the store READ): the groups are the store\'s',
+          jobOwner: 'a jobs caller: its groups judge a job\'s group VIEW (only narrows) and become a new job\'s groupsSnapshot — made while held it stays EMPTY for good, only its owner sees it: the STATED remainder of the hold (a refusal blocked every `vibespace-job run`)',
+        };
+        const BROWS = [
+          ["src/agent-routes.js", "{ name: ep.t.name ? agentText(ep.t.name, { kind: '", 1, "answer"],
+          ["src/agent-routes.js", "{ success: true, groups: tasks.list().map(brief) }", 1, "answer"],
+          ["src/agent-routes.js", "{ conversationId: own.cid, borrowed: own.cid ? nul", 1, "jobOwner"],
+          ["src/agent-routes.js", "{ id: tid, t, cid, groups, reachability: t._msgRea", 1, "roster"],
+          ["src/agent-routes.js", "{ groups: msgGroupsAnswer(c.ge.listFor(c.cid)) }", 1, "answer"],
+          ["src/browser-login.js", "{ conversationKey: BY_WHAT_PROBE, groupIds: [m[1]]", 1, "named"],
+          ["src/exit-proxy.js", "{ groups: false }", 1, "other"],
+          ["src/msg-acl.js", "{ conversationKeys: target.cid ? [String(target.ci", 1, "narrows"],
+          ["src/routes/automation.js", "{ sessions: [], groups: [] }", 1, "answer"],
+          ["src/routes/browser-trace.js", "{ key: u.browserKey, sessionId: u.sessionId, name:", 1, "answer"],
+          ["src/routes/browser.js", "{ session: s, sessionId: id, browserKey: s._browse", 1, "user"],
+          ["src/routes/browser.js", "{ taskIds: String(req.query?.taskIds || '').split(", 1, "named"],
+          ["src/routes/browser.js", "{ taskIds }", 1, "named"],
+          ["src/routes/browser.js", "{ session: s, sessionId: h.sessionId, browserKey: ", 1, "user"],
+          ["src/routes/channels.js", "{ groups: groupsEngine().list() }", 1, "answer"],
+          ["src/routes/persistence.js", "{ count: Object.keys(state?.customNames || {}).len", 1, "other"],
+          ["src/routes/vault.js", "{ sessions: [], groups: [] }", 1, "answer"],
+          ["src/routes/vault.js", "{ conversationId: caller.conversationId, groups: c", 1, "narrows"],
+          ["src/server/automation-engine.js", "{ type: 'automation-ask', askId, keyId: key.id, ke", 1, "answer"],
+          ["src/server/automation-engine.js", "{ maintainer: true, name: A.MAINTAINER_NAME, conve", 1, "fixed"],
+          ["src/server/browser-keeper.js", "{ browserKey: '', taskIds: Array.isArray(taskIds) ", 1, "named"],
+          ["src/server/browser-keeper.js", "{ taskIds }", 1, "named"],
+          ["src/server/browser-keeper.js", "{ taskIds: formGroups }", 1, "named"],
+          ["src/server/browser-logins.js", "{ sessions: (Array.isArray(sj.sessions) ? sj.sessi", 1, "answer"],
+          ["src/server/browser-trace.js", "{ groups: [{ key: pid, entries: files }], now: t }", 1, "other"],
+          ["src/server/channel-api.js", "{ id: `shape-${crypto.randomBytes(5).toString('hex", 1, "record"],
+          ["src/server/channels-access.js", "{ cid: String(x.cid), name: x.name || null, groups", 1, "roster"],
+          ["src/server/channels-access.js", "{ gen, id: ctx.id, groups: g, n, by: new Map() }", 1, "record"],
+          ["src/server/channels-access.js", "{ cid: String(x.cid), groups: Array.isArray(x.grou", 1, "roster"],
+          ["src/server/channels-access.js", "{ id: String(a.id), kind: a.kind || '', vendor: a.", 1, "answer"],
+          ["src/server/channels-auth.js", "{ flowId: st.flowId, mode: st.mode, running: !!st.", 1, "answer"],
+          ["src/server/channels-engine.js", "{ groups: routes.join(',') }", 1, "other"],
+          ["src/server/channels-engine.js", "{ adapterLabel: label, scopeLabel, groups, windowM", 1, "answer"],
+          ["src/server/channels-engine.js", "{ conversationKey: String(x.cid), groupIds: Array.", 1, "narrows"],
+          ["src/server/channels-engine.js", "{ conversationKey: String(cid), groupIds: Array.is", 1, "narrows"],
+          ["src/server/channels-wiring.js", "{ channels, groups, touches, flushGroupCards, live", 1, "other"],
+          ["src/server/conversation-ops.js", "{ s, id, conversationId: idOf(s), sessionKey: keyO", 1, "roster"],
+          ["src/server/conversation-ops.js", "{ s: null, id: null, conversationId: d.conversatio", 1, "roster"],
+          ["src/server/exit-routes.js", "{ sessions, groups }", 1, "answer"],
+          ["src/server/groups-engine.js", "{ cid: target.cid, groups: target.groups || [], re", 1, "narrows"],
+          ["src/server/groups-engine.js", "{ type: 'channel-groups-updated', changed, groups,", 1, "answer"],
+          ["src/server/groups-engine.js", "{ groups: [], reads: 0 }", 1, "other"],
+          ["src/server/groups-engine.js", "{ groups: w }", 1, "answer"],
+          ["src/server/groups-engine.js", "{ groups: out, partial }", 1, "other"],
+          ["src/server/groups-engine.js", "{ cid: s.cid, name: s.name ? G.cleanName(s.name) |", 1, "roster"],
+          ["src/server/jobs-wiring.js", "{ live: false, conversationId: cid, groups: new Se", 1, "afterHold"],
+          ["src/server/jobs-wiring.js", "{ isUser: true, groups: new Set() }", 1, "user"],
+          ["src/server/memory-pressure-watch.js", "{ procs, sessions: ids.sessions, groups: MP.attrib", 1, "other"],
+          ["src/server/memory-pressure-watch.js", "{ pct, used: mem.used, limit: mem.limit, groups, t", 1, "other"],
+          ["src/server/migrations.js", "{ archived: archived.length, groups: 0 }", 1, "other"],
+          ["src/server/migrations.js", "{ archived: archived.length, groups: Object.keys(g", 1, "other"],
+          ["src/server/migrations.js", "{ groups: 0, rows: 0, folders: 0, notes: 0, merged", 1, "other"],
+          ["src/server/mounts-plugins-wiring.js", "{ sessions, groups }", 1, "answer"],
+          ["src/server/mounts-plugins-wiring.js", "{ conversationId: cid, sessionKey, name, groups }", 1, "roster"],
+          ["src/server/roster-pass.js", "{ cid, name: s.name || null, groups, webuiId: id, ", 1, "roster"],
+          ["src/server/search-index.js", "{ groups: copiesOf(null, { cachedOnly: true }), wh", 2, "other"],
+          ["src/server/search-index.js", "{ groups: copiesOf(null), whole: true }", 1, "other"],
+          ["src/server/search-index.js", "{ groups, whole: !partial.length }", 1, "other"],
+          ["src/server/search-index.js", "{ groups: copiesOf(String(gid)) }", 1, "other"],
+          ["src/server/search-index.js", "{ hits: r.hits, groups: r.groups, total: r.total, ", 1, "other"],
+          ["src/server/spend-guard.js", "{ ok: false, why: list.length ? 'identity-unknown'", 1, "other"],
+          ["src/server/spend-guard.js", "{ reason, groups: [...byKey.values()], state, limi", 2, "other"],
+          ["src/server/usage-pool-engine.js", "{ at: 0, groups: null }", 1, "other"],
+          ["src/server/usage-pool-engine.js", "{ accounts: () => accounts, todos: () => getUserTo", 1, "other"],
+          ["src/server/window-targets-engine.js", "{ sessionKeys: [], groupIds: [] }", 1, "narrows"],
+          ["src/server/window-targets-engine.js", "{ sessionKeys: keysOf(s, id), conversationKeys: ke", 1, "narrows"],
+          ["src/window-reach.js", "{ everyone: { checked: !!allRow, by: allRow ? allR", 1, "answer"],
+          ["src/ws-create.js", "{ groupId: spawnGroups[0], groupIds: spawnGroups.s", 1, "record"],
+          ["src/ws-create.js", "{ name: session.name, nameExplicit: session._nameE", 1, "record"],
+        ];
+        const walkB = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.posix.join(d, e.name); if (e.isDirectory()) { if (rel !== 'src/lib' && rel !== 'src/agentd') walkB(rel, out); } else if (e.name.endsWith('.js')) out.push(rel); } return out; };
+        const bfiles = () => new Map(['server.js', ...walkB('src')].filter((f) => BFILE.test(f) && f !== 'src/server/grants-migration.js').map((f) => [f, readSrc(f)]));   // grants-migration: its probes compare mappings on purpose (kb)
+        const bsites = (files) => {
+          const seen = new Map();
+          for (const [f, t] of files) {
+            const c = TREE_AST.get(f), ast = c && c.src === t ? c.ast : parseOf(t), hits = [...t.matchAll(GKEY_AT)].map((m) => m.index);
+            const holds = (a, b) => { let lo = 0, hi = hits.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (hits[mid] < a) lo = mid + 1; else hi = mid; } return lo < hits.length && hits[lo] < b; };
+            const txt = (x) => uncomment(t.slice(x.start, x.end));
+            const visit = (n, up) => {
+              if (!n || typeof n.type !== 'string' || !holds(n.start, n.end)) return;
+              if (n.type === 'ObjectExpression' && n.properties.some((p) => GKEYS.has(keyOf(p)))) {
+                const viaAssign = !!up && up.type === 'CallExpression' && up.arguments[0] === n && txt(up.callee).trim() === 'Object.assign';
+                const fact = n.properties.some((p) => (FKEYS.has(keyOf(p)) && !(p.value.type === 'Literal' && p.value.value === false)) || FACTV.test(txt(p.type === 'Property' ? p.value : p.argument))) || (viaAssign && up.arguments.slice(1).some((a) => FACTV.test(txt(a))));
+                const k = f + '\u0000' + txt(n).replace(/\s+/g, ' ').slice(0, 50), o = seen.get(k) || { n: 0, fact: 0 }; o.n++; if (fact) o.fact++; seen.set(k, o);
+              }
+              for (const key in n) { if (key === 'loc') continue; const v = n[key]; if (Array.isArray(v)) { for (const x of v) visit(x, n); } else if (v && typeof v === 'object') visit(v, n); }
+            };
+            visit(ast, null);
+          }
+          return seen;
+        };
+        const bcensus = (files, rows) => {
+          const seen = bsites(files), problems = [];
+          for (const [k, o] of seen) {
+            if (o.fact === o.n) continue;
+            const [f, at] = k.split('\u0000'), r = rows.find((x) => x[0] === f && x[1] === at);
+            if (!r) { problems.push(`${f}: NO ROW «${at}» — a context with Task Group ids: hand the hold's fact (groups-hold), take the groups from a reader that throws to unreadable, or say why it needs none`); continue; }
+            if (r[2] !== o.n - o.fact) problems.push(`${f} «${at}»: ${r[2]} → ${o.n - o.fact} — classify the new site(s), then move the count`);
+          }
+          for (const r of rows) { const o = seen.get(r[0] + '\u0000' + r[1]); if (!o || o.fact === o.n) problems.push(`${r[0]} «${r[1]}»: DEAD row${o ? ' (every site of it hands the fact now)' : ''}`); }
+          const all = [...seen.values()];
+          return { problems, sites: all.reduce((k, o) => k + o.n, 0), facts: all.reduce((k, o) => k + o.fact, 0) };
+        };
+        const BF = bfiles(), bc = bcensus(BF, BROWS);
+        ok(!bc.problems.length && BROWS.every((r) => WHY[r[3]] && r[2] > 0), `⑨ follow (2) THE PRINCIPAL BUILDERS: ${bc.sites} object literals with Task Group ids in ${BF.size} hub files — ${bc.facts} hand the hold's fact, ${BROWS.reduce((k, r) => k + r[2], 0)} more each a row saying why none is needed (${Object.keys(WHY).map((c) => `${c} ${BROWS.filter((r) => r[3] === c).reduce((k, r) => k + r[2], 0)}`).join(' · ')})${bc.problems.length ? `\n  ${bc.problems.slice(0, 12).join('\n  ')}` : ''}`);
+        // CONTROLS — one per shape the read named (each planted alone in a new file, the fact left out ⇒ a row is owed), the same
+        // shapes WITH the fact (no row owed: a spread, a key, an Object.assign — never a comment), and two real doors that LOSE it
+        const SHAPES = [
+          "const p = { kind: 'agent', id: cid, name: null, groups: g };",
+          'const v = B.mayAttach(p, { browserKey, conversationKeys, taskIds: g.ids });',
+          'if (!CG.wakeAdmits(res, root, { cid, groups })) return false;',
+          'const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });',
+          "function principalOf(s, cid) {\n  return {\n    kind: 'agent',\n    id: cid,\n    name: s.name || null,\n    groups: myGroups,\n  };\n}",
+          'const r = totp.use({ conversationId: caller.conversationId, groups: caller.groups, live: caller.live }, name);',
+        ];
+        const owed = (src) => bcensus(new Map([['src/server/new-door.js', src + '\n']]), []).problems.filter((p) => p.startsWith('src/server/new-door.js: NO ROW')).length;
+        const WITH = [
+          "const p = { kind: 'agent', id: cid, name: null, groups: g, ...require('./groups-hold.js').fact() };",
+          'const v = B.mayAttach(p, { browserKey, conversationKeys, taskIds: g.ids, groupsUnreadable: !!g.unreadable });',
+          "const p = Object.assign({ kind: 'agent', id: cid, name: null, groups: g }, require('./groups-hold.js').fact());",
+        ];
+        const loses = (f, from, to) => { const t = BF.get(f), t2 = t.replace(from, to); return t2 !== t && bcensus(new Map([[f, t2]]), BROWS.filter((r) => r[0] === f)).problems.some((p) => p.startsWith(`${f}: NO ROW`)); };
+        ok(SHAPES.every((s) => owed(s) === 1) && WITH.every((s) => owed(s) === 0) && owed("const p = { kind: 'agent', id: cid, groups: [g /* ...require('./groups-hold.js').fact() */] };") === 1 && owed("const p = { kind: 'agent', id: cid, groups: g, groupsUnreadable: false };") === 1
+          && loses('src/server/channels-outbound.js', "...(!live && a.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };", "msgLevelFor: () => 'none' };")
+          && loses('src/agent-routes.js', "groups: myGroups, ...(require('./server/groups-hold.js').fact()),", 'groups: myGroups,'),
+          `CONTROL: each of the ${SHAPES.length} shapes (a principal, a mayAttach's taskIds, a { cid, groups } watch, a reach target, a principal over seven lines, a caller re-built for a use door) planted with no fact is RED by name; with the fact (a spread, a key, an Object.assign) it owes nothing; a fact named only in a comment, or a literal false, is RED; channels-outbound's stash-gate principal and agent-routes' multi-line one that LOSE the fact are RED`);
+      }
+      {
+        // THE GROUP'S BROWSER CAP of a conversation started while Task Groups were held (主开发 08:04Z: «skipped in silence» — the first
+        // row of the census above): the cap read throws by name while held ⇒ UNKNOWN (the keeper's undefined, the witness's 'unread'),
+        // never «none in force» (null); the key WAITS and is stamped at the store's read (groups-hold's lift, signalled by the store)
+        const GH = require(path.join(REPO, 'src/server/groups-hold.js')), BP = require(path.join(REPO, 'src/browser-profiles.js'));
+        let h = true;
+        // …and the keeper's WAITING caps are tried again at EVERY store change (onStoreChange — a B-55dc read that lands with no hold
+        // lifted is a change too), held or not, until its off(): the stamp itself re-reads, so a still-held read keeps waiting
+        let changes = 0; h = true; GH.setHeld(() => h); const offC = GH.onStoreChange(() => { changes++; });
+        GH.noteChange(); h = false; GH.noteChange(); GH.noteChange(); const before = changes; offC(); GH.noteChange(); GH.setHeld(null);
+        ok(before === 3 && changes === 3, '⑨ follow-owed: groups-hold\'s onStoreChange runs at every store change — while held, at the lift and after it — and never after its off()', { before, changes });
+        ok(BP.witnessCap({ cap: 'unread' }) === undefined && BP.witnessCap({ cap: 2 }) === 2 && BP.witnessCap({ cap: 'x' }) === null && BP.witnessCap(null) === null,
+          '⑨ follow-owed: a start-time witness of the cap while held is UNKNOWN (\'unread\' ⇒ undefined: the late key reads it live), any other non-integer none');
+        // the wait OUTLIVES a restart (the follow-owed read's should 2): the registry keeps a `waiting` cap with the create's facts (bounded)
+        { const K = 'bk-000000aa', n = BP.normalizeRegistry({ caps: { [K]: { cap: null, group: null, at: 5, waiting: true, facts: { cwd: '/w', hostId: 'h1', sessionKey: 'claude:x', initialGroupIds: ['T-1', 7], junk: 'x' } }, 'bk-000000bb': { cap: null, group: null } } });
+          const kept = n && n.caps && n.caps[K];
+          ok(!!kept && kept.waiting === true && JSON.stringify(kept.facts) === '{"sessionKey":"claude:x","cwd":"/w","hostId":"h1","initialGroupIds":["T-1"]}' && Object.keys(n.caps).length === 1, '⑨ follow-owed: a cap WAITING for Task Groups survives a restart — the registry keeps its mark and the create\'s facts (bounded keys only); an entry with nothing in it is still dropped', n && n.caps); }
+        const KP = readSrc('src/server/browser-keeper.js'), WC = readSrc('src/ws-create.js'), MPW = readSrc('src/server/mounts-plugins-wiring.js'), TGW = readSrc('src/server/task-groups-wiring.js');
+        ok(/catch \(e\) \{ if \(e && e\.code === 'TASK_GROUPS_UNREAD'\) return undefined;/.test(KP) && /if \(e && e\.code === 'TASK_GROUPS_UNREAD'\) \{ capWaiting\.set\(bk, facts \|\| \{\}\);/.test(KP)
+          && /const offCapLift = require\('\.\/groups-hold\.js'\)\.onStoreChange\(\(\) => \{ if \(loaded\) retryWaitingCaps\(\); \}\);/.test(KP) && /function retryWaitingCaps\(\) \{ if \(!capWaiting\.size\) return; for \(const \[k, f\] of \[\.\.\.capWaiting\]\) \{ capWaiting\.delete\(k\); try \{ stampGroupCap\(k, f\);/.test(KP) && /loaded = true;\n\s*for \(const \[k, v\] of Object\.entries\(reg\.caps \|\| \{\}\)\) if \(v && v\.waiting === true\) capWaiting\.set\(k, v\.facts \|\| \{\}\);\n\s*if \(capWaiting\.size\) Promise\.resolve\(\)\.then\(\(\) => retryWaitingCaps\(\)\)/.test(KP) && /capWaiting\.set\(bk, facts \|\| \{\}\); if \(!\(v && v\.waiting === true\)\) \{ reg\.caps\[bk\] = \{ cap: v && Number\.isInteger\(v\.cap\) \? v\.cap : null, group: null, at: now\(\), waiting: true, facts: facts \|\| \{\} \}; commit\(\); \}/.test(KP) && /function shutdown\(\) \{ try \{ offCapLift\(\); \} catch \{ \}/.test(KP)
+          && /spawnPinWitness\.cap = c0 === undefined \? 'unread' : c0;/.test(WC) && /if \(c === undefined\) c = 'unread';/.test(WC)
+          && /const a = \{ sessionKey, cwd, hostId, initialGroupId, initialGroupIds \};\n\s*const ids = grantMemberIds\(tasks, a\);[^\n]*\n\s*if \(ids\.unread\) throw Object\.assign\(new Error\('the Task Group list is still being read'\), \{ code: 'TASK_GROUPS_UNREAD' \}\);/.test(MPW) && /onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\(\)\.rejudgeAll\('task-groups'\); \}[^\n]*\n\s*try \{ require\('\.\/groups-hold\.js'\)\.noteChange\(\); \} catch \{ \}/.test(TGW),
+          '⑨ follow-owed: the cap road — the reader throws by name while held (through the seam\'s helper), the keeper answers UNKNOWN and keeps the key WAITING, stamped at the lift (and lets go at its shutdown); ws-create witnesses \'unread\'; the store signals the lift');
+        // THE SECOND ROW — the group's DEFAULT browser profile at a create (a REMAINDER, stated in the kb): the real reader (its source)
+        // throws by name while held (the keeper's taskGroupDefaultFor answers '' with its one warning — test-browser-handles), and
+        // reads the group's default when the store is read
+        {
+          const L = MPW.split('\n'), i0 = L.findIndex((l) => /^\s*taskGroupDefault: \(\{ cwd = null/.test(l)), i1 = i0 < 0 ? -1 : L.findIndex((l, i) => i > i0 && /^ {6}\},$/.test(l));
+          const fn = i1 > i0 && i0 >= 0 ? new Function('getTasks', `return ${L.slice(i0, i1 + 1).join('\n').trim().replace(/^taskGroupDefault: /, '').replace(/,$/, '')};`) : null;
+          const G1 = [{ id: 'T-1', browserProfileId: 'bp-0000feed' }];
+          let threw = null; try { fn(() => ({ isHeldUnread: () => true, groupsForSession: () => [] }))({ initialGroupId: 'T-1' }); } catch (e) { threw = e && e.code; }
+          const readNow = fn ? fn(() => ({ isHeldUnread: () => false, groupsForSession: () => G1 }))({ initialGroupId: 'T-1' }) : null;
+          ok(!!fn && threw === 'TASK_GROUPS_UNREAD' && readNow === 'bp-0000feed', '⑨ follow-owed: the group\'s DEFAULT profile at a create while held is UNKNOWN — the real reader throws by name (never «no group default» in silence); read, it answers the group\'s default', { threw, readNow });
+        }
+        // (1) the lost wake said where the person looks; (4) the create dialog's who refusal in the page's words; (3)/(card) the recorded lists
+        const TGS = readSrc('src/task-groups.js'), CLAUSE = ' A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel.';
+        const rows = ['zh', 'ja'].map((l) => (readSrc(`src/lib/i18n-${l}.js`).match(/A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel\./g) || []).length);
+        ok((TGS.match(/A channel watch by a Task Group, or one that leaves a Task Group out, wakes nobody until it reads; what arrives meanwhile stays in its channel\."/g) || []).length === 2 && TGS.includes(CLAUSE) && JSON.stringify(rows) === '[2,2]',
+          '⑨ follow-owed (1): the hold\'s For-you item says the lost wake — both detail sentences, their zh / ja rows', rows);
+        ok(/say\(pw \|\| createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\|/.test(readSrc('src/lib/browser-new-profile.js')) && /case 'TASK_GROUPS_UNREAD': return t\(/.test(readSrc('src/lib/browser-who-model.js')),
+          '⑨ follow-owed (4): the create dialog words the who list\'s refusals — the hold among them — in the page\'s words (zh / ja rows), never the server\'s English');
+        ok(/if \(require\('\.\/groups-hold\.js'\)\.held\(\) \|\| \(p\.principal && p\.principal\.groupsUnreadable === true\)\) return null;   \/\/ Task Groups held unread, or the card filed while they were/.test(readSrc('src/server/channel-api-cards.js')) && /groups: p\.principal\.groups \|\| \[\], \.\.\.\(p\.principal\.groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\) \}\);/.test(readSrc('src/server/channel-api-cards.js')),
+          '⑨ follow-owed (3): a recorded proposal\'s card never ENDS «withdrawn» on an unread tier — its liveness answers null while held AND for a card filed while held (its principal\'s own mark rides ctxOf too)');
+        { const CO = readSrc('src/server/channels-outbound.js'), WT = readSrc('src/server/window-targets-engine.js');
+          ok(/const drafterGroupsOf = \(ctx\) => [^\n]*\.\.\.\(ctx\.groupsUnreadable === true \? \{ drafterGroupsUnreadable: true \} : \{\}\)/.test(CO) && /\.\.\.\(!live && p\.drafterGroupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO) && !/groupsOfSession\(String\(d\.id\)\)/.test(CO)
+            && /const unread = groupsUnreadable === true \|\| \(!Array\.isArray\(g\) && require\('\.\/groups-hold\.js'\)\.held\(\)\);/.test(CO) && /groupsUnreadable: !live && cur\.drafterGroupsUnreadable === true \}\)/.test(CO)
+            && /\.\.\.\(!live && a\.groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO) && /if \(!sees && ctx\.groupsUnreadable === true && !\(entry\.source === 'channel-receipt' && entry\.ref\)\) return \{ text: HELD_STASH_TEXT \};/.test(CO) && /const gk = `\$\{ctx\.groupsUnreadable === true \? '\?' : ''\}/.test(CO)
+            && /const needGroups = row\.principal\.kind === 'group' \|\| one\.except\.some\(\(e\) => e && e\.kind === 'group'\);/.test(WT) && /const c = needGroups \? ctxOf\(\{ sessionId: id, session: s \}\)/.test(WT),
+            '⑨ follow-owed (the read\'s MUST + shoulds): a drafter\'s groups and a stash entry\'s `about` read while held carry their OWN mark, judged while the conversation is STOPPED (a stopped one\'s membership cannot be read: groupsOfSession answers [] for it — never «read again» into «no group»); with the groups unknown, a refused stash entry is said as HELD BACK (its words withheld — a receipt keeps its fate line), never dropped in silence; the memo keys the mark; a window share that leaves a Task Group out reads every session\'s groups (a session / everyone row listed G\'s members as reached)'); }
+        { // BEHAVIOUR (the delta reads): drafterSees and stashGate RUN from channels-outbound's source over a REAL grant row «All agents,
+          // except Task Group G» (grant-model admits), marked / unmarked × stopped / live × held / read
+          const GMm = require(path.join(REPO, 'src/grant-model.js')), GHm = require(path.join(REPO, 'src/server/groups-hold.js'));
+          const COs = readSrc('src/server/channels-outbound.js');
+          const fnSrc = (sig) => { const i = COs.indexOf(sig); if (i < 0) return null; const j = COs.indexOf('{', i + sig.length - 1); let d = 0; for (let k = j; k < COs.length; k++) { if (COs[k] === '{') d++; else if (COs[k] === '}' && --d === 0) return COs.slice(i, k + 1); } return null; };
+          const ROW = GMm.prepareRow({ door: 'channel-reach', resource: '-', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-G' }] });
+          const stillSeesS = (ctx) => GMm.admits([ROW], GMm.prepareFacts({ conversationKey: String(ctx.id), groupIds: ctx.groups || [], ...(ctx.groupsUnreadable === true ? { groupsUnreadable: true } : {}) })).ok;
+          let LIVE = [];
+          const out = {}, req = (m) => (m === './groups-hold.js' ? GHm : require(m));   // the functions' own relative require, as from src/server
+          try {
+            const DS = new Function('adapterRecords', 'registry', 'liveSessions', 'stillSees', 'scopeConvOf', 'require', 'groupsOfSession', `${fnSrc('function drafterSees(p) {')}; return drafterSees;`)(() => ({ adapters: [{ id: 'lark-1', kind: 'lark' }] }), { get: () => ({ reach: 'grants' }) }, () => LIVE, stillSeesS, () => null, req, () => []);   // groupsOfSession answers [] for a stopped one (the live rule) — a «read again» would be red here
+            const SG = new Function('STASH_ABOUT_KEYS_MAX', 'liveSessions', 'msgAclAccount', 'stillSees', 'store', 'P', 'HELD_STASH_TEXT', 'require', 'groupsOfSession', `${fnSrc('function stashGate(cid, entry, memo = null) {')}; return stashGate;`)(64, () => LIVE, () => false, stillSeesS, { outbox: { snapshot: () => ({ proposals: {} }) } }, { withheldReceiptLine: () => 'receipt fate' }, 'HELD BACK', req, () => []);
+            const dr = (extra) => ({ draftedBy: { kind: 'agent', id: 'c1' }, adapterId: 'lark-1', ...extra });
+            const en = (about) => ({ source: 'channel', about: { keys: ['lark-1/conv1'], ...about } });
+            GHm.setHeld(null); LIVE = [];
+            out.read = { markedStopped: DS(dr({ drafterGroupsUnreadable: true })), plainStopped: DS(dr({})), stashMarked: SG('c1', en({ groups: [], groupsUnreadable: true })), stashPlain: SG('c1', en({ groups: [] })) };
+            LIVE = [{ cid: 'c1', groups: ['T-G'] }];
+            out.read.liveInG = DS(dr({ drafterGroupsUnreadable: true })); out.read.stashLiveInG = SG('c1', en({ groups: [], groupsUnreadable: true }));
+            LIVE = [{ cid: 'c1', groups: [] }]; out.read.liveMarkedNoGroup = DS(dr({ drafterGroupsUnreadable: true }));   // CONTROL: live, the mark is NOT applied — its live groups judge
+            GHm.setHeld(() => true); LIVE = [{ cid: 'c1', groups: [] }];
+            out.held = { liveDrafter: DS(dr({})), stashLive: SG('c1', en({ groups: [] })) };
+          } catch (e) { out.err = String(e && e.stack || e).slice(0, 300); }
+          GHm.setHeld(null);
+          ok(!out.err && out.read.markedStopped === false && out.read.plainStopped === true && JSON.stringify(out.read.stashMarked) === '{"text":"HELD BACK"}' && out.read.stashPlain === null
+            && out.read.liveInG === false && out.read.liveMarkedNoGroup === true && JSON.stringify(out.read.stashLiveInG) === '{"drop":true}' && out.held.liveDrafter === false && JSON.stringify(out.held.stashLive) === '{"text":"HELD BACK"}',
+            '⑨ follow-owed (the delta reads), RUN: once Task Groups read, a STOPPED drafter whose groups were recorded while held is still UNKNOWN under «All agents, except G» (withheld — never admitted as «in no group»; a plain recorded [] is), a marked stash entry is HELD BACK, a live conversation in G is refused for real (dropped); while held a live conversation is unknown too — held back, never dropped in silence', out); }
+      }
       // THE REAL READER (automationGroupsRead, evaluated from its source) and the release's spelling of it (anchored) as the control
       const ARline = MP.split('\n').find((l) => l.startsWith('const automationGroupsRead = (s, id) => {'));
       const ARtext = ARline ? ARline.slice('const automationGroupsRead = '.length).replace(/;\s*$/, '') : null;

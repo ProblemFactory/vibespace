@@ -411,7 +411,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       return r.code === 'api_not_granted' && !r.status && l.verdict === 'withheld' && l.status === 200; },
   };
   const R1 = [
-    ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ["state.shapes = state.shapes.filter((s) => s.cred !== cred || ['write-ask', 'write-auto', 'write-all'].includes(tierNow(shapeCtx(s), cred).tier));", 'void 0;']],
+    ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ['state.shapes = state.shapes.filter((s) => {\n        if (s.cred !== cred) return true;', 'state.shapes = state.shapes.filter((s) => { return true;\n        if (s.cred !== cred) return true;']],
     ['pending', `one conversation keeps at most ${F.PENDING_MAX} proposals waiting on a credential; the next is api_budget (M2)`, ['if (waiting >= F.PENDING_MAX)', 'if (false)']],
     ['digest', 'Approve carries the card\'s digest: a record rewritten on disk (digest recomputed) + a restart runs NOTHING (M3)', ['if (!digest || digest !== (p.frozen && p.frozen.digest))', 'if (false)']],
     ['refresh', 'a Google mount\'s refresh is single-flight (5 concurrent calls ⇒ 1) and paced after a refusal (4 calls ⇒ 1) (M4)', ['if (fl && fl.then) return fl;\n    if (fl && fl.failedUntil > now())', 'if (false) return fl;\n    if (false)']],
@@ -502,6 +502,63 @@ module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landi
   ok(r.code === 'api_pending' && r.proposal.sensitive === 'path' && r.proposal.offersAlways === false && card && card.head.what.key === 'call the {vendor} API ({call})' && card.head.what.params.vendor === 'Acme (test)' && card.head.what.params.call === 'POST users' && card.request.path === '/v1/admin/users' && card.sensitive && card.sensitive.key === 'Sensitive path · always asks', 'acme: its declared sensitive path is a proposal, never "always allow"; the owner\'s card draws it (an unknown vendor call: the account + METHOD + last segment; the full path in the fold; the policy chip)', { code: r.code, card: card && card.head });
   const dv = api.docs(A, 'acme-1');
   ok(dv.ok && dv.vendor === 'Acme' && dv.docs[0] === 'https://docs.acme.test/api' && dv.hosts.join(',') === 'api.acme.test,eu.acme.test' && dv.fence.readByPost[0] === String(/^\/v1\/search$/), 'acme: docs answers the DECLARED label, docs, hosts and fence lists', dv);
+  // THE FOLLOW-OWED READ'S MUST (a group list RECORDED while Task Groups were held keeps its own mark): agent A, in Task Group G,
+  // files a write while held (admitted by its own row — its live groups read [] then); the owner removes A's row, leaving «All
+  // agents, except G»; the store reads; Approve is refused BY NAME (groups_unknown_filed) — never run as «A is in no group». CONTROL:
+  // the same filing while the store is READ (A in no group) is not refused by the unknown
+  {
+    const GH = require(path.join(REPO, 'src/server/groups-hold.js'));
+    let heldNow = true; GH.setHeld(() => heldNow);
+    const EXC = { except: [{ kind: 'group', id: 'T-G' }] }, BOTH = [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }, { principal: { kind: 'everyone', id: '*' }, tier: 'write-ask', allWrite: true }], ALL = [{ principal: { kind: 'everyone', id: '*' }, tier: 'write-ask', allWrite: true }];
+    const out = { set: [] };
+    const set = async (rows) => { const w = await api.setTiers('acme-1', rows, EXC); out.set.push(w.ok ? 'ok' : w.code); };
+    try {
+      await set(BOTH);
+      const f1 = await api.call({ ...A, groups: [], ...GH.fact() }, { cred: 'acme-1', method: 'POST', path: '/v1/items', body: '{}' });
+      const rec1 = f1.proposal ? api.ownerView().proposals.find((p) => p.id === f1.proposal.id) : null;
+      out.filed = f1.code; out.mark = !!(rec1 && rec1.principal && rec1.principal.groupsUnreadable === true);
+      await set(ALL);
+      heldNow = false;
+      const a1 = await api.approve(f1.proposal.id, { digest: f1.proposal.digest });
+      out.approve = a1.ok ? 'ran' : a1.code;
+      await set(BOTH);
+      const f2 = await api.call({ ...A, groups: [] }, { cred: 'acme-1', method: 'POST', path: '/v1/items', body: '{}' });
+      const rec2 = f2.proposal ? api.ownerView().proposals.find((p) => p.id === f2.proposal.id) : null;
+      out.mark2 = !!(rec2 && rec2.principal && rec2.principal.groupsUnreadable);
+      await set(ALL);
+      const a2 = await api.approve(f2.proposal.id, { digest: f2.proposal.digest });
+      out.control = a2.ok ? 'ran' : a2.code;
+      // the delta read's S1: filed while READ (A in no group, by its own row); the owner leaves only a Task Group's row; the store is
+      // HELD at the decision — A's groups are unknown and access could come THROUGH that group: refused by name, the card pending
+      const OWN_G = [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }, { principal: { kind: 'group', id: 'T-G' }, tier: 'write-ask' }], G_ROW = [OWN_G[1]];
+      heldNow = false; { const w = await api.setTiers('acme-1', OWN_G, { except: [], removeExcept: [{ kind: 'group', id: 'T-G' }] }); out.setG = w.ok ? true : w.code; }   // the kept exception named as taken away (else except_conflicts)
+      const f3 = await api.call({ ...A, groups: [] }, { cred: 'acme-1', method: 'POST', path: '/v1/items', body: '{}' });
+      await api.setTiers('acme-1', G_ROW, { except: [] });
+      heldNow = true;
+      const a3 = f3.proposal ? await api.approve(f3.proposal.id, { digest: f3.proposal.digest }) : { code: `not filed: ${f3.code}` };
+      const rec3 = f3.proposal ? api.ownerView().proposals.find((p) => p.id === f3.proposal.id) : null;
+      out.throughG = { filed: f3.code, approve: a3.code, status: rec3 && rec3.status };
+      heldNow = false;
+      // the delta reads' S-a: an «always» shape whose tier falls WHILE held is kept only when a write-level group row could lift it back —
+      // stamped, it never auto-allows (held or not), and the store's read drops it at once; a Read-only group row decides nothing
+      const conv = (n) => ((api.ownerView().creds.find((c) => c.id === 'acme-1') || {}).shapes || []).filter((s) => s.principal === 'agent:conv-A' && (n === 'kept' ? s.keptHeld === true : true)).length;
+      const always = async (rows) => { await api.setTiers('acme-1', rows, { except: [] }); const f = await api.call({ ...A, groups: [] }, { cred: 'acme-1', method: 'POST', path: '/v1/items', body: '{}' }); const a = f.proposal ? await api.approve(f.proposal.id, { always: true, digest: f.proposal.digest }) : { code: f.code }; return a.ok ? 'ran' : a.code; };
+      const own = (tier) => ({ principal: { kind: 'agent', id: 'conv-A' }, tier }), H = (tier) => ({ principal: { kind: 'group', id: 'T-H' }, tier });
+      out.shape = { made: await always([own('write-ask'), H('write-ask')]), before: conv() };
+      heldNow = true; await api.setTiers('acme-1', [own('read'), H('write-ask')], { except: [] }); out.shape.keptWhileHeld = conv('kept');
+      await api.setTiers('acme-1', [own('write-ask'), H('write-ask')], { except: [] });
+      out.shape.callWhileHeld = (await api.call({ ...A, groups: [], ...GH.fact() }, { cred: 'acme-1', method: 'POST', path: '/v1/items', body: '{}' })).code;
+      heldNow = false; GH.noteChange(); out.shape.afterRead = conv();
+      out.shape.readOnly = await always([own('write-ask'), H('read')]);
+      heldNow = true; await api.setTiers('acme-1', [own('read'), H('read')], { except: [] }); out.shape.readOnlyKept = conv();
+      heldNow = false;
+    } catch (e) { out.err = String(e && e.stack || e).slice(0, 300); }
+    GH.setHeld(null);
+    await api.setTiers('acme-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }], { except: [] });
+    ok(out.set.join() === 'ok,ok,ok,ok' && out.filed === 'api_pending' && out.mark === true && out.approve === 'groups_unknown_filed' && out.mark2 === false && out.control === 'ran' && out.setG === true && JSON.stringify(out.throughG) === '{"filed":"api_pending","approve":"groups_unreadable","status":"pending"}'
+      && !!out.shape && out.shape.made === 'ran' && out.shape.before >= 1 && out.shape.keptWhileHeld === out.shape.before && out.shape.callWhileHeld === 'api_pending' && out.shape.afterRead === 0 && out.shape.readOnly === 'ran' && out.shape.readOnlyKept === 0,
+      'the follow-owed MUST: a proposal filed while Task Groups were held KEEPS its mark — after the store reads, «All agents, except G» never admits it as «in no group» (refused groups_unknown_filed, nothing ran); CONTROL: filed while read, it is judged as read; access THROUGH a Task Group with the store held at the decision is refused groups_unreadable and the card stays pending (never «no longer holds»); an «always» shape kept on the unknown (a write-level group row) never auto-allows, even re-widened while held, and the store\'s read drops it; with a Read-only group row it is dropped at once', out);
+  }
   // the CLI against a loopback agent surface over this ORCH
   const srv = http.createServer((req, res) => {
     const chunks = []; req.on('data', (c) => chunks.push(c));

@@ -1426,7 +1426,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             }
             if (!be.variant && spawnPinWitness) {
               // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
-              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
+              try { const kc = require('./server/browser-keeper.js').keeper(); const c0 = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; spawnPinWitness.cap = c0 === undefined ? 'unread' : c0; } catch { spawnPinWitness.cap = null; }   // undefined = Task Groups held: witnessed UNKNOWN
             } else if (!be.variant && pinOwed) {
               // its read r2 (S5): a KEYLESS create the held registry could not judge — its WITNESS is the facts it owes, judged by the
               // late key (the same verdict) once the registry reads: the start's pick, a fork's parent row, never the default by then
@@ -1434,7 +1434,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             } else if (!be.variant && be0 && integrationOn && !pin.held) {   // held: no empty start record (a late key judges afresh then)
               // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
               // start had no default rather than guessing from the default the user has by then
-              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }
+              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, hostId: data.hostId || null, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; if (c === undefined) c = 'unread'; } catch { c = null; }   // undefined = Task Groups held: witnessed UNKNOWN
               spawnPinWitness = { profileId: '', origin: 'harness', at: Date.now(), by: 'user', cap: c };
             }
             if (be.variant) {

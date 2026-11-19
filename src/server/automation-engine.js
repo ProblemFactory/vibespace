@@ -245,7 +245,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // own answer (once or always) settles only that card, in answer() (q-048 verify M3: one card per verb)
     // lane grants-unify: «covers» is THE model's answer over the new grant's use row (its own conversation, one of its
     // Task Groups — minus the members the owner left out), never a hand-written membership test
-    const covers = (g, q) => GM.admits([A.useRowOf(g)].filter(Boolean), { conversationKeys: [String(q.subject).replace(/^session:/, '')], groupIds: (q.groups || []).map((x) => String(x).replace(/^group:/, '')) }).ok;
+    const covers = (g, q) => GM.admits([A.useRowOf(g)].filter(Boolean), { conversationKeys: [String(q.subject).replace(/^session:/, '')], groupIds: (q.groups || []).map((x) => String(x).replace(/^group:/, '')), ...(q.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() }).ok;   // the ask's RECORDED groups judged under the hold (held ⇒ never «covered»: the card stays the person's)
     if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => covers(g, q))) settle(q, 'always', { answeredBy: by, why: 'granted' });
     return { ok: true, added };
   }
@@ -407,7 +407,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (open && asks.has(open)) { asks.get(open).waiters.push(waiter); withdrawOn(asks.get(open)); return; }
       const askId = randomBytes(16).toString('hex');
       const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
-      const q = { askId, pair, keyId: key.id, keyName: key.name, subject, groups: (caller.groups || []).map((g) => `group:${g}`), sessionKey: caller.sessionKey || null, who, verb, askedAt: now(), waiters: [waiter], todoId: null, timer: null };
+      const q = { askId, pair, keyId: key.id, keyName: key.name, subject, groups: (caller.groups || []).map((g) => `group:${g}`), ...(caller.groupsUnreadable === true ? { groupsUnreadable: true } : {}), sessionKey: caller.sessionKey || null, who, verb, askedAt: now(), waiters: [waiter], todoId: null, timer: null };
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {

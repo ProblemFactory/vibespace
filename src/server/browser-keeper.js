@@ -582,6 +582,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function digestExtra() { const out = {}; for (const fn of digestExtras) { try { Object.assign(out, fn() || {}); } catch (e) { log.warn?.(`[browser] digest extra failed: ${e && e.message}`); } } return out; }
   let timer = null;
   let loaded = false;
+  // the follow-owed unit: the keys whose group cap was UNKNOWN (Task Groups held) — stamped at the store's read, once; KEPT in the
+  // registry too (`reg.caps[bk].waiting` + the create's facts): load() seeds them and asks once (a restart that ended the hold fires
+  // no store change — the delta read)
+  const capWaiting = new Map();
   let dirty = false;
   // ── the remainder of B-f276: the registry HELD (its read failed / its bytes are not a registry) ──
   const heldRetryMs = { first: (unreadRetry && Number(unreadRetry.firstMs) > 0) ? Number(unreadRetry.firstMs) : 30000, max: (unreadRetry && Number(unreadRetry.maxMs) > 0) ? Number(unreadRetry.maxMs) : 300000 };
@@ -743,6 +747,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (unreadable.length) { const codes = [...new Set(unreadable.map((x) => x.code))].join(', '); log.warn?.(`[browser] the launch-host lineage of ${subject(unreadable.map((x) => x.d))} kept — the directory cannot be read right now (${codes}); judged again at the next load${each(unreadable.map((x) => x.d))}`); }
       if (rekeyed.length) log.log?.(`[browser] the launch-host lineage of ${subject(rekeyed.map((x) => x.d))} is remembered under its real path ${rekeyed.length === 1 ? rekeyed[0].id : 'now'}${each(rekeyed.map((x) => `${x.d} → ${x.id}`))}`); }
     loaded = true;
+    for (const [k, v] of Object.entries(reg.caps || {})) if (v && v.waiting === true) capWaiting.set(k, v.facts || {});
+    if (capWaiting.size) Promise.resolve().then(() => retryWaitingCaps()).catch(() => { });
     hydrateAllUse();   // lane grants-unify: every record's "Who can use it" mirrored from the ONE store
     // BROWSE YOURSELF verify r1 (H4): the user's own holder SURVIVES a restart — restored AWAY (no window holds his tab
     // until one re-attaches; the keep runs from the restart when he was driving, from when he left when he was away), so
@@ -2015,7 +2021,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   function taskGroupCapFor(facts = {}) {
     if (typeof taskGroupCap !== 'function') return null;
-    try { return B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); return null; }
+    try { return B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { if (e && e.code === 'TASK_GROUPS_UNREAD') return undefined; log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); return null; }   // the follow-owed unit: Task Groups held ⇒ UNKNOWN (undefined), never «none in force» (null)
   }
   function instanceDefault() { return instanceDefaultOf(setting('browser.defaultProfile', '')); }
   /** the instance default as a profile id, from the setting's raw value (a label or an id) — r3 S8: a create the held registry owed
@@ -2158,6 +2164,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * Task Group's default cap is stamped ONCE — a conversation that already has its stamp keeps it (a later edit
    * of the group never reaches a running conversation, nor its resume). No group default ⇒ nothing stamped.
    */
+  // the follow-owed read's must: asked again at EVERY store change (the lift, and each membership read that lands — a reply «still
+  // being read» at the lift waits on), each key re-queued by stampGroupCap while its answer is still unknown; a keeper not loaded
+  // yet is not loaded for it (load() seeds the registry's kept waits itself)
+  const offCapLift = require('./groups-hold.js').onStoreChange(() => { if (loaded) retryWaitingCaps(); });
+  function retryWaitingCaps() { if (!capWaiting.size) return; for (const [k, f] of [...capWaiting]) { capWaiting.delete(k); try { stampGroupCap(k, f); } catch (e) { log.warn?.(`[browser] ${k}: the waiting Task Group cap could not be stamped — ${e && e.message}`); } } }
   function stampGroupCap(browserKey, facts = {}, { value = undefined } = {}) {
     if (!loaded) ensureLoaded();   // its read r1 (N5): the hold is known before it is judged
     if (heldReg) return null;   // the B-f276 remainder: the conversation's own stamp is unread — never re-stamped from the group's live value
@@ -2170,8 +2181,17 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // force) instead of reading the group live — a group edited after the conversation started never reaches it
     let g = null;
     if (value !== undefined) g = B.clampConversationCap(value);
-    else if (typeof taskGroupCap === 'function') { try { g = B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); g = null; } }
-    if (g === null) return capFor(bk);
+    else if (typeof taskGroupCap === 'function') {
+      try { g = B.clampConversationCap(taskGroupCap(facts || {})); }
+      catch (e) {
+        // the follow-owed unit: Task Groups HELD — the group's cap is unknown NOW: the key WAITS and is stamped at the store's read
+        // (groups-hold onStoreChange; the wait is KEPT in the registry across a restart), never the instance default in silence
+        if (e && e.code === 'TASK_GROUPS_UNREAD') { capWaiting.set(bk, facts || {}); if (!(v && v.waiting === true)) { reg.caps[bk] = { cap: v && Number.isInteger(v.cap) ? v.cap : null, group: null, at: now(), waiting: true, facts: facts || {} }; commit(); } log.log?.(`[browser] ${bk}: the Task Group's browser cap waits for Task Groups to read`); return capFor(bk); }
+        log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); g = null;
+        if (v && v.waiting === true) { capWaiting.set(bk, facts || {}); return capFor(bk); }   // a waiting key's other read error keeps it waiting (the delta read)
+      }
+    }
+    if (g === null) { if (v && v.waiting === true) { if (Number.isInteger(v.cap)) reg.caps[bk] = { cap: v.cap, group: null, at: now() }; else delete reg.caps[bk]; commit(); } return capFor(bk); }   // read: no group cap — the wait ends
     reg.caps[bk] = { cap: v && Number.isInteger(v.cap) ? v.cap : null, group: g, at: now() };
     commit();
     log.log?.(`[browser] ${bk}: the Task Group's default browser cap ${g} stamped at start`);
@@ -2186,7 +2206,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const c = cap === null || cap === undefined || cap === '' ? null : B.clampConversationCap(cap);
     if (cap !== null && cap !== undefined && cap !== '' && c === null) throw namedError('bad-request', `a per-conversation cap is ${B.CONVERSATION_CAP_MIN}..${B.CONVERSATION_CAP_MAX}`);
     const group = groupCapOf(bk);
-    if (c === null && group === null) delete reg.caps[bk]; else reg.caps[bk] = { cap: c, group, at: now() };
+    const w = reg.caps[bk] && reg.caps[bk].waiting === true ? { waiting: true, facts: reg.caps[bk].facts || {} } : {};   // a person's cap never ends a group cap's wait
+    if (c === null && group === null && !w.waiting) delete reg.caps[bk]; else reg.caps[bk] = { cap: c, group, at: now(), ...w };
     commit();
     return { ...capFor(bk), own: ownLive(bk), explicit: c };
   }
@@ -8121,7 +8142,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { try { offCapLift(); } catch { } if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 

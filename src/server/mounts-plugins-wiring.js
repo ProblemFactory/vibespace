@@ -224,7 +224,7 @@ const automationSettings = require('./harness-config-sync.js').accessorsFor({ se
 const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; const g = automationGroupsRead(s, id); return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: g.ids, groupsUnreadable: g.unreadable,
   scope: String(s._webuiId || id), conv: require('../claude-lock-capture.js').addressableId(s) }; } return null; };   // scope / conv: lane vault-agent-own — the conversation's registered and durable ids (an entry it stored itself is its own)
 // the grant pickers' subjects: every running conversation and every Task Group (automation keys' 授权给…, two-step codes' 用于…)
-const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, groupIds: automationGroupsOf(s, id) /* lane grants-unify: the «除了» row offers a picked group's members */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
+const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', webuiId: String(s._webuiId || id) /* lane login-request-card: a grant written under its page id names it too */, ...((gr) => ({ groupIds: gr.ids, ...(gr.unreadable ? { groupsUnreadable: true } : {}) }))(automationGroupsRead(s, id)) /* lane grants-unify: the «除了» row offers a picked group's members; the follow-owed read: the hold rides it (the login dialog's «by what» judges them) */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
 // lane vault-window-v2 (design q-047 §3.4): the Vault window's 「需要你」 producers — a use door's refusal (使用失败), an agent's put (建议轮换)
 const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
@@ -1114,6 +1114,10 @@ function createSessionMessages(session, sessionId) {
       taskGroupDefault: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return '';
+        // THE STORE HELD UNREAD (lane bl-windows — the principal-builder census's second row): the group's default profile is
+        // UNKNOWN, never «no group default» — a throw by name; the keeper says it (taskGroupDefaultFor's one warning) and the
+        // ladder takes the other rungs (the dialog's explicit pick, the prior profile, the instance default): a REMAINDER, stated in the kb
+        if (typeof tasks.isHeldUnread === 'function' && tasks.isHeldUnread()) throw Object.assign(new Error('the Task Group list cannot be read — its default browser profile is unknown'), { code: 'TASK_GROUPS_UNREAD' });
         const groups = tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) || [];
         // lane new-session-form: the FIRST spawned-into group in selection order that names a default (then any group)
         const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
@@ -1148,7 +1152,10 @@ function createSessionMessages(session, sessionId) {
       taskGroupCap: ({ cwd = null, hostId = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return null;
-        const groups = tasks.groupsForSession({ sessionKey, cwd, hostId, initialGroupId, initialGroupIds }) || [];
+        const a = { sessionKey, cwd, hostId, initialGroupId, initialGroupIds };
+        const ids = grantMemberIds(tasks, a);   // the follow-owed unit: a HELD store throws by name here — the cap is UNKNOWN (the keeper stamps it at the read), never «none in force»
+        if (ids.unread) throw Object.assign(new Error('the Task Group list is still being read'), { code: 'TASK_GROUPS_UNREAD' });   // B-55dc: a reply still being read is unknown too — the keeper waits for its landing
+        const groups = tasks.groupsForSession(a) || [];
         const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
         const first = picked.map((id) => groups.find((g) => g.id === id && Number.isInteger(g.browserCap))).find(Boolean) || groups.find((g) => Number.isInteger(g.browserCap));
         return first ? first.browserCap : null;

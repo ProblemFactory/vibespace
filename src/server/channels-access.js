@@ -3002,7 +3002,7 @@ function create(engineCtx) {
   function mayUseFor(facts = {}) {
     const cid = facts.cid ? String(facts.cid) : '';
     const groups = (facts.groupIds || []).map(String);
-    const ctx = { kind: 'agent', id: cid, groups };   // THE channel door's asker (channel-acl / channel-filter)
+    const ctx = { kind: 'agent', id: cid, groups, ...(facts.groupsUnreadable ? { groupsUnreadable: true } : {}) };   // THE channel door's asker (channel-acl / channel-filter) — the facts' hold rides it (the follow's census: an unread list is never «in no group»)
     const RF = { conversationKey: cid, groupIds: groups, groupsUnreadable: !!facts.groupsUnreadable };
     const VIA = { agent: 'conversation', group: 'group', everyone: 'everyone' };
     const best = (ps) => ps.find((p) => p.kind === 'agent') || ps.find((p) => p.kind === 'group') || ps[0];

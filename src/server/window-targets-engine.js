@@ -1524,9 +1524,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     let unreadable = 0;
     // lane grants-unify: THE ONE ADMISSION — this row alone, minus the share's exceptions (a member left out is not reached)
     const one = { door: 'window', resource: '-', to: [R.rowOfRecord({ windowId: '-', rows: [row] }).to[0]].filter(Boolean), except: record ? R.rowOfRecord(record).except : [] };
+    const needGroups = row.principal.kind === 'group' || one.except.some((e) => e && e.kind === 'group');
     for (const [id, s] of sessionsMap()) {
       if (!s || capsOf(s.backend).terminalOnly) continue;
-      const c = row.principal.kind === 'group' ? ctxOf({ sessionId: id, session: s }) : { sessionKeys: keysOf(s, id), conversationKeys: keysOf(s, id).map(R.sessionKeyNow).filter(Boolean), groupIds: [] };
+      // the follow-owed read (should 4): a share that leaves a Task Group OUT reads each session's groups for every row kind — a
+      // session / everyone row judged with no groups listed G's own members as reached (the dialog's list, the launch audit count)
+      const c = needGroups ? ctxOf({ sessionId: id, session: s }) : { sessionKeys: keysOf(s, id), conversationKeys: keysOf(s, id).map(R.sessionKeyNow).filter(Boolean), groupIds: [] };
       const v = GM.admits([one], { conversationKeys: c.conversationKeys, groupIds: c.groupIds, groupsUnreadable: !!c.unreadable });
       if (!v.ok && v.code === 'groups_unreadable') { unreadable++; continue; }
       const hit = v.ok;

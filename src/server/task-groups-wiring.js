@@ -29,6 +29,7 @@ function createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRou
     onChange: (ch) => {
       try { taskFanout.note(ch && ch.ids); } catch { } // lane task-group-fanout: THE broadcast = a coalesced DELTA of the groups this write named (src/server/task-fanout.js); the store never travels whole (GET /api/tasks only)
       try { exitProxy().rejudgeAll('task-groups'); } catch { } try { channelsWiring().rosterChanged(); } catch { } /* lane roster-per-pass: the live roster's Task Groups half moved */ // verify-r2: a group change is a revoke too — open exit connections judged NOW (exitProxy is built later: a boot-time change is a caught TDZ)
+      try { require('./groups-hold.js').noteChange(); } catch { }   // the follow-owed unit: the read that lifts a hold runs what waited for it (a group's browser cap)
       // identity verify r4 (2026-09-28): a Task Group change re-judges every browser lease a list admits THROUGH a Task
       // Group — a conversation removed from the group (or whose group is deleted) loses the kept profile AT ONCE like a
       // narrowing (its tab closes, a mediated grant is revoked), not at its next command. The keeper singleton is null before install.

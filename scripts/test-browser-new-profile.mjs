@@ -328,7 +328,7 @@ console.log('— ④ wiring: the panel\'s New profile… and the picker\'s adopt
     'verify r3 (Y4): 409 adopt_form_changed ⇒ the dialog is reopened on the server\'s current form with the typed name and the same callbacks (a handoff, not a dismissal) — the person\'s Create press re-opened it: opener \'person\', in front (lane dialog-yield r4 — r3\'s \'system\' put it behind)');
   { const W2 = "This conversation's browser changed since this dialog opened — nothing was created; the dialog was reopened with the form that applies now."; const ZH2 = (await import('../src/lib/i18n-zh.js')).default, JA2 = (await import('../src/lib/i18n-ja.js')).default;
     ok(M.createRefusalWords({ code: 'adopt_form_changed' }) === W2 && ZH2[W2] && JA2[W2], '…and the sentence says the dialog was reopened (zh / ja)'); }
-  ok(/createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| \(t\('Could not create the profile'\)/.test(dl), 'a refusal is said by its code (the create\'s, then the build\'s), and an unknown code still says the server\'s sentence (never silence)');
+  ok(/createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\| \(t\('Could not create the profile'\)/.test(dl), 'a refusal is said by its code (the create\'s, then the build\'s, then the who list\'s — the Task Groups hold among them), and an unknown code still says the server\'s sentence (never silence)');
 }
 
 // ═══ ⑤ controls ═════════════════════════════════════════════════════════════

@@ -231,10 +231,10 @@ function create({ grants = null, dataDir = null } = {}) {
   }
   /** Does a grain's notification wake ONE conversation — the fan-out's own question (`wakeAdmits`) asked for each watching
    *  principal of the row (unit what-it-may-use)? → {ok:true, via, groupId?} | the refusal (refusalOf). */
-  function watchAdmitsFor(res, { cid = '', groups = [], groupsUnreadable = false } = {}) {
+  function watchAdmitsFor(res, { cid = '', groups = [], groupsUnreadable = false } = {}) {   // the follow-owed read: the hold rides the admit too (the may-use lister says what the fan-out does)
     for (const e of watchOf(res).to) {
       const p = GM.toChannelPrincipal(e);
-      if (p && wakeAdmits(res, p, { cid, groups })) return { ok: true, via: e.kind, ...(e.kind === 'group' ? { groupId: String(e.id) } : {}) };
+      if (p && wakeAdmits(res, p, { cid, groups, groupsUnreadable })) return { ok: true, via: e.kind, ...(e.kind === 'group' ? { groupId: String(e.id) } : {}) };
     }
     return refusalOf(DOORS.watch, res, { conversationKey: String(cid || ''), groupIds: groups, groupsUnreadable });
   }

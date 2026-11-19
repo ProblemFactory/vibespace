@@ -39,7 +39,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   const credDir = (cred) => path.join(dir, String(cred).replace(/[^A-Za-z0-9._-]/g, '_'), 'api.ndjson');
   const pkOf = (ctx) => `${ctx.kind}:${ctx.id}`;
   /** The call shapes this principal's cards made always-allowed on one credential (the verdict's `shapes`). */
-  const shapesOf = (ctx, cred) => state.shapes.filter((s) => s.cred === cred && s.principal === pkOf(ctx)).map((s) => s.shape);
+  // a shape KEPT only because its principal's groups were unknown (`keptHeld`) never auto-allows — held or not (the delta reads: a
+  // re-widen while held, or after, would run calls with no ask); the store's read drops it (below); the agent asks again
+  const shapesOf = (ctx, cred) => state.shapes.filter((s) => s.cred === cred && s.principal === pkOf(ctx) && s.keptHeld !== true).map((s) => s.shape);
 
   /** THE AUDIT RING — one line per call (and per decision), the 16 MB ring rolled once (the exit-run precedent). */
   function audit(cred, line) {
@@ -262,7 +264,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
    *  ones beyond PROPOSALS_KEEP are dropped. The caller saves + tells the owner. */
   function fileProposal(ctx, cred, c, req, { cls, sensitive, note = null, why, extra = {} }) {
     const id = `api-${crypto.randomBytes(6).toString('hex')}`;
-    state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [] }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note, why, ...extra };
+    state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [], ...(ctx.groupsUnreadable === true ? { groupsUnreadable: true } : {}) }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note, why, ...extra };
     const keep = Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(PROPOSALS_KEEP).filter((p) => p.status !== 'pending');
     for (const p of keep) delete state.proposals[p.id];
     return state.proposals[id];
@@ -343,13 +345,45 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     // a tier below "Read + write" ends that principal's always-allowed shapes — a later re-widen starts asking again (verify r1 M1)
     if (r.ok) {
       const n = state.shapes.length;
-      state.shapes = state.shapes.filter((s) => s.cred !== cred || ['write-ask', 'write-auto', 'write-all'].includes(tierNow(shapeCtx(s), cred).tier));
-      if (state.shapes.length !== n) save();
+      const KEEP = ['write-ask', 'write-auto', 'write-all'];
+      // the follow-owed read's must: WHILE Task Groups are held, a shape whose tier falls on an unknown group is kept (B-55dc's law: no
+      // drop on an unknown answer); once they read, a tier lowered for any reason ends it — a shape recorded while held included
+      // (the delta read: kept for good, a later re-widen auto-allowed with no ask; a drop only means the agent asks again)
+      // only a group row (or a group left out of a row) at Read + write or above can lift the tier back — a Read-only group row decides
+      // nothing here; a shape kept on the unknown is STAMPED `keptHeld`, and once the store reads the next prune drops it
+      const heldNow = require('./groups-hold.js').held();
+      let stamped = false;
+      state.shapes = state.shapes.filter((s) => {
+        if (s.cred !== cred) return true;
+        if (!heldNow && s.keptHeld === true) return false;
+        const sc = shapeCtx(s);
+        if (KEEP.includes(tierNow(sc, cred).tier)) return true;
+        if (heldNow && sc.groupsUnreadable === true && groupDecides(cred, KEEP)) { if (s.keptHeld !== true) { s.keptHeld = true; stamped = true; } return true; }
+        return false;
+      });
+      if (state.shapes.length !== n || stamped) save();
       notifyOwner([]);
     }
     return r;
   }
-  const shapeCtx = (s) => { const i = String(s.principal).indexOf(':'); return { kind: s.principal.slice(0, i), id: s.principal.slice(i + 1), groups: s.groups || [] }; };
+  // a RECORDED principal (a shape, a proposal) carries the groups it was filed with — the hold rides it too (主开发 05:42Z (3): at the
+  // base the model's own predicate refused these while Task Groups were held unread; a recorded list is judged under the same fact)
+  // the follow-owed read: a tier that is `none` ONLY because Task Groups are held (the principal's recorded groups, read as read, would
+  // reach it) is UNKNOWN — a card is never used up on it, a shape never dropped on it
+  // A RECORDED group list (a proposal's principal, a shape) carries its OWN mark: recorded while Task Groups were held ⇒ its
+  // groups are UNKNOWN for good — never «in no group» once the store reads (the follow-owed read's MUST: an approve after the lift
+  // judged the held [] as read, and an «All agents except G» row admitted G's agent). It is judged under the hold NOW as well
+  // (主开发 05:42Z (3)). An unknown that decides the tier refuses BY NAME, never «no longer holds».
+  const markOf = (r) => (r && r.groupsUnreadable === true ? { groupsUnreadable: true } : {});
+  const judgedCtx = (pr) => ({ kind: pr.kind, id: pr.id, name: pr.name, groups: pr.groups || [], ...markOf(pr), ...require('./groups-hold.js').fact() });
+  // the unknown DECIDES when any row of the credential is a Task Group's or leaves a Task Group out (the delta read: access that comes
+  // THROUGH a group reads the held [] as a known «none» — «no longer holds» there was false too)
+  const groupDecides = (cred, tiers = null) => { const e = eng(); return (e && typeof e.apiGrants === 'function' ? e.apiGrants() : []).some((g) => g && g.scope && g.scope.id === cred && (!tiers || tiers.includes(g.api)) && ((g.principal && g.principal.kind === 'group') || (Array.isArray(g.except) && g.except.some((x) => x && x.kind === 'group')))); };
+  const heldTierUnknown = (ctx, cred) => ctx.groupsUnreadable === true && groupDecides(cred);
+  const HELD_TIER_WORDS = 'Task Groups cannot be read right now, and this access comes through a Task Group — nothing ran; the card stays — decide it again once they read';
+  const FILED_UNREAD_WORDS = 'This was filed while Task Groups could not be read, and this access comes through a Task Group — the agent\'s groups then are unknown, so nothing ran; reject it and let the agent ask again';
+  const unknownRefusal = (pr) => (pr && pr.groupsUnreadable !== true && require('./groups-hold.js').held() ? { ok: false, code: 'groups_unreadable', error: HELD_TIER_WORDS } : { ok: false, code: 'groups_unknown_filed', error: FILED_UNREAD_WORDS });
+  const shapeCtx = (s) => { const i = String(s.principal).indexOf(':'); return { kind: s.principal.slice(0, i), id: s.principal.slice(i + 1), groups: s.groups || [], ...markOf(s), ...require('./groups-hold.js').fact() }; };
   /** `digest` = the frozen digest the user's card was drawn from: a record that changed since (a restart over an edited
    *  file) runs nothing (verify r1 M3). */
   async function approve(id, { always = false, by = 'user', digest = null } = {}) {
@@ -358,14 +392,17 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (p.status !== 'pending') return { ok: false, code: 'not-pending', error: `this proposal is ${p.status} already` };
     if (!digest || digest !== (p.frozen && p.frozen.digest)) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you approved is not the request on record — reopen API access… and decide the card again' };
     const req = F.thaw(p.frozen);
-    const ctx = { kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [] };
+    const ctx = judgedCtx(p.principal);   // the recorded list: its own mark + the hold now (主开发 05:42Z (3))
     const c = credentialOf(p.cred);
     // a decided card that runs nothing is a refused call on its log line, like any other (lane channel-api-log-blank)
     const refused = (code) => audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req: req || p.frozen, verdict: 'refused', code, proposal: p.id, by }));
     if (!req || !c) { p.status = 'failed'; p.reason = !req ? 'the frozen request no longer matches its digest — nothing ran' : 'the credential is gone'; refused('api_frozen_mismatch'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_frozen_mismatch', error: p.reason }; }
+    // the follow-owed read: Task Groups HELD and the card's access comes through a group — its tier is UNKNOWN: refused BY NAME, the card
+    // stays pending (never used up on «no longer holds API access», a false end)
+    if (tierNow(ctx, p.cred).tier === 'none' && heldTierUnknown(ctx, p.cred)) return unknownRefusal(p.principal);
     if (tierNow(ctx, p.cred).tier === 'none') { p.status = 'failed'; p.reason = 'the agent no longer holds API access to this credential — nothing ran'; refused('api_not_granted'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_not_granted', error: p.reason }; }
     p.status = 'running'; p.decidedAt = now(); p.decidedBy = by;
-    if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, shape: F.shapeOf(req), at: now(), by });
+    if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, ...markOf(p.principal), shape: F.shapeOf(req), at: now(), by });   // the shape keeps the list's own mark
     save();
     const kept = {};
     const r = await run(ctx, p.cred, c, req, kept);
@@ -388,8 +425,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (!digest || digest !== (p.frozen && p.frozen.digest)) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you pressed is not the request on record — reopen API access… and look again' };
     const orig = F.thaw(p.frozen), c = credentialOf(p.cred);
     if (!orig || !c) return { ok: false, code: 'api_frozen_mismatch', error: !orig ? 'the frozen request no longer matches its digest — nothing filed' : 'the credential is gone' };
-    const ctx = { kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [] };
+    const ctx = judgedCtx(p.principal);   // the recorded list: its own mark + the hold now (主开发 05:42Z (3))
     const tr = tierNow(ctx, p.cred);
+    if (tr.tier === 'none' && heldTierUnknown(ctx, p.cred)) return unknownRefusal(p.principal);   // the follow-owed read: unknown, never «no longer holds»
     if (tr.tier === 'none') return { ok: false, code: 'api_not_granted', error: 'the agent no longer holds API access to this credential — nothing filed' };
     const v = F.retarget(c, orig, p.redirect);
     if (!v.ok) return v;
@@ -397,7 +435,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const vd = F.verdict({ tier: tr.tier, cls, sensitive, shape: F.shapeOf(v.req), shapes: shapesOf(ctx, p.cred) });
     if (!vd.ok) return vd;
     if (pending().filter((x) => x.cred === p.cred && x.conv === p.conv).length >= F.PENDING_MAX) return { ok: false, code: 'api_budget', error: `${F.PENDING_MAX} of this agent's API proposals on the credential wait already — decide one first` };
-    const np = fileProposal(ctx, p.cred, c, v.req, { cls, sensitive, note: p.note || null, why: 'resubmit', extra: { resubmitOf: p.id } });
+    const np = fileProposal({ ...ctx, groupsUnreadable: p.principal.groupsUnreadable === true }, p.cred, c, v.req, { cls, sensitive, note: p.note || null, why: 'resubmit', extra: { resubmitOf: p.id } });   // the new record keeps the OLD list's mark (its groups were recorded then)
     p.resubmittedAs = np.id;
     audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req: v.req, verdict: 'resubmitted', proposal: np.id, by }));
     save(); notifyOwner([p.id, np.id]);
@@ -420,7 +458,15 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     return { ok: true };
   }
 
-  return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, resubmit, reject, revokeShape, auditTail, pending };
+  // THE STORE READ (groups-hold's change signal): the shapes kept on an unknown end at once — the owner's list never shows one as
+  // «always allowed» that no longer applies (the delta read)
+  const offShapeLift = require('./groups-hold.js').onStoreChange(() => {
+    if (require('./groups-hold.js').held() || !state.shapes.some((s) => s.keptHeld === true)) return;
+    state.shapes = state.shapes.filter((s) => s.keptHeld !== true);
+    save(); notifyOwner([]);
+  });
+  const close = () => { try { offShapeLift(); } catch { } };
+  return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, resubmit, reject, revokeShape, auditTail, pending, close };
 }
 
 module.exports = { create, AUDIT_RING_BYTES, TAIL_LINES, TAIL_BYTES };

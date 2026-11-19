@@ -215,7 +215,7 @@ function isEmptyPinWitness(w) {
   return !!(w && typeof w === 'object' && !w.profileId && w.origin === 'harness' && typeof w.at === 'number' && Number.isFinite(w.at) && w.at >= 0);
 }
 /** The Task Group cap a witness carries (null = none was in force / not witnessed). */
-function witnessCap(w) { return w && typeof w === 'object' && Number.isInteger(w.cap) ? w.cap : null; }
+function witnessCap(w) { if (w && typeof w === 'object' && w.cap === 'unread') return undefined; return w && typeof w === 'object' && Number.isInteger(w.cap) ? w.cap : null; }   // 'unread' (Task Groups held at the start): UNKNOWN — the late key reads it live (the follow-owed unit)
 function lateDefaultPin({ witness = null, ladder = null } = {}) {
   const pick = ladder && typeof ladder === 'object' ? ladder : { profileId: '', origin: 'harness' };
   if (pick.origin === 'conversation' && pick.profileId) return { profileId: String(pick.profileId), origin: 'conversation', at: null, by: null, source: 'conversation' };
@@ -1375,6 +1375,14 @@ function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null,
  *  registry, never a crash; unknown keys are dropped on purpose (the file is a
  *  registry, not a copy). `browsers` (the BROWSER records, §3.1) and `pins`
  *  (browserKey → the conversation's pin) live beside the design's three lists. */
+/** a waiting cap's create facts as the registry keeps them (the Task Group store's own keys; strings bounded) */
+function capFactsOf(f) {
+  const s = (x, n) => (typeof x === 'string' && x ? x.slice(0, n) : null), o = {};
+  if (!f || typeof f !== 'object') return o;
+  for (const [k, n] of [['sessionKey', 300], ['cwd', 4096], ['hostId', 200], ['initialGroupId', 120]]) { const v = s(f[k], n); if (v !== null) o[k] = v; }
+  if (Array.isArray(f.initialGroupIds)) o.initialGroupIds = f.initialGroupIds.map((x) => s(x, 120)).filter(Boolean).slice(0, 50);
+  return o;
+}
 function normalizeRegistry(doc) {
   const d = doc && typeof doc === 'object' ? doc : {};
   const list = (v, pred) => (Array.isArray(v) ? v.filter((x) => x && typeof x === 'object' && pred(x)) : []);
@@ -1425,7 +1433,9 @@ function normalizeRegistry(doc) {
     // keeps it; the session meta carries a copy (`browserCap`)
     // MULTIVIEW D4: per conversation — `cap` = its explicit value, `group` = the Task Group default stamped when it
     // STARTED (lane P verify, finding 5); an entry holding neither is dropped
-    caps: Object.fromEntries(Object.entries(obj(d.caps)).filter(([k, v]) => isBrowserKey(k) && v && typeof v === 'object' && (clampConversationCap(v.cap) !== null || clampConversationCap(v.group) !== null)).map(([k, v]) => [k, { cap: clampConversationCap(v.cap), group: clampConversationCap(v.group), at: Number(v.at) || 0 }])),
+    // + a cap WAITING for Task Groups to read (the follow-owed read: a restart during the hold kept nothing — the conversation stayed
+    // on the instance default for its life): `waiting` with the create's facts the keeper asks again with, kept across a restart
+    caps: Object.fromEntries(Object.entries(obj(d.caps)).filter(([k, v]) => isBrowserKey(k) && v && typeof v === 'object' && (clampConversationCap(v.cap) !== null || clampConversationCap(v.group) !== null || v.waiting === true)).map(([k, v]) => [k, { cap: clampConversationCap(v.cap), group: clampConversationCap(v.group), at: Number(v.at) || 0, ...(v.waiting === true ? { waiting: true, facts: capFactsOf(v.facts) } : {}) }])),
     // P4 second half (§7.4): the SEAT reading per key row (integrationId →
     // {tier, total, at, source}) read back from the FIRST REAL LAUNCH, the
     // Chromium major each backend was last seen writing (provider →

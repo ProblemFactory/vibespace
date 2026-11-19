@@ -1138,7 +1138,7 @@ const BY_WHAT_PROBE = '#by-what';
  *  group. The verdict is still the grant model's own. */
 function byWhatSubjects(subjects = {}) {
   const out = [];
-  for (const s of (subjects && subjects.sessions) || []) { const k = GM.keyFromSubject(s && s.subject); if (k) out.push({ key: `conversation:${k}`, facts: { conversationKey: k, groupIds: Array.isArray(s.groupIds) ? s.groupIds : [] } }); }
+  for (const s of (subjects && subjects.sessions) || []) { const k = GM.keyFromSubject(s && s.subject); if (k) out.push({ key: `conversation:${k}`, facts: { conversationKey: k, groupIds: Array.isArray(s.groupIds) ? s.groupIds : [], ...(s.groupsUnreadable === true ? { groupsUnreadable: true } : {}) } }); }   // the follow-owed read: Task Groups held ⇒ the grant model refuses an except-row unknown, never «admitted»
   for (const g of (subjects && subjects.groups) || []) { const m = /^group:(.+)$/.exec(str(g && g.subject)); if (m) out.push({ key: `group:${m[1]}`, facts: { conversationKey: BY_WHAT_PROBE, groupIds: [m[1]] } }); }
   out.push({ key: 'everyone', facts: { conversationKey: BY_WHAT_PROBE } });
   return out;

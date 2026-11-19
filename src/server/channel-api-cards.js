@@ -34,7 +34,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
   const state = (() => { try { const j = JSON.parse(fs.readFileSync(stateFile, 'utf8')); return { items: j.items || {} }; } catch { return { items: {} }; } })();
   const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api-cards] state write failed:', e && e.message); } };
   const frozenOf = () => { try { return JSON.parse(fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };
-  const ctxOf = (p) => ({ kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [] });
+  const ctxOf = (p) => ({ kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [], ...(p.principal.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() });   // a RECORDED principal carries the hold too (主开发 05:42Z (3)); today's one reader (liveness) returns before it while held, so the spread is inert there — kept so every principal built here hands the fact (the census reads it per site)
   /** The call's chat NAMED from what the channel store knows (card grammar ②) — and the conversation it opens; else nothing (the card shows the id chip). */
   const objectOf = (p) => {
     const o = W.wordsOf(p).object;
@@ -65,6 +65,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
     return (p) => {
       if (!credIds.has(p.cred)) return 'the account was removed';
       let mine = null;
+      if (require('./groups-hold.js').held() || (p.principal && p.principal.groupsUnreadable === true)) return null;   // Task Groups held unread, or the card filed while they were: its tier is unknown — a card never ENDS on it («withdrawn» would be false)
       try { mine = a.creds(ctxOf(p)); } catch { return null; }   // an unreadable tier decides nothing
       return mine && mine.ok && !(mine.creds || []).some((c) => c.id === p.cred) ? 'API access to this account was withdrawn' : null;
     };

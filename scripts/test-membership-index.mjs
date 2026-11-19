@@ -411,8 +411,13 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const OWED_PASS = [['src/server/browser-keeper.js', 'stampGroupCap', 1, 'owed.groupFacts'], ['src/server/browser-key.js', 'taskGroupCapFor', 0, 'o.groupFacts || {}']];
   let owedPasses = 0;
   const owedPass = (t, file, m, a, built = OWED_BUILT) => built && OWED_PASS.some(([f, n, i, arg]) => file === f && m[1] === n && (argsOf(a)[i] || '').trim() === arg);
+  // THE KEEPER'S WAITING CAP (lane bl-windows, the B-f276 follow's owed items): src/server/browser-keeper.js re-stamps a key whose
+  // cap read waited for the Task Groups store with the facts ITS OWN stampGroupCap was handed (`capWaiting.set(bk, facts || {})`) —
+  // that first call is a row of this census; only on retryWaitingCaps' line, only a bare name: the same shape anywhere else is UNSEEN
+  let waits = 0;
+  const waitPass = (t, file, m, a) => file === path.join('src', 'server', 'browser-keeper.js') && m[1] === 'stampGroupCap' && /^\s*function retryWaitingCaps\(\) \{/.test(lineOf(t, m.index)) && /^[A-Za-z_$][\w$]*$/.test(argsOf(a)[1] || '') && /capWaiting\.set\(bk, facts \|\| \{\}\)/.test(t);
   const missing = (t, file = '') => { const out = []; let m; CALLS.lastIndex = 0;
-    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } if (a != null && helperPass(t, file, m, a)) { passes++; continue; } if (a != null && owedPass(t, file, m, a)) { owedPasses++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
+    while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); if (a != null && reentry(t, file, m, a)) { reentries++; continue; } if (a != null && helperPass(t, file, m, a)) { passes++; continue; } if (a != null && owedPass(t, file, m, a)) { owedPasses++; continue; } if (a != null && waitPass(t, file, m, a)) { waits++; continue; } const f = a != null && factsOf(t, m[1], a, m.index); if (!f) continue;
       if (f.unseen) out.push(`${m[1]}(${a.replace(/\s+/g, ' ').slice(0, 80)}) — «${f.unseen}» UNSEEN (no object literal of it in this file)`);
       else if (!handsMachine(f.facts)) out.push(`${m[1]}(${(f.via ? f.via + ' = ' : '') + f.facts.replace(/\s+/g, ' ').slice(0, 100)})`); }
     return out; };
@@ -421,7 +426,11 @@ for (const [tag, [, , leg, what]] of Object.entries(PATCHES)) {
   const bad = [];
   let calls = 0, viaVar = 0;
   for (const f of files) { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); let m; CALLS.lastIndex = 0; while ((m = CALLS.exec(t))) { const a = argOf(t, m.index + m[0].length - 1); const x = a != null && factsOf(t, m[1], a, m.index); if (x && x.facts) { calls++; if (x.via) viaVar++; } } for (const x of missing(t, f)) bad.push(`${f}: ${x}`); }
-  ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 4 && passes === 1, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts — 2.369.411's groupIdsForGrant among them; the seam's ONE helper grantMemberIds passes ${passes}, its callers rows here), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
+  ok(calls >= 26 && viaVar >= 2 && bad.length === 0 && reentries === 4 && passes === 1 && waits === 1, `B-df5f: every call handing the store a conversation's cwd hands its machine (hostId) — ${calls} calls in src/ + server.js (groupsForSession, B-55dc's deciding doors and the create's Task-Group facts; the store's own ${reentries} re-entries pass their caller's facts — 2.369.411's groupIdsForGrant among them; the seam's ONE helper grantMemberIds passes ${passes}, its callers rows here; the keeper's waiting cap re-stamps ${waits} time (retryWaitingCaps) with the facts its own first call was handed), ${viaVar} of them through a variable read at its object literal${bad.length ? ' · MISSING: ' + bad.join(' | ') : ''}`);
+  { const before = waits, KPF = path.join('src', 'server', 'browser-keeper.js'), SEEN = "  function retryWaitingCaps() { for (const [k, f] of [...capWaiting]) stampGroupCap(k, f); }\n  function stampGroupCap(browserKey, facts = {}) { capWaiting.set(bk, facts || {}); }";
+    ok(missing(SEEN, KPF).length === 0 && /UNSEEN/.test(missing(SEEN, 'src/server/other.js').join('')) && /UNSEEN/.test(missing("  const later = () => { for (const [k, f] of [...capWaiting]) stampGroupCap(k, f); };\n  function stampGroupCap(browserKey, facts = {}) { capWaiting.set(bk, facts || {}); }", KPF).join('')),
+      'CONTROL (the keeper\'s waiting cap): its re-stamp with the facts the first call handed passes ONLY on the line of retryWaitingCaps in the keeper (another file, another line: UNSEEN, a red)');
+    waits = before; }
   ok(missing("x = tasks.groupsForSession({\n  sessionKey: k,\n  cwd: s.cwd,\n  initialGroupId: s._initialGroupId,\n});").length === 1, 'CONTROL: a planted MULTI-LINE call that hands a cwd without its machine is caught');
   { const before = passes, MPF = path.join('src', 'server', 'mounts-plugins-wiring.js');
     ok(/UNSEEN/.test(missing("const grantMemberIds = (tasks, a) => tasks.memberIds(a);", 'src/server/other.js').join('')) && /UNSEEN/.test(missing("const otherHelper = (tasks, a) => tasks.memberIds(a);", MPF).join(''))

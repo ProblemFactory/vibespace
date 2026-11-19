@@ -39,6 +39,7 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the browser-restart item's refusal by its code (PURE words)
 import { humanRefusalText } from '../browser-human.js'; // B-53df: … the person's own browsing words first (PURE)
+import { heldRefusalText } from './channel-api-card-view.js'; // the follow-owed read: an unknown Task Group refusal in the page's words
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer, answerJobSecrets } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 import { refusalText as pictureRefusalText } from './image-attach.js'; // B-51dd: a picture the route refused — the picture door's own words
@@ -603,7 +604,7 @@ export function inboxModel(app) {
         ? await fetchJson(`/api/channels/api/proposals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         : await fetchJson(`/api/channels/api/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
       if (r && r.ok) { showToast(answer === 'reject' ? t('Rejected — the agent is told on its next turn') : t('Approved — the card in the conversation shows how it went')); return true; }
-      showToast(r && r.code === 'not-pending' ? t('That request was already decided') : r && r.code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      showToast(r && r.code === 'not-pending' ? t('That request was already decided') : r && r.code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : heldRefusalText(r && r.code) || (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
     if (rec && rec.action && rec.action.type === 'save-login') {
