@@ -94,7 +94,7 @@ const OWNERS = Object.freeze([
       name('design'), but('design-', 'fs')] },
   { id: 'machines', words: 'the machines registry: hosts and pairing, browser records and leases, jobs records, mounts, desktop apps and windows, plugins, exits',
     rules: [dir('app-kinds|mount-providers|plugins|browser-backends'),
-      lead('host-tokens|pairing-token|dial-pairing|dial-health|dial-facts|agentd-signature|device|engine-kernel|engine-distribution|apps|install-slot|installs|ffmpeg-install|mic-install|machine-needs|machine-mounts|mount|path-mounts|vfs-cache-place|rclone-obscure|storage-path|storage-facts|fs-canary|relay-token|tailnet|tailscale-dns|hub-act|desktop-apps|desktop-app-keeper|desktop-browser-app|desktop-handover|desktop-machines-cache|encoded-command|modifier-map'),
+      lead('host-tokens|pairing-token|dial-pairing|dial-health|dial-facts|agentd-signature|device|engine-kernel|engine-distribution|apps|install-slot|installs|ffmpeg-install|mic-install|machine-needs|watch-door|machine-mounts|mount|path-mounts|vfs-cache-place|rclone-obscure|storage-path|storage-facts|fs-canary|relay-token|tailnet|tailscale-dns|hub-act|desktop-apps|desktop-app-keeper|desktop-browser-app|desktop-handover|desktop-machines-cache|encoded-command|modifier-map'),
       name('mounts-plugins-wiring|plugins'), but('plugin-', 'loader'), but('jobs?-', 'logs-sweep(?:-worker)?'),   // cure r3: hosts, mounts, port-forward, plugin-loader, jobs are SPLIT rows
       name('app-card|app-manifest|app-recipes|app-system|window-(?:reach|request|targets|targets-engine|desktop)|exit-(?:proxy|reach|routes|shell)'),
       name(`browser|browser-(?:${BROWSER_ROWS})`)] },

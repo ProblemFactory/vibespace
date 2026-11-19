@@ -268,6 +268,9 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     signature = await signatureNow();     // the boot read's state is the baseline
     try {
       watcher = WD.watch(dir, { persistent: false }, schedule);   // the door: a refused watch is a poll (said there), never a throw
+      // (2026-11-19, its readers' must) the presets carry their OWN poll: a watch the door had to poll is closed here and said in
+      // the presets' own line below — their poll (pollMs) carries the next swap, as before the door
+      if (watcher.polled) { const code = watcher.refusedCode; watcher.close(); watcher = null; throw Object.assign(new Error('the watch was refused'), { code }); }
       watcher.on('error', (e) => { log.warn(`[presets] watch on ${dir} failed (${e && e.code}) — the ${Math.round(pollMs / 1000)} s poll carries on`); try { watcher.close(); } catch {} });
     } catch (e) { log.warn(`[presets] cannot watch ${dir} (${e && e.code}) — polling every ${Math.round(pollMs / 1000)} s`); }
     poll = setInterval(() => { reload(); }, pollMs);

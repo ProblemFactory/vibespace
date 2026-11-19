@@ -213,7 +213,6 @@
  * settings `desktop.backendPrefs` (a row's own `backendPrefs` still wins).
  */
 const fs = require('fs');
-const WD = require('./watch-door.js');   // the one door for a file watch (2026-11-19)
 const os = require('os');
 const path = require('path');
 const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: the witness's storage roots
@@ -1069,7 +1068,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (first) {
       n = { off: 0, tail: '', ring: [], watch: null };
       notes.set(rec.id, n);
-      try { n.watch = WD.watch(dir, (ev, name) => { if (name === 'notify.jsonl') drainNotes(store.apps[rec.id]); }); n.watch.on('error', () => {}); } catch { /* the tick still drains */ }
+      try { n.watch = fs.watch(dir, (ev, name) => { if (name === 'notify.jsonl') drainNotes(store.apps[rec.id]); }); n.watch.on('error', () => {}); } catch { /* the tick still drains */ }
     }
     let size = 0;
     try { size = fs.statSync(file).size; } catch { return; }
