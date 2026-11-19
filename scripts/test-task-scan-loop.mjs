@@ -11,6 +11,8 @@
 //  ④ the kept conversations are bounded (TASK_EVENT_CACHE_MAX, least recently warmed out first)
 //  ⑤ the two HTTP roads (status, GET /api/session-todos) warm ONLY what they read (the cure): claude's task scan, awaited first; a codex
 //     conversation's task state lists nothing and starts nothing (RED: cadb07780's transcript warm); the route hands every harness its machine
+//  ⑤b (B-a60e) a codex conversation WITH a rollout: its find walks the sessions tree once, then the kept path (0 listings a
+//     call, status() too); the file gone ⇒ walked again; RED the release's find in a copy ⇒ every call walks
 //  ⑥ (A4) chatStatus probes no project folder · ⑦ (A5) the merge parses the buffer lines it gained, against the release's merge
 //     planted back (an append, a split line, a mid-line trim, a kept map landing late; each guard's mutant RED)
 //  ⑦b (the cure) the position indexes the merges keep are counted in the transcript tails' census row (RED: cadb07780's row)
@@ -215,6 +217,44 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       `a codex conversation's task state (GET /api/session-todos, a Properties window at every broadcast): ${green.nTask} listings of the codex store on this thread, no codex started; RED (the transcript warm on this road — cadb07780): ${red.nTask} listings and a codex app-server started for a thread this machine does not hold (${red.ran})`, { green, red });
     ok(nReader > 0 && green.nStatus === nReader && red.nStatus > nReader,
       `status(): the listings its reader makes (${nReader}, chatStatus finds the rollout as the release did) and no warm's on top (${green.nStatus}); RED: ${red.nStatus}`);
+    // ⑤b B-a60e: a conversation WITH a rollout — its find walks the sessions tree ONCE, then the path is KEPT (asked again by one
+    // existsSync): 0 listings a call, status() too; the file gone ⇒ dropped, walked again, «none». RED (the release's find, no kept
+    // path, in a copy) ⇒ every call walks
+    {
+      const { anchored } = await import('./scratch.mjs');
+      const tid2 = 'eeeeeeee-0000-4000-8000-00000000a60e', cref2 = { backend: 'codex', sessionId: tid2, cwd };
+      const rdir = path.join(csess, '2026', '07', '02'); fs.mkdirSync(rdir, { recursive: true });
+      const rfile = path.join(rdir, `rollout-2026-07-02T00-00-00-${tid2}.jsonl`);
+      fs.writeFileSync(rfile, JSON.stringify({ timestamp: T0, type: 'session_meta', payload: { id: tid2 } }) + '\n');   // the finder reads names only (no `cwd` on an fs line: the fixture census)
+      const AD = require(path.join(REPO, 'src/adapters/codex.js'));
+      const finds = async (A) => { const n = [], got = []; for (let i = 0; i < 3; i++) n.push(await listing(async () => { got.push(A.findCodexSessionJsonlPath(tid2)); })); return { n, got }; };
+      const adSrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+      const KEPT = "  const kept = keptCodexPath(threadId);\n  if (kept) return kept;\n";
+      const ADr = mutantCopies('a60e-no-kept-path', REPO).load('src/adapters/codex.js', anchored(adSrc, KEPT, '', 'a60e-no-kept-path'), 'no-kept-path');
+      const g = await finds(AD), r = await finds(ADr);
+      // status() through the service, a fresh service a call (nothing of a reader kept between them): its find is the kept path's
+      const nS = []; for (let i = 0; i < 2; i++) { const svc = createTranscriptService({ activeSessions: new Map(), createSessionMessages: mkReader, hosts: null }); nS.push(await listing(async () => { await svc.status(cref2); })); }
+      fs.rmSync(rfile, { force: true });
+      let goneAt = null; const nGone = await listing(async () => { goneAt = AD.findCodexSessionJsonlPath(tid2); });
+      ok(g.n[0] > 0 && g.n[1] === 0 && g.n[2] === 0 && g.got.every((x) => x === rfile) && nS[0] === 0 && nS[1] === 0 && nGone > 0 && goneAt === null && r.n.every((x) => x > 0),
+        `a codex conversation with a rollout: its find lists the sessions tree ${g.n.join(' / ')} times (the first find, then the kept path), status() ${nS.join(' / ')}; the file gone ⇒ walked again (${nGone}), «none»; RED (no kept path): ${r.n.join(' / ')} every call`);
+      // its read (S2): a kept .jsonl.zst yields to its plain twin in the same folder, with no walk — RED (no twin check) ⇒ the .zst stays
+      const tid3 = 'eeeeeeee-0000-4000-8000-0000000a60e3';
+      const zfile = path.join(rdir, `rollout-2026-07-02T00-00-01-${tid3}.jsonl.zst`), pfile = zfile.slice(0, -'.zst'.length);
+      const twin = async (A) => {
+        fs.writeFileSync(zfile, 'zst');   // the finder reads names only
+        const first = A.findCodexSessionJsonlPath(tid3);
+        fs.writeFileSync(pfile, '{}\n');
+        let got = null; const n = await listing(async () => { got = A.findCodexSessionJsonlPath(tid3); });
+        fs.rmSync(pfile, { force: true }); fs.rmSync(zfile, { force: true });
+        return { first, got, n };
+      };
+      const TWIN = "    if (fs.existsSync(plain)) { CODEX_PATH_KEPT.set(threadId, { fp: plain, at: Date.now() }); return plain; }\n";
+      const ADt = mutantCopies('a60e-no-twin', REPO).load('src/adapters/codex.js', anchored(adSrc, TWIN, '', 'a60e-no-twin'), 'no-twin');
+      const tw = await twin(AD), twr = await twin(ADt);
+      ok(tw.first === zfile && tw.got === pfile && tw.n === 0 && twr.first === zfile && twr.got === zfile,
+        `a kept .jsonl.zst and then its plain twin: the plain wins (${path.basename(String(tw.got))}) with ${tw.n} listings; RED (no twin check): ${path.basename(String(twr.got))}`);
+    }
     // claude: its own task-state warm, awaited before the reader is built — on both roads
     const calls = [];
     H.store.warmTaskState = async (...a) => { calls.push('warm'); await realWts(...a); calls.push('warmed'); order.push('warmed'); };

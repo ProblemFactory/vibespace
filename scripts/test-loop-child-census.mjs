@@ -70,7 +70,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/hosts.js', 'HostManager.installAgentd', 'child:execFileSync', 1, DEBT, 'per act — a device agent install / upgrade (tar, 15 s)'],
     // round 2 — the four walks the census SEES now (the iterative shape)
     ['src/agentd/agentd.js', 'du', 'walk', 1, OFF, 'the device agent — its OWN process (agentd), never the hub\'s loop'],
-    ['src/adapters/codex.js', '_walkJsonlFiles', 'walk', 1, DEBT, 'per find — a codex session\'s rollout lookup (findCodexSessionJsonlPath: an open, a resume, a transcript read) walks the WHOLE sessions tree'],
+    ['src/adapters/codex.js', '_walkJsonlFiles', 'walk', 1, DEBT, 'per find — a codex session\'s rollout lookup (findCodexSessionJsonlPath: an open, a resume, a transcript read) walks the WHOLE sessions tree; since B-a60e once per thread while its LOCAL rollout stays where it was found (the path kept, asked again by an existsSync; a .jsonl.zst walked again after a minute) — a thread with no local rollout yet, or one found in the remote cache, is walked at each find'],
     ['src/server/browser-builds-keeper.js', 'create > treeOf', 'walk', 1, DEBT, 'per second while a build downloads — the builds picker reads its facts every second during a download (each build\'s size, up to 20 000 entries, an lstat each) — and per act (a picker read, an unpacked download\'s file count)'],
     ['src/usage-routes.js', 'setupUsage > listRecentCodexJsonlFiles', 'walk', 1, DEBT, 'per GET /api/usage — the usage snapshot\'s refresh (about every 30 s while a page shows it), pruned to 14 days of date dirs'],
     // lane job-logs-sweep (.398): the job-logs remover's CHILD — never the hub's process, never its loop

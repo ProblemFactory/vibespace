@@ -305,17 +305,48 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
 }
 const CODEX_WALKS_OUT = new Map();   // roots → {since, said}
 
+/** B-a60e: a thread's LOCAL rollout path, KEPT. A local codex conversation's status() (chatStatus → _ensureParsed →
+ *  parseCodexSessionJsonl → here) walked the whole ~/.codex/sessions tree with readdirSync on the hub's main loop at EVERY
+ *  call. The path found is kept per thread id and asked again by an existsSync (two for a .jsonl.zst): gone (codex
+ *  compressed it to .jsonl.zst, archived or deleted it) ⇒ dropped and walked again; a kept .jsonl.zst whose plain twin is
+ *  there ⇒ the plain wins. The walk took a plain file from ANY folder before a .zst (its read, S1): a kept .jsonl.zst is
+ *  walked again once it is a minute old, so a plain rollout of the thread made elsewhere wins within a minute. Only a LOCAL
+ *  hit is kept: a remote-cache hit or «none» is walked again at the next call, as before (a local rollout must win the
+ *  moment it appears). Bounded: the oldest kept path goes first. */
+const CODEX_PATH_KEPT = new Map();   // threadId → { fp, at }
+const CODEX_PATH_KEPT_MAX = 4096;
+const CODEX_ZST_KEPT_MS = 60_000;
+function keptCodexPath(threadId) {
+  const k = CODEX_PATH_KEPT.get(threadId);
+  if (!k) return null;
+  if (k.fp.endsWith('.jsonl.zst')) {
+    const plain = k.fp.slice(0, -'.zst'.length);
+    if (fs.existsSync(plain)) { CODEX_PATH_KEPT.set(threadId, { fp: plain, at: Date.now() }); return plain; }
+    if (Date.now() - k.at > CODEX_ZST_KEPT_MS) { CODEX_PATH_KEPT.delete(threadId); return null; }   // a minute old: walked again
+  }
+  if (fs.existsSync(k.fp)) return k.fp;
+  CODEX_PATH_KEPT.delete(threadId);
+  return null;
+}
+function keepCodexPath(threadId, fp) {
+  CODEX_PATH_KEPT.delete(threadId); CODEX_PATH_KEPT.set(threadId, { fp, at: Date.now() });
+  if (CODEX_PATH_KEPT.size > CODEX_PATH_KEPT_MAX) CODEX_PATH_KEPT.delete(CODEX_PATH_KEPT.keys().next().value);
+  return fp;
+}
+
 /** Locate a thread's rollout: `…-<threadId>.jsonl`, else its `.jsonl.zst`
  *  twin (codex ≥0.153 compression; the plain file wins when both exist), then
- *  the remote-jsonl cache. Returns the REAL path — readers materialize. */
+ *  the remote-jsonl cache. Returns the REAL path — readers materialize. A local hit is kept (B-a60e, above). */
 function findCodexSessionJsonlPath(threadId) {
   if (!threadId) return null;
+  const kept = keptCodexPath(threadId);
+  if (kept) return kept;
   let zst = null;
   for (const fp of _walkJsonlFiles(CODEX_SESSIONS_DIR)) {
-    if (fp.endsWith(`${threadId}.jsonl`)) return fp;
+    if (fp.endsWith(`${threadId}.jsonl`)) return keepCodexPath(threadId, fp);
     if (!zst && fp.endsWith(`${threadId}.jsonl.zst`)) zst = fp;
   }
-  if (zst) return zst;
+  if (zst) return keepCodexPath(threadId, zst);
   // Remote-cache scan (B-10ed, mirrors session-store's claude cache scan):
   // hosts.fetchCodexJsonl pulls a host's rollout into
   // data/remote-jsonl/<hostId>/codex/<threadId>.jsonl — finding it here makes
