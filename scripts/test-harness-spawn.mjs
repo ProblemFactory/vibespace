@@ -290,10 +290,10 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const PSS = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
   const GATE = '  if (!homes.some((n) => inProviderHome(e[n]) || (hubEnv && inProviderHome(hubEnv[n])))) return [];\n';
   if (PSS.split(GATE).length !== 2) throw new Error('the anchor of the control «the plan\'s fingerprint gate» is not in the source once');
-  const psNoGate = M.write('src/server/provider-spawn.js', PSS.replace(GATE, ''), 'pv-nogate');
+  const psNoGate = M.write('src/server/provider-spawn.js', anchored(PSS, GATE, '', 'the plan\'s fingerprint gate'), 'pv-nogate');
   const CALL = "require('./server/provider-spawn.js').ambientPlanNames(";
   if (src.split(CALL).length !== 2) throw new Error('the anchor of the control «the spawn line\'s strip call» is not in the source once');
-  const wcNoGate = M.load('src/ws-create.js', src.replace(CALL, `require(${JSON.stringify(psNoGate)}).ambientPlanNames(`), 'pv-nogate-create');
+  const wcNoGate = M.load('src/ws-create.js', anchored(src, CALL, `require(${JSON.stringify(psNoGate)}).ambientPlanNames(`, 'the spawn line\'s strip call'), 'pv-nogate-create');
   const mh0 = await hubClean(() => drive(wcNoGate, { backend: 'claude' }, { accounts: am }, HAND));
   ok(mh0.spawned.length === 1 && !('ANTHROPIC_BASE_URL' in mh0.spawned[0].env), 'CONTROL: a strip with no fingerprint test drops the person\'s own gateway from every claude start ⇒ the hand-set leg goes RED');
   // THROUGH THE REAL AGENT DOOR (the chain cure's read, R1): it drops claude's secret-store variable (claude's declared
@@ -305,12 +305,12 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(!('CLAUDE_SECURESTORAGE_CONFIG_DIR' in DOOR()) && 'ANTHROPIC_BASE_URL' in DOOR() && md.spawned.length === 1 && carried(md, PLAN_C).length === 0, 'THROUGH THE REAL AGENT DOOR (it drops the secret-store variable, keeps ANTHROPIC_*): the fingerprint is read from the hub\'s own env — the plan\'s address and key never reach a machine-login start', carried(md, PLAN_C));
   const HUBARG = ", undefined, process.env)) delete env[n];";
   if (src.split(HUBARG).length !== 2) throw new Error('the anchor of the control «the hub env\'s fingerprint» is not in the source once');
-  const md0 = await viaHub(M.load('src/ws-create.js', src.replace(HUBARG, ')) delete env[n];'), 'pv-nohubfp'));
+  const md0 = await viaHub(M.load('src/ws-create.js', anchored(src, HUBARG, ')) delete env[n];', 'the hub env\'s fingerprint'), 'pv-nohubfp'));
   ok(md0.spawned.length === 1 && carried(md0, PLAN_C).includes('ANTHROPIC_BASE_URL') && carried(md0, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN'), 'CONTROL (R1): the strip reading the start\'s env alone never sees the fingerprint on the real road ⇒ the third party\'s address and key reach the start ⇒ the leg goes RED', carried(md0, PLAN_C));
   const stripLine = src.split('\n').find((l) => l.includes("require('./server/provider-spawn.js').ambientPlanNames(backend, env"));
   if (!stripLine) throw new Error('the anchor of the control «the spawn line\'s plan strip» is not in the source');
-  const kM = await drive(M.load('src/ws-create.js', src.replace(stripLine + '\n', ''), 'pv-nostrip'), { backend: 'claude' }, { accounts: am }, SEEDED);
-  const kMx = await drive(M.load('src/ws-create.js', src.replace(stripLine + '\n', ''), 'pv-nostrip-codex'), { backend: 'codex', mode: 'chat' }, { accounts: am }, SEEDED);
+  const kM = await drive(M.load('src/ws-create.js', anchored(src, stripLine + '\n', '', 'the spawn line\'s plan strip'), 'pv-nostrip'), { backend: 'claude' }, { accounts: am }, SEEDED);
+  const kMx = await drive(M.load('src/ws-create.js', anchored(src, stripLine + '\n', '', 'the spawn line\'s plan strip'), 'pv-nostrip-codex'), { backend: 'codex', mode: 'chat' }, { accounts: am }, SEEDED);
   ok(kMx.spawned.length === 1 && carried(kMx, PLAN_X).includes('VIBESPACE_PROVIDER_KEY') && carried(kMx, PLAN_X).includes('CODEX_HOME'), 'CONTROL (the must, codex): without the strip a machine-login codex start gets the provider\'s key and home ⇒ the codex leg goes RED', carried(kMx, PLAN_X));
   ok(kM.spawned.length === 1 && carried(kM, PLAN_C).includes('ANTHROPIC_BASE_URL') && carried(kM, PLAN_C).includes('ANTHROPIC_AUTH_TOKEN'), 'CONTROL (the must): the spawn line without its plan strip hands the machine-login conversation the THIRD PARTY\'S ADDRESS AND KEY ⇒ the must\'s leg goes RED', carried(kM, PLAN_C));
   // …and the hub's own start sanitiser (server.js — inside a Claude Code conversation): run ITS OWN lines over that environment
@@ -424,7 +424,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const e1m = c1m.sent.find((m) => m.type === 'error');
   const BARE = "const bare = String(data.model || '').replace(/\\[1m\\]$/i, '');";
   if (src.split(BARE).length !== 2) throw new Error('the anchor of the control «the instance default\'s [1m] retry» is not in the source once');
-  const d1m0 = await drive(M.load('src/ws-create.js', src.replace(BARE, "const bare = String(data.model || '');"), 'pv-no1m'), { backend: 'claude', accountId: ds.id, model: 'opus[1m]', spawnOriginHint: { model: 'instance' } }, { accounts: am });
+  const d1m0 = await drive(M.load('src/ws-create.js', anchored(src, BARE, "const bare = String(data.model || '');", 'the instance default\'s [1m] retry'), 'pv-no1m'), { backend: 'claude', accountId: ds.id, model: 'opus[1m]', spawnOriginHint: { model: 'instance' } }, { accounts: am });
   store.setModels(ds.id, { models: dsRowsA, aliases: dsA.aliases || {}, defaultModel: dsA.defaultModel }); await store.durable();
   ok(argModel(d1m) === 'deepseek-reasoner' && c1m.spawned.length === 0 && !!e1m && e1m.code === 'model-not-served' && /opus\[1m\]/.test(e1m.message), 'an instance default «opus[1m]» meets the provider\'s «opus» alias (deepseek-reasoner); the SAME pick made by the person is refused by name (never a silent short context)', { d1m: argModel(d1m), c1m: e1m && e1m.code });
   ok(argModel(d1m0) === 'deepseek-chat', 'CONTROL: without the instance default\'s [1m] retry «opus[1m]» falls to the provider\'s default ⇒ the leg goes RED', argModel(d1m0));
@@ -448,8 +448,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const PVLINE = "  if (!!account && typeof account === 'object' && account.kind === 'provider') return true;   // a third-party provider (the meeting, 22:14Z)\n";
   const BPREQ = "require('./billing-pick.js')";
   if (BPSRC.split(PVLINE).length !== 2 || src.split(BPREQ).length !== 2) throw new Error('the anchors of the control «the rule without its provider half» are not in the sources once');
-  const bpNo = M.write('src/billing-pick.js', BPSRC.replace(PVLINE, ''), 'bp-noprovider');
-  const hk0 = await drive(M.load('src/ws-create.js', src.replace(BPREQ, 'require(' + JSON.stringify(bpNo) + ')'), 'pv-nohelper'), { backend: 'claude', accountId: ds.id }, { accounts: am });
+  const bpNo = M.write('src/billing-pick.js', anchored(BPSRC, PVLINE, '', 'the rule without its provider half'), 'bp-noprovider');
+  const hk0 = await drive(M.load('src/ws-create.js', anchored(src, BPREQ, 'require(' + JSON.stringify(bpNo) + ')', 'the rule without its provider half (its require)'), 'pv-nohelper'), { backend: 'claude', accountId: ds.id }, { accounts: am });
   ok(hk0.spawned.length === 1 && !argsOf(hk0).some((a) => String(a).includes('"apiKeyHelper":""')), 'CONTROL: the rule without its provider half spawns a provider conversation with the machine\'s helper in force ⇒ the leg above goes RED', argsOf(hk0));
   // EVERY READER FOLLOWS IT, IN A PROVIDER'S OWN WORDS (the cure's read: the notice called DeepSeek «the subscription you picked»
   // and offered «CLI login»): the machine's Claude settings NAME a helper (a scratch config dir) ⇒ ONE notice, the provider's
@@ -496,7 +496,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   helperNamed(true);
   const LABEL = ' || accounts?.providerRecordOf?.(acctId)?.label';
   if (src.split(LABEL).length !== 2) throw new Error('the anchor of the control «the notice names the provider by its record» is not in the source once');
-  const nl = await noticed(M.load('src/ws-create.js', src.replace(LABEL, ''), 'pv-nolabel'), {});
+  const nl = await noticed(M.load('src/ws-create.js', anchored(src, LABEL, '', 'the notice names the provider by its record'), 'pv-nolabel'), {});
   const hl = nl.notes.filter((n) => n.key.startsWith('billing-pick-helper-'));
   ok(hl.length === 1 && hl[0].i18n.params.account === ds.id, 'CONTROL: the notice without the record\'s name names the conversation\'s provider by its pv- id ⇒ the leg above goes RED', hl.map((n) => n.i18n && n.i18n.params));
   // RED CONTROLS FOR THE PROVIDER'S WORDS (主开发 23:45Z): the create without the provider's form says the SUBSCRIPTION words —
@@ -712,7 +712,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   const ACC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   const TRUST = '    const wanted = Array.isArray(a.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;\n    return wanted.map((x) => x.id);';
   if (ACC.split(TRUST).length !== 2) throw new Error('the anchor of the control «a pool trusts its member list» is not in the source once');
-  const px = poolOf(M.load('src/accounts.js', ACC.replace(TRUST, '    return Array.isArray(a.members) && a.members.length ? a.members.slice() : all.map((x) => x.id);'), 'pool-trusts-list').AccountManager, 'mut');
+  const px = poolOf(M.load('src/accounts.js', anchored(ACC, TRUST, '    return Array.isArray(a.members) && a.members.length ? a.members.slice() : all.map((x) => x.id);', 'a pool trusts its member list'), 'pool-trusts-list').AccountManager, 'mut');
   ok(px.a.poolMembership('pool-t1').includes(ds.id), 'CONTROL: a pool that trusts its member list as given counts the provider a member ⇒ the leg above goes RED', px.a.poolMembership('pool-t1'));
   // (MAJOR 3) the badge names the provider, billed by use — never «API key» / «ChatGPT»
   const badgeC = H.get('claude').billingIdentity({ _accountId: ds.id }, { accounts: am, withHost: (x) => x, poolAuth: (x) => x });
@@ -740,13 +740,13 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   wire();
   const argvLine = '          if (spawnAccount && Array.isArray(spawnAccount.argv) && spawnAccount.argv.length) spawnArgs = [...spawnAccount.argv, ...spawnArgs];\n';
   ok(src.split(argvLine).length === 2, 'control: the argv line is one identifiable line of ws-create');
-  const k3 = await drive(M.load('src/ws-create.js', src.replace(argvLine, ''), 'pv-noargv'), { backend: 'codex', mode: 'chat', accountId: lab.id }, { accounts: am });
+  const k3 = await drive(M.load('src/ws-create.js', anchored(src, argvLine, '', 'the create without the argv line'), 'pv-noargv'), { backend: 'codex', mode: 'chat', accountId: lab.id }, { accounts: am });
   ok(k3.spawned.length === 1 && !k3.spawned[0].args.some((a) => /^model_provider=/.test(String(a))), 'CONTROL: the create without the argv line spawns codex with NO provider table (it would talk to its own vendor with the key in a variable it never reads) ⇒ the -c leg goes RED');
   const fenceLine = "          if (pvModel && !pvModel.ok) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: pvModel.code, message: pvModel.message })); break; }\n          if (pvModel) data.model = pvModel.model;\n";
   ok(src.split(fenceLine).length === 2, 'control: the model fence is two identifiable lines of ws-create');
-  const k4 = await drive(M.load('src/ws-create.js', src.replace(fenceLine, ''), 'pv-nofence'), { backend: 'claude', accountId: ds.id, model: 'gpt-5.5' }, { accounts: am });
+  const k4 = await drive(M.load('src/ws-create.js', anchored(src, fenceLine, '', 'the create without the model fence'), 'pv-nofence'), { backend: 'claude', accountId: ds.id, model: 'gpt-5.5' }, { accounts: am });
   ok(k4.spawned.length === 1 && modelOf(k4) === 'gpt-5.5', 'CONTROL: the create without the model fence sends gpt-5.5 to DeepSeek ⇒ the not-served leg goes RED');
-  const k5 = await drive(M.load('src/ws-create.js', src.replace(fenceLine, ''), 'pv-nofence-resume'), { backend: 'claude', accountId: gone.id, resume: true, resumeId: 'conv-gone-2', ignoreNoConvo: true }, { accounts: am });
+  const k5 = await drive(M.load('src/ws-create.js', anchored(src, fenceLine, '', 'the create without the model fence'), 'pv-nofence-resume'), { backend: 'claude', accountId: gone.id, resume: true, resumeId: 'conv-gone-2', ignoreNoConvo: true }, { accounts: am });
   const e5 = k5.sent.find((m) => m.type === 'error');
   ok(k5.spawned.length === 0 && !!e5 && e5.code === 'provider-unknown' && /unknown model provider/.test(e5.message), 'past the fence (taken out), a removed provider on a RESUME is refused BY resolveForSpawn itself — provider-unknown with its code, nothing spawned, never rescued onto the machine\'s own login', e5);
   const PSF = PSP.create({ providers: store, dataDir: DATA });
@@ -774,7 +774,7 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(ct.spawned.length === 1 && tIdx > 0 && ta[tIdx - 1] === '-c' && ta.includes(`model_provider="pv_${lab.id.slice(3)}"`) && !ta.some((a) => String(a).includes(KEY)), 'codex in a TERMINAL: the provider\'s -c table rides its command line too (each item after its -c), the key never', ta.slice(-14));
   const PSRC = fs.readFileSync(path.join(REPO, 'src/server/provider-spawn.js'), 'utf8');
   const seedGuard = "{ let fresh = true; try { fs.lstatSync(path.join(home, 'sessions')); fresh = false; } catch { } if (fresh) h.creds.seedDir(home); }";
-  const PSPm = M.load('src/server/provider-spawn.js', PSRC.replace(seedGuard, 'h.creds.seedDir(home);'), 'pv-seed-always');
+  const PSPm = M.load('src/server/provider-spawn.js', anchored(PSRC, seedGuard, 'h.creds.seedDir(home);', 'the provider home seeded every start'), 'pv-seed-always');
   am.setProviderSpawn(PSPm.create({ providers: store, dataDir: DATA }), (id, be, model) => PSPm.modelFor(store, id, model));
   fs.rmSync(path.join(homeX, 'sessions'), { recursive: true, force: true }); fs.mkdirSync(path.join(homeX, 'sessions')); fs.writeFileSync(path.join(homeX, 'sessions', 'rollout-kept.jsonl'), '{}');
   await drive(wsCreate, { backend: 'codex', mode: 'chat', accountId: lab.id }, { accounts: am });
