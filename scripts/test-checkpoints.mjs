@@ -593,6 +593,32 @@ ok(/'queue_settle', 'frame_stamp', 'rewind_out',/.test(read('server.js')) && /fa
   && /\.\.\.\(r && r\.i18n \? \{ i18n: r\.i18n \} : \{\}\), reopened: true/.test(read('src/routes/user-todos-reply.js')),
   'the claude stream knows the wrapper\'s two rewind records (frame_stamp, rewind_out: no «unhandled type» breadcrumb); BOTH For-you reply roads (a live conversation, a reopened one) carry the refusal\'s words as an i18n key');
 
+// THE GROUP HAND-OVER MEETS THE FENCE (B-02a3 — int361's must-check while seaming line 87, 2026-11-19): during the minute a
+// rewind is out, a person's hand-over is refused by the typing path — nothing written, the group messages NOT committed
+// (they keep waiting for the agent's next turn), the presser told so. It runs where line 87 meets B-02a3 (the train); a
+// tree without the hand-over SKIPS it by name (counted)
+if (!/async function handOverGroups\(/.test(read('src/server/stash-handover.js'))) { skipped++; say('  - SKIP the group hand-over leg: B-02a3 is not in this tree (it runs where line 87 meets it, the 2.369.411 train)'); }
+else {
+  const SH = require(path.join(REPO, 'src/server/stash-handover.js'));
+  const WO = require(path.join(REPO, 'src/write-origin.js'));
+  const { mm: mg } = liveTwo(createMessageManager, 'cp-group');
+  const typedG = [];
+  const sg = { mode: 'chat', backend: 'claude', backendSessionId: 'cid-group', claudeSessionId: 'cid-group', pty: { write: (l) => typedG.push(l) }, _normalizer: mg, _isStreaming: false, _turnState: 'idle' };
+  const p2g = mg.messages.find((m) => m.webuiMsgId === 'm-2');
+  const rg = requestRewind({ by: HUMAN, session: sg, msgId: p2g && p2g.id, lastSeenUuid: U(3) });   // pressed while idle…
+  sg._isStreaming = true; sg._turnState = 'running';                                              // …then a turn runs (the hand-over's door)
+  const typingG = createUserInputSender({ activeSessions: new Map([['w-group', sg]]), adapterRegistry: { get: () => null }, BUFFERS_DIR: os.tmpdir(), broadcastToSession() { }, feedLive() { }, autoResume: null, reattachLocalPty: () => false, ptyQuietSince: () => null, log() { } });
+  let commits = 0;
+  const sh = SH.create({ activeSessions: new Map([['w-group', sg]]), getGroups: () => ({ reportsForTurn: () => ({ text: 'a message posted in a group', marks: [{ cards: [1] }] }), commitReports: async () => { commits++; } }),
+    getSpendGuard: () => ({ authorize: () => ({ ok: true, identity: 'x' }), note() { } }), getSendUserInput: () => typingG.send, log: { warn() { }, log() { } }, groupHandedWaitMs: 50, schedule: (fn, ms) => { const t = setTimeout(fn, Math.min(ms, 60)); if (t && t.unref) t.unref(); return t; } });
+  const pressed = WO.pressOf({ headers: { host: 'hub.example', 'sec-fetch-site': 'same-origin' }, socket: {} });
+  let hg = null;
+  try { hg = await sh.handOverGroups('w-group', { pressed }); } catch (e) { hg = { threw: e.message }; }
+  ok(rg.ok && !!pressed && typedG.length === 1 && hg && hg.ok === false && commits === 0 && !sg._groupHandover && /keep waiting|ride its next turn/.test(String(hg.error || '')),   // the fence's words, or the hand-over's own if a seam puts its turn check first
+    'the group hand-over meets the fence: refused while a rewind is out — nothing written, the group messages NOT committed (they keep waiting for the next turn), the presser told so', JSON.stringify({ rg: rg.reason, hg, commits, typed: typedG.length }));
+  try { sh.close && sh.close(); } catch { }
+}
+
 say('— §7 the real wrapper stamps every person frame');
 async function wrapperLaws(wrapperFile, { absent = 3000 } = {}) {   // `absent`: how long to wait for a record the wrapper may never say
   const bad = [];
