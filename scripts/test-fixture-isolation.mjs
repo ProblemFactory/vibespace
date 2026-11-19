@@ -487,7 +487,10 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   const serverConsts = (t) => [...t.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.(?:join|resolve)\([^;]*?)?['"`](?:[^'"`;]*\/)?server\.js['"`]\)?\s*;/g)].map((m) => m[1]);
   const spawnNames = (t) => ['[\'"`]server\\.js[\'"`]', ...serverConsts(t).map((c) => `\\b${c.replace(/\$/g, '\\$')}\\b`)];
   const spawnsThrough = (t) => serverConsts(t).some((c) => new RegExp(`spawn\\([^;]*?\\b${c.replace(/\$/g, '\\$')}\\b`, 's').test(t));
-  const spawnsServer = (t) => /['"`]server\.js['"`]\s*\]/.test(t) || spawnsThrough(t);
+  // (a git argv that LISTS server.js — `execFileSync('git', ['ls-files', 'src', 'server.js'])`, test-helper-ask's source census — names
+  // the file to git; it starts no server: such a list is read out before the shape is looked for)
+  const GIT_ARGV = /\b(?:execFileSync|execFile|spawnSync|spawn)\(\s*['"`]git['"`]\s*,\s*\[[^\]]*\]/g;
+  const spawnsServer = (t) => /['"`]server\.js['"`]\s*\]/.test(t.replace(GIT_ARGV, '')) || spawnsThrough(t);
   // THE SUITES' ONE HUB BOOT (lane boot-helper, 2026-11-17): a suite on scripts/hub-boot.mjs spawns no server.js itself — it
   // imports startHub and calls it. Its isolation is the helper's: startHub REFUSES an env without a HOME, or with a HOME outside
   // the root the helper minted; the root (the home and its transcripts in it) is ended at exit AND at SIGTERM / SIGINT / SIGHUP,
@@ -543,6 +546,10 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     const readOnly = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SERVER_SOURCE = 'server.js';\nconst files = list.concat([SERVER_SOURCE]);";
     ok(spawnsServer(viaConst) && writesTranscript(viaConst) && !namesHome(viaConst) && namesHome(viaConst.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome')) && !spawnsServer(readOnly),
       'CONTROL (b): a server spawn through a NAMED CONSTANT (`const SRV = path.join(wt, \'server.js\')`, `spawn(node, [SRV], …)`) is caught, HOME is its fix; a constant that only names the file is not a spawn');
+    // a git argv listing server.js (a source census) is no server spawn — and a real spawn beside it is still caught
+    const gitList = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst files = execFileSync('git', ['ls-files', 'src', 'server.js'], { cwd: REPO, encoding: 'utf8' });";
+    ok(!spawnsServer(gitList) && spawnsServer(gitList + "\nconst srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env } });"),
+      'CONTROL (b): `git ls-files … server.js` names the file to git — not a server spawn (test-helper-ask); a real spawn beside it is still caught');
   }
   // THE STRONGEST CONTROL: the RETIRED BYTES, not a paraphrase of them. The two
   // offenders exist verbatim in git history, so the census is run against what
