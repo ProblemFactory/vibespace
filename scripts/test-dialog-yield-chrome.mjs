@@ -985,11 +985,15 @@ await step('㊱', async () => {
   await evalJs(`(() => { app.sidebar._showHostMountDialog(${h}); app.sidebar._showMachinePullDialog(${h}); return true; })()`);
   await waitFor(`!!${byTitle(SHARE)}?.querySelector('.pf-pick') && !!${byTitle(PULL)}?.querySelector('.pf-pick')`, 10000);
   // THE FIELD BY ITS IDENTITY (checkpoint 61's hosted red: the plain-words chain reworded both placeholders — src/lib/sidebar-mounts.js
-  // — and the find by their old words came back empty, the step threw before its control): the path field whose key is
-  // 'mounts:mountpoint' (path-field.js draws it into its list's id) inside the form found by its title; an empty find is a NAMED red
-  const mp = (title) => `(() => { const r = ${byTitle(title)}; const l = r && r.querySelector('.path-field .pf-list[id^="pf-list-mounts:mountpoint-"]'); return l ? l.closest('.path-field').querySelector('input') : null; })()`;
+  // — and the find by their old words came back empty, the step threw before its control): the INPUT whose controlled list's id
+  // begins with the field's key — path-field.js sets `aria-controls` = `pf-list-<key>-…` on the input from its build (the list itself
+  // is detached until it is opened) — inside the form found by its title; an empty find is a NAMED red
+  const mpOf = (title, key) => `(() => { const r = ${byTitle(title)}; return r ? r.querySelector('input[aria-controls^=${JSON.stringify('pf-list-' + key + '-')}]') : null; })()`;
+  const mp = (title) => mpOf(title, 'mounts:mountpoint');
   const found = await evalJs(`(() => { const a = ${mp(SHARE)}, b = ${mp(PULL)}; if (!a || !b) return { share: !!a, pull: !!b }; a.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-a'; b.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-b'; return { share: true, pull: true, same: a === b }; })()`);
   check(`㊱ each form's «mount point» field found by its identity — the path field keyed 'mounts:mountpoint', inside the form found by its title (share ${found.share}, pull ${found.pull})`, found.share && found.pull && !found.same, found);
+  const none = await evalJs(`(() => { const a = ${mpOf(SHARE, 'mounts:no-such-field')}, b = ${mpOf(PULL, 'mounts:no-such-field')}; return { share: !!a, pull: !!b }; })()`);
+  check(`㊱ CONTROL: the same finder asked for a field the forms do not have ('mounts:no-such-field') comes back EMPTY (share ${none.share}, pull ${none.pull}) — the finder can fail`, !none.share && !none.pull, none);
   const oldWords = await evalJs(`[...document.querySelectorAll('input[placeholder^="default: ~/vibespace-"]')].length`);
   check(`㊱ CONTROL: the base's find by the placeholder's old words comes back EMPTY on this page (${oldWords}) — the field's key, not its words, is what finds it`, oldWords === 0, oldWords);
   if (!(found.share && found.pull)) { await closeForms(); await evalJs(`(() => { window.fetch = window.__dyMpFetch; delete window.__dyMpFetch; return true; })()`); return; }

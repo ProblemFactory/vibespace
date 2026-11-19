@@ -154,6 +154,13 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const F =
 const desk = async (w = 1440, h = 900) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'hover' }, { name: 'pointer', value: 'fine' }] }); };
 const phone = async (w = 390, h = 844) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 3, mobile: true }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] }); };
 const load = async () => { await cdp('Page.navigate', { url: ORIGIN + '/' }); await waitFor('!!(window.app && app.ready)', 60000); await evalJs('app.ready.then(() => true)'); await waitFor(`!document.getElementById('loading-screen')`, 30000); await sleep(1200); };
+/** checkpoint 61 (the coordinator's readers): every census fold stands on its OWN full row — its left and width are its id row's
+ *  content box (±1 px); the folds that do not, said */
+const FOLD_ROWS = `(() => { const fs = [...document.querySelectorAll('#all-sessions-list .ob-cli-where-fold')].filter((d) => d.getClientRects().length);
+  const bad = fs.map((d) => { const row = d.parentElement, c = getComputedStyle(row), rr = row.getBoundingClientRect(), fr = d.getBoundingClientRect();
+    const left = rr.left + (parseFloat(c.borderLeftWidth) || 0) + (parseFloat(c.paddingLeft) || 0), width = row.clientWidth - (parseFloat(c.paddingLeft) || 0) - (parseFloat(c.paddingRight) || 0);
+    return Math.abs(fr.left - left) <= 1 && Math.abs(fr.width - width) <= 1 ? null : { fold: [Math.round(fr.left), Math.round(fr.width)], box: [Math.round(left), Math.round(width)] }; }).filter(Boolean);
+  return { n: fs.length, bad }; })()`;
 /** checkpoint 61: every census fold («found by your shell at …») in the open rail column, opened by a REAL press on its summary */
 const openCliFolds = async () => {
   const n = await evalJs(`(() => { const fs = [...document.querySelectorAll('#all-sessions-list .ob-cli-where-fold')].filter((d) => d.getClientRects().length); fs.forEach((d, k) => { d.querySelector(':scope > summary').dataset.uf = 'cliwhere-' + k; }); return fs.length; })()`);
@@ -193,7 +200,10 @@ try {
       await sleep(id === 'agents' || id === 'plugins' || id === 'jobs' ? 2200 : 1200);
       await evalJs(`document.querySelectorAll('.context-menu, #global-toasts > .global-toast').forEach((e) => e.remove()); true`);
       if (id === 'agents') {   // checkpoint 61: the census line «found by your shell at …» is a FOLD now — measured OPEN, opened by a real press
+        const rowsClosed = await evalJs(FOLD_ROWS);
         const fo = await openCliFolds();
+        const rowsOpen = await evalJs(FOLD_ROWS);
+        check(`① «agents» at ${w}: every census fold stands on its OWN full row — its left and width its id row's content box, CLOSED (${rowsClosed.n - rowsClosed.bad.length} of ${rowsClosed.n}) and OPEN (${rowsOpen.n - rowsOpen.bad.length} of ${rowsOpen.n})`, rowsClosed.n > 0 && !rowsClosed.bad.length && rowsOpen.n > 0 && !rowsOpen.bad.length, { rowsClosed, rowsOpen });
         check(`① «agents» at ${w}: the census folds («found by your shell at …») opened by a real press (${fo.opened} of ${fo.n}) — measured OPEN`, fo.n > 0 && fo.opened === fo.n, fo);
       }
       const f = await evalJs(FIT_FACTS('#all-sessions-list'));
@@ -206,6 +216,9 @@ try {
     }
     if (w === 200) { // CONTROLS (checkpoint 61): a census fold squeezed by a PLANT (2 em wide) — OPEN it faults (squeezed), CLOSED the walk never judges its words
       await openRail('agents'); await sleep(1500);
+      // …and the own-row rule planted AWAY: the closed fold is then no full row (the pin above can fail)
+      const away = await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-no-fold-row'; s.textContent = '.ob-backend-id > .ob-cli-where-fold { flex: 0 1 auto !important; min-width: auto !important; }'; document.head.appendChild(s); const r = ${FOLD_ROWS}; s.remove(); return r; })()`);
+      check(`① CONTROL: the census fold's own-row rule planted away — the CLOSED fold is no full row (${away.bad.length} of ${away.n} off its id row's box)`, away.n > 0 && away.bad.length === away.n, away);
       await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-undo-fold'; s.textContent = '.ob-backend-id > .ob-cli-where-fold { flex: 0 0 2em !important; max-width: 2em !important; min-width: 0 !important; }'; document.head.appendChild(s); return true; })()`);
       const closedF = await evalJs(FIT_FACTS('#all-sessions-list'));
       const fo = await openCliFolds();
