@@ -432,7 +432,7 @@ const fixes2 = (async () => {
   // ⑯ RED, the base ROAD (B-952b: the status road now hands the live session's reader its id — before, it passed none): the
   // service whose readerFor builds the reader with no id, loaded once
   const tsSrc = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8'), ROAD = 'createSessionMessages(sessionShape(r, session), liveIdOf(session))';
-  const baseRoad = tsSrc.split(ROAD).length === 2 ? mutantCopies('agy-harness-road', REPO).load('src/transcript-service.js', tsSrc.replace(ROAD, () => 'createSessionMessages(sessionShape(r, session))'), 'base-road') : null;   // stale-pins: kept (the red control rebuilds the base road)
+  const baseRoad = mutantCopies('agy-harness-road', REPO).load('src/transcript-service.js', anchored(tsSrc, ROAD, 'createSessionMessages(sessionShape(r, session))', 'base-road'), 'base-road');   // stale-pins: kept (the red control rebuilds the base road)
   const AgyReader = g.store.SessionMessages; // the agy descriptor's reader (AgySessionMessages over AcpSessionMessages)
   let baseReader = null; // ⑯ RED: the base wrapperMeta (the sidecar only by the caller's session id) — set in ⑮
   // ⑯ the HUB's consumer (src/server/stdout/acp-events.js) over the resumed wrapper's own stdout: what the creator's window is told
