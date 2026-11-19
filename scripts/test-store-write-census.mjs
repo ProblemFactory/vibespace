@@ -873,6 +873,7 @@ const STORE_READS = [
   { file: 'src/app-serve.js', store: 'apps manifest.json', state: 'right', why: 'a failed read is an error; only an unparsable manifest is set aside, at the next write', mark: /catch \(e\) \{ if \(e\.code === 'ENOENT'\) return \{ manifest: A\.emptyManifest\(\), error: null \}; return \{/ },
   { file: 'src/job-logs-sweep-worker.js', store: 'jobs-logs-sweep.json', state: 'right', why: 'a failed read makes the pass wait; only unparsable bytes are set aside', mark: /if \(!e \|\| e\.code !== 'ENOENT'\) return \{ error: `the catch-up record could not be read: / },
   { file: 'src/server/writes-lost.js', store: 'writes-lost.json', state: 'right', why: 'a failed read is no answer (readFailed, read again); only bytes that are no store are set aside (`.unreadable-`)', mark: /if \(e\.code !== 'ENOENT'\) return readFailed\(`not read/ },
+  { file: 'src/server/queued-wakes.js', store: 'msg-queued.json', state: 'right', why: 'a failed read is held (unread: never written over, read again — B-e3fe); the bytes are set aside (`.unreadable-`) only by the person\'s press (setAside, POST /api/queued-wakes/set-aside), after one more read', mark: /if \(!unread \|\| stillUnread\(\) === false\) return \{ ok: true, state: 'none' \};/ },
   { file: 'src/job-logs-sweep.js', store: '(none)', state: 'names', why: 'names the set-aside and note files the clean-up honours; reads no store', mark: /const NOTE_SUFFIX = '\.corrupt-unread';/ },
   // DEBT (B-f276's census, 2026-11-17) — each is converted by the lane that holds its file; then its row flips to `answer` and READ_DEBT_CAP drops
   { file: 'src/channel-store.js', store: 'channels/*.json (loadJsonFamily)', state: 'debt', why: 'sets the LIVE file aside on a failed read', mark: /return setAside\(`unreadable \(\$\{\(e && e\.code\) \|\| \(e && e\.message\)\}\)`\);/ },
@@ -897,7 +898,7 @@ const treeTexts = () => new Map(censusFiles(REPO).map((f) => [f, fs.readFileSync
 /** the files whose CODE holds a set-aside name (a string or template piece with `.corrupt-` — never a comment) */
 const SET_ASIDE = /\.(corrupt|unreadable)-/, SET_ASIDE_G = /\.(corrupt|unreadable)-/g;   // the two names the tree sets bytes aside under
 // the set-aside names per file, EXACT — a second store with a set-aside in a file that already has a row is red by its count
-const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/server/browser-kept.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
+const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/server/browser-kept.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/queued-wakes.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
 const tokenHit = new Map();   // a text's verdict, once (the controls re-run the census over copies that differ in ONE file)
 function setAsideFiles(texts) {
   const out = [];

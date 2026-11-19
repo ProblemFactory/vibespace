@@ -753,6 +753,65 @@ const lastWrite = (w) => (w.writes.length ? JSON.parse(w.writes[w.writes.length 
     /function persist\(\) \{\n    if \(stillUnread\(\)\) \{/.test(read('src/server/queued-wakes.js')) && read('src/server/queued-wakes.js').split('readHeld()').length === 3);
 }
 
+console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04:02Z) — ONE For-you item while the file cannot be read; «Set it aside»');
+{
+  const QW = require(path.join(REPO, 'src/server/queued-wakes.js'));
+  const QF = require(path.join(REPO, 'src/server/queued-file-for-you.js'));
+  const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  const S = JSON.stringify;
+  // a For-you store that records what a producer files and resolves (the store's own add / setStatus / forSession shape)
+  const store = () => { const items = []; return { items, add: (key, it) => { const ex = items.find((x) => x.key === key && x.itemKey && x.itemKey === it.itemKey && x.status === 'open'); if (ex) return { id: ex.id }; const x = { id: 'ut' + (items.length + 1), key, status: 'open', ...it }; items.push(x); return { id: x.id }; }, setStatus: (id, st) => { const x = items.find((y) => y.id === id); if (x) x.status = st; }, forSession: (keys) => items.filter((x) => keys.includes(x.key)) }; };
+  // one hub: the REAL queued-wakes over a REAL data dir (its default reader), the REAL producer wired to it as jobs-wiring does
+  const hub = (mod = QW, qf = QF, onDisk = TORN_QW) => {
+    const dir = fs.mkdtempSync(path.join(ROOT, 'qw-hold-')); if (onDisk != null) fs.writeFileSync(path.join(dir, 'msg-queued.json'), onDisk);
+    let clock = T22; const writes = [];
+    const q = mod.create({ dataDir: dir, now: () => clock, writer: { dirty: (f, o) => writes.push(o.produce()) }, noteSpend: () => { }, releaseSpend: () => { }, log: () => { } });
+    const ut = store(), deliver = { queuedFileState: () => q.fileState(), onQueuedFileState: (fn) => q.onFileState(fn), queuedSetAside: () => q.setAside() };
+    qf.create({ getUserTodos: () => ut, deliver, log: () => { } });
+    return { dir, q, ut, writes, adv: (ms) => { clock += ms; }, open: () => ut.items.filter((x) => x.status === 'open') };
+  };
+  // A — the boot finds it torn: ONE item, «This machine», naming the file, with the door's type; nothing written
+  const a = hub(); unreadFrame(a, 'held words');
+  const it = a.open()[0];
+  ok('㉓ A: msg-queued.json torn at boot ⇒ ONE For-you item (origin server, head «Agent messages», high) naming data/msg-queued.json, action queued-file-unread — and nothing written',
+    a.open().length === 1 && it.origin === 'server' && it.sessionName === 'Agent messages' && it.urgency === 'high' && it.action.type === 'queued-file-unread' && it.i18n.text.key === QF.TEXT && it.i18n.text.params.file === 'data/msg-queued.json' && a.writes.length === 0 && FA.FORYOU_HEADS['Agent messages'] === 'Agent messages', S({ it, writes: a.writes.length }));
+  // B — the person's «Set it aside»: the file RENAMED beside it (its bytes kept), the writes resume, the item resolves itself
+  const r = await a.q.setAside();
+  const aside = fs.readdirSync(a.dir).filter((f) => f.startsWith('msg-queued.json.unreadable-'));
+  const last = a.writes.length ? JSON.parse(a.writes[a.writes.length - 1]) : null;
+  ok('㉓ B: «Set it aside» renames the torn file beside it (its bytes kept — nothing deleted), the record is written again with this process\'s frame, and the item resolves itself',
+    r.ok && r.state === 'pass' && aside.length === 1 && fs.readFileSync(path.join(a.dir, aside[0]), 'utf8') === TORN_QW && !fs.existsSync(path.join(a.dir, 'msg-queued.json')) && !!last && last.entries.length === 1 && a.open().length === 0 && a.q.fileState().unread === false, S({ r, aside, n: a.writes.length, open: a.open().length }));
+  // C — a press after the file was repaired (inside the re-read bound): it reads once more FIRST — the file joins, nothing moves
+  const c = hub(); fs.writeFileSync(path.join(c.dir, 'msg-queued.json'), OLD_QW); c.adv(5e3);
+  const rc = await c.q.setAside();
+  ok('㉓ C: the file repaired a moment before the press — the press reads it once more first: «nothing to set aside», no file moved, its frame joined, the item resolved',
+    rc.ok && rc.state === 'none' && fs.readdirSync(c.dir).filter((f) => f.includes('.unreadable-')).length === 0 && c.q.entriesFor('conv-u').some((e) => e.id === 'old-1') && c.open().length === 0, S({ rc, open: c.open().length }));
+  // D — a readable file (or none): no item at all
+  const d = hub(QW, QF, OLD_QW), d0 = hub(QW, QF, null);
+  ok('㉓ D: a readable file, or none at all ⇒ no item (the door is only for a file that cannot be read)', d.ut.items.length === 0 && d0.ut.items.length === 0 && (await d.q.setAside()).state === 'none', S({ d: d.ut.items.length, d0: d0.ut.items.length }));
+  // E — the door is declared by the registry row (the model never branches on the type), its words in zh and ja; the route is a person's press
+  const row = FA.ROW_OF['queued-file-unread'], jw = read('src/server/jobs-wiring.js');
+  const { dictEntries } = await import('./i18n-extract.mjs');
+  const ZH = new Map([...dictEntries(read('src/lib/i18n-zh.js'))].map((e) => [e.key, e.value])), JA = new Map([...dictEntries(read('src/lib/i18n-ja.js'))].map((e) => [e.key, e.value]));
+  const words = [QF.TEXT, QF.DETAIL, row.checkAgain, row.checkLabel, row.checkSaid.done, row.checkSaid.none, row.checkSaid.failed, 'Agent messages'];
+  ok('㉓ E: the row declares the door (checkRoute /api/queued-wakes/set-aside, its said words) and every new sentence is in zh and ja',
+    row.producer === 'src/server/queued-file-for-you.js' && row.card === 'inbox-window' && row.checkRoute === '/api/queued-wakes/set-aside' && words.every((k) => ZH.has(k) && JA.has(k)), words.filter((k) => !ZH.has(k) || !JA.has(k)).join(' | '));
+  const WO = require(path.join(REPO, 'src/write-origin.js'));
+  ok('㉓ E: the route is a PERSON\'S press — the owner\'s page verdict (ownerPageWhy) refuses before the ladder is asked; a bearer is refused by it',
+    /app\.post\('\/api\/queued-wakes\/set-aside', async \(req, res\) => \{\n    const w = require\('\.\.\/write-origin\.js'\)\.ownerPageWhy\(req\);[^\n]*\n    if \(w\) return res\.status\(403\)/.test(jw) && WO.ownerPageWhy({ headers: { authorization: 'Bearer x', 'sec-fetch-site': 'same-origin' } }) === 'bearer' && WO.ownerPageWhy({ headers: { 'sec-fetch-site': 'same-origin' } }) === null);
+  // RED CONTROLS (setup-checked anchors; each fails by name when its anchor is gone)
+  const MH = mutantCopies('queued-wake-hold', REPO);
+  const qsrc = read('src/server/queued-wakes.js'), fsrc = read('src/server/queued-file-for-you.js');
+  const REN = "    try { await require('fs').promises.rename(file, dest); }", SUB = "  if (deliver && typeof deliver.onQueuedFileState === 'function') deliver.onQueuedFileState((ev) => { if (ev && ev.unread === false) settled(ev.how); });";
+  ok('㉓ setup: the rename and the item\'s resolve are each in their module once', qsrc.split(REN).length === 2 && fsrc.split(SUB).length === 2);
+  const NoRen = MH.load('src/server/queued-wakes.js', qsrc.replace(REN, '    try { /* no rename */ }'), 'no-rename');
+  const ar = hub(NoRen); await ar.q.setAside();
+  ok('㉓ CONTROL: without the rename the torn file stays where it was, under its own name — nothing is set aside (㉓ B can go red)', fs.readdirSync(ar.dir).filter((f) => f.includes('.unreadable-')).length === 0 && fs.readFileSync(path.join(ar.dir, 'msg-queued.json'), 'utf8') === TORN_QW);
+  const NoSub = MH.load('src/server/queued-file-for-you.js', fsrc.replace(SUB, ''), 'no-resolve');
+  const as = hub(QW, NoSub); await as.q.setAside();
+  ok('㉓ CONTROL: without the producer\'s listener the item stays open after the file is set aside (㉓ B can go red)', as.open().length === 1);
+}
+
 console.log('㉔ AN OLD AGENT\'S FRAME, SAID FOR REAL (B-0a33 cure (c)) — the REAL ladder\'s pullQueued answers «no-remove», the REAL guard files the For-you line');
 {
   const GUARDm = require(path.join(REPO, 'src/server/spend-guard.js'));

@@ -281,6 +281,16 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       res.json({ success: true, ...r });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
+  // B-e3fe follow-up (主开发 04:02Z: THE HOLD IS NOT SILENT): an unreadable data/msg-queued.json is said in For you, with the person's
+  // «Set it aside» — the ladder (deliver) holds the record, this wiring holds the For-you store and the app (server.js gains no line)
+  require('./queued-file-for-you.js').create({ getUserTodos: () => userTodos, deliver, log });
+  app.post('/api/queued-wakes/set-aside', async (req, res) => {
+    const w = require('../write-origin.js').ownerPageWhy(req);   // a person's press: the owner's own page, never a bearer
+    if (w) return res.status(403).json({ ok: false, error: `the record of waiting messages is set aside only by the owner's press on the owner's own page; ${w === 'bearer' ? 'a request carrying a bearer token' : 'a request with no mark of the owner\'s page'} cannot` });
+    try { const r = deliver && typeof deliver.queuedSetAside === 'function' ? await deliver.queuedSetAside() : { ok: false, error: 'no delivery ladder' }; res.status(r.ok ? 200 : 500).json(r); }
+    catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
   // lane job-secrets-retire: GET/POST /api/jobs-secrets (a plaintext data/job-secrets.json no client wrote) are gone —
   // a job's secret comes from the vault (job-model vetSpec refuses a named envFrom `envfrom_retired`)
   // read-only escape visibility: hand-rolled systemd/crontab jobs OUTSIDE the registry

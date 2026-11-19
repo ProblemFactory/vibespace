@@ -553,6 +553,15 @@ const ROWS = [
     c: [pin('src/foryou-actions.js', /\{ type: 'mount-reconnect', identity: 'mountId', producer: 'src\/server\/mount-for-you\.js',/, 'THE registry row: one producer, one identity (the mount), one door (a check: Reconnect)')],
     d: [decl('no agent wrote words here to be read and approved: the item names a storage, a count and a provider label the record keeps')],
     gate: [['scripts/test-mount-liveness.mjs', 'the cure: Reconnect on a parked mount whose storage answers']] },
+  // B-e3fe follow-up (主开发 04:02Z): an UNREADABLE data/msg-queued.json — ONE item while it cannot be read; its only door
+  // (Set it aside) renames the file beside it after one more read; nothing is granted
+  { id: 'queued-file-unread', surface: 'an unreadable record of waiting messages — "VibeSpace could not read data/msg-queued.json, its record of messages waiting behind running turns …" (Set it aside in For you; one item)',
+    doors: [['A', 'src/server/queued-file-for-you.js', /^queued-file-unread$/]],
+    a: [pin('src/server/queued-file-for-you.js', /const params = \{ file: String\(file \|\| 'data\/msg-queued\.json'\) \};/, 'the item\'s words ARE the ladder\'s own fact: the file it could not read (queued-wakes fileState), in fixed sentences')],
+    b: [pin('src/server/queued-wakes.js', /if \(unread\) recheckAt = -Infinity;/, 'the press reads the file ONCE MORE first, whatever the re-read bound'), pin('src/server/queued-wakes.js', /if \(!unread \|\| stillUnread\(\) === false\) return \{ ok: true, state: 'none' \};/, 'a file that reads again or is gone at the press is never moved — «nothing to set aside»'), pin('src/server/jobs-wiring.js', /const w = require\('\.\.\/write-origin\.js'\)\.ownerPageWhy\(req\);/, 'a person\'s press: the owner\'s page verdict refuses a bearer or an unmarked request before the ladder is asked')],
+    c: [pin('src/foryou-actions.js', /\{ type: 'queued-file-unread', identity: null, producer: 'src\/server\/queued-file-for-you\.js',/, 'THE registry row: one producer, one door (a check: Set it aside)'), pin('src/server/queued-file-for-you.js', /action: \{ type: TYPE \}, itemKey: TYPE \}\);/, 'ONE item (its itemKey) — a re-file updates it, never a second')],
+    d: [decl('no agent wrote words here to be read and approved: the item names a file of the hub\'s own data folder in fixed sentences')],
+    gate: [['scripts/test-queued-wake.mjs', '㉓ C: the file repaired a moment before the press — the press reads it once more first'], ['scripts/test-queued-wake.mjs', '㉓ B: «Set it aside» renames the torn file beside it']] },
 ];
 function approvalRows(read) {
   const hits = doorHits(read), unclaimed = [], wrong = [];

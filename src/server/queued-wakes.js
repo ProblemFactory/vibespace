@@ -89,6 +89,8 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   // ── boot: what the previous process held ────────────────────────────────
   let unread = false;   // B-0a33 follow-up: the file was there and could not be read — the reconcile holds off (and B-e3fe: it is not written)
   let recheckAt = 0;   // B-e3fe: when the unread file was last read
+  let unreadWhy = null;   // B-e3fe follow-up: { error, since } while it cannot be read — what the person's For-you item says
+  const fileListeners = new Set();   // B-e3fe follow-up: told when the file stops being unread (it reads, it is gone, it is set aside)
   // the ONE reading of the file (the boot, and B-e3fe's re-read while it is unread) — throws when it is not there or not a record.
   // B-e3fe: JSON that holds no `entries` list (another build's shape, a stray value) is unread too, never an empty record
   const readHeld = () => {
@@ -107,7 +109,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   } catch (err) {
     // none (ENOENT), or UNREADABLE: the guard's stamps stand (counted) — never free. B-0a33 follow-up: the two are told apart —
     // an unreadable or unparsable file holds frames this process cannot see, so the reconcile holds off until it reads again
-    if (!(err && err.code === 'ENOENT')) { unread = true; recheckAt = now(); log('[queued] msg-queued.json could not be read — its waiting reservations stand (counted, never given up by this process), and it is not written over: ' + (err && err.message)); }
+    if (!(err && err.code === 'ENOENT')) { unread = true; recheckAt = now(); unreadWhy = { error: String((err && (err.code || err.message)) || 'read failed').slice(0, 120), since: now() }; log('[queued] msg-queued.json could not be read — its waiting reservations stand (counted, never given up by this process), and it is not written over: ' + (err && err.message)); }
   }
   /** B-e3fe: AN UNREAD FILE IS NEVER WRITTEN OVER (the spend ledger's rule, B-3b0f). It holds frames this process cannot see —
    *  their words, their reservations — and the first write of what this process holds would make one failed read permanent.
@@ -126,11 +128,31 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
       entries = [...entries, ...held.entries.filter((e) => !ids.has(e.id))];   // the old ones leave at the next sweep (ageOut: counted, said)
       gone = [...held.gone.filter((g) => !gids.has(g.id)), ...gone].slice(-MAX_ENTRIES);
     }
-    unread = false;
+    unread = false; fileSettled(held ? 'reads' : 'gone');
     log(held ? '[queued] msg-queued.json reads again — what it holds joins this process\'s entries; it is written again' : '[queued] msg-queued.json was removed — it is written again with this process\'s entries');
     return false;
   }
   let saidUnwritten = false;
+  /** B-e3fe follow-up (主开发's verdict 04:02Z: THE HOLD IS NOT SILENT): the file stopped being unread — its For-you item resolves */
+  function fileSettled(how) { unreadWhy = null; for (const fn of fileListeners) { try { fn({ unread: false, how }); } catch (e) { log('[queued] a file listener failed:', e.message); } } }
+  /** B-e3fe follow-up: THE PERSON'S «SET IT ASIDE» — the unread file is RENAMED aside (nothing is deleted; off the loop), then the
+   *  record is written again from what this process holds. → { ok, state: 'pass' (set aside) | 'none' (it reads again or is gone —
+   *  nothing to set aside), dest } | { ok: false, error } */
+  async function setAside() {
+    if (unread) recheckAt = -Infinity;   // the press reads the file once more first, whatever the bound: a file repaired a moment ago joins, never moves
+    if (!unread || stillUnread() === false) return { ok: true, state: 'none' };
+    const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');
+    const dest = file + '.unreadable-' + stamp;
+    try { await require('fs').promises.rename(file, dest); }
+    catch (err) {
+      if (!(err && err.code === 'ENOENT')) { log('[queued] setting msg-queued.json aside failed:', err && err.message); return { ok: false, error: String((err && err.code) || 'rename failed') }; }
+    }
+    if (!unread) return { ok: true, state: 'none' };   // a re-read settled it meanwhile
+    unread = false; fileSettled('aside');
+    log(`[queued] msg-queued.json set aside by the person as ${path.basename(dest)} — written again from this process's entries`);
+    persist();
+    return { ok: true, state: 'pass', dest: path.basename(dest) };
+  }
 
   function persist() {
     if (stillUnread()) {   // B-e3fe: never written over while it cannot be read
@@ -525,6 +547,10 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     entriesFor: (cid) => { ageOut(); return entries.filter((e) => !cid || e.cid === cid).map(publicOf); },
     heldCids: () => { ageOut(); return [...new Set(entries.filter(live).map((e) => e.cid))]; },
     ageOut, reconcile, rejudge,
+    // B-e3fe follow-up: the file's state (the For-you item's facts), its listeners and the person's door
+    fileState: () => ({ unread, file: FILE, error: unreadWhy ? unreadWhy.error : null, since: unreadWhy ? unreadWhy.since : null }),
+    onFileState: (fn) => { fileListeners.add(fn); return () => fileListeners.delete(fn); },
+    setAside,
     goneFor: (cid) => gone.filter((g) => !cid || g.cid === cid).map((g) => ({ id: g.id, cid: g.cid, why: g.why, at: g.at, stashed: !!g.stashed })),   // B-0a33 (1)
     count: () => entries.length,
   };

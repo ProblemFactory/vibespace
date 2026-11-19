@@ -1339,6 +1339,7 @@ Carried = the bound item LEFT the queue AND a turn STARTED since the bind (unbou
 - An unanswered frame stays owed (never silently free); law 2's bound speaks for it.
 - A hub restart: the entries persist (msg-queued.json, through the store writer). A bound item gone from the first queue the new hub reads is carried. A drop while the hub was down therefore reads as carried — the money-safe direction, named.
 - An UNREADABLE msg-queued.json (torn, a read error, JSON with no `entries` list) is never written over (B-e3fe, the spend ledger's B-3b0f rule): persist() writes nothing until a re-read (at most once a minute, at a write) finds it readable — its entries then join this process's — or removed.
+- The hold is SAID (B-e3fe follow-up): ONE For-you item while it cannot be read (src/server/queued-file-for-you.js), resolved when it reads, is gone or is set aside; its door «Set it aside» (a person's press, POST /api/queued-wakes/set-aside) renames the file beside itself — nothing deleted — and the record is written again.
 
 **不变量.**
 - The sender is told what the addressee DID, not what the hub wrote. A frame waiting behind a running turn is said waiting, its record is not «read», and its charge is owed until a turn carries the text.

@@ -334,6 +334,8 @@ const NOT_NEEDS = Object.freeze([
   { why: 'inside Settings: the LLM plugin\'s attention row\'s own description (ui-plain-words\' words) naming its own draft button, drawn below it in the same row — no door is owed', match: /^In your own words \(at most 1,500 characters\), what the judging model should pick out for you — it reads it as written\./ },
   { why: 'ui-plain-words (the dial picker): a connected address\'s history — the attempts that failed BEFORE it connected; it is connected now, nothing is needed', match: /^Before that, \{n\} attempts failed \(\{reason\}\)$/ },
   { why: 'ui-plain-words (session-props, with ui-needs-a-button pick 5\'s door): the on-state of a conversation\'s job notices — «need input» is the JOBS\' need, said as a fact; the «Change…» door that switches it is on the same line', match: /^Background jobs tell this conversation when they finish or need input\.$/ },
+  // B-e3fe follow-up: «Set it aside»'s failure toast — said where the press was made; the door is the item's own button on that row
+  { why: 'a press\'s own failure toast (the unreadable record of waiting messages): the «Set it aside» button it answers stays on the For-you item, its door', match: /^Could not set the file aside$/ },
 ]);
 /** THE DOORS OWED (主开发's ruling (a), 2026-11-18 23:33Z; their own heading at 2026-11-19 00:44Z): a sentence that sends a person down
  *  a menu path where a door ON ITS LINE is owed. B-d073 built the four its family held (bulk-resume's Close toast and hint, the

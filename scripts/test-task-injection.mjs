@@ -267,6 +267,7 @@ const TIME_ALLOWED = [
   ['src/task-groups.js', 'const monthOf = (at) =>', 'the archive FILE\'s month key (data/task-groups-archive/<id>/<YYYY-MM>.ndjson) — never shown'],
   ['src/task-groups.js', "for (const p of prog) body.push(`- ${new Date(p.at).toISOString()", 'the repo task file\'s Activity rows — importFromFile parses them back as UTC (`Date.parse(… + \'Z\')`)'],
   ['src/server/integration-store.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],
+  ['src/server/queued-wakes.js', "const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-');", 'an unreadable msg-queued.json\'s set-aside NAME (msg-queued.json.unreadable-<instant>, B-e3fe follow-up) — never shown'],
   ['src/server/plugin-install.js', 'trashDir, `${id}-${', 'a trashed plugin\'s directory NAME'],
   ['src/server/conversation-deliver.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],
   ['src/server/usage-pool-engine.js', '.corrupt-${', 'a corrupt file\'s aside NAME'],

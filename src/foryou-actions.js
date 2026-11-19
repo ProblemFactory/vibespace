@@ -170,6 +170,11 @@ const ROWS = Object.freeze([
   // item's mountId filled in ({mountId}); the item resolves itself once the park ends
   { type: 'mount-reconnect', identity: 'mountId', producer: 'src/server/mount-for-you.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group', checkAgain: i18nKey('Reconnect this storage now — this item goes away by itself once it is connected'), checkLabel: i18nKey('Reconnect'),
     checkRoute: '/api/mounts/{mountId}/reconnect', checkSaid: { done: i18nKey('Reconnected — the storage answers again'), started: i18nKey('Connected — the storage is still being checked; it is parked again if its listing keeps hanging'), none: i18nKey('Could not reconnect the storage'), failed: i18nKey('Could not reconnect the storage') } },
+  // B-e3fe follow-up (主开发 04:02Z): an UNREADABLE data/msg-queued.json — ONE item while it cannot be read (the waiting messages live in
+  // memory only); its door declared here — the For-you window's «Set it aside» posts the route (the file renamed aside off the loop,
+  // nothing deleted; a person's press: the owner's page only); the item resolves itself when the file reads, is gone or is set aside
+  { type: 'queued-file-unread', identity: null, producer: 'src/server/queued-file-for-you.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group', checkAgain: i18nKey('Rename the unreadable file aside now — nothing is deleted, and the record of waiting messages is written again'), checkLabel: i18nKey('Set it aside'),
+    checkRoute: '/api/queued-wakes/set-aside', checkSaid: { done: i18nKey('Set aside — the record of waiting messages is written again'), none: i18nKey('The file reads again — nothing to set aside'), failed: i18nKey('Could not set the file aside') } },
   { type: 'browser-restart', identity: null, producer: 'src/server/browser-keeper.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the base's two browser cards (int358: lanes browser-surfaces + browser-login, after this registry's own base — int360 seam (e)):
   // filed under the browser's group key, drawn on the row by proposalAskHtml, answered by their own Approve / Reject; merged by
@@ -1257,6 +1262,7 @@ const FORYOU_HEADS = Object.freeze({
   'Agent feedback': i18nKey('Agent feedback'),
   'Task Groups': i18nKey('Task Groups'), // lane bl-windows: the store held unread (src/server/task-groups-wiring.js)
   'File watches': i18nKey('File watches'), // lane bl-loop-b (the 2026-11-19 hotfix): the machine's limit of file watches reached (src/watch-door.js)
+  'Agent messages': i18nKey('Agent messages'),   // B-e3fe follow-up: the unreadable record of waiting messages
 });
 /** The words of a filed head, in the reader's language (an unknown head = itself). */
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
